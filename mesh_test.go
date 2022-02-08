@@ -18,7 +18,7 @@ import (
 func newAgentAddon(t *testing.T) (agent.AgentAddon, error) {
 	registrationOption := newRegistrationOption(nil, nil, utilrand.String(5))
 
-	agentAddon, err := addonfactory.NewAgentAddonFactory(addonName, fs, "manifests/templates").
+	agentAddon, err := addonfactory.NewAgentAddonFactory(addonName, fs, "manifests/agent").
 		WithGetValuesFuncs(getValues, addonfactory.GetValuesFromAddonAnnotation).
 		WithAgentRegistrationOption(registrationOption).
 		BuildTemplateAgentAddon()

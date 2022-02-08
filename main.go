@@ -85,7 +85,7 @@ func runController(ctx context.Context, controllerContext *controllercmd.Control
 		controllerContext.EventRecorder,
 		utilrand.String(5))
 
-	agentAddon, err := addonfactory.NewAgentAddonFactory(addonName, fs, "manifests/templates").
+	agentAddon, err := addonfactory.NewAgentAddonFactory(addonName, fs, "manifests/agent").
 		WithGetValuesFuncs(getValues, addonfactory.GetValuesFromAddonAnnotation).
 		WithAgentRegistrationOption(registrationOption).
 		WithInstallStrategy(addonagent.InstallAllStrategy(meshagent.MeshAgentInstallationNamespace)).

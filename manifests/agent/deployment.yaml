@@ -25,7 +25,6 @@ spec:
         image: {{ .Image }}
         imagePullPolicy: IfNotPresent
         args:
-          - "/mesh"
           - "agent"
           - "--hub-kubeconfig=/var/run/hub/kubeconfig"
           - "--cluster-name={{ .ClusterName }}"

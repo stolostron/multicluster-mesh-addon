@@ -30,18 +30,18 @@ var (
 
 const (
 	defaultMeshAddonImage = "quay.io/morvencao/mesh-addon:latest"
-	addonName           = "mesh"
+	addonName             = "mesh"
 )
 
 //go:embed manifests
-//go:embed manifests/templates
+//go:embed manifests/agent
 var fs embed.FS
 
 var agentPermissionFiles = []string{
 	// role with RBAC rules to access resources on hub
-	"manifests/permission/role.yaml",
+	"manifests/rbac/role.yaml",
 	// rolebinding to bind the above role to a certain user group
-	"manifests/permission/rolebinding.yaml",
+	"manifests/rbac/rolebinding.yaml",
 }
 
 func newRegistrationOption(kubeConfig *rest.Config, recorder events.Recorder, agentName string) *agent.RegistrationOption {
