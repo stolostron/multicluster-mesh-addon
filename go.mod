@@ -11,8 +11,10 @@ require (
 	k8s.io/client-go v0.23.0
 	k8s.io/component-base v0.23.0
 	k8s.io/klog/v2 v2.30.0
+	maistra.io/api v0.0.0-20211119171546-348bbce3ca27
 	open-cluster-management.io/addon-framework v0.2.1-0.20220207065614-325cd9f6e402
 	open-cluster-management.io/api v0.5.1-0.20220112073018-2d280a97a052
+	sigs.k8s.io/controller-runtime v0.11.0
 	sigs.k8s.io/yaml v1.3.0
 )
 
@@ -93,7 +95,6 @@ require (
 	go.opentelemetry.io/otel/trace v0.20.0 // indirect
 	go.opentelemetry.io/proto/otlp v0.7.0 // indirect
 	go.uber.org/atomic v1.7.0 // indirect
-	go.uber.org/goleak v1.1.12 // indirect
 	go.uber.org/multierr v1.6.0 // indirect
 	go.uber.org/zap v1.19.1 // indirect
 	golang.org/x/crypto v0.0.0-20211202192323-5770296d904e // indirect

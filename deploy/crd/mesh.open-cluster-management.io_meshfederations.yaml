@@ -1,0 +1,70 @@
+
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.7.0
+  creationTimestamp: null
+  name: meshfederations.mesh.open-cluster-management.io
+spec:
+  group: mesh.open-cluster-management.io
+  names:
+    kind: MeshFederation
+    listKind: MeshFederationList
+    plural: meshfederations
+    singular: meshfederation
+  scope: Namespaced
+  versions:
+  - name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: MeshFederation is the Schema for the meshfederations API
+        properties:
+          apiVersion:
+            description: 'APIVersion defines the versioned schema of this representation
+              of an object. Servers should convert recognized schemas to the latest
+              internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources'
+            type: string
+          kind:
+            description: 'Kind is a string value representing the REST resource this
+              object represents. Servers may infer this from the endpoint the client
+              submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds'
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: MeshFederationSpec defines the desired state of MeshFederation
+              of a central view
+            properties:
+              meshPeers:
+                items:
+                  description: MeshPeer defines mesh peers
+                  properties:
+                    peers:
+                      items:
+                        type: string
+                      type: array
+                  type: object
+                type: array
+              trustConfig:
+                description: TrustConfig defines the trust configuratin for mesh peers
+                properties:
+                  trustType:
+                    type: string
+                type: object
+            type: object
+          status:
+            description: MeshFederationStatus defines the observed state of MeshFederation
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
+status:
+  acceptedNames:
+    kind: ""
+    plural: ""
+  conditions: []
+  storedVersions: []

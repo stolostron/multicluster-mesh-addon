@@ -71,6 +71,14 @@ docker-push: ## Push docker image with the multicluster-mesh-addon.
 
 ##@ Deployment
 
+.PHONY: manifests
+manifests: controller-gen ## Generate CustomResourceDefinition objects.
+	$(CONTROLLER_GEN) crd paths="./apis/..." output:crd:artifacts:config=deploy/crd
+
+.PHONY: generate
+generate: controller-gen ## Generate code containing DeepCopy, DeepCopyInto, and DeepCopyObject method implementations.
+	$(CONTROLLER_GEN) object paths="./apis/..."
+
 deploy: kustomize
 	cp deploy/kustomization.yaml deploy/kustomization.yaml.tmp
 	cd deploy && $(KUSTOMIZE) edit set image multicluster-mesh-addon=$(IMAGE) && $(KUSTOMIZE) edit add configmap image-config --from-literal=MULTICLUSTER_MESH_ADDON_IMAGE=$(IMAGE)
@@ -79,6 +87,11 @@ deploy: kustomize
 
 undeploy: kustomize
 	$(KUSTOMIZE) build deploy | $(KUBECTL) delete --ignore-not-found -f -
+
+CONTROLLER_GEN = $(shell pwd)/bin/controller-gen
+.PHONY: controller-gen
+controller-gen: ## Download controller-gen locally if necessary.
+	$(call go-get-tool,$(CONTROLLER_GEN),sigs.k8s.io/controller-tools/cmd/controller-gen@v0.7.0)
 
 KUSTOMIZE = $(shell pwd)/bin/kustomize
 .PHONY: kustomize
