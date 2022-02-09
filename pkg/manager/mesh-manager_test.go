@@ -1,4 +1,4 @@
-package main
+package manager
 
 import (
 	"fmt"
@@ -13,12 +13,14 @@ import (
 	addonapiv1alpha1 "open-cluster-management.io/api/addon/v1alpha1"
 	clusterv1 "open-cluster-management.io/api/cluster/v1"
 	"sigs.k8s.io/yaml"
+
+	constants "github.com/morvencao/multicluster-mesh-addon/pkg/constants"
 )
 
 func newAgentAddon(t *testing.T) (agent.AgentAddon, error) {
 	registrationOption := newRegistrationOption(nil, nil, utilrand.String(5))
 
-	agentAddon, err := addonfactory.NewAgentAddonFactory(addonName, fs, "manifests/agent").
+	agentAddon, err := addonfactory.NewAgentAddonFactory(constants.MeshAddonName, fs, "manifests/agent").
 		WithGetValuesFuncs(getValues, addonfactory.GetValuesFromAddonAnnotation).
 		WithAgentRegistrationOption(registrationOption).
 		BuildTemplateAgentAddon()
@@ -38,7 +40,7 @@ func newManagedCluster(clusterName string) *clusterv1.ManagedCluster {
 func newManagedClusterAddon(clusterName, installNamespace, values string) *addonapiv1alpha1.ManagedClusterAddOn {
 	return &addonapiv1alpha1.ManagedClusterAddOn{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      addonName,
+			Name:      constants.MeshAddonName,
 			Namespace: clusterName,
 			Annotations: map[string]string{
 				"addon.open-cluster-management.io/values": values,

@@ -1,4 +1,4 @@
-package main
+package manager
 
 import (
 	"context"
@@ -7,19 +7,25 @@ import (
 	"os"
 
 	"github.com/openshift/library-go/pkg/assets"
+	"github.com/openshift/library-go/pkg/controller/controllercmd"
 	"github.com/openshift/library-go/pkg/operator/events"
 	"github.com/openshift/library-go/pkg/operator/resource/resourceapply"
+	"github.com/spf13/cobra"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/serializer"
+	utilrand "k8s.io/apimachinery/pkg/util/rand"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
+	"k8s.io/klog/v2"
 	"open-cluster-management.io/addon-framework/pkg/addonfactory"
+	"open-cluster-management.io/addon-framework/pkg/addonmanager"
 	"open-cluster-management.io/addon-framework/pkg/agent"
 	"open-cluster-management.io/addon-framework/pkg/utils"
+	"open-cluster-management.io/addon-framework/pkg/version"
 	addonapiv1alpha1 "open-cluster-management.io/api/addon/v1alpha1"
 	clusterv1 "open-cluster-management.io/api/cluster/v1"
 
-	meshagent "github.com/morvencao/multicluster-mesh-addon/agent"
+	constants "github.com/morvencao/multicluster-mesh-addon/pkg/constants"
 )
 
 var (
@@ -28,25 +34,64 @@ var (
 	genericCodec  = genericCodecs.UniversalDeserializer()
 )
 
-const (
-	defaultMeshAddonImage = "quay.io/morvencao/mesh-addon:latest"
-	addonName             = "mesh"
-)
-
 //go:embed manifests
 //go:embed manifests/agent
 var fs embed.FS
 
-var agentPermissionFiles = []string{
+var agentRBACFiles = []string{
 	// role with RBAC rules to access resources on hub
 	"manifests/rbac/role.yaml",
 	// rolebinding to bind the above role to a certain user group
 	"manifests/rbac/rolebinding.yaml",
 }
 
+func NewControllerCommand() *cobra.Command {
+	cmd := controllercmd.
+		NewControllerCommandConfig("multicluster-mesh-addon-controller", version.Get(), runController).
+		NewCommand()
+	cmd.Use = "controller"
+	cmd.Short = "Start the multicluster mesh addon controller"
+
+	return cmd
+}
+
+func runController(ctx context.Context, controllerContext *controllercmd.ControllerContext) error {
+	mgr, err := addonmanager.New(controllerContext.KubeConfig)
+	if err != nil {
+		return err
+	}
+	registrationOption := newRegistrationOption(
+		controllerContext.KubeConfig,
+		controllerContext.EventRecorder,
+		utilrand.String(5))
+
+	agentAddon, err := addonfactory.NewAgentAddonFactory(constants.MeshAddonName, fs, "manifests/agent").
+		WithGetValuesFuncs(getValues, addonfactory.GetValuesFromAddonAnnotation).
+		WithAgentRegistrationOption(registrationOption).
+		WithInstallStrategy(agent.InstallAllStrategy(constants.MeshAgentInstallationNamespace)).
+		BuildTemplateAgentAddon()
+	if err != nil {
+		klog.Errorf("failed to build agent %v", err)
+		return err
+	}
+
+	err = mgr.AddAgent(agentAddon)
+	if err != nil {
+		klog.Fatal(err)
+	}
+
+	err = mgr.Start(ctx)
+	if err != nil {
+		klog.Fatal(err)
+	}
+	<-ctx.Done()
+
+	return nil
+}
+
 func newRegistrationOption(kubeConfig *rest.Config, recorder events.Recorder, agentName string) *agent.RegistrationOption {
 	return &agent.RegistrationOption{
-		CSRConfigurations: agent.KubeClientSignerConfigurations(addonName, agentName),
+		CSRConfigurations: agent.KubeClientSignerConfigurations(constants.MeshAddonName, agentName),
 		CSRApproveCheck:   utils.DefaultCSRApprover(agentName),
 		PermissionConfig: func(cluster *clusterv1.ManagedCluster, addon *addonapiv1alpha1.ManagedClusterAddOn) error {
 			kubeclient, err := kubernetes.NewForConfig(kubeConfig)
@@ -54,7 +99,7 @@ func newRegistrationOption(kubeConfig *rest.Config, recorder events.Recorder, ag
 				return err
 			}
 
-			for _, file := range agentPermissionFiles {
+			for _, file := range agentRBACFiles {
 				if err := applyManifestFromFile(file, cluster.Name, addon.Name, kubeclient, recorder); err != nil {
 					return err
 				}
@@ -102,12 +147,12 @@ func getValues(cluster *clusterv1.ManagedCluster,
 	addon *addonapiv1alpha1.ManagedClusterAddOn) (addonfactory.Values, error) {
 	installNamespace := addon.Spec.InstallNamespace
 	if len(installNamespace) == 0 {
-		installNamespace = meshagent.MeshAgentInstallationNamespace
+		installNamespace = constants.MeshAgentInstallationNamespace
 	}
 
-	image := os.Getenv("MESH_ADDON_IMAGE_NAME")
+	image := os.Getenv("MULTICLUSTER_MESH_ADDON_IMAGE")
 	if len(image) == 0 {
-		image = defaultMeshAddonImage
+		image = constants.DefaultMeshAddonImage
 	}
 
 	manifestConfig := struct {

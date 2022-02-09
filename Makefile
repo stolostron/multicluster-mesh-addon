@@ -19,7 +19,7 @@ KUSTOMIZE_VERSION?=v3.5.4
 KUSTOMIZE_ARCHIVE_NAME?=kustomize_$(KUSTOMIZE_VERSION)_$(GOHOSTOS)_$(GOHOSTARCH).tar.gz
 kustomize_dir:=$(dir $(KUSTOMIZE))
 
-IMAGE = quay.io/morvencao/mesh-addon:latest
+IMAGE = quay.io/morvencao/multicluster-mesh-addon:latest
 
 all: build
 .PHONY: all
@@ -58,30 +58,26 @@ test: fmt vet ## Run tests.
 ##@ Build
 
 .PHONY: build
-build: fmt vet ## Build mesh-addon binary.
-	go build -o bin/mesh-addon ./...
-
-.PHONY: run
-run: fmt vet ## Run a controller from your host.
-	go run ./...
+build: fmt vet ## Build multicluster-mesh-addon binary.
+	go build -o bin/multicluster-mesh-addon main.go
 
 .PHONY: docker-build
-docker-build: test ## Build docker image with the mesh-addon.
+docker-build: test ## Build docker image with the multicluster-mesh-addon.
 	docker build -t ${IMAGE} .
 
 .PHONY: docker-push
-docker-push: ## Push docker image with the mesh-addon.
+docker-push: ## Push docker image with the multicluster-mesh-addon.
 	docker push ${IMAGE}
 
 ##@ Deployment
 
-deploy-mesh-addon: kustomize
+deploy: kustomize
 	cp deploy/kustomization.yaml deploy/kustomization.yaml.tmp
-	cd deploy && $(KUSTOMIZE) edit set image mesh-addon-image=$(IMAGE) && $(KUSTOMIZE) edit add configmap image-config --from-literal=MESH_ADDON_IMAGE_NAME=$(IMAGE)
+	cd deploy && $(KUSTOMIZE) edit set image multicluster-mesh-addon=$(IMAGE) && $(KUSTOMIZE) edit add configmap image-config --from-literal=MULTICLUSTER_MESH_ADDON_IMAGE=$(IMAGE)
 	$(KUSTOMIZE) build deploy | $(KUBECTL) apply -f -
 	mv deploy/kustomization.yaml.tmp deploy/kustomization.yaml
 
-undeploy-mesh-addon: kustomize
+undeploy: kustomize
 	$(KUSTOMIZE) build deploy | $(KUBECTL) delete --ignore-not-found -f -
 
 KUSTOMIZE = $(shell pwd)/bin/kustomize

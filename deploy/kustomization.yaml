@@ -1,13 +1,14 @@
 namespace: open-cluster-management
 
 resources:
-- rbac.yaml
-- mesh-addon.yaml
+- clusterrole.yaml
+- clusterrolebinding.yaml
+- deployment.yaml
+- serviceaccount.yaml
 
 images:
-- name: mesh-addon-image
-  newName: quay.io/morvencao/mesh-addon
+- name: multicluster-mesh-addon
+  newName: quay.io/morvencao/multicluster-mesh-addon
   newTag: latest
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
-

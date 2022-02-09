@@ -1,35 +1,28 @@
 package main
 
 import (
-	"context"
+	"flag"
 	"fmt"
 	"math/rand"
 	"os"
 	"time"
 
-	goflag "flag"
-
-	"github.com/openshift/library-go/pkg/controller/controllercmd"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 	utilflag "k8s.io/component-base/cli/flag"
 	"k8s.io/component-base/logs"
-	"k8s.io/klog/v2"
-	"open-cluster-management.io/addon-framework/pkg/addonfactory"
-	addonagent "open-cluster-management.io/addon-framework/pkg/agent"
 	"open-cluster-management.io/addon-framework/pkg/version"
 
-	utilrand "k8s.io/apimachinery/pkg/util/rand"
-	"open-cluster-management.io/addon-framework/pkg/addonmanager"
-
-	meshagent "github.com/morvencao/multicluster-mesh-addon/agent"
+	meshagent "github.com/morvencao/multicluster-mesh-addon/pkg/agent"
+	constants "github.com/morvencao/multicluster-mesh-addon/pkg/constants"
+	meshmanager "github.com/morvencao/multicluster-mesh-addon/pkg/manager"
 )
 
 func main() {
 	rand.Seed(time.Now().UTC().UnixNano())
 
 	pflag.CommandLine.SetNormalizeFunc(utilflag.WordSepNormalizeFunc)
-	pflag.CommandLine.AddGoFlagSet(goflag.CommandLine)
+	pflag.CommandLine.AddGoFlagSet(flag.CommandLine)
 
 	logs.InitLogs()
 	defer logs.FlushLogs()
@@ -44,7 +37,7 @@ func main() {
 func newCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "addon",
-		Short: "service mesh addon",
+		Short: "multicluster mesh addon",
 		Run: func(cmd *cobra.Command, args []string) {
 			if err := cmd.Help(); err != nil {
 				fmt.Fprintf(os.Stderr, "%v\n", err)
@@ -59,52 +52,8 @@ func newCommand() *cobra.Command {
 		cmd.Version = v
 	}
 
-	cmd.AddCommand(newControllerCommand())
-	cmd.AddCommand(meshagent.NewAgentCommand(addonName))
+	cmd.AddCommand(meshmanager.NewControllerCommand())
+	cmd.AddCommand(meshagent.NewAgentCommand(constants.MeshAddonName))
 
 	return cmd
-}
-
-func newControllerCommand() *cobra.Command {
-	cmd := controllercmd.
-		NewControllerCommandConfig("mesh-addon-controller", version.Get(), runController).
-		NewCommand()
-	cmd.Use = "controller"
-	cmd.Short = "Start the addon controller"
-
-	return cmd
-}
-
-func runController(ctx context.Context, controllerContext *controllercmd.ControllerContext) error {
-	mgr, err := addonmanager.New(controllerContext.KubeConfig)
-	if err != nil {
-		return err
-	}
-	registrationOption := newRegistrationOption(
-		controllerContext.KubeConfig,
-		controllerContext.EventRecorder,
-		utilrand.String(5))
-
-	agentAddon, err := addonfactory.NewAgentAddonFactory(addonName, fs, "manifests/agent").
-		WithGetValuesFuncs(getValues, addonfactory.GetValuesFromAddonAnnotation).
-		WithAgentRegistrationOption(registrationOption).
-		WithInstallStrategy(addonagent.InstallAllStrategy(meshagent.MeshAgentInstallationNamespace)).
-		BuildTemplateAgentAddon()
-	if err != nil {
-		klog.Errorf("failed to build agent %v", err)
-		return err
-	}
-
-	err = mgr.AddAgent(agentAddon)
-	if err != nil {
-		klog.Fatal(err)
-	}
-
-	err = mgr.Start(ctx)
-	if err != nil {
-		klog.Fatal(err)
-	}
-	<-ctx.Done()
-
-	return nil
 }

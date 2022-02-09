@@ -1,0 +1,30 @@
+kind: Deployment
+apiVersion: apps/v1
+metadata:
+  name: multicluster-mesh-addon
+  labels:
+    app: multicluster-mesh-addon
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: multicluster-mesh-addon
+  template:
+    metadata:
+      labels:
+        app: multicluster-mesh-addon
+    spec:
+      serviceAccountName: multicluster-mesh-addon
+      containers:
+      - name: multicluster-mesh-addon
+        image: multicluster-mesh-addon
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: MULTICLUSTER_MESH_ADDON_IMAGE
+          valueFrom:
+            configMapKeyRef:
+              name: image-config
+              key: MULTICLUSTER_MESH_ADDON_IMAGE
+        command:
+        - "/multicluster-mesh-addon"
+        - "controller"

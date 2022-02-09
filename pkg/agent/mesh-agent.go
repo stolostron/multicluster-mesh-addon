@@ -24,17 +24,13 @@ import (
 	"open-cluster-management.io/addon-framework/pkg/version"
 )
 
-// Mesh Agent syncs mesh resource in cluster namespace of hub cluster to the install namespace in managedcluster.
-// addOnAgentInstallationNamespace is the namespace on the managed cluster to install the mesh addon agent.
-const MeshAgentInstallationNamespace = "mesh-system"
-
 func NewAgentCommand(addonName string) *cobra.Command {
 	o := NewAgentOptions(addonName)
 	cmd := controllercmd.
-		NewControllerCommandConfig("mesh-addon-agent", version.Get(), o.RunAgent).
+		NewControllerCommandConfig("multicluster-mesh-addon-agent", version.Get(), o.RunAgent).
 		NewCommand()
 	cmd.Use = "agent"
-	cmd.Short = "Start the addon agent"
+	cmd.Short = "Start the multicluster mesh addon agent"
 
 	o.AddFlags(cmd)
 	return cmd
@@ -130,7 +126,7 @@ func newAgentController(
 			key, _ := cache.MetaNamespaceKeyFunc(obj)
 			return key
 		}, configmapInformers.Informer()).
-		WithSync(c.sync).ToController("mesh-agent-controller", recorder)
+		WithSync(c.sync).ToController("multicluster-mesh-agent-controller", recorder)
 }
 
 func (c *agentController) sync(ctx context.Context, syncCtx factory.SyncContext) error {

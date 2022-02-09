@@ -1,4 +1,4 @@
-# Build the mesh-addon binary
+# Build the multicluster-mesh-addon binary
 FROM golang:1.17 as builder
 
 WORKDIR /workspace
@@ -11,17 +11,15 @@ RUN go mod download
 
 # Copy the go source
 COPY main.go main.go
-COPY mesh.go mesh.go
-COPY agent/ agent/
-COPY manifests/ manifests/
+COPY pkg/ pkg/
 
 # Build
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -a -o mesh-addon .
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -a -o multicluster-mesh-addon main.go
 
 FROM registry.access.redhat.com/ubi8/ubi-minimal:latest
 WORKDIR /
-COPY --from=builder /workspace/mesh-addon .
+COPY --from=builder /workspace/multicluster-mesh-addon .
 USER 65532:65532
 
-ENTRYPOINT ["/mesh-addon"]
+CMD ["/multicluster-mesh-addon"]
 
