@@ -17,7 +17,6 @@ type MeshDeploymentSpec struct {
 type MeshDeploymentStatus struct {
 }
 
-// +genclient
 //+kubebuilder:object:root=true
 //+kubebuilder:subresource:status
 //+kubebuilder:printcolumn:name="CLUSTERS",type="string",JSONPath=".spec.clusters",description="Target clusters of the mesh deployment"
