@@ -42,6 +42,7 @@ type MeshStatus struct {
 	Readiness maistrav2.ReadinessStatus `json:"readiness"`
 }
 
+// +genclient
 //+kubebuilder:object:root=true
 //+kubebuilder:subresource:status
 //+kubebuilder:printcolumn:name="CLUSTER",type="string",JSONPath=".spec.cluster",description="Cluster of the mesh"

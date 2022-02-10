@@ -32,6 +32,7 @@ type TrustConfig struct {
 type MeshFederationStatus struct {
 }
 
+// +genclient
 //+kubebuilder:object:root=true
 //+kubebuilder:subresource:status
 

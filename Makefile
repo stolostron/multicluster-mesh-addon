@@ -77,7 +77,15 @@ manifests: controller-gen ## Generate CustomResourceDefinition objects.
 
 .PHONY: generate
 generate: controller-gen ## Generate code containing DeepCopy, DeepCopyInto, and DeepCopyObject method implementations.
-	$(CONTROLLER_GEN) object paths="./apis/..."
+	$(CONTROLLER_GEN) object:headerFile="hack/boilerplate.go.txt" paths="./apis/..."
+
+.PHONY: update-codegen
+update-codegen: # update the client set tools.
+	./hack/update-codegen.sh
+
+.PHONY: verify-codegen
+verify-codegen: # verify the client set tools.
+	./hack/verify-codegen.sh
 
 deploy: kustomize
 	cp deploy/kustomization.yaml deploy/kustomization.yaml.tmp
