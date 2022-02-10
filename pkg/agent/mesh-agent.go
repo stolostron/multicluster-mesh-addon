@@ -7,21 +7,25 @@ import (
 	"github.com/openshift/library-go/pkg/controller/controllercmd"
 	"github.com/openshift/library-go/pkg/controller/factory"
 	"github.com/openshift/library-go/pkg/operator/events"
-	"github.com/openshift/library-go/pkg/operator/resource/resourceapply"
 	"github.com/spf13/cobra"
-	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/client-go/informers"
-	corev1informers "k8s.io/client-go/informers/core/v1"
 	"k8s.io/client-go/kubernetes"
-	corev1lister "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/klog/v2"
+	maistrainformer "maistra.io/api/client/informers/externalversions"
+	maistrav1informer "maistra.io/api/client/informers/externalversions/core/v1"
+	maistrav2informer "maistra.io/api/client/informers/externalversions/core/v2"
+	maistrav1lister "maistra.io/api/client/listers/core/v1"
+	maistrav2lister "maistra.io/api/client/listers/core/v2"
+	maistraclientset "maistra.io/api/client/versioned"
 	"open-cluster-management.io/addon-framework/pkg/lease"
 	"open-cluster-management.io/addon-framework/pkg/version"
+
+	meshclientset "github.com/morvencao/multicluster-mesh-addon/apis/client/clientset/versioned"
+	meshresourceapply "github.com/morvencao/multicluster-mesh-addon/pkg/resourceapply"
+	meshtranslate "github.com/morvencao/multicluster-mesh-addon/pkg/translate"
 )
 
 func NewAgentCommand(addonName string) *cobra.Command {
@@ -64,22 +68,35 @@ func (o *AgentOptions) RunAgent(ctx context.Context, controllerContext *controll
 	if err != nil {
 		return err
 	}
+	// build maistraClient of managed cluster
+	spokeMaistraClient, err := maistraclientset.NewForConfig(controllerContext.KubeConfig)
+	if err != nil {
+		return err
+	}
+	spokeKubeInformerFactory := maistrainformer.NewSharedInformerFactory(spokeMaistraClient, 10*time.Minute)
 
-	// build kubeinformerfactory of hub cluster
-	hubRestConfig, err := clientcmd.BuildConfigFromFlags("" /* leave masterurl as empty */, o.HubKubeconfigFile)
+	// build kubeconfig of hub cluster
+	hubRestConfig, err := clientcmd.BuildConfigFromFlags("", o.HubKubeconfigFile)
 	if err != nil {
 		return err
 	}
-	hubKubeClient, err := kubernetes.NewForConfig(hubRestConfig)
+	// // build kubeclient of hub cluster
+	// hubKubeClient, err := kubernetes.NewForConfig(hubRestConfig)
+	// if err != nil {
+	// 	return err
+	// }
+	// build meshClient of hub cluster
+	hubMeshClient, err := meshclientset.NewForConfig(hubRestConfig)
 	if err != nil {
 		return err
 	}
-	hubKubeInformerFactory := informers.NewSharedInformerFactoryWithOptions(hubKubeClient, 10*time.Minute, informers.WithNamespace(o.SpokeClusterName))
 
 	// create an agent contoller
 	agent := newAgentController(
-		spokeKubeClient,
-		hubKubeInformerFactory.Core().V1().ConfigMaps(),
+		// hubKubeClient,
+		hubMeshClient,
+		spokeKubeInformerFactory.Core().V2().ServiceMeshControlPlanes(),
+		spokeKubeInformerFactory.Core().V1().ServiceMeshMemberRolls(),
 		o.SpokeClusterName,
 		o.AddonNamespace,
 		controllerContext.EventRecorder,
@@ -91,7 +108,7 @@ func (o *AgentOptions) RunAgent(ctx context.Context, controllerContext *controll
 		o.AddonNamespace,
 	)
 
-	go hubKubeInformerFactory.Start(ctx.Done())
+	go spokeKubeInformerFactory.Start(ctx.Done())
 	go agent.Run(ctx, 1)
 	go leaseUpdater.Start(ctx)
 
@@ -100,46 +117,52 @@ func (o *AgentOptions) RunAgent(ctx context.Context, controllerContext *controll
 }
 
 type agentController struct {
-	spokeKubeClient    kubernetes.Interface
-	hunConfigMapLister corev1lister.ConfigMapLister
-	clusterName        string
-	addonNamespace     string
-	recorder           events.Recorder
+	// hubKubeClient    kubernetes.Interface
+	hubMeshClient   meshclientset.Interface
+	spokeSMCPLister maistrav2lister.ServiceMeshControlPlaneLister
+	spokeSMMRLister maistrav1lister.ServiceMeshMemberRollLister
+	clusterName     string
+	addonNamespace  string
+	recorder        events.Recorder
 }
 
 func newAgentController(
-	spokeKubeClient kubernetes.Interface,
-	configmapInformers corev1informers.ConfigMapInformer,
+	// hubKubeClient kubernetes.Interface,
+	hubMeshClient meshclientset.Interface,
+	smcpInformer maistrav2informer.ServiceMeshControlPlaneInformer,
+	smmrInformer maistrav1informer.ServiceMeshMemberRollInformer,
 	clusterName string,
 	addonNamespace string,
 	recorder events.Recorder,
 ) factory.Controller {
 	c := &agentController{
-		spokeKubeClient:    spokeKubeClient,
-		clusterName:        clusterName,
-		addonNamespace:     addonNamespace,
-		hunConfigMapLister: configmapInformers.Lister(),
-		recorder:           recorder,
+		// hubKubeClient:    hubKubeClient,
+		hubMeshClient:   hubMeshClient,
+		clusterName:     clusterName,
+		addonNamespace:  addonNamespace,
+		spokeSMCPLister: smcpInformer.Lister(),
+		spokeSMMRLister: smmrInformer.Lister(),
+		recorder:        recorder,
 	}
 	return factory.New().WithInformersQueueKeyFunc(
 		func(obj runtime.Object) string {
 			key, _ := cache.MetaNamespaceKeyFunc(obj)
 			return key
-		}, configmapInformers.Informer()).
+		}, smcpInformer.Informer()).
 		WithSync(c.sync).ToController("multicluster-mesh-agent-controller", recorder)
 }
 
 func (c *agentController) sync(ctx context.Context, syncCtx factory.SyncContext) error {
 	key := syncCtx.QueueKey()
-	klog.V(4).Infof("Reconciling addon deploy %q", key)
+	klog.V(4).Infof("Reconciling SMCP %q", key)
 
-	clusterName, name, err := cache.SplitMetaNamespaceKey(key)
+	namespace, name, err := cache.SplitMetaNamespaceKey(key)
 	if err != nil {
 		// ignore addon whose key is not in format: namespace/name
 		return nil
 	}
 
-	cm, err := c.hunConfigMapLister.ConfigMaps(clusterName).Get(name)
+	smcp, err := c.spokeSMCPLister.ServiceMeshControlPlanes(namespace).Get(name)
 	switch {
 	case errors.IsNotFound(err):
 		return nil
@@ -147,14 +170,20 @@ func (c *agentController) sync(ctx context.Context, syncCtx factory.SyncContext)
 		return err
 	}
 
-	configmap := &corev1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      cm.Name,
-			Namespace: c.addonNamespace,
-		},
-		Data: cm.Data,
+	// smmr named "default" in the namespace
+	smmr, err := c.spokeSMMRLister.ServiceMeshMemberRolls(namespace).Get("default")
+	switch {
+	case errors.IsNotFound(err):
+		return nil
+	case err != nil:
+		return err
 	}
 
-	_, _, err = resourceapply.ApplyConfigMap(ctx, c.spokeKubeClient.CoreV1(), c.recorder, configmap)
+	mesh, err := meshtranslate.TranslateToLogicMesh(smcp, smmr, c.clusterName)
+	if err != nil {
+		return err
+	}
+
+	_, _, err = meshresourceapply.ApplyMesh(ctx, c.hubMeshClient.MeshV1alpha1(), c.recorder, mesh)
 	return err
 }

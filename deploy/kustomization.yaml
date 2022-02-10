@@ -5,6 +5,9 @@ resources:
 - clusterrolebinding.yaml
 - deployment.yaml
 - serviceaccount.yaml
+- crd/mesh.open-cluster-management.io_meshes.yaml
+- crd/mesh.open-cluster-management.io_meshdeployments.yaml
+- crd/mesh.open-cluster-management.io_meshfederations.yaml
 
 images:
 - name: multicluster-mesh-addon

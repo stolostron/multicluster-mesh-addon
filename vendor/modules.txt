@@ -901,6 +901,7 @@ k8s.io/client-go/applyconfigurations/storage/v1
 k8s.io/client-go/applyconfigurations/storage/v1alpha1
 k8s.io/client-go/applyconfigurations/storage/v1beta1
 k8s.io/client-go/discovery
+k8s.io/client-go/discovery/fake
 k8s.io/client-go/dynamic
 k8s.io/client-go/informers
 k8s.io/client-go/informers/admissionregistration
@@ -1060,6 +1061,7 @@ k8s.io/client-go/pkg/version
 k8s.io/client-go/plugin/pkg/client/auth/exec
 k8s.io/client-go/rest
 k8s.io/client-go/rest/watch
+k8s.io/client-go/testing
 k8s.io/client-go/tools/auth
 k8s.io/client-go/tools/cache
 k8s.io/client-go/tools/clientcmd
@@ -1190,8 +1192,28 @@ k8s.io/utils/pointer
 k8s.io/utils/trace
 # maistra.io/api v0.0.0-20211119171546-348bbce3ca27
 ## explicit; go 1.15
+maistra.io/api/client/informers/externalversions
+maistra.io/api/client/informers/externalversions/core
+maistra.io/api/client/informers/externalversions/core/v1
+maistra.io/api/client/informers/externalversions/core/v1alpha1
+maistra.io/api/client/informers/externalversions/core/v2
+maistra.io/api/client/informers/externalversions/federation
+maistra.io/api/client/informers/externalversions/federation/v1
+maistra.io/api/client/informers/externalversions/internalinterfaces
+maistra.io/api/client/listers/core/v1
+maistra.io/api/client/listers/core/v1alpha1
+maistra.io/api/client/listers/core/v2
+maistra.io/api/client/listers/federation/v1
+maistra.io/api/client/versioned
+maistra.io/api/client/versioned/scheme
+maistra.io/api/client/versioned/typed/core/v1
+maistra.io/api/client/versioned/typed/core/v1alpha1
+maistra.io/api/client/versioned/typed/core/v2
+maistra.io/api/client/versioned/typed/federation/v1
 maistra.io/api/core/v1
+maistra.io/api/core/v1alpha1
 maistra.io/api/core/v2
+maistra.io/api/federation/v1
 # open-cluster-management.io/addon-framework v0.2.1-0.20220207065614-325cd9f6e402
 ## explicit; go 1.17
 open-cluster-management.io/addon-framework/pkg/addonfactory

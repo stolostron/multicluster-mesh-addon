@@ -23,7 +23,7 @@ spec:
       containers:
       - name: multicluster-mesh-agent
         image: {{ .Image }}
-        imagePullPolicy: IfNotPresent
+        imagePullPolicy: Always
         command:
         - "/multicluster-mesh-addon"
         - "agent"

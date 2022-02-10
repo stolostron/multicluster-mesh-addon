@@ -18,7 +18,7 @@ spec:
       containers:
       - name: multicluster-mesh-addon
         image: multicluster-mesh-addon
-        imagePullPolicy: IfNotPresent
+        imagePullPolicy: Always
         env:
         - name: MULTICLUSTER_MESH_ADDON_IMAGE
           valueFrom:

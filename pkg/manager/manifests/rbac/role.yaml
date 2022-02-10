@@ -4,6 +4,7 @@ metadata:
   name: open-cluster-management:multicluster-mesh:agent
   namespace: {{ .ClusterName }}
 rules:
-  - apiGroups: [""]
-    resources: ["configmaps"]
-    verbs: ["get", "list", "watch"]
+- apiGroups: ["mesh.open-cluster-management.io"]
+  resources: ["meshes", "meshdeployments", "meshfederations"]
+  verbs: ["*"]
+
