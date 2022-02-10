@@ -6,6 +6,7 @@ import (
 	"github.com/openshift/library-go/pkg/controller/factory"
 	"github.com/openshift/library-go/pkg/operator/events"
 	"k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog/v2"
@@ -15,6 +16,7 @@ import (
 	maistrav2lister "maistra.io/api/client/listers/core/v2"
 
 	meshclientset "github.com/morvencao/multicluster-mesh-addon/apis/client/clientset/versioned"
+	constants "github.com/morvencao/multicluster-mesh-addon/pkg/constants"
 	meshresourceapply "github.com/morvencao/multicluster-mesh-addon/pkg/resourceapply"
 	meshtranslate "github.com/morvencao/multicluster-mesh-addon/pkg/translate"
 )
@@ -78,6 +80,19 @@ func (c *discoveryController) sync(ctx context.Context, syncCtx factory.SyncCont
 		return nil
 	case err != nil:
 		return err
+	}
+
+	userCreatedMeshList, err := c.hubMeshClient.MeshV1alpha1().Meshes(c.clusterName).List(context.TODO(), metav1.ListOptions{LabelSelector: constants.LabelKeyForDiscoveriedMesh + "!=true"})
+	isUserCreatedMesh := false
+	for _, userCreatedMesh := range userCreatedMeshList.Items {
+		// skip user created mesh for discovery
+		if userCreatedMesh.GetName() == name && userCreatedMesh.Spec.ControlPlane.Namespace == namespace {
+			isUserCreatedMesh = true
+			break
+		}
+	}
+	if isUserCreatedMesh {
+		return nil
 	}
 
 	mesh, err := meshtranslate.TranslateToLogicMesh(smcp, smmr, c.clusterName)

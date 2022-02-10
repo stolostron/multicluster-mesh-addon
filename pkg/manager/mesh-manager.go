@@ -5,6 +5,7 @@ import (
 	"embed"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/openshift/library-go/pkg/assets"
 	"github.com/openshift/library-go/pkg/controller/controllercmd"
@@ -25,7 +26,10 @@ import (
 	addonapiv1alpha1 "open-cluster-management.io/api/addon/v1alpha1"
 	clusterv1 "open-cluster-management.io/api/cluster/v1"
 
+	meshclientset "github.com/morvencao/multicluster-mesh-addon/apis/client/clientset/versioned"
+	meshinformer "github.com/morvencao/multicluster-mesh-addon/apis/client/informers/externalversions"
 	constants "github.com/morvencao/multicluster-mesh-addon/pkg/constants"
+	meshdeployment "github.com/morvencao/multicluster-mesh-addon/pkg/manager/deployment"
 )
 
 var (
@@ -80,10 +84,29 @@ func runController(ctx context.Context, controllerContext *controllercmd.Control
 		klog.Fatal(err)
 	}
 
+	// build mesh kubeconfig
+	meshClient, err := meshclientset.NewForConfig(controllerContext.KubeConfig)
+	if err != nil {
+		return err
+	}
+
+	// build mesh informer factory
+	meshInformerFactory := meshinformer.NewSharedInformerFactory(meshClient, 10*time.Minute)
+
+	// create an meshDeployment controller
+	meshDeploymentController := meshdeployment.NewMeshDeploymentController(
+		meshClient,
+		meshInformerFactory.Mesh().V1alpha1().MeshDeployments(),
+		controllerContext.EventRecorder,
+	)
+
 	err = mgr.Start(ctx)
 	if err != nil {
 		klog.Fatal(err)
 	}
+
+	go meshInformerFactory.Start(ctx.Done())
+	go meshDeploymentController.Run(ctx, 1)
 	<-ctx.Done()
 
 	return nil
