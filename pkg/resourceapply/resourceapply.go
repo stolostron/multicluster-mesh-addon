@@ -14,13 +14,16 @@ import (
 	openshiftresourceapply "github.com/openshift/library-go/pkg/operator/resource/resourceapply"
 	"github.com/openshift/library-go/pkg/operator/resource/resourcehelper"
 	"github.com/openshift/library-go/pkg/operator/resource/resourcemerge"
+	maistrav1client "maistra.io/api/client/versioned/typed/core/v1"
+	maistrav2client "maistra.io/api/client/versioned/typed/core/v2"
+	maistrav1 "maistra.io/api/core/v1"
+	maistrav2 "maistra.io/api/core/v2"
 
 	meshv1alpha1client "github.com/morvencao/multicluster-mesh-addon/apis/client/clientset/versioned/typed/mesh/v1alpha1"
 	meshv1alpha1 "github.com/morvencao/multicluster-mesh-addon/apis/mesh/v1alpha1"
 )
 
 func ApplyMesh(ctx context.Context, client meshv1alpha1client.MeshesGetter, recorder events.Recorder, required *meshv1alpha1.Mesh) (*meshv1alpha1.Mesh, bool, error) {
-
 	existing, err := client.Meshes(required.Namespace).Get(context.TODO(), required.Name, metav1.GetOptions{})
 	if apierrors.IsNotFound(err) {
 		requiredCopy := required.DeepCopy()
@@ -46,6 +49,66 @@ func ApplyMesh(ctx context.Context, client meshv1alpha1client.MeshesGetter, reco
 	}
 
 	actual, err := client.Meshes(required.Namespace).Update(context.TODO(), existingCopy, metav1.UpdateOptions{})
+	reportUpdateEvent(recorder, required, err)
+	return actual, true, err
+}
+
+func ApplyServiceMeshControlPlane(ctx context.Context, client maistrav2client.ServiceMeshControlPlanesGetter, recorder events.Recorder, required *maistrav2.ServiceMeshControlPlane) (*maistrav2.ServiceMeshControlPlane, bool, error) {
+	existing, err := client.ServiceMeshControlPlanes(required.Namespace).Get(context.TODO(), required.Name, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		requiredCopy := required.DeepCopy()
+		actual, err := client.ServiceMeshControlPlanes(requiredCopy.Namespace).
+			Create(context.TODO(), resourcemerge.WithCleanLabelsAndAnnotations(requiredCopy).(*maistrav2.ServiceMeshControlPlane), metav1.CreateOptions{})
+		reportCreateEvent(recorder, requiredCopy, err)
+		return actual, true, err
+	}
+	if err != nil {
+		return nil, false, err
+	}
+
+	modified := resourcemerge.BoolPtr(false)
+	existingCopy := existing.DeepCopy()
+
+	resourcemerge.EnsureObjectMeta(modified, &existingCopy.ObjectMeta, required.ObjectMeta)
+	if !*modified {
+		return existingCopy, false, nil
+	}
+
+	if klog.V(4).Enabled() {
+		klog.Infof("ServiceMeshControlPlane %q changes: %v", required.Namespace+"/"+required.Name, openshiftresourceapply.JSONPatchNoError(existing, required))
+	}
+
+	actual, err := client.ServiceMeshControlPlanes(required.Namespace).Update(context.TODO(), existingCopy, metav1.UpdateOptions{})
+	reportUpdateEvent(recorder, required, err)
+	return actual, true, err
+}
+
+func ApplyServiceMeshMemberRoll(ctx context.Context, client maistrav1client.ServiceMeshMemberRollsGetter, recorder events.Recorder, required *maistrav1.ServiceMeshMemberRoll) (*maistrav1.ServiceMeshMemberRoll, bool, error) {
+	existing, err := client.ServiceMeshMemberRolls(required.Namespace).Get(context.TODO(), required.Name, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		requiredCopy := required.DeepCopy()
+		actual, err := client.ServiceMeshMemberRolls(requiredCopy.Namespace).
+			Create(context.TODO(), resourcemerge.WithCleanLabelsAndAnnotations(requiredCopy).(*maistrav1.ServiceMeshMemberRoll), metav1.CreateOptions{})
+		reportCreateEvent(recorder, requiredCopy, err)
+		return actual, true, err
+	}
+	if err != nil {
+		return nil, false, err
+	}
+
+	modified := resourcemerge.BoolPtr(false)
+	existingCopy := existing.DeepCopy()
+
+	resourcemerge.EnsureObjectMeta(modified, &existingCopy.ObjectMeta, required.ObjectMeta)
+	if !*modified {
+		return existingCopy, false, nil
+	}
+
+	if klog.V(4).Enabled() {
+		klog.Infof("ServiceMeshMemberRoll %q changes: %v", required.Namespace+"/"+required.Name, openshiftresourceapply.JSONPatchNoError(existing, required))
+	}
+
+	actual, err := client.ServiceMeshMemberRolls(required.Namespace).Update(context.TODO(), existingCopy, metav1.UpdateOptions{})
 	reportUpdateEvent(recorder, required, err)
 	return actual, true, err
 }
