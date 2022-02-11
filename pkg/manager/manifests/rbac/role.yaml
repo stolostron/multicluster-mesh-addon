@@ -7,4 +7,6 @@ rules:
 - apiGroups: ["mesh.open-cluster-management.io"]
   resources: ["meshes", "meshdeployments", "meshfederations"]
   verbs: ["*"]
-
+- apiGroups: [""]
+  resources: ["configmaps"]
+  verbs: ["create", "get", "list", "patch", "update", "watch"]

@@ -67,9 +67,10 @@ func (c *meshDeploymentController) sync(ctx context.Context, syncCtx factory.Syn
 		if meshDeployment.Spec.TrustDomain != "" {
 			trustDomain = meshDeployment.Spec.TrustDomain
 		}
+		meshName := fmt.Sprintf("%s-%s", cluster, meshDeployment.GetName())
 		mesh := &meshv1alpha1.Mesh{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      fmt.Sprintf("%s-%s", cluster, meshDeployment.GetName()),
+				Name:      meshName,
 				Namespace: cluster,
 			},
 			Spec: meshv1alpha1.MeshSpec{
@@ -80,8 +81,14 @@ func (c *meshDeploymentController) sync(ctx context.Context, syncCtx factory.Syn
 				TrustDomain:    trustDomain,
 			},
 		}
-		_, _, err = meshresourceapply.ApplyMesh(ctx, c.meshClient.MeshV1alpha1(), c.recorder, mesh)
-		if err != nil {
+
+		_, err := c.meshClient.MeshV1alpha1().Meshes(cluster).Get(context.TODO(), meshName, metav1.GetOptions{})
+		if errors.IsNotFound(err) {
+			_, _, err = meshresourceapply.ApplyMesh(ctx, c.meshClient.MeshV1alpha1(), c.recorder, mesh)
+			if err != nil {
+				return err
+			}
+		} else {
 			return err
 		}
 	}
