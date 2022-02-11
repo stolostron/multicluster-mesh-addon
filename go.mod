@@ -1,4 +1,4 @@
-module github.com/morvencao/multicluster-mesh-addon
+module github.com/stolostron/multicluster-mesh-addon
 
 go 1.17
 

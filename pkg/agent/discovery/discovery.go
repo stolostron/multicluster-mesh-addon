@@ -15,10 +15,10 @@ import (
 	maistrav1lister "maistra.io/api/client/listers/core/v1"
 	maistrav2lister "maistra.io/api/client/listers/core/v2"
 
-	meshclientset "github.com/morvencao/multicluster-mesh-addon/apis/client/clientset/versioned"
-	constants "github.com/morvencao/multicluster-mesh-addon/pkg/constants"
-	meshresourceapply "github.com/morvencao/multicluster-mesh-addon/pkg/resourceapply"
-	meshtranslate "github.com/morvencao/multicluster-mesh-addon/pkg/translate"
+	meshclientset "github.com/stolostron/multicluster-mesh-addon/apis/client/clientset/versioned"
+	constants "github.com/stolostron/multicluster-mesh-addon/pkg/constants"
+	meshresourceapply "github.com/stolostron/multicluster-mesh-addon/pkg/resourceapply"
+	meshtranslate "github.com/stolostron/multicluster-mesh-addon/pkg/translate"
 )
 
 type discoveryController struct {

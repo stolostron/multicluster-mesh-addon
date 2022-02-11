@@ -21,8 +21,8 @@ package v1alpha1
 import (
 	"net/http"
 
-	"github.com/morvencao/multicluster-mesh-addon/apis/client/clientset/versioned/scheme"
-	v1alpha1 "github.com/morvencao/multicluster-mesh-addon/apis/mesh/v1alpha1"
+	"github.com/stolostron/multicluster-mesh-addon/apis/client/clientset/versioned/scheme"
+	v1alpha1 "github.com/stolostron/multicluster-mesh-addon/apis/mesh/v1alpha1"
 	rest "k8s.io/client-go/rest"
 )
 

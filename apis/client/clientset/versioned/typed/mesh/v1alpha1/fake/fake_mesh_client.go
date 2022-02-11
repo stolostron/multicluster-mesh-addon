@@ -19,7 +19,7 @@ limitations under the License.
 package fake
 
 import (
-	v1alpha1 "github.com/morvencao/multicluster-mesh-addon/apis/client/clientset/versioned/typed/mesh/v1alpha1"
+	v1alpha1 "github.com/stolostron/multicluster-mesh-addon/apis/client/clientset/versioned/typed/mesh/v1alpha1"
 	rest "k8s.io/client-go/rest"
 	testing "k8s.io/client-go/testing"
 )

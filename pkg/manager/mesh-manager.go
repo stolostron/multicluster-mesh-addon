@@ -26,10 +26,10 @@ import (
 	addonapiv1alpha1 "open-cluster-management.io/api/addon/v1alpha1"
 	clusterv1 "open-cluster-management.io/api/cluster/v1"
 
-	meshclientset "github.com/morvencao/multicluster-mesh-addon/apis/client/clientset/versioned"
-	meshinformer "github.com/morvencao/multicluster-mesh-addon/apis/client/informers/externalversions"
-	constants "github.com/morvencao/multicluster-mesh-addon/pkg/constants"
-	meshdeployment "github.com/morvencao/multicluster-mesh-addon/pkg/manager/deployment"
+	meshclientset "github.com/stolostron/multicluster-mesh-addon/apis/client/clientset/versioned"
+	meshinformer "github.com/stolostron/multicluster-mesh-addon/apis/client/informers/externalversions"
+	constants "github.com/stolostron/multicluster-mesh-addon/pkg/constants"
+	meshdeployment "github.com/stolostron/multicluster-mesh-addon/pkg/manager/deployment"
 )
 
 var (

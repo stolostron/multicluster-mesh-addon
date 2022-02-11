@@ -12,11 +12,11 @@ import (
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog/v2"
 
-	meshclientset "github.com/morvencao/multicluster-mesh-addon/apis/client/clientset/versioned"
-	meshv1alpha1informer "github.com/morvencao/multicluster-mesh-addon/apis/client/informers/externalversions/mesh/v1alpha1"
-	meshv1alpha1lister "github.com/morvencao/multicluster-mesh-addon/apis/client/listers/mesh/v1alpha1"
-	meshv1alpha1 "github.com/morvencao/multicluster-mesh-addon/apis/mesh/v1alpha1"
-	meshresourceapply "github.com/morvencao/multicluster-mesh-addon/pkg/resourceapply"
+	meshclientset "github.com/stolostron/multicluster-mesh-addon/apis/client/clientset/versioned"
+	meshv1alpha1informer "github.com/stolostron/multicluster-mesh-addon/apis/client/informers/externalversions/mesh/v1alpha1"
+	meshv1alpha1lister "github.com/stolostron/multicluster-mesh-addon/apis/client/listers/mesh/v1alpha1"
+	meshv1alpha1 "github.com/stolostron/multicluster-mesh-addon/apis/mesh/v1alpha1"
+	meshresourceapply "github.com/stolostron/multicluster-mesh-addon/pkg/resourceapply"
 )
 
 type meshDeploymentController struct {

@@ -15,10 +15,10 @@ import (
 	"k8s.io/klog/v2"
 	maistraclientset "maistra.io/api/client/versioned"
 
-	meshv1alpha1informer "github.com/morvencao/multicluster-mesh-addon/apis/client/informers/externalversions/mesh/v1alpha1"
-	meshv1alpha1lister "github.com/morvencao/multicluster-mesh-addon/apis/client/listers/mesh/v1alpha1"
-	meshresourceapply "github.com/morvencao/multicluster-mesh-addon/pkg/resourceapply"
-	meshtranslate "github.com/morvencao/multicluster-mesh-addon/pkg/translate"
+	meshv1alpha1informer "github.com/stolostron/multicluster-mesh-addon/apis/client/informers/externalversions/mesh/v1alpha1"
+	meshv1alpha1lister "github.com/stolostron/multicluster-mesh-addon/apis/client/listers/mesh/v1alpha1"
+	meshresourceapply "github.com/stolostron/multicluster-mesh-addon/pkg/resourceapply"
+	meshtranslate "github.com/stolostron/multicluster-mesh-addon/pkg/translate"
 )
 
 type deployController struct {

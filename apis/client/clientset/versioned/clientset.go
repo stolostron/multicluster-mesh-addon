@@ -22,7 +22,7 @@ import (
 	"fmt"
 	"net/http"
 
-	meshv1alpha1 "github.com/morvencao/multicluster-mesh-addon/apis/client/clientset/versioned/typed/mesh/v1alpha1"
+	meshv1alpha1 "github.com/stolostron/multicluster-mesh-addon/apis/client/clientset/versioned/typed/mesh/v1alpha1"
 	discovery "k8s.io/client-go/discovery"
 	rest "k8s.io/client-go/rest"
 	flowcontrol "k8s.io/client-go/util/flowcontrol"
