@@ -13,9 +13,9 @@ import (
 	"k8s.io/component-base/logs"
 	"open-cluster-management.io/addon-framework/pkg/version"
 
-	meshagent "github.com/morvencao/multicluster-mesh-addon/pkg/agent"
-	constants "github.com/morvencao/multicluster-mesh-addon/pkg/constants"
-	meshmanager "github.com/morvencao/multicluster-mesh-addon/pkg/manager"
+	meshagent "github.com/stolostron/multicluster-mesh-addon/pkg/agent"
+	constants "github.com/stolostron/multicluster-mesh-addon/pkg/constants"
+	meshmanager "github.com/stolostron/multicluster-mesh-addon/pkg/manager"
 )
 
 func main() {

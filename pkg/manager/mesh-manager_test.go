@@ -14,7 +14,7 @@ import (
 	clusterv1 "open-cluster-management.io/api/cluster/v1"
 	"sigs.k8s.io/yaml"
 
-	constants "github.com/morvencao/multicluster-mesh-addon/pkg/constants"
+	constants "github.com/stolostron/multicluster-mesh-addon/pkg/constants"
 )
 
 func newAgentAddon(t *testing.T) (agent.AgentAddon, error) {

@@ -13,10 +13,10 @@ import (
 	"open-cluster-management.io/addon-framework/pkg/lease"
 	"open-cluster-management.io/addon-framework/pkg/version"
 
-	meshclientset "github.com/morvencao/multicluster-mesh-addon/apis/client/clientset/versioned"
-	meshinformer "github.com/morvencao/multicluster-mesh-addon/apis/client/informers/externalversions"
-	meshdeploy "github.com/morvencao/multicluster-mesh-addon/pkg/agent/deploy"
-	meshdiscovery "github.com/morvencao/multicluster-mesh-addon/pkg/agent/discovery"
+	meshclientset "github.com/stolostron/multicluster-mesh-addon/apis/client/clientset/versioned"
+	meshinformer "github.com/stolostron/multicluster-mesh-addon/apis/client/informers/externalversions"
+	meshdeploy "github.com/stolostron/multicluster-mesh-addon/pkg/agent/deploy"
+	meshdiscovery "github.com/stolostron/multicluster-mesh-addon/pkg/agent/discovery"
 )
 
 func NewAgentCommand(addonName string) *cobra.Command {

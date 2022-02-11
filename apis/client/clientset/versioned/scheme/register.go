@@ -19,7 +19,7 @@ limitations under the License.
 package scheme
 
 import (
-	meshv1alpha1 "github.com/morvencao/multicluster-mesh-addon/apis/mesh/v1alpha1"
+	meshv1alpha1 "github.com/stolostron/multicluster-mesh-addon/apis/mesh/v1alpha1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	runtime "k8s.io/apimachinery/pkg/runtime"
 	schema "k8s.io/apimachinery/pkg/runtime/schema"

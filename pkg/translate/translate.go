@@ -11,9 +11,9 @@ import (
 	maistrav1 "maistra.io/api/core/v1"
 	maistrav2 "maistra.io/api/core/v2"
 
-	meshv1alpha1 "github.com/morvencao/multicluster-mesh-addon/apis/mesh/v1alpha1"
-	constants "github.com/morvencao/multicluster-mesh-addon/pkg/constants"
-	utils "github.com/morvencao/multicluster-mesh-addon/pkg/utils"
+	meshv1alpha1 "github.com/stolostron/multicluster-mesh-addon/apis/mesh/v1alpha1"
+	constants "github.com/stolostron/multicluster-mesh-addon/pkg/constants"
+	utils "github.com/stolostron/multicluster-mesh-addon/pkg/utils"
 )
 
 var profileComponentsMap map[string][]string
