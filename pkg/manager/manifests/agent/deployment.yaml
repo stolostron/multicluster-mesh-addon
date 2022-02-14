@@ -27,6 +27,7 @@ spec:
         command:
         - "/multicluster-mesh-addon"
         - "agent"
+        - "-v=2"
         - "--hub-kubeconfig=/var/run/hub/kubeconfig"
         - "--cluster-name={{ .ClusterName }}"
         - "--addon-namespace={{ .AddonInstallNamespace }}"

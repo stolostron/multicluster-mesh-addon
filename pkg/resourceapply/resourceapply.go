@@ -44,10 +44,7 @@ func ApplyMesh(ctx context.Context, client meshv1alpha1client.MeshesGetter, reco
 		return existingCopy, false, nil
 	}
 
-	if klog.V(4).Enabled() {
-		klog.Infof("Mesh %q changes: %v", required.Namespace+"/"+required.Name, openshiftresourceapply.JSONPatchNoError(existing, required))
-	}
-
+	klog.V(2).Infof("Mesh %q changes: %v", required.Namespace+"/"+required.Name, openshiftresourceapply.JSONPatchNoError(existing, required))
 	actual, err := client.Meshes(required.Namespace).Update(context.TODO(), existingCopy, metav1.UpdateOptions{})
 	reportUpdateEvent(recorder, required, err)
 	return actual, true, err
@@ -74,10 +71,7 @@ func ApplyServiceMeshControlPlane(ctx context.Context, client maistrav2client.Se
 		return existingCopy, false, nil
 	}
 
-	if klog.V(4).Enabled() {
-		klog.Infof("ServiceMeshControlPlane %q changes: %v", required.Namespace+"/"+required.Name, openshiftresourceapply.JSONPatchNoError(existing, required))
-	}
-
+	klog.V(2).Infof("ServiceMeshControlPlane %q changes: %v", required.Namespace+"/"+required.Name, openshiftresourceapply.JSONPatchNoError(existing, required))
 	actual, err := client.ServiceMeshControlPlanes(required.Namespace).Update(context.TODO(), existingCopy, metav1.UpdateOptions{})
 	reportUpdateEvent(recorder, required, err)
 	return actual, true, err
@@ -104,10 +98,7 @@ func ApplyServiceMeshMemberRoll(ctx context.Context, client maistrav1client.Serv
 		return existingCopy, false, nil
 	}
 
-	if klog.V(4).Enabled() {
-		klog.Infof("ServiceMeshMemberRoll %q changes: %v", required.Namespace+"/"+required.Name, openshiftresourceapply.JSONPatchNoError(existing, required))
-	}
-
+	klog.V(2).Infof("ServiceMeshMemberRoll %q changes: %v", required.Namespace+"/"+required.Name, openshiftresourceapply.JSONPatchNoError(existing, required))
 	actual, err := client.ServiceMeshMemberRolls(required.Namespace).Update(context.TODO(), existingCopy, metav1.UpdateOptions{})
 	reportUpdateEvent(recorder, required, err)
 	return actual, true, err

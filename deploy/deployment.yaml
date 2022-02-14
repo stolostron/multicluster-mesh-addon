@@ -28,3 +28,4 @@ spec:
         command:
         - "/multicluster-mesh-addon"
         - "controller"
+        - "-v=2"

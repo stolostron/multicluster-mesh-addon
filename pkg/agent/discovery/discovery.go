@@ -57,7 +57,7 @@ func NewDiscoveryController(
 
 func (c *discoveryController) sync(ctx context.Context, syncCtx factory.SyncContext) error {
 	key := syncCtx.QueueKey()
-	klog.V(4).Infof("Reconciling SMCP %q", key)
+	klog.V(2).Infof("Reconciling SMCP %q", key)
 
 	namespace, name, err := cache.SplitMetaNamespaceKey(key)
 	if err != nil {
