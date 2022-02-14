@@ -46,7 +46,7 @@ func NewMeshDeploymentController(
 
 func (c *meshDeploymentController) sync(ctx context.Context, syncCtx factory.SyncContext) error {
 	key := syncCtx.QueueKey()
-	klog.V(4).Infof("Reconciling meshdeployment %q", key)
+	klog.V(2).Infof("Reconciling meshdeployment %q", key)
 
 	namespace, name, err := cache.SplitMetaNamespaceKey(key)
 	if err != nil {
