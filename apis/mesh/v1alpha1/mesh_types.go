@@ -24,17 +24,17 @@ const (
 
 // MeshControlPlane defines the mesh control plane
 type MeshControlPlane struct {
-	Namespace          string              `json:"namespace,omitempty"`
-	Version            string              `json:"version,omitempty"`
-	Profiles           []string            `json:"profiles,omitempty"`
-	Components         []string            `json:"components,omitempty"`
-	FederationGateways []FederationGateway `json:"federationGateways,omitempty"`
+	Namespace  string   `json:"namespace,omitempty"`
+	Version    string   `json:"version,omitempty"`
+	Profiles   []string `json:"profiles,omitempty"`
+	Components []string `json:"components,omitempty"`
+	Peers      []Peer   `json:"peers,omitempty"`
 }
 
-// FederationGateway defines the ingressgateway and egressgateways used for mesh federation
-type FederationGateway struct {
-	MeshPeer string `json:"meshPeer,omitempty"`
-	// additional setting for federation gateway...
+// Peer defines mesh peer
+type Peer struct {
+	Name    string `json:"name,omitempty"`
+	Cluster string `json:"cluster,omitempty"`
 }
 
 // MeshStatus defines the observed state of Mesh
@@ -47,7 +47,7 @@ type MeshStatus struct {
 //+kubebuilder:subresource:status
 //+kubebuilder:printcolumn:name="CLUSTER",type="string",JSONPath=".spec.cluster",description="Cluster of the mesh"
 //+kubebuilder:printcolumn:name="VERSION",type="string",JSONPath=".spec.controlPlane.version",description="Version of the mesh"
-//+kubebuilder:printcolumn:name="PEERS",type="string",JSONPath=".spec.controlPlane.federationGateways[*].meshPeer"
+//+kubebuilder:printcolumn:name="PEERS",type="string",JSONPath=".spec.controlPlane.peers[*].name"
 //+kubebuilder:printcolumn:name="AGE",type="date",JSONPath=".metadata.creationTimestamp"
 
 // Mesh is the Schema for the meshes API

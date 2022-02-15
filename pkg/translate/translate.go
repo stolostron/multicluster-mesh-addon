@@ -237,7 +237,7 @@ func TranslateToPhysicalMesh(mesh *meshv1alpha1.Mesh) (*maistrav2.ServiceMeshCon
 		}
 	}
 
-	if !gatewayEnabled && len(mesh.Spec.ControlPlane.FederationGateways) > 0 {
+	if !gatewayEnabled && len(mesh.Spec.ControlPlane.Peers) > 0 {
 		smcp.Spec.Gateways = &maistrav2.GatewaysConfig{
 			Enablement: maistrav2.Enablement{
 				Enabled: &[]bool{true}[0],
@@ -247,11 +247,11 @@ func TranslateToPhysicalMesh(mesh *meshv1alpha1.Mesh) (*maistrav2.ServiceMeshCon
 		}
 	}
 
-	for _, federatedGw := range mesh.Spec.ControlPlane.FederationGateways {
-		meshPeer := federatedGw.MeshPeer
-		if meshPeer != "" {
-			smcp.Spec.Gateways.EgressGateways[meshPeer+"-egress"] = &maistrav2.EgressGatewayConfig{
-				RequestedNetworkView: []string{"network-" + meshPeer},
+	for _, peer := range mesh.Spec.ControlPlane.Peers {
+		peerName := peer.Name
+		if peerName != "" {
+			smcp.Spec.Gateways.EgressGateways[peerName+"-egress"] = &maistrav2.EgressGatewayConfig{
+				RequestedNetworkView: []string{"network-" + peerName},
 				GatewayConfig: maistrav2.GatewayConfig{
 					Enablement: maistrav2.Enablement{
 						Enabled: &[]bool{true}[0],
@@ -260,7 +260,7 @@ func TranslateToPhysicalMesh(mesh *meshv1alpha1.Mesh) (*maistrav2.ServiceMeshCon
 					Service: maistrav2.GatewayServiceConfig{
 						Metadata: &maistrav2.MetadataConfig{
 							Labels: map[string]string{
-								"federation.maistra.io/egress-for": meshPeer,
+								"federation.maistra.io/egress-for": peerName,
 							},
 						},
 						ServiceSpec: corev1.ServiceSpec{
@@ -301,7 +301,7 @@ func TranslateToPhysicalMesh(mesh *meshv1alpha1.Mesh) (*maistrav2.ServiceMeshCon
 				},
 			}
 
-			smcp.Spec.Gateways.IngressGateways[meshPeer+"-ingress"] = &maistrav2.IngressGatewayConfig{
+			smcp.Spec.Gateways.IngressGateways[peerName+"-ingress"] = &maistrav2.IngressGatewayConfig{
 				GatewayConfig: maistrav2.GatewayConfig{
 					Enablement: maistrav2.Enablement{
 						Enabled: &[]bool{true}[0],
@@ -310,7 +310,7 @@ func TranslateToPhysicalMesh(mesh *meshv1alpha1.Mesh) (*maistrav2.ServiceMeshCon
 					Service: maistrav2.GatewayServiceConfig{
 						Metadata: &maistrav2.MetadataConfig{
 							Labels: map[string]string{
-								"federation.maistra.io/ingress-for": meshPeer,
+								constants.FederationServiceLabelKey: peerName,
 							},
 							Annotations: map[string]string{
 								"service.beta.kubernetes.io/aws-load-balancer-type": "nlb",

@@ -59,17 +59,18 @@ spec:
                     items:
                       type: string
                     type: array
-                  federationGateways:
+                  namespace:
+                    type: string
+                  peers:
                     items:
-                      description: FederationGateway defines the ingressgateway and
-                        egressgateways used for mesh federation
+                      description: Peer defines mesh peer
                       properties:
-                        meshPeer:
+                        cluster:
+                          type: string
+                        name:
                           type: string
                       type: object
                     type: array
-                  namespace:
-                    type: string
                   profiles:
                     items:
                       type: string

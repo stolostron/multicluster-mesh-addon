@@ -12,7 +12,7 @@ type MeshFederationSpec struct {
 
 // MeshPeer defines mesh peers
 type MeshPeer struct {
-	Peers []string `json:"peers,omitempty"`
+	Peers []Peer `json:"peers,omitempty"`
 	// additional setting for peers...
 }
 

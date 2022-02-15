@@ -15,6 +15,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/serializer"
 	utilrand "k8s.io/apimachinery/pkg/util/rand"
+	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/klog/v2"
@@ -30,6 +31,7 @@ import (
 	meshinformer "github.com/stolostron/multicluster-mesh-addon/apis/client/informers/externalversions"
 	constants "github.com/stolostron/multicluster-mesh-addon/pkg/constants"
 	meshdeployment "github.com/stolostron/multicluster-mesh-addon/pkg/manager/deployment"
+	meshfederation "github.com/stolostron/multicluster-mesh-addon/pkg/manager/federation"
 )
 
 var (
@@ -84,6 +86,12 @@ func runController(ctx context.Context, controllerContext *controllercmd.Control
 		klog.Fatal(err)
 	}
 
+	// build kube client
+	kubeClient, err := kubernetes.NewForConfig(controllerContext.KubeConfig)
+
+	// build kube informer factory
+	kubeInformerFactory := informers.NewSharedInformerFactory(kubeClient, 10*time.Minute)
+
 	// build mesh kubeconfig
 	meshClient, err := meshclientset.NewForConfig(controllerContext.KubeConfig)
 	if err != nil {
@@ -100,13 +108,25 @@ func runController(ctx context.Context, controllerContext *controllercmd.Control
 		controllerContext.EventRecorder,
 	)
 
+	// create an meshFederation controller
+	meshFederationController := meshfederation.NewMeshFederationController(
+		kubeClient,
+		meshClient,
+		kubeInformerFactory.Core().V1().ConfigMaps(),
+		meshInformerFactory.Mesh().V1alpha1().MeshFederations(),
+		controllerContext.EventRecorder,
+	)
+
 	err = mgr.Start(ctx)
 	if err != nil {
 		klog.Fatal(err)
 	}
 
+	go kubeInformerFactory.Start(ctx.Done())
 	go meshInformerFactory.Start(ctx.Done())
 	go meshDeploymentController.Run(ctx, 1)
+	go meshFederationController.Run(ctx, 1)
+	go meshFederationController.Run(ctx, 1)
 	<-ctx.Done()
 
 	return nil

@@ -6,6 +6,7 @@ import (
 
 	"github.com/openshift/library-go/pkg/controller/controllercmd"
 	"github.com/spf13/cobra"
+	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
 	maistrainformer "maistra.io/api/client/informers/externalversions"
@@ -17,6 +18,7 @@ import (
 	meshinformer "github.com/stolostron/multicluster-mesh-addon/apis/client/informers/externalversions"
 	meshdeploy "github.com/stolostron/multicluster-mesh-addon/pkg/agent/deploy"
 	meshdiscovery "github.com/stolostron/multicluster-mesh-addon/pkg/agent/discovery"
+	meshfederation "github.com/stolostron/multicluster-mesh-addon/pkg/agent/federation"
 )
 
 func NewAgentCommand(addonName string) *cobra.Command {
@@ -65,6 +67,9 @@ func (o *AgentOptions) RunAgent(ctx context.Context, controllerContext *controll
 		return err
 	}
 
+	// build spoke kube informer factory
+	spokeKubeInformerFactory := informers.NewSharedInformerFactory(spokeKubeClient, 10*time.Minute)
+
 	// build spoke maistra informer factory
 	spokeMaistraInformerFactory := maistrainformer.NewSharedInformerFactory(spokeMaistraClient, 10*time.Minute)
 
@@ -73,6 +78,12 @@ func (o *AgentOptions) RunAgent(ctx context.Context, controllerContext *controll
 	if err != nil {
 		return err
 	}
+
+	// build kube client of hub cluster
+	hubKubeClient, err := kubernetes.NewForConfig(hubRestConfig)
+
+	// build hub kube informer factory
+	hubKubeInformerFactory := informers.NewSharedInformerFactoryWithOptions(hubKubeClient, 10*time.Minute, informers.WithNamespace(o.SpokeClusterName))
 
 	// build meshClient of hub cluster
 	hubMeshClient, err := meshclientset.NewForConfig(hubRestConfig)
@@ -103,6 +114,19 @@ func (o *AgentOptions) RunAgent(ctx context.Context, controllerContext *controll
 		controllerContext.EventRecorder,
 	)
 
+	// create an mesh-federation controller
+	federationController := meshfederation.NewFederationController(
+		o.SpokeClusterName,
+		o.AddonNamespace,
+		hubKubeClient,
+		spokeKubeClient,
+		spokeMaistraClient,
+		hubKubeInformerFactory.Core().V1().ConfigMaps(),
+		spokeKubeInformerFactory.Core().V1().Services(),
+		spokeKubeInformerFactory.Core().V1().ConfigMaps(),
+		controllerContext.EventRecorder,
+	)
+
 	// create a lease updater
 	leaseUpdater := lease.NewLeaseUpdater(
 		spokeKubeClient,
@@ -110,10 +134,13 @@ func (o *AgentOptions) RunAgent(ctx context.Context, controllerContext *controll
 		o.AddonNamespace,
 	)
 
+	go hubKubeInformerFactory.Start(ctx.Done())
+	go spokeKubeInformerFactory.Start(ctx.Done())
 	go spokeMaistraInformerFactory.Start(ctx.Done())
 	go hubMeshInformerFactory.Start(ctx.Done())
 	go discoveryController.Run(ctx, 1)
 	go deployController.Run(ctx, 1)
+	go federationController.Run(ctx, 1)
 	go leaseUpdater.Start(ctx)
 
 	<-ctx.Done()
