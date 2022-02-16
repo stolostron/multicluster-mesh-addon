@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/openshift/library-go/pkg/controller/controllercmd"
+	olmclientset "github.com/operator-framework/operator-lifecycle-manager/pkg/api/client/clientset/versioned"
 	"github.com/spf13/cobra"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
@@ -61,6 +62,13 @@ func (o *AgentOptions) RunAgent(ctx context.Context, controllerContext *controll
 	if err != nil {
 		return err
 	}
+
+	// build olm client of managed cluster
+	spokeOLMClient, err := olmclientset.NewForConfig(controllerContext.KubeConfig)
+	if err != nil {
+		return err
+	}
+
 	// build maistraClient of managed cluster
 	spokeMaistraClient, err := maistraclientset.NewForConfig(controllerContext.KubeConfig)
 	if err != nil {
@@ -110,6 +118,7 @@ func (o *AgentOptions) RunAgent(ctx context.Context, controllerContext *controll
 		o.AddonNamespace,
 		hubMeshInformerFactory.Mesh().V1alpha1().Meshes(),
 		spokeKubeClient,
+		spokeOLMClient,
 		spokeMaistraClient,
 		controllerContext.EventRecorder,
 	)
