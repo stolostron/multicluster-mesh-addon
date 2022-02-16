@@ -78,7 +78,6 @@ status:
 - Ensure [docker](https://docs.docker.com/get-started) 17.03+ is installed.
 - Ensure [golang](https://golang.org/doc/install) 1.15+ is installed.
 - Prepare an environment of [Red Hat Advanced Cluster Management for Kubernetes](https://access.redhat.com/documentation/en-us/red_hat_advanced_cluster_management_for_kubernetes/) and login to the hub cluster with `oc` command line tool.
-- ~~Follow the [instructions](https://docs.openshift.com/container-platform/4.6/service_mesh/v2x/installing-ossm.html) to nstall Openshift Service Mesh Operator in each managed cluster.~~
 
 ### Build and Deploy
 
