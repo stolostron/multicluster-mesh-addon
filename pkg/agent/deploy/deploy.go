@@ -128,7 +128,7 @@ func (c *deployController) sync(ctx context.Context, syncCtx factory.SyncContext
 		Spec: olmv1.OperatorGroupSpec{},
 	}
 
-	ogList, _ := c.spokeOLMClient.OperatorsV1().OperatorGroups(elasticsearchOperatorNamespace).List(context.TODO(), metav1.ListOptions{})
+	ogList, _ := c.spokeOLMClient.OperatorsV1().OperatorGroups(elasticsearchOperatorNamespace).List(ctx, metav1.ListOptions{})
 	if ogList != nil && len(ogList.Items) == 0 {
 		_, _, err = meshresourceapply.ApplyOperatorGroup(ctx, c.spokeOLMClient.OperatorsV1(), c.recorder, elasticsearchOG)
 		if err != nil {
@@ -209,7 +209,7 @@ func (c *deployController) sync(ctx context.Context, syncCtx factory.SyncContext
 	}
 
 	err = wait.Poll(5*time.Second, 60*time.Second, func() (done bool, err error) {
-		csvList, err := c.spokeOLMClient.OperatorsV1alpha1().ClusterServiceVersions("openshift-operators").List(context.TODO(), metav1.ListOptions{LabelSelector: "operators.coreos.com/servicemeshoperator.openshift-operators="})
+		csvList, err := c.spokeOLMClient.OperatorsV1alpha1().ClusterServiceVersions("openshift-operators").List(ctx, metav1.ListOptions{LabelSelector: "operators.coreos.com/servicemeshoperator.openshift-operators="})
 		if err != nil {
 			return false, err
 		}

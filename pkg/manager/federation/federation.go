@@ -151,11 +151,11 @@ func (c *meshFederationController) sync(ctx context.Context, syncCtx factory.Syn
 			}
 
 			mesh1, mesh2 := &meshv1alpha1.Mesh{}, &meshv1alpha1.Mesh{}
-			mesh1, err := c.meshClient.MeshV1alpha1().Meshes(peers[0].Cluster).Get(context.TODO(), peers[0].Name, metav1.GetOptions{})
+			mesh1, err := c.meshClient.MeshV1alpha1().Meshes(peers[0].Cluster).Get(ctx, peers[0].Name, metav1.GetOptions{})
 			if err != nil {
 				return err
 			}
-			mesh2, err = c.meshClient.MeshV1alpha1().Meshes(peers[1].Cluster).Get(context.TODO(), peers[1].Name, metav1.GetOptions{})
+			mesh2, err = c.meshClient.MeshV1alpha1().Meshes(peers[1].Cluster).Get(ctx, peers[1].Name, metav1.GetOptions{})
 			if err != nil {
 				return err
 			}
@@ -204,7 +204,7 @@ func (c *meshFederationController) sync(ctx context.Context, syncCtx factory.Syn
 		peerMeshName := strSplit[1]
 
 		meshList := &meshv1alpha1.MeshList{}
-		meshList, err := c.meshClient.MeshV1alpha1().Meshes("").List(context.TODO(), metav1.ListOptions{})
+		meshList, err := c.meshClient.MeshV1alpha1().Meshes("").List(ctx, metav1.ListOptions{})
 		if err != nil {
 			return err
 		}
@@ -282,11 +282,11 @@ func (c *meshFederationController) removeMeshFederationResources(ctx context.Con
 		}
 
 		mesh1, mesh2 := &meshv1alpha1.Mesh{}, &meshv1alpha1.Mesh{}
-		mesh1, err := c.meshClient.MeshV1alpha1().Meshes(peers[0].Cluster).Get(context.TODO(), peers[0].Name, metav1.GetOptions{})
+		mesh1, err := c.meshClient.MeshV1alpha1().Meshes(peers[0].Cluster).Get(ctx, peers[0].Name, metav1.GetOptions{})
 		if err != nil {
 			return err
 		}
-		mesh2, err = c.meshClient.MeshV1alpha1().Meshes(peers[1].Cluster).Get(context.TODO(), peers[1].Name, metav1.GetOptions{})
+		mesh2, err = c.meshClient.MeshV1alpha1().Meshes(peers[1].Cluster).Get(ctx, peers[1].Name, metav1.GetOptions{})
 		if err != nil {
 			return err
 		}
@@ -300,7 +300,7 @@ func (c *meshFederationController) removeMeshFederationResources(ctx context.Con
 		}
 		if len(copiedPeers) != len(mesh1.Spec.ControlPlane.Peers) {
 			mesh1.Spec.ControlPlane.Peers = copiedPeers
-			_, err := c.meshClient.MeshV1alpha1().Meshes(mesh1.GetNamespace()).Update(context.TODO(), mesh1, metav1.UpdateOptions{})
+			_, err := c.meshClient.MeshV1alpha1().Meshes(mesh1.GetNamespace()).Update(ctx, mesh1, metav1.UpdateOptions{})
 			if err != nil {
 				return err
 			}
@@ -315,7 +315,7 @@ func (c *meshFederationController) removeMeshFederationResources(ctx context.Con
 		}
 		if len(copiedPeers) != len(mesh2.Spec.ControlPlane.Peers) {
 			mesh2.Spec.ControlPlane.Peers = copiedPeers
-			_, err := c.meshClient.MeshV1alpha1().Meshes(mesh2.GetNamespace()).Update(context.TODO(), mesh2, metav1.UpdateOptions{})
+			_, err := c.meshClient.MeshV1alpha1().Meshes(mesh2.GetNamespace()).Update(ctx, mesh2, metav1.UpdateOptions{})
 			if err != nil {
 				return err
 			}

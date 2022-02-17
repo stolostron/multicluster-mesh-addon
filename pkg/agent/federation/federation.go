@@ -260,7 +260,7 @@ func (c *federationController) sync(ctx context.Context, syncCtx factory.SyncCon
 			return err
 		}
 
-		smcpList, err := c.spokeMaistraClient.CoreV2().ServiceMeshControlPlanes(ingSvc.GetNamespace()).List(context.TODO(), metav1.ListOptions{})
+		smcpList, err := c.spokeMaistraClient.CoreV2().ServiceMeshControlPlanes(ingSvc.GetNamespace()).List(ctx, metav1.ListOptions{})
 		if err != nil {
 			return err
 		}
