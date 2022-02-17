@@ -108,7 +108,7 @@ func (c *meshDeploymentController) sync(ctx context.Context, syncCtx factory.Syn
 			},
 		}
 
-		_, err := c.meshClient.MeshV1alpha1().Meshes(cluster).Get(context.TODO(), meshName, metav1.GetOptions{})
+		_, err := c.meshClient.MeshV1alpha1().Meshes(cluster).Get(ctx, meshName, metav1.GetOptions{})
 		if errors.IsNotFound(err) {
 			_, _, err = meshresourceapply.ApplyMesh(ctx, c.meshClient.MeshV1alpha1(), c.recorder, mesh)
 			if err != nil {
@@ -125,7 +125,7 @@ func (c *meshDeploymentController) sync(ctx context.Context, syncCtx factory.Syn
 func (c *meshDeploymentController) removeMeshDeploymentResources(ctx context.Context, meshDeployment *meshv1alpha1.MeshDeployment) error {
 	for _, cluster := range meshDeployment.Spec.Clusters {
 		meshName := fmt.Sprintf("%s-%s", cluster, meshDeployment.GetName())
-		if err := c.meshClient.MeshV1alpha1().Meshes(cluster).Delete(context.TODO(), meshName, metav1.DeleteOptions{}); err != nil && !errors.IsNotFound(err) {
+		if err := c.meshClient.MeshV1alpha1().Meshes(cluster).Delete(ctx, meshName, metav1.DeleteOptions{}); err != nil && !errors.IsNotFound(err) {
 			return err
 		}
 	}

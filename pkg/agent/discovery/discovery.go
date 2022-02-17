@@ -92,7 +92,7 @@ func (c *discoveryController) sync(ctx context.Context, syncCtx factory.SyncCont
 		return err
 	}
 
-	userCreatedMeshList, err := c.hubMeshClient.MeshV1alpha1().Meshes(c.clusterName).List(context.TODO(), metav1.ListOptions{LabelSelector: constants.LabelKeyForDiscoveriedMesh + "!=true"})
+	userCreatedMeshList, err := c.hubMeshClient.MeshV1alpha1().Meshes(c.clusterName).List(ctx, metav1.ListOptions{LabelSelector: constants.LabelKeyForDiscoveriedMesh + "!=true"})
 	isUserCreatedMesh := false
 	for _, userCreatedMesh := range userCreatedMeshList.Items {
 		// skip user created mesh for discovery
