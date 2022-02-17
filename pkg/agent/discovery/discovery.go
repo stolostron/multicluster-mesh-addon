@@ -73,6 +73,11 @@ func (c *discoveryController) sync(ctx context.Context, syncCtx factory.SyncCont
 		return err
 	}
 
+	// skip the terminating smcp
+	if !smcp.DeletionTimestamp.IsZero() {
+		return nil
+	}
+
 	// smmr named "default" in the namespace
 	smmr, err := c.spokeSMMRLister.ServiceMeshMemberRolls(namespace).Get("default")
 	switch {

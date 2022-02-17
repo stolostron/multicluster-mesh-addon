@@ -20,15 +20,21 @@ import (
 	"k8s.io/klog/v2"
 	maistraclientset "maistra.io/api/client/versioned"
 
+	meshclientset "github.com/stolostron/multicluster-mesh-addon/apis/client/clientset/versioned"
 	meshv1alpha1informer "github.com/stolostron/multicluster-mesh-addon/apis/client/informers/externalversions/mesh/v1alpha1"
 	meshv1alpha1lister "github.com/stolostron/multicluster-mesh-addon/apis/client/listers/mesh/v1alpha1"
+	meshv1alpha1 "github.com/stolostron/multicluster-mesh-addon/apis/mesh/v1alpha1"
+	constants "github.com/stolostron/multicluster-mesh-addon/pkg/constants"
 	meshresourceapply "github.com/stolostron/multicluster-mesh-addon/pkg/resourceapply"
 	meshtranslate "github.com/stolostron/multicluster-mesh-addon/pkg/translate"
 )
 
+const meshFinalizer = "mesh.open-cluster-management.io/mesh-resources-cleanup"
+
 type deployController struct {
 	clusterName        string
 	addonNamespace     string
+	hubMeshClient      meshclientset.Interface
 	hubMeshLister      meshv1alpha1lister.MeshLister
 	spokeKubeClient    kubernetes.Interface
 	spokeOLMClient     olmclientset.Interface
@@ -39,6 +45,7 @@ type deployController struct {
 func NewDeployController(
 	clusterName string,
 	addonNamespace string,
+	hubMeshClient meshclientset.Interface,
 	meshInformer meshv1alpha1informer.MeshInformer,
 	spokeKubeClient kubernetes.Interface,
 	spokeOLMClient olmclientset.Interface,
@@ -48,6 +55,7 @@ func NewDeployController(
 	c := &deployController{
 		clusterName:        clusterName,
 		addonNamespace:     addonNamespace,
+		hubMeshClient:      hubMeshClient,
 		hubMeshLister:      meshInformer.Lister(),
 		spokeKubeClient:    spokeKubeClient,
 		spokeOLMClient:     spokeOLMClient,
@@ -79,6 +87,30 @@ func (c *deployController) sync(ctx context.Context, syncCtx factory.SyncContext
 		return nil
 	case err != nil:
 		return err
+	}
+
+	mesh = mesh.DeepCopy()
+	if mesh.DeletionTimestamp.IsZero() {
+		hasFinalizer := false
+		for i := range mesh.Finalizers {
+			if mesh.Finalizers[i] == meshFinalizer {
+				hasFinalizer = true
+				break
+			}
+		}
+		if !hasFinalizer {
+			mesh.Finalizers = append(mesh.Finalizers, meshFinalizer)
+			_, err := c.hubMeshClient.MeshV1alpha1().Meshes(namespace).Update(ctx, mesh, metav1.UpdateOptions{})
+			return err
+		}
+	}
+
+	// remove mesh related resources after mesh is deleted
+	if !mesh.DeletionTimestamp.IsZero() {
+		if err := c.removeMeshResources(ctx, mesh); err != nil {
+			return err
+		}
+		return c.removeMeshFinalizer(ctx, mesh)
 	}
 
 	elasticsearchOperatorNamespace := "openshift-operators-redhat" // elasticsearch-operator is recommended to be installed in openshift-operators-redhat namespace
@@ -212,4 +244,48 @@ func (c *deployController) sync(ctx context.Context, syncCtx factory.SyncContext
 
 	_, _, err = meshresourceapply.ApplyServiceMeshMemberRoll(ctx, c.spokeMaistraClient.CoreV1(), c.recorder, smmr)
 	return err
+}
+
+func (c *deployController) removeMeshResources(ctx context.Context, mesh *meshv1alpha1.Mesh) error {
+	labels := mesh.GetLabels()
+	discoveriedMesh, ok := labels[constants.LabelKeyForDiscoveriedMesh]
+	if ok && discoveriedMesh == "true" {
+		// for discoveried mesh, won't remove the related resources
+		return nil
+	}
+
+	smcp, smmr, err := meshtranslate.TranslateToPhysicalMesh(mesh)
+	if err != nil {
+		return err
+	}
+
+	err = c.spokeMaistraClient.CoreV2().ServiceMeshControlPlanes(smcp.GetNamespace()).Delete(ctx, smcp.GetName(), metav1.DeleteOptions{})
+	if err != nil && !errors.IsNotFound(err) {
+		return err
+	}
+
+	err = c.spokeMaistraClient.CoreV1().ServiceMeshMemberRolls(smmr.GetNamespace()).Delete(ctx, smmr.GetName(), metav1.DeleteOptions{})
+	if err != nil && !errors.IsNotFound(err) {
+		return err
+	}
+
+	return nil
+}
+
+func (c *deployController) removeMeshFinalizer(ctx context.Context, mesh *meshv1alpha1.Mesh) error {
+	copiedFinalizers := []string{}
+	for _, finalizer := range mesh.Finalizers {
+		if finalizer == meshFinalizer {
+			continue
+		}
+		copiedFinalizers = append(copiedFinalizers, finalizer)
+	}
+
+	if len(mesh.Finalizers) != len(copiedFinalizers) {
+		mesh.Finalizers = copiedFinalizers
+		_, err := c.hubMeshClient.MeshV1alpha1().Meshes(mesh.GetNamespace()).Update(ctx, mesh, metav1.UpdateOptions{})
+		return err
+	}
+
+	return nil
 }
