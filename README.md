@@ -60,8 +60,10 @@ metadata:
 spec:
   meshPeers:
   - peers:
-    - managedcluster1-mesh
-    - managedcluster1-mesh
+    - name: managedcluster1-mesh
+      cluster: managedcluster1
+    - name: managedcluster2-mesh
+      cluster: managedcluster2
   trustConfig:
     trustType: Limited
 status:
@@ -146,8 +148,10 @@ metadata:
 spec:
   meshPeers:
   - peers:
-    - managedcluster1-mesh
-    - managedcluster2-mesh
+    - name: managedcluster1-mesh
+      cluster: managedcluster1
+    - name: managedcluster2-mesh
+      cluster: managedcluster2
   trustConfig:
     trustType: Limited
 EOF
