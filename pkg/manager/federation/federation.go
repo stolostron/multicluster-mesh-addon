@@ -27,6 +27,8 @@ import (
 	meshresourceapply "github.com/stolostron/multicluster-mesh-addon/pkg/resourceapply"
 )
 
+const meshFederationFinalizer = "mesh.open-cluster-management.io/meshfederation-resources-cleanup"
+
 type meshFederationController struct {
 	kubeClient           kubernetes.Interface
 	meshClient           meshclientset.Interface
@@ -97,6 +99,30 @@ func (c *meshFederationController) sync(ctx context.Context, syncCtx factory.Syn
 			return nil
 		case err != nil:
 			return err
+		}
+
+		meshFederation = meshFederation.DeepCopy()
+		if meshFederation.DeletionTimestamp.IsZero() {
+			hasFinalizer := false
+			for i := range meshFederation.Finalizers {
+				if meshFederation.Finalizers[i] == meshFederationFinalizer {
+					hasFinalizer = true
+					break
+				}
+			}
+			if !hasFinalizer {
+				meshFederation.Finalizers = append(meshFederation.Finalizers, meshFederationFinalizer)
+				_, err := c.meshClient.MeshV1alpha1().MeshFederations(namespace).Update(ctx, meshFederation, metav1.UpdateOptions{})
+				return err
+			}
+		}
+
+		// remove meshfederation related resources after meshfederation is deleted
+		if !meshFederation.DeletionTimestamp.IsZero() {
+			if err := c.removeMeshFederationResources(ctx, meshFederation); err != nil {
+				return err
+			}
+			return c.removeMeshFederationFinalizer(ctx, meshFederation)
 		}
 
 		trustType := meshv1alpha1.TrustTypeComplete
@@ -233,4 +259,76 @@ func (c *meshFederationController) sync(ctx context.Context, syncCtx factory.Syn
 		_, _, err = resourceapply.ApplyConfigMap(ctx, c.kubeClient.CoreV1(), c.recorder, federationConfigMap)
 		return err
 	}
+}
+
+func (c *meshFederationController) removeMeshFederationResources(ctx context.Context, meshFederation *meshv1alpha1.MeshFederation) error {
+	// remove east-west gateways for mesh peers
+	meshPeers := meshFederation.Spec.MeshPeers
+	for _, meshPeer := range meshPeers {
+		peers := meshPeer.Peers
+		//TODO(morvencao): add validation webhook to validate the meshFederation resource
+		if peers == nil || len(peers) != 2 || peers[0].Name+peers[0].Cluster == peers[1].Name+peers[1].Cluster {
+			return fmt.Errorf("two different meshes must specified in peers")
+		}
+
+		mesh1, mesh2 := &meshv1alpha1.Mesh{}, &meshv1alpha1.Mesh{}
+		mesh1, err := c.meshClient.MeshV1alpha1().Meshes(peers[0].Cluster).Get(context.TODO(), peers[0].Name, metav1.GetOptions{})
+		if err != nil {
+			return err
+		}
+		mesh2, err = c.meshClient.MeshV1alpha1().Meshes(peers[1].Cluster).Get(context.TODO(), peers[1].Name, metav1.GetOptions{})
+		if err != nil {
+			return err
+		}
+
+		copiedPeers := []meshv1alpha1.Peer{}
+		for _, peer := range mesh1.Spec.ControlPlane.Peers {
+			if peer.Name == mesh2.GetName() && peer.Cluster == mesh2.GetNamespace() {
+				continue
+			}
+			copiedPeers = append(copiedPeers, peer)
+		}
+		if len(copiedPeers) != len(mesh1.Spec.ControlPlane.Peers) {
+			mesh1.Spec.ControlPlane.Peers = copiedPeers
+			_, err := c.meshClient.MeshV1alpha1().Meshes(mesh1.GetNamespace()).Update(context.TODO(), mesh1, metav1.UpdateOptions{})
+			if err != nil {
+				return err
+			}
+		}
+
+		copiedPeers = []meshv1alpha1.Peer{}
+		for _, peer := range mesh2.Spec.ControlPlane.Peers {
+			if peer.Name == mesh1.GetName() && peer.Cluster == mesh1.GetNamespace() {
+				continue
+			}
+			copiedPeers = append(copiedPeers, peer)
+		}
+		if len(copiedPeers) != len(mesh2.Spec.ControlPlane.Peers) {
+			mesh2.Spec.ControlPlane.Peers = copiedPeers
+			_, err := c.meshClient.MeshV1alpha1().Meshes(mesh2.GetNamespace()).Update(context.TODO(), mesh2, metav1.UpdateOptions{})
+			if err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
+}
+
+func (c *meshFederationController) removeMeshFederationFinalizer(ctx context.Context, meshFederation *meshv1alpha1.MeshFederation) error {
+	copiedFinalizers := []string{}
+	for _, finalizer := range meshFederation.Finalizers {
+		if finalizer == meshFederationFinalizer {
+			continue
+		}
+		copiedFinalizers = append(copiedFinalizers, finalizer)
+	}
+
+	if len(meshFederation.Finalizers) != len(copiedFinalizers) {
+		meshFederation.Finalizers = copiedFinalizers
+		_, err := c.meshClient.MeshV1alpha1().MeshFederations(meshFederation.GetNamespace()).Update(ctx, meshFederation, metav1.UpdateOptions{})
+		return err
+	}
+
+	return nil
 }

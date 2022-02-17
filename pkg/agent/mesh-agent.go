@@ -116,6 +116,7 @@ func (o *AgentOptions) RunAgent(ctx context.Context, controllerContext *controll
 	deployController := meshdeploy.NewDeployController(
 		o.SpokeClusterName,
 		o.AddonNamespace,
+		hubMeshClient,
 		hubMeshInformerFactory.Mesh().V1alpha1().Meshes(),
 		spokeKubeClient,
 		spokeOLMClient,

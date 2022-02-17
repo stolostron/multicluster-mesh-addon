@@ -19,6 +19,8 @@ import (
 	meshresourceapply "github.com/stolostron/multicluster-mesh-addon/pkg/resourceapply"
 )
 
+const meshDeploymentFinalizer = "mesh.open-cluster-management.io/meshdeployment-resources-cleanup"
+
 type meshDeploymentController struct {
 	meshClient           meshclientset.Interface
 	meshDeploymentLister meshv1alpha1lister.MeshDeploymentLister
@@ -62,6 +64,30 @@ func (c *meshDeploymentController) sync(ctx context.Context, syncCtx factory.Syn
 		return err
 	}
 
+	meshDeployment = meshDeployment.DeepCopy()
+	if meshDeployment.DeletionTimestamp.IsZero() {
+		hasFinalizer := false
+		for i := range meshDeployment.Finalizers {
+			if meshDeployment.Finalizers[i] == meshDeploymentFinalizer {
+				hasFinalizer = true
+				break
+			}
+		}
+		if !hasFinalizer {
+			meshDeployment.Finalizers = append(meshDeployment.Finalizers, meshDeploymentFinalizer)
+			_, err := c.meshClient.MeshV1alpha1().MeshDeployments(namespace).Update(ctx, meshDeployment, metav1.UpdateOptions{})
+			return err
+		}
+	}
+
+	// remove meshdeployment related resources after meshdeployment is deleted
+	if !meshDeployment.DeletionTimestamp.IsZero() {
+		if err := c.removeMeshDeploymentResources(ctx, meshDeployment); err != nil {
+			return err
+		}
+		return c.removeMeshDeploymentFinalizer(ctx, meshDeployment)
+	}
+
 	for _, cluster := range meshDeployment.Spec.Clusters {
 		trustDomain := "cluster.local" // default trust domain
 		if meshDeployment.Spec.TrustDomain != "" {
@@ -91,6 +117,35 @@ func (c *meshDeploymentController) sync(ctx context.Context, syncCtx factory.Syn
 		} else {
 			return err
 		}
+	}
+
+	return nil
+}
+
+func (c *meshDeploymentController) removeMeshDeploymentResources(ctx context.Context, meshDeployment *meshv1alpha1.MeshDeployment) error {
+	for _, cluster := range meshDeployment.Spec.Clusters {
+		meshName := fmt.Sprintf("%s-%s", cluster, meshDeployment.GetName())
+		if err := c.meshClient.MeshV1alpha1().Meshes(cluster).Delete(context.TODO(), meshName, metav1.DeleteOptions{}); err != nil && !errors.IsNotFound(err) {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (c *meshDeploymentController) removeMeshDeploymentFinalizer(ctx context.Context, meshDeployment *meshv1alpha1.MeshDeployment) error {
+	copiedFinalizers := []string{}
+	for _, finalizer := range meshDeployment.Finalizers {
+		if finalizer == meshDeploymentFinalizer {
+			continue
+		}
+		copiedFinalizers = append(copiedFinalizers, finalizer)
+	}
+
+	if len(meshDeployment.Finalizers) != len(copiedFinalizers) {
+		meshDeployment.Finalizers = copiedFinalizers
+		_, err := c.meshClient.MeshV1alpha1().MeshDeployments(meshDeployment.GetNamespace()).Update(ctx, meshDeployment, metav1.UpdateOptions{})
+		return err
 	}
 
 	return nil
