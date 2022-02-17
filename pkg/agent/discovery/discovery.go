@@ -73,8 +73,13 @@ func (c *discoveryController) sync(ctx context.Context, syncCtx factory.SyncCont
 		return err
 	}
 
-	// skip the terminating smcp
+	// handling the smcp deleting
 	if !smcp.DeletionTimestamp.IsZero() {
+		discoveriedMeshName := c.clusterName + "-" + smcp.GetNamespace() + "-" + smcp.GetName()
+		err := c.hubMeshClient.MeshV1alpha1().Meshes(c.clusterName).Delete(ctx, discoveriedMeshName, metav1.DeleteOptions{})
+		if err != nil && !errors.IsNotFound(err) {
+			return err
+		}
 		return nil
 	}
 
