@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/openshift/library-go/pkg/controller/factory"
 	"github.com/openshift/library-go/pkg/operator/events"
@@ -13,6 +14,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/util/wait"
 	corev1informer "k8s.io/client-go/informers/core/v1"
 	"k8s.io/client-go/kubernetes"
 	corev1lister "k8s.io/client-go/listers/core/v1"
@@ -218,54 +220,81 @@ func (c *federationController) sync(ctx context.Context, syncCtx factory.SyncCon
 
 		_, _, err = resourceapply.ApplyConfigMap(ctx, c.hubKubeClient.CoreV1(), c.recorder, newMeshCAConfigmap)
 		return err
-	}
+	} else { // ingressgateway service from mesh control plane namespace
+		ingSvc, err := c.spokeServiceLister.Services(namespace).Get(name)
+		switch {
+		case errors.IsNotFound(err):
+			return nil
+		case err != nil:
+			return err
+		}
 
-	// ingressgateway service from mesh control plane namespace
-	ingSvc, err := c.spokeServiceLister.Services(namespace).Get(name)
-	switch {
-	case errors.IsNotFound(err):
-		return nil
-	case err != nil:
-		return err
-	}
+		svcLabels := ingSvc.GetLabels()
+		peerMeshName := svcLabels[constants.FederationServiceLabelKey]
 
-	if len(ingSvc.Status.LoadBalancer.Ingress) <= 0 {
-		return fmt.Errorf("no public ingress address found in service %s", ingSvc.GetName())
-	}
+		// remove ingress svc related resources after mesh is deleted
+		if !ingSvc.DeletionTimestamp.IsZero() {
+			return c.removeMeshFederationResources(ctx, namespace, peerMeshName)
+		}
 
-	endpointAddr := ""
-	if ingSvc.Status.LoadBalancer.Ingress[0].IP != "" {
-		endpointAddr = ingSvc.Status.LoadBalancer.Ingress[0].IP
-	} else if ingSvc.Status.LoadBalancer.Ingress[0].Hostname != "" {
-		endpointAddr = ingSvc.Status.LoadBalancer.Ingress[0].Hostname
-	} else {
-		return fmt.Errorf("no public IP or hostname found in service %s", ingSvc.GetName())
-	}
+		endpointAddr := ""
+		err = wait.Poll(5*time.Second, 60*time.Second, func() (done bool, err error) {
+			ingSvc, err = c.spokeServiceLister.Services(namespace).Get(name)
+			if err != nil {
+				return false, err
+			}
+			if len(ingSvc.Status.LoadBalancer.Ingress) <= 0 {
+				return false, nil
+			}
+			if ingSvc.Status.LoadBalancer.Ingress[0].IP != "" {
+				endpointAddr = ingSvc.Status.LoadBalancer.Ingress[0].IP
+				return true, nil
+			} else if ingSvc.Status.LoadBalancer.Ingress[0].Hostname != "" {
+				endpointAddr = ingSvc.Status.LoadBalancer.Ingress[0].Hostname
+				return true, nil
+			} else {
+				return false, nil
+			}
+		})
+		if err != nil {
+			return err
+		}
 
-	smcpList, err := c.spokeMaistraClient.CoreV2().ServiceMeshControlPlanes(ingSvc.GetNamespace()).List(context.TODO(), metav1.ListOptions{})
-	if err != nil {
-		return err
-	}
-	if len(smcpList.Items) != 1 {
-		return nil
-	}
-	smcp := smcpList.Items[0]
+		smcpList, err := c.spokeMaistraClient.CoreV2().ServiceMeshControlPlanes(ingSvc.GetNamespace()).List(context.TODO(), metav1.ListOptions{})
+		if err != nil {
+			return err
+		}
+		if len(smcpList.Items) != 1 {
+			return nil
+		}
+		smcp := smcpList.Items[0]
 
-	svcLabels := ingSvc.GetLabels()
-	peerMeshName := svcLabels[constants.FederationServiceLabelKey]
-	ingressEndpointConfigmap := &corev1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      smcp.GetName() + "-from-" + peerMeshName,
-			Namespace: c.clusterName,
-			Labels: map[string]string{
-				constants.FederationResourcesLabelKey: "true",
+		ingressEndpointConfigmap := &corev1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      smcp.GetName() + "-ep4-" + peerMeshName, // smcp ingress endpoint for peer mesh
+				Namespace: c.clusterName,
+				Labels: map[string]string{
+					constants.FederationResourcesLabelKey: "true",
+				},
 			},
-		},
-		Data: map[string]string{
-			constants.FederationConfigMapMeshPeerEndpointLabelKey: endpointAddr,
-		},
-	}
+			Data: map[string]string{
+				constants.FederationConfigMapMeshPeerEndpointLabelKey: endpointAddr,
+			},
+		}
 
-	_, _, err = resourceapply.ApplyConfigMap(ctx, c.hubKubeClient.CoreV1(), c.recorder, ingressEndpointConfigmap)
-	return err
+		_, _, err = resourceapply.ApplyConfigMap(ctx, c.hubKubeClient.CoreV1(), c.recorder, ingressEndpointConfigmap)
+		return err
+	}
+}
+
+func (c *federationController) removeMeshFederationResources(ctx context.Context, namespace, peerMeshName string) error {
+	err := c.spokeMaistraClient.FederationV1().ServiceMeshPeers(namespace).Delete(ctx, peerMeshName, metav1.DeleteOptions{})
+	if err != nil && !errors.IsNotFound(err) {
+		return err
+	}
+	err = c.spokeKubeClient.CoreV1().ConfigMaps(namespace).Delete(ctx, peerMeshName+"-ca-root-cert", metav1.DeleteOptions{})
+	if err != nil && !errors.IsNotFound(err) {
+		return err
+	}
+	return nil
 }

@@ -68,7 +68,7 @@ func NewMeshFederationController(
 			// only enqueue a configmap with label "mesh.open-cluster.io/federation=true"
 			labels := accessor.GetLabels()
 			lv, ok := labels[constants.FederationResourcesLabelKey]
-			return ok && (lv == "true") && strings.Contains(accessor.GetName(), "-from-")
+			return ok && (lv == "true") && strings.Contains(accessor.GetName(), "-ep4-")
 		}, configMapInformer.Informer()).
 		WithSync(c.sync).ToController("multicluster-meshfederation-controller", recorder)
 }
@@ -195,11 +195,12 @@ func (c *meshFederationController) sync(ctx context.Context, syncCtx factory.Syn
 
 		return nil
 	} else {
-		strSplit := strings.Split(name, "-from-")
+		//  retrieve smcp name and peer mesh name from the reconciling configmap name
+		strSplit := strings.Split(name, "-ep4-")
 		if len(strSplit) != 2 {
 			return fmt.Errorf("invalid federation resource name: %s", name)
 		}
-		currentMeshName := strSplit[0]
+		currentSMCPName := strSplit[0]
 		peerMeshName := strSplit[1]
 
 		meshList := &meshv1alpha1.MeshList{}
@@ -207,14 +208,22 @@ func (c *meshFederationController) sync(ctx context.Context, syncCtx factory.Syn
 		if err != nil {
 			return err
 		}
-		currentMeshCluster, currentMeshNamespace, currentMeshTrustDomain, peerMeshCluster, peerMeshNamespace := "", "", "", "", ""
+
+		currentMeshName, currentMeshCluster, currentMeshNamespace, currentMeshTrustDomain, peerMeshCluster, peerMeshNamespace := "", "", "", "", "", ""
 		for _, mesh := range meshList.Items {
-			if mesh.GetName() == currentMeshName { // TODO(morvencao): fix mesh name and smcp name inconsistent
+			meshName := ""
+			discoveriedMesh, ok := mesh.GetLabels()[constants.LabelKeyForDiscoveriedMesh]
+			if ok && discoveriedMesh == "true" {
+				meshName = mesh.Spec.Cluster + "-" + mesh.Spec.ControlPlane.Namespace + "-" + currentSMCPName
+			} else {
+				meshName = currentSMCPName
+			}
+			if mesh.GetName() == meshName {
+				currentMeshName = meshName
 				currentMeshCluster = mesh.Spec.Cluster
 				currentMeshNamespace = mesh.Spec.ControlPlane.Namespace
 				currentMeshTrustDomain = mesh.Spec.TrustDomain
-			}
-			if mesh.GetName() == peerMeshName {
+			} else if mesh.GetName() == peerMeshName {
 				peerMeshCluster = mesh.Spec.Cluster
 				peerMeshNamespace = mesh.Spec.ControlPlane.Namespace
 			}
@@ -239,6 +248,7 @@ func (c *meshFederationController) sync(ctx context.Context, syncCtx factory.Syn
 			return err
 		}
 
+		// create configmap that contains mesh federation information
 		federationConfigMap := &corev1.ConfigMap{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      peerMeshName + "-to-" + currentMeshName,
