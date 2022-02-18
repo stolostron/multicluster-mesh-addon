@@ -92,7 +92,7 @@ func (c *meshFederationController) sync(ctx context.Context, syncCtx factory.Syn
 		return nil
 	}
 
-	if !reconcileK8sRes {
+	if !reconcileK8sRes { // reconciling update from meshfederation
 		meshFederation, err := c.meshFederationLister.MeshFederations(namespace).Get(name)
 		switch {
 		case errors.IsNotFound(err):
@@ -194,7 +194,7 @@ func (c *meshFederationController) sync(ctx context.Context, syncCtx factory.Syn
 		}
 
 		return nil
-	} else {
+	} else { // reconciling update from federationconfiguration
 		//  retrieve smcp name and peer mesh name from the reconciling configmap name
 		strSplit := strings.Split(name, "-ep4-")
 		if len(strSplit) != 2 {

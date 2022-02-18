@@ -93,6 +93,7 @@ func (c *meshDeploymentController) sync(ctx context.Context, syncCtx factory.Syn
 		if meshDeployment.Spec.TrustDomain != "" {
 			trustDomain = meshDeployment.Spec.TrustDomain
 		}
+		// add cluster name prefix to mesh name to distinguish meshes in mesh federation
 		meshName := fmt.Sprintf("%s-%s", cluster, meshDeployment.GetName())
 		mesh := &meshv1alpha1.Mesh{
 			ObjectMeta: metav1.ObjectMeta{
