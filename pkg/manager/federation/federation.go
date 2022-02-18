@@ -112,6 +112,7 @@ func (c *meshFederationController) sync(ctx context.Context, syncCtx factory.Syn
 			}
 			if !hasFinalizer {
 				meshFederation.Finalizers = append(meshFederation.Finalizers, meshFederationFinalizer)
+				klog.V(2).Infof("adding finalizer %q to meshfederation %q/%q", meshFederationFinalizer, namespace, name)
 				_, err := c.meshClient.MeshV1alpha1().MeshFederations(namespace).Update(ctx, meshFederation, metav1.UpdateOptions{})
 				return err
 			}
@@ -170,6 +171,7 @@ func (c *meshFederationController) sync(ctx context.Context, syncCtx factory.Syn
 			if !ewgwExisting {
 				mesh1.Spec.ControlPlane.Peers = append(mesh1.Spec.ControlPlane.Peers, meshv1alpha1.Peer{Name: mesh2.GetName(), Cluster: mesh2.GetNamespace()})
 				// only update mesh if needed
+				klog.V(2).Infof("applying mesh %q/%q for new mesh peer %q-%q added", mesh1.GetNamespace(), mesh1.GetName(), mesh2.GetNamespace(), mesh2.GetName())
 				_, _, err = meshresourceapply.ApplyMesh(ctx, c.meshClient.MeshV1alpha1(), c.recorder, mesh1)
 				if err != nil {
 					return err
@@ -186,6 +188,7 @@ func (c *meshFederationController) sync(ctx context.Context, syncCtx factory.Syn
 			if !ewgwExisting {
 				mesh2.Spec.ControlPlane.Peers = append(mesh2.Spec.ControlPlane.Peers, meshv1alpha1.Peer{Name: mesh1.GetName(), Cluster: mesh1.GetNamespace()})
 				// only update mesh if needed
+				klog.V(2).Infof("applying mesh %q/%q for new mesh peer %q-%q added", mesh2.GetNamespace(), mesh2.GetName(), mesh1.GetNamespace(), mesh1.GetName())
 				_, _, err = meshresourceapply.ApplyMesh(ctx, c.meshClient.MeshV1alpha1(), c.recorder, mesh2)
 				if err != nil {
 					return err
@@ -240,6 +243,12 @@ func (c *meshFederationController) sync(ctx context.Context, syncCtx factory.Syn
 			return err
 		}
 
+		// remove mesh federation configuration
+		if !endpointConfigMap.DeletionTimestamp.IsZero() {
+			klog.V(2).Infof("removing mesh federation resources: configmap %q/%q", peerMeshCluster, peerMeshName+"-to-"+currentMeshName)
+			return c.kubeClient.CoreV1().ConfigMaps(peerMeshCluster).Delete(ctx, peerMeshName+"-to-"+currentMeshName, metav1.DeleteOptions{})
+		}
+
 		meshCAConfigMap, err := c.configMapLister.ConfigMaps(namespace).Get(currentMeshNamespace + "-mesh-ca")
 		switch {
 		case errors.IsNotFound(err):
@@ -266,6 +275,7 @@ func (c *meshFederationController) sync(ctx context.Context, syncCtx factory.Syn
 			},
 		}
 
+		klog.V(2).Infof("apply mesh federation resources: configmap %q/%q", peerMeshCluster, peerMeshName+"-to-"+currentMeshName)
 		_, _, err = resourceapply.ApplyConfigMap(ctx, c.kubeClient.CoreV1(), c.recorder, federationConfigMap)
 		return err
 	}
@@ -300,6 +310,7 @@ func (c *meshFederationController) removeMeshFederationResources(ctx context.Con
 		}
 		if len(copiedPeers) != len(mesh1.Spec.ControlPlane.Peers) {
 			mesh1.Spec.ControlPlane.Peers = copiedPeers
+			klog.V(2).Infof("applying mesh %q/%q for mesh peer %q-%q removed", mesh1.GetNamespace(), mesh1.GetName(), mesh2.GetNamespace(), mesh2.GetName())
 			_, err := c.meshClient.MeshV1alpha1().Meshes(mesh1.GetNamespace()).Update(ctx, mesh1, metav1.UpdateOptions{})
 			if err != nil {
 				return err
@@ -315,6 +326,7 @@ func (c *meshFederationController) removeMeshFederationResources(ctx context.Con
 		}
 		if len(copiedPeers) != len(mesh2.Spec.ControlPlane.Peers) {
 			mesh2.Spec.ControlPlane.Peers = copiedPeers
+			klog.V(2).Infof("applying mesh %q/%q for mesh peer %q-%q removed", mesh2.GetNamespace(), mesh2.GetName(), mesh1.GetNamespace(), mesh1.GetName())
 			_, err := c.meshClient.MeshV1alpha1().Meshes(mesh2.GetNamespace()).Update(ctx, mesh2, metav1.UpdateOptions{})
 			if err != nil {
 				return err
@@ -336,6 +348,7 @@ func (c *meshFederationController) removeMeshFederationFinalizer(ctx context.Con
 
 	if len(meshFederation.Finalizers) != len(copiedFinalizers) {
 		meshFederation.Finalizers = copiedFinalizers
+		klog.V(2).Infof("removing finalizer %q from meshfederation %q/%q", meshFederationFinalizer, meshFederation.GetNamespace(), meshFederation.GetName())
 		_, err := c.meshClient.MeshV1alpha1().MeshFederations(meshFederation.GetNamespace()).Update(ctx, meshFederation, metav1.UpdateOptions{})
 		return err
 	}

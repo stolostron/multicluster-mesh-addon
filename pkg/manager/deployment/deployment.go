@@ -75,6 +75,7 @@ func (c *meshDeploymentController) sync(ctx context.Context, syncCtx factory.Syn
 		}
 		if !hasFinalizer {
 			meshDeployment.Finalizers = append(meshDeployment.Finalizers, meshDeploymentFinalizer)
+			klog.V(2).Infof("adding finalizer %q to meshdeployment %q/%q", meshDeploymentFinalizer, namespace, name)
 			_, err := c.meshClient.MeshV1alpha1().MeshDeployments(namespace).Update(ctx, meshDeployment, metav1.UpdateOptions{})
 			return err
 		}
@@ -111,6 +112,7 @@ func (c *meshDeploymentController) sync(ctx context.Context, syncCtx factory.Syn
 
 		_, err := c.meshClient.MeshV1alpha1().Meshes(cluster).Get(ctx, meshName, metav1.GetOptions{})
 		if errors.IsNotFound(err) {
+			klog.V(2).Infof("applying mesh %q/%q for meshdeployment", mesh.GetNamespace(), mesh.GetName())
 			_, _, err = meshresourceapply.ApplyMesh(ctx, c.meshClient.MeshV1alpha1(), c.recorder, mesh)
 			if err != nil {
 				return err
@@ -126,6 +128,7 @@ func (c *meshDeploymentController) sync(ctx context.Context, syncCtx factory.Syn
 func (c *meshDeploymentController) removeMeshDeploymentResources(ctx context.Context, meshDeployment *meshv1alpha1.MeshDeployment) error {
 	for _, cluster := range meshDeployment.Spec.Clusters {
 		meshName := fmt.Sprintf("%s-%s", cluster, meshDeployment.GetName())
+		klog.V(2).Infof("removing mesh %q/%q for meshdeployment cleanup", cluster, meshName)
 		if err := c.meshClient.MeshV1alpha1().Meshes(cluster).Delete(ctx, meshName, metav1.DeleteOptions{}); err != nil && !errors.IsNotFound(err) {
 			return err
 		}
@@ -145,6 +148,7 @@ func (c *meshDeploymentController) removeMeshDeploymentFinalizer(ctx context.Con
 
 	if len(meshDeployment.Finalizers) != len(copiedFinalizers) {
 		meshDeployment.Finalizers = copiedFinalizers
+		klog.V(2).Infof("removing finalizer %q from meshdeployment %q/%q", meshDeploymentFinalizer, meshDeployment.GetNamespace(), meshDeployment.GetName())
 		_, err := c.meshClient.MeshV1alpha1().MeshDeployments(meshDeployment.GetNamespace()).Update(ctx, meshDeployment, metav1.UpdateOptions{})
 		return err
 	}
