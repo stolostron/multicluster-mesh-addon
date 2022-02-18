@@ -162,6 +162,7 @@ func (c *federationController) sync(ctx context.Context, syncCtx factory.SyncCon
 			},
 		}
 
+		klog.V(2).Infof("applying federation resources: configmap %q/%q", sourceMeshNamespace, targetMeshName+"-ca-root-cert")
 		_, _, err = resourceapply.ApplyConfigMap(ctx, c.spokeKubeClient.CoreV1(), c.recorder, meshPeerCAConfigMap)
 		if err != nil {
 			return err
@@ -196,6 +197,7 @@ func (c *federationController) sync(ctx context.Context, syncCtx factory.SyncCon
 				},
 			},
 		}
+		klog.V(2).Infof("applying federation resources: servicemeshpeer %q/%q", sourceMeshNamespace, targetMeshName)
 		_, _, err = meshresourceapply.ApplyServiceMeshPeer(ctx, c.spokeMaistraClient.FederationV1(), c.recorder, serviceMeshPeer)
 		return err
 	} else if name == constants.IstioCAConfigmapName { // ca configmap from mesh control plane namespace
@@ -217,7 +219,7 @@ func (c *federationController) sync(ctx context.Context, syncCtx factory.SyncCon
 			},
 			Data: meshCAConfigMap.Data,
 		}
-
+		klog.V(2).Infof("applying federation resources: configmap %q/%q", c.clusterName, meshCAConfigMap.GetNamespace()+"-mesh-ca")
 		_, _, err = resourceapply.ApplyConfigMap(ctx, c.hubKubeClient.CoreV1(), c.recorder, newMeshCAConfigmap)
 		return err
 	} else { // ingressgateway service from mesh control plane namespace
@@ -231,10 +233,17 @@ func (c *federationController) sync(ctx context.Context, syncCtx factory.SyncCon
 
 		svcLabels := ingSvc.GetLabels()
 		peerMeshName := svcLabels[constants.FederationServiceLabelKey]
+		smcpName := ""
+		for _, ref := range ingSvc.GetOwnerReferences() {
+			if ref.Kind == "ServiceMeshControlPlane" {
+				smcpName = ref.Name
+				break
+			}
+		}
 
 		// remove ingress svc related resources after mesh is deleted
 		if !ingSvc.DeletionTimestamp.IsZero() {
-			return c.removeMeshFederationResources(ctx, namespace, peerMeshName)
+			return c.removeMeshFederationResources(ctx, namespace, smcpName, peerMeshName)
 		}
 
 		endpointAddr := ""
@@ -260,18 +269,9 @@ func (c *federationController) sync(ctx context.Context, syncCtx factory.SyncCon
 			return err
 		}
 
-		smcpList, err := c.spokeMaistraClient.CoreV2().ServiceMeshControlPlanes(ingSvc.GetNamespace()).List(ctx, metav1.ListOptions{})
-		if err != nil {
-			return err
-		}
-		if len(smcpList.Items) != 1 {
-			return nil
-		}
-		smcp := smcpList.Items[0]
-
 		ingressEndpointConfigmap := &corev1.ConfigMap{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      smcp.GetName() + "-ep4-" + peerMeshName, // smcp ingress endpoint for peer mesh
+				Name:      smcpName + "-ep4-" + peerMeshName, // smcp ingress endpoint for peer mesh
 				Namespace: c.clusterName,
 				Labels: map[string]string{
 					constants.FederationResourcesLabelKey: "true",
@@ -281,17 +281,24 @@ func (c *federationController) sync(ctx context.Context, syncCtx factory.SyncCon
 				constants.FederationConfigMapMeshPeerEndpointLabelKey: endpointAddr,
 			},
 		}
-
+		klog.V(2).Infof("applying federation resources: configmap %q/%q", c.clusterName, smcpName+"-ep4-"+peerMeshName)
 		_, _, err = resourceapply.ApplyConfigMap(ctx, c.hubKubeClient.CoreV1(), c.recorder, ingressEndpointConfigmap)
 		return err
 	}
 }
 
-func (c *federationController) removeMeshFederationResources(ctx context.Context, namespace, peerMeshName string) error {
-	err := c.spokeMaistraClient.FederationV1().ServiceMeshPeers(namespace).Delete(ctx, peerMeshName, metav1.DeleteOptions{})
+func (c *federationController) removeMeshFederationResources(ctx context.Context, namespace, smcpName, peerMeshName string) error {
+	klog.V(2).Infof("removing federation resources: configmap %q/%q", c.clusterName, smcpName+"-ep4-"+peerMeshName)
+	err := c.hubKubeClient.CoreV1().ConfigMaps(c.clusterName).Delete(ctx, smcpName+"-ep4-"+peerMeshName, metav1.DeleteOptions{})
 	if err != nil && !errors.IsNotFound(err) {
 		return err
 	}
+	klog.V(2).Infof("removing federation resources: servicemeshpeer %q/%q", namespace, peerMeshName)
+	err = c.spokeMaistraClient.FederationV1().ServiceMeshPeers(namespace).Delete(ctx, peerMeshName, metav1.DeleteOptions{})
+	if err != nil && !errors.IsNotFound(err) {
+		return err
+	}
+	klog.V(2).Infof("removing federation resources: configmap %q/%q", namespace, peerMeshName+"-ca-root-cert")
 	err = c.spokeKubeClient.CoreV1().ConfigMaps(namespace).Delete(ctx, peerMeshName+"-ca-root-cert", metav1.DeleteOptions{})
 	if err != nil && !errors.IsNotFound(err) {
 		return err

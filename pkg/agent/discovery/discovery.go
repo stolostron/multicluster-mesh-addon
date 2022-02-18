@@ -77,6 +77,7 @@ func (c *discoveryController) sync(ctx context.Context, syncCtx factory.SyncCont
 	if !smcp.DeletionTimestamp.IsZero() {
 		discoveriedMeshName := c.clusterName + "-" + smcp.GetNamespace() + "-" + smcp.GetName()
 		// try to delete the mesh if it is discoveried mesh, if not found the mesh, then the mesh is not discoveried mesh, just ignore the error
+		klog.V(2).Infof("trying to remove discoveried mesh %q/%q if existing", c.clusterName, discoveriedMeshName)
 		err := c.hubMeshClient.MeshV1alpha1().Meshes(c.clusterName).Delete(ctx, discoveriedMeshName, metav1.DeleteOptions{})
 		if err != nil && !errors.IsNotFound(err) {
 			return err
@@ -111,6 +112,7 @@ func (c *discoveryController) sync(ctx context.Context, syncCtx factory.SyncCont
 		return err
 	}
 
+	klog.V(2).Infof("applying discoveried mesh %q/%q", mesh.GetNamespace(), mesh.GetName())
 	_, _, err = meshresourceapply.ApplyMesh(ctx, c.hubMeshClient.MeshV1alpha1(), c.recorder, mesh)
 	return err
 }

@@ -100,6 +100,7 @@ func (c *deployController) sync(ctx context.Context, syncCtx factory.SyncContext
 		}
 		if !hasFinalizer {
 			mesh.Finalizers = append(mesh.Finalizers, meshFinalizer)
+			klog.V(2).Infof("adding finalizer %q to mesh %q/%q", meshFinalizer, namespace, name)
 			_, err := c.hubMeshClient.MeshV1alpha1().Meshes(namespace).Update(ctx, mesh, metav1.UpdateOptions{})
 			return err
 		}
@@ -115,6 +116,7 @@ func (c *deployController) sync(ctx context.Context, syncCtx factory.SyncContext
 
 	elasticsearchOperatorNamespace := "openshift-operators-redhat" // elasticsearch-operator is recommended to be installed in openshift-operators-redhat namespace
 	elasticsearchOperatorNS := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: elasticsearchOperatorNamespace}}
+	klog.V(2).Infof("applying olm resources: namespace %q", elasticsearchOperatorNamespace)
 	_, _, err = resourceapply.ApplyNamespace(ctx, c.spokeKubeClient.CoreV1(), c.recorder, elasticsearchOperatorNS)
 	if err != nil {
 		return err
@@ -130,6 +132,7 @@ func (c *deployController) sync(ctx context.Context, syncCtx factory.SyncContext
 
 	ogList, _ := c.spokeOLMClient.OperatorsV1().OperatorGroups(elasticsearchOperatorNamespace).List(ctx, metav1.ListOptions{})
 	if ogList != nil && len(ogList.Items) == 0 {
+		klog.V(2).Infof("applying olm resources: operatorgroup %q/%q", elasticsearchOperatorNamespace, elasticsearchOperatorNamespace)
 		_, _, err = meshresourceapply.ApplyOperatorGroup(ctx, c.spokeOLMClient.OperatorsV1(), c.recorder, elasticsearchOG)
 		if err != nil {
 			return err
@@ -149,6 +152,7 @@ func (c *deployController) sync(ctx context.Context, syncCtx factory.SyncContext
 			InstallPlanApproval:    olmv1alpha1.ApprovalAutomatic,
 		},
 	}
+	klog.V(2).Infof("applying olm resources: subscription %q/%q", elasticsearchOperatorNamespace, "elasticsearch-operator")
 	_, _, err = meshresourceapply.ApplySubscription(ctx, c.spokeOLMClient.OperatorsV1alpha1(), c.recorder, elasticsearchSub)
 	if err != nil {
 		return err
@@ -167,6 +171,7 @@ func (c *deployController) sync(ctx context.Context, syncCtx factory.SyncContext
 			InstallPlanApproval:    olmv1alpha1.ApprovalAutomatic,
 		},
 	}
+	klog.V(2).Infof("applying olm resources: subscription %q/%q", "openshift-operators", "jaeger-product")
 	_, _, err = meshresourceapply.ApplySubscription(ctx, c.spokeOLMClient.OperatorsV1alpha1(), c.recorder, jaegerSub)
 	if err != nil {
 		return err
@@ -185,6 +190,7 @@ func (c *deployController) sync(ctx context.Context, syncCtx factory.SyncContext
 			InstallPlanApproval:    olmv1alpha1.ApprovalAutomatic,
 		},
 	}
+	klog.V(2).Infof("applying olm resources: subscription %q/%q", "openshift-operators", "kiali-ossm")
 	_, _, err = meshresourceapply.ApplySubscription(ctx, c.spokeOLMClient.OperatorsV1alpha1(), c.recorder, kialiSub)
 	if err != nil {
 		return err
@@ -203,6 +209,7 @@ func (c *deployController) sync(ctx context.Context, syncCtx factory.SyncContext
 			InstallPlanApproval:    olmv1alpha1.ApprovalAutomatic,
 		},
 	}
+	klog.V(2).Infof("applying olm resources: subscription %q/%q", "openshift-operators", "servicemeshoperator")
 	_, _, err = meshresourceapply.ApplySubscription(ctx, c.spokeOLMClient.OperatorsV1alpha1(), c.recorder, ossmSub)
 	if err != nil {
 		return err
@@ -232,16 +239,19 @@ func (c *deployController) sync(ctx context.Context, syncCtx factory.SyncContext
 	}
 
 	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: smcp.GetNamespace()}}
+	klog.V(2).Infof("applying service mesh namespace %q", smcp.GetNamespace())
 	_, _, err = resourceapply.ApplyNamespace(ctx, c.spokeKubeClient.CoreV1(), c.recorder, ns)
 	if err != nil {
 		return err
 	}
 
+	klog.V(2).Infof("applying servicemeshcontrtolplane %q/%q", smcp.GetNamespace(), smcp.GetName())
 	_, _, err = meshresourceapply.ApplyServiceMeshControlPlane(ctx, c.spokeMaistraClient.CoreV2(), c.recorder, smcp)
 	if err != nil {
 		return err
 	}
 
+	klog.V(2).Infof("applying servicemeshmemberroll %q/%q", smmr.GetNamespace(), smmr.GetName())
 	_, _, err = meshresourceapply.ApplyServiceMeshMemberRoll(ctx, c.spokeMaistraClient.CoreV1(), c.recorder, smmr)
 	return err
 }
@@ -259,11 +269,13 @@ func (c *deployController) removeMeshResources(ctx context.Context, mesh *meshv1
 		return err
 	}
 
+	klog.V(2).Infof("removing servicemeshcontrtolplane %q/%q", smcp.GetNamespace(), smcp.GetName())
 	err = c.spokeMaistraClient.CoreV2().ServiceMeshControlPlanes(smcp.GetNamespace()).Delete(ctx, smcp.GetName(), metav1.DeleteOptions{})
 	if err != nil && !errors.IsNotFound(err) {
 		return err
 	}
 
+	klog.V(2).Infof("removing servicemeshmemberroll %q/%q", smmr.GetNamespace(), smmr.GetName())
 	err = c.spokeMaistraClient.CoreV1().ServiceMeshMemberRolls(smmr.GetNamespace()).Delete(ctx, smmr.GetName(), metav1.DeleteOptions{})
 	if err != nil && !errors.IsNotFound(err) {
 		return err
@@ -283,6 +295,7 @@ func (c *deployController) removeMeshFinalizer(ctx context.Context, mesh *meshv1
 
 	if len(mesh.Finalizers) != len(copiedFinalizers) {
 		mesh.Finalizers = copiedFinalizers
+		klog.V(2).Infof("removing finalizer %q from mesh %q/%q", meshFinalizer, mesh.GetNamespace(), mesh.GetName())
 		_, err := c.hubMeshClient.MeshV1alpha1().Meshes(mesh.GetNamespace()).Update(ctx, mesh, metav1.UpdateOptions{})
 		return err
 	}
