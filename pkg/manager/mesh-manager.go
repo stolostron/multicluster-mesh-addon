@@ -74,7 +74,7 @@ func runController(ctx context.Context, controllerContext *controllercmd.Control
 	agentAddon, err := addonfactory.NewAgentAddonFactory(constants.MeshAddonName, fs, "manifests/agent").
 		WithGetValuesFuncs(getValues, addonfactory.GetValuesFromAddonAnnotation).
 		WithAgentRegistrationOption(registrationOption).
-		WithInstallStrategy(agent.InstallAllStrategy(constants.MeshAgentInstallationNamespace)).
+		WithInstallStrategy(agent.InstallAllStrategy(constants.MeshAgentNamespace)).
 		BuildTemplateAgentAddon()
 	if err != nil {
 		klog.Errorf("failed to build agent %v", err)
@@ -190,7 +190,7 @@ func getValues(cluster *clusterv1.ManagedCluster,
 	addon *addonapiv1alpha1.ManagedClusterAddOn) (addonfactory.Values, error) {
 	installNamespace := addon.Spec.InstallNamespace
 	if len(installNamespace) == 0 {
-		installNamespace = constants.MeshAgentInstallationNamespace
+		installNamespace = constants.MeshAgentNamespace
 	}
 
 	image := os.Getenv("MULTICLUSTER_MESH_ADDON_IMAGE")

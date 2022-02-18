@@ -23,6 +23,7 @@ func init() {
 	profileComponentsMap["default"] = []string{"grafana", "istio-discovery", "istio-egress", "istio-ingress", "kiali", "mesh-config", "prometheus", "telemetry-common", "tracing"}
 }
 
+// TranslateToLogicMesh translate the physical mesh to the logical mesh
 func TranslateToLogicMesh(smcp *maistrav2.ServiceMeshControlPlane, smmr *maistrav1.ServiceMeshMemberRoll, cluster string) (*meshv1alpha1.Mesh, error) {
 	meshMember := []string{}
 	if smmr != nil {
@@ -69,6 +70,7 @@ func TranslateToLogicMesh(smcp *maistrav2.ServiceMeshControlPlane, smmr *maistra
 	return mesh, nil
 }
 
+// TranslateToPhysicalMesh translate the logical mesh to the physical mesh
 func TranslateToPhysicalMesh(mesh *meshv1alpha1.Mesh) (*maistrav2.ServiceMeshControlPlane, *maistrav1.ServiceMeshMemberRoll, error) {
 	if mesh.Spec.Cluster == "" {
 		return nil, nil, fmt.Errorf("cluster field in mesh object is empty")
