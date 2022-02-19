@@ -28,6 +28,11 @@ import (
 	meshresourceapply "github.com/stolostron/multicluster-mesh-addon/pkg/resourceapply"
 )
 
+var (
+	peerMeshName = "" // peerMeshName is the peer mesh name in the ingress gateway service label
+	smcpName     = "" // smcpName is SMCP name of thev current reconciling ingress gateway service
+)
+
 type federationController struct {
 	clusterName          string
 	addonNamespace       string
@@ -72,8 +77,16 @@ func NewFederationController(
 				return false
 			}
 			// only enqueue a service with label key "federation.maistra.io/ingress-for"
-			labels := accessor.GetLabels()
-			_, ok := labels[constants.FederationServiceLabelKey]
+			var ok bool
+			peerMeshName, ok = accessor.GetLabels()[constants.FederationServiceLabelKey]
+			if ok {
+				for _, ref := range accessor.GetOwnerReferences() {
+					if ref.Kind == "ServiceMeshControlPlane" {
+						smcpName = ref.Name
+						break
+					}
+				}
+			}
 			return ok
 		}, spokeServiceInformer.Informer()).
 		WithFilteredEventsInformersQueueKeyFunc(func(obj runtime.Object) string {
@@ -122,6 +135,11 @@ func (c *federationController) sync(ctx context.Context, syncCtx factory.SyncCon
 			return nil
 		case err != nil:
 			return err
+		}
+
+		if !federationConfigMap.DeletionTimestamp.IsZero() {
+			// just return if the mesh federation configmap is deleted.
+			return nil
 		}
 
 		sourceMeshNamespace, ok := federationConfigMap.Data[constants.FederationConfigMapMeshNamespaceLabelKey]
@@ -226,19 +244,10 @@ func (c *federationController) sync(ctx context.Context, syncCtx factory.SyncCon
 		ingSvc, err := c.spokeServiceLister.Services(namespace).Get(name)
 		switch {
 		case errors.IsNotFound(err):
-			return nil
+			// double check to make sure mesh federation resources are deleted, because the ingress service may be removed before we can check the deletion timestamp
+			return c.removeMeshFederationResources(ctx, namespace, smcpName, peerMeshName)
 		case err != nil:
 			return err
-		}
-
-		svcLabels := ingSvc.GetLabels()
-		peerMeshName := svcLabels[constants.FederationServiceLabelKey]
-		smcpName := ""
-		for _, ref := range ingSvc.GetOwnerReferences() {
-			if ref.Kind == "ServiceMeshControlPlane" {
-				smcpName = ref.Name
-				break
-			}
 		}
 
 		// remove ingress svc related resources after mesh is deleted

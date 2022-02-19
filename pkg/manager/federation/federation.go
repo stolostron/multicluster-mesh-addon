@@ -238,7 +238,9 @@ func (c *meshFederationController) sync(ctx context.Context, syncCtx factory.Syn
 		endpointConfigMap, err := c.configMapLister.ConfigMaps(namespace).Get(name)
 		switch {
 		case errors.IsNotFound(err):
-			return nil
+			// double check to make sure mesh federation configmap is deleted, because the -ep4- configmap may be removed before we can check the deletion timestamp
+			klog.V(2).Infof("removing mesh federation resources: configmap %q/%q", peerMeshCluster, peerMeshName+"-to-"+currentMeshName)
+			return c.kubeClient.CoreV1().ConfigMaps(peerMeshCluster).Delete(ctx, peerMeshName+"-to-"+currentMeshName, metav1.DeleteOptions{})
 		case err != nil:
 			return err
 		}
