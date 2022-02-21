@@ -10,7 +10,7 @@ type MeshDeploymentSpec struct {
 	Clusters       []string          `json:"clusters,omitempty"`
 	ControlPlane   *MeshControlPlane `json:"controlPlane,omitempty"`
 	MeshMemberRoll []string          `json:"meshMemberRoll,omitempty"`
-	TrustDomain    string            `json:"trustDomain,omitempty"`
+	// TrustDomain    string            `json:"trustDomain,omitempty"`
 }
 
 // MeshDeploymentStatus defines the observed state of MeshDeployment

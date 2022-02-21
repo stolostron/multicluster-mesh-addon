@@ -84,8 +84,6 @@ spec:
                 type: array
               meshProvider:
                 type: string
-              trustDomain:
-                type: string
             type: object
           status:
             description: MeshDeploymentStatus defines the observed state of MeshDeployment

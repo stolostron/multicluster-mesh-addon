@@ -45,7 +45,6 @@ spec:
     version: v2.1
   meshMemberRoll: ["mesh-apps"]
   meshProvider: Openshift Service Mesh
-  trustDomain: mesh.local
 status:
   appliedMeshes: ["managedcluster1-mesh", "managedcluster2-mesh"]
 ```
@@ -123,7 +122,6 @@ spec:
     version: v2.1
   meshMemberRoll: ["mesh-bookinfo"]
   meshProvider: Openshift Service Mesh
-  trustDomain: mesh.local
 EOF
 ```
 
