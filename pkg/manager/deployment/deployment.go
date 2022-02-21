@@ -90,12 +90,10 @@ func (c *meshDeploymentController) sync(ctx context.Context, syncCtx factory.Syn
 	}
 
 	for _, cluster := range meshDeployment.Spec.Clusters {
-		trustDomain := "cluster.local" // default trust domain
-		if meshDeployment.Spec.TrustDomain != "" {
-			trustDomain = meshDeployment.Spec.TrustDomain
-		}
 		// add cluster name prefix to mesh name to distinguish meshes in mesh federation
 		meshName := fmt.Sprintf("%s-%s", cluster, meshDeployment.GetName())
+		// trust domain for each mesh need to be different, since the self generated CA for each mesh is different
+		trustDomain := fmt.Sprintf("%s.local", meshName)
 		mesh := &meshv1alpha1.Mesh{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      meshName,
