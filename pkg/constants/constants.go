@@ -17,7 +17,8 @@ const (
 
 // openshift service mesh constants
 const (
-	FederationServiceLabelKey = "federation.maistra.io/ingress-for"
+	FederationEgressServiceLabelKey  = "federation.maistra.io/egress-for"
+	FederationIngressServiceLabelKey = "federation.maistra.io/ingress-for"
 )
 
 // mesh federation configuration constants

@@ -78,7 +78,7 @@ func NewFederationController(
 			}
 			// only enqueue a service with label key "federation.maistra.io/ingress-for"
 			var ok bool
-			peerMeshName, ok = accessor.GetLabels()[constants.FederationServiceLabelKey]
+			peerMeshName, ok = accessor.GetLabels()[constants.FederationIngressServiceLabelKey]
 			if ok {
 				for _, ref := range accessor.GetOwnerReferences() {
 					if ref.Kind == "ServiceMeshControlPlane" {

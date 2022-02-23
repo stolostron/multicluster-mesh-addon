@@ -262,7 +262,7 @@ func TranslateToPhysicalMesh(mesh *meshv1alpha1.Mesh) (*maistrav2.ServiceMeshCon
 					Service: maistrav2.GatewayServiceConfig{
 						Metadata: &maistrav2.MetadataConfig{
 							Labels: map[string]string{
-								"federation.maistra.io/egress-for": peerName,
+								constants.FederationEgressServiceLabelKey: peerName,
 							},
 						},
 						ServiceSpec: corev1.ServiceSpec{
@@ -312,7 +312,7 @@ func TranslateToPhysicalMesh(mesh *meshv1alpha1.Mesh) (*maistrav2.ServiceMeshCon
 					Service: maistrav2.GatewayServiceConfig{
 						Metadata: &maistrav2.MetadataConfig{
 							Labels: map[string]string{
-								constants.FederationServiceLabelKey: peerName,
+								constants.FederationIngressServiceLabelKey: peerName,
 							},
 							Annotations: map[string]string{
 								"service.beta.kubernetes.io/aws-load-balancer-type": "nlb",
