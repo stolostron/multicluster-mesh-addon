@@ -4,9 +4,6 @@ import (
 	"fmt"
 	"strings"
 
-	iopv1alpha1 "istio.io/istio/operator/pkg/apis/istio/v1alpha1"
-	iopname "istio.io/istio/operator/pkg/name"
-	ioptranslate "istio.io/istio/operator/pkg/translate"
 	corev1 "k8s.io/api/core/v1"
 	resource "k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -26,88 +23,8 @@ func init() {
 	profileComponentsMap["default"] = []string{"grafana", "istio-discovery", "istio-egress", "istio-ingress", "kiali", "mesh-config", "prometheus", "telemetry-common", "tracing"}
 }
 
-// TranslateIstioToLogicMesh translate the physical istio service mesh to the logical mesh
-func TranslateIstioToLogicMesh(iop *iopv1alpha1.IstioOperator, memberNamespaces []string, cluster string) (*meshv1alpha1.Mesh, error) {
-	trustDomain := "cluster.local"
-	if iop.Spec.MeshConfig != nil {
-		td, ok := iop.Spec.MeshConfig["trustDomain"]
-		if ok && td != nil && td.(string) != "" {
-			trustDomain = td.(string)
-		}
-	}
-
-	profile, controlPlaneNamespace, enabledComponents, err := getProfileNSAndEnabledComponents(iop)
-	if err != nil {
-		return nil, err
-	}
-
-	tag, ok := iop.Spec.Tag.(string)
-	if !ok {
-		return nil, fmt.Errorf("invalid tag for IstioOperatorSpec: %v", iop.Spec.Tag)
-	}
-
-	meshName := cluster + "-" + iop.GetNamespace() + "-" + iop.GetName()
-	mesh := &meshv1alpha1.Mesh{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      meshName,
-			Namespace: cluster,
-			Labels:    map[string]string{constants.LabelKeyForDiscoveriedMesh: "true"},
-		},
-		Spec: meshv1alpha1.MeshSpec{
-			MeshProvider: meshv1alpha1.MeshProviderOpenshift,
-			Cluster:      cluster,
-			ControlPlane: &meshv1alpha1.MeshControlPlane{
-				Namespace:  controlPlaneNamespace,
-				Profiles:   []string{profile},
-				Version:    tag,
-				Revision:   iop.Spec.Revision,
-				Components: enabledComponents,
-			},
-			MeshMemberRoll: memberNamespaces,
-			TrustDomain:    trustDomain,
-		},
-		// Status: meshv1alpha1.MeshStatus{
-		// 	Readiness: iop.Status.Readiness,
-		// },
-	}
-
-	return mesh, nil
-}
-
-func getProfileNSAndEnabledComponents(iop *iopv1alpha1.IstioOperator) (string, string, []string, error) {
-	var enabledComponents []string
-	if iop.Spec.Components != nil {
-		for _, c := range iopname.AllCoreComponentNames {
-			enabled, err := ioptranslate.IsComponentEnabledInSpec(c, iop.Spec)
-			if err != nil {
-				return "", "", nil, fmt.Errorf("failed to check if component: %s is enabled or not: %v", string(c), err)
-			}
-			if enabled {
-				enabledComponents = append(enabledComponents, iopname.UserFacingComponentName(c))
-			}
-		}
-		for _, c := range iop.Spec.Components.IngressGateways {
-			if c.Enabled.GetValue() {
-				enabledComponents = append(enabledComponents, iopname.UserFacingComponentName(iopname.IngressComponentName))
-				break
-			}
-		}
-		for _, c := range iop.Spec.Components.EgressGateways {
-			if c.Enabled.GetValue() {
-				enabledComponents = append(enabledComponents, iopname.UserFacingComponentName(iopname.EgressComponentName))
-				break
-			}
-		}
-	}
-
-	if configuredNamespace := iopv1alpha1.Namespace(iop.Spec); configuredNamespace != "" {
-		return iop.Spec.Profile, configuredNamespace, enabledComponents, nil
-	}
-	return iop.Spec.Profile, iopname.IstioDefaultNamespace, enabledComponents, nil
-}
-
-// TranslateOSSMToLogicMesh translate the physical openshift service mesh to the logical mesh
-func TranslateOSSMToLogicMesh(smcp *maistrav2.ServiceMeshControlPlane, smmr *maistrav1.ServiceMeshMemberRoll, cluster string) (*meshv1alpha1.Mesh, error) {
+// TranslateToLogicMesh translate the physical mesh to the logical mesh
+func TranslateToLogicMesh(smcp *maistrav2.ServiceMeshControlPlane, smmr *maistrav1.ServiceMeshMemberRoll, cluster string) (*meshv1alpha1.Mesh, error) {
 	meshMember := []string{}
 	if smmr != nil {
 		meshMember = smmr.Spec.Members

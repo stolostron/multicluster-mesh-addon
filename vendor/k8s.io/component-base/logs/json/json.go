@@ -40,8 +40,20 @@ func NewJSONLogger(infoStream, errorStream zapcore.WriteSyncer) (logr.Logger, fu
 	encoder := zapcore.NewJSONEncoder(encoderConfig)
 	var core zapcore.Core
 	if errorStream == nil {
-		core = zapcore.NewCore(encoder, infoStream, zapcore.Level(-127))
+		core = zapcore.NewCore(encoder, zapcore.AddSync(infoStream), zapcore.Level(-127))
 	} else {
+		// Set up writing of error messages to stderr and info messages
+		// to stdout. Info messages get optionally buffered and flushed
+		// - through klog.FlushLogs -> zapr Flush -> zap Sync
+		// - when an error gets logged
+		//
+		// The later is important when both streams get merged into a single
+		// stream by the consumer (same console for a command line tool, pod
+		// log for a container) because without it, messages get reordered.
+		flushError := writeWithFlushing{
+			WriteSyncer: errorStream,
+			other:       infoStream,
+		}
 		highPriority := zap.LevelEnablerFunc(func(lvl zapcore.Level) bool {
 			return lvl >= zapcore.ErrorLevel
 		})
@@ -49,7 +61,7 @@ func NewJSONLogger(infoStream, errorStream zapcore.WriteSyncer) (logr.Logger, fu
 			return lvl < zapcore.ErrorLevel
 		})
 		core = zapcore.NewTee(
-			zapcore.NewCore(encoder, errorStream, highPriority),
+			zapcore.NewCore(encoder, flushError, highPriority),
 			zapcore.NewCore(encoder, infoStream, lowPriority),
 		)
 	}
@@ -80,23 +92,36 @@ type Factory struct{}
 var _ registry.LogFormatFactory = Factory{}
 
 func (f Factory) Create(options config.FormatOptions) (logr.Logger, func()) {
-	stderr := zapcore.Lock(os.Stderr)
 	if options.JSON.SplitStream {
-		stdout := zapcore.Lock(os.Stdout)
+		// stdout for info messages, stderr for errors.
+		infoStream := zapcore.Lock(os.Stdout)
 		size := options.JSON.InfoBufferSize.Value()
 		if size > 0 {
 			// Prevent integer overflow.
 			if size > 2*1024*1024*1024 {
 				size = 2 * 1024 * 1024 * 1024
 			}
-			stdout = &zapcore.BufferedWriteSyncer{
-				WS:   stdout,
+			infoStream = &zapcore.BufferedWriteSyncer{
+				WS:   infoStream,
 				Size: int(size),
 			}
 		}
-		// stdout for info messages, stderr for errors.
-		return NewJSONLogger(stdout, stderr)
+		return NewJSONLogger(infoStream, zapcore.Lock(os.Stderr))
 	}
-	// Write info messages and errors to stderr to prevent mixing with normal program output.
-	return NewJSONLogger(stderr, nil)
+	// The default is to write to stderr (same as in klog's text output,
+	// doesn't get mixed with normal program output).
+	out := zapcore.Lock(os.Stderr)
+	return NewJSONLogger(out, out)
+}
+
+// writeWithFlushing is a wrapper around an output stream which flushes another
+// output stream before each write.
+type writeWithFlushing struct {
+	zapcore.WriteSyncer
+	other zapcore.WriteSyncer
+}
+
+func (f writeWithFlushing) Write(bs []byte) (int, error) {
+	f.other.Sync()
+	return f.WriteSyncer.Write(bs)
 }
