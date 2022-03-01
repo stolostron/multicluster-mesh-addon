@@ -256,7 +256,7 @@ func (c *federationController) sync(ctx context.Context, syncCtx factory.SyncCon
 		}
 
 		endpointAddr := ""
-		err = wait.Poll(5*time.Second, 60*time.Second, func() (bool, error) {
+		err = wait.Poll(5*time.Second, 60*time.Second, func() (done bool, err error) {
 			ingSvc, err = c.spokeServiceLister.Services(namespace).Get(name)
 			if err != nil {
 				return false, err
