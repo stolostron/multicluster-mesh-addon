@@ -21,7 +21,6 @@ import (
 	"strings"
 
 	"github.com/emicklei/go-restful"
-
 	"k8s.io/kube-openapi/pkg/validation/spec"
 )
 
@@ -93,13 +92,7 @@ type Config struct {
 	GetDefinitions GetOpenAPIDefinitions
 
 	// GetOperationIDAndTags returns operation id and tags for a restful route. It is an optional function to customize operation IDs.
-	//
-	// Deprecated: GetOperationIDAndTagsFromRoute should be used instead. This cannot be specified if using the new Route
-	// interface set of funcs.
 	GetOperationIDAndTags func(r *restful.Route) (string, []string, error)
-
-	// GetOperationIDAndTagsFromRoute returns operation id and tags for a Route. It is an optional function to customize operation IDs.
-	GetOperationIDAndTagsFromRoute func(r Route) (string, []string, error)
 
 	// GetDefinitionName returns a friendly name for a definition base on the serving path. parameter `name` is the full name of the definition.
 	// It is an optional function to customize model names.

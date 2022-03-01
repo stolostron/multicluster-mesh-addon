@@ -27,7 +27,6 @@ type MeshControlPlane struct {
 	Namespace  string   `json:"namespace,omitempty"`
 	Version    string   `json:"version,omitempty"`
 	Profiles   []string `json:"profiles,omitempty"`
-	Revision   string   `json:"revision,omitempty"`
 	Components []string `json:"components,omitempty"`
 	Peers      []Peer   `json:"peers,omitempty"`
 }

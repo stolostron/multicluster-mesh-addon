@@ -18,6 +18,7 @@ package handler3
 
 import (
 	"bytes"
+	"compress/gzip"
 	"crypto/sha512"
 	"encoding/json"
 	"fmt"
@@ -32,7 +33,6 @@ import (
 	openapi_v3 "github.com/googleapis/gnostic/openapiv3"
 	"github.com/munnerz/goautoneg"
 	"k8s.io/kube-openapi/pkg/common"
-	"k8s.io/kube-openapi/pkg/internal/handler"
 	"k8s.io/kube-openapi/pkg/spec3"
 	"k8s.io/kube-openapi/pkg/validation/spec"
 )
@@ -64,8 +64,13 @@ type OpenAPIV3Group struct {
 
 	lastModified time.Time
 
-	pbCache   handler.HandlerCache
-	jsonCache handler.HandlerCache
+	specBytes []byte
+	specPb    []byte
+	specPbGz  []byte
+
+	specBytesETag string
+	specPbETag    string
+	specPbGzETag  string
 }
 
 func init() {
@@ -114,11 +119,9 @@ func (o *OpenAPIService) getSingleGroupBytes(getType string, group string) ([]by
 		return nil, "", time.Now(), fmt.Errorf("Cannot find CRD group %s", group)
 	}
 	if getType == subTypeJSON {
-		specBytes, etag, err := v.jsonCache.Get()
-		return specBytes, etag, v.lastModified, err
+		return v.specBytes, v.specBytesETag, v.lastModified, nil
 	} else if getType == subTypeProtobuf {
-		specPb, etag, err := v.pbCache.Get()
-		return specPb, etag, v.lastModified, err
+		return v.specPb, v.specPbETag, v.lastModified, nil
 	}
 	return nil, "", time.Now(), fmt.Errorf("Invalid accept clause %s", getType)
 }
@@ -150,6 +153,14 @@ func ToV3ProtoBinary(json []byte) ([]byte, error) {
 		return nil, err
 	}
 	return proto.Marshal(document)
+}
+
+func toGzip(data []byte) []byte {
+	var buf bytes.Buffer
+	zw := gzip.NewWriter(&buf)
+	zw.Write(data)
+	zw.Close()
+	return buf.Bytes()
 }
 
 func (o *OpenAPIService) HandleDiscovery(w http.ResponseWriter, r *http.Request) {
@@ -211,13 +222,27 @@ func (o *OpenAPIV3Group) UpdateSpec(specBytes []byte) (err error) {
 	o.rwMutex.Lock()
 	defer o.rwMutex.Unlock()
 
-	o.pbCache = o.pbCache.New(func() ([]byte, error) {
-		return ToV3ProtoBinary(specBytes)
-	})
+	specPb, err := ToV3ProtoBinary(specBytes)
+	if err != nil {
+		return err
+	}
 
-	o.jsonCache = o.jsonCache.New(func() ([]byte, error) {
-		return specBytes, nil
-	})
-	o.lastModified = time.Now()
+	specPbGz := toGzip(specPb)
+
+	specBytesETag := computeETag(specBytes)
+	specPbETag := computeETag(specPb)
+	specPbGzETag := computeETag(specPbGz)
+
+	lastModified := time.Now()
+
+	o.specBytes = specBytes
+	o.specPb = specPb
+	o.specPbGz = specPbGz
+
+	o.specBytesETag = specBytesETag
+	o.specPbETag = specPbETag
+	o.specPbGzETag = specPbGzETag
+
+	o.lastModified = lastModified
 	return nil
 }

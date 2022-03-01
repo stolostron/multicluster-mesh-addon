@@ -14,7 +14,6 @@ package unix
 import (
 	"encoding/binary"
 	"syscall"
-	"time"
 	"unsafe"
 )
 
@@ -132,10 +131,8 @@ func Pipe2(p []int, flags int) error {
 	}
 	var pp [2]_C_int
 	err := pipe2(&pp, flags)
-	if err == nil {
-		p[0] = int(pp[0])
-		p[1] = int(pp[1])
-	}
+	p[0] = int(pp[0])
+	p[1] = int(pp[1])
 	return err
 }
 
@@ -375,7 +372,9 @@ func (sa *SockaddrInet4) sockaddr() (unsafe.Pointer, _Socklen, error) {
 	p := (*[2]byte)(unsafe.Pointer(&sa.raw.Port))
 	p[0] = byte(sa.Port >> 8)
 	p[1] = byte(sa.Port)
-	sa.raw.Addr = sa.Addr
+	for i := 0; i < len(sa.Addr); i++ {
+		sa.raw.Addr[i] = sa.Addr[i]
+	}
 	return unsafe.Pointer(&sa.raw), SizeofSockaddrInet4, nil
 }
 
@@ -388,7 +387,9 @@ func (sa *SockaddrInet6) sockaddr() (unsafe.Pointer, _Socklen, error) {
 	p[0] = byte(sa.Port >> 8)
 	p[1] = byte(sa.Port)
 	sa.raw.Scope_id = sa.ZoneId
-	sa.raw.Addr = sa.Addr
+	for i := 0; i < len(sa.Addr); i++ {
+		sa.raw.Addr[i] = sa.Addr[i]
+	}
 	return unsafe.Pointer(&sa.raw), SizeofSockaddrInet6, nil
 }
 
@@ -437,7 +438,9 @@ func (sa *SockaddrLinklayer) sockaddr() (unsafe.Pointer, _Socklen, error) {
 	sa.raw.Hatype = sa.Hatype
 	sa.raw.Pkttype = sa.Pkttype
 	sa.raw.Halen = sa.Halen
-	sa.raw.Addr = sa.Addr
+	for i := 0; i < len(sa.Addr); i++ {
+		sa.raw.Addr[i] = sa.Addr[i]
+	}
 	return unsafe.Pointer(&sa.raw), SizeofSockaddrLinklayer, nil
 }
 
@@ -852,10 +855,12 @@ func (sa *SockaddrTIPC) sockaddr() (unsafe.Pointer, _Socklen, error) {
 	if sa.Addr == nil {
 		return nil, 0, EINVAL
 	}
+
 	sa.raw.Family = AF_TIPC
 	sa.raw.Scope = int8(sa.Scope)
 	sa.raw.Addrtype = sa.Addr.tipcAddrtype()
 	sa.raw.Addr = sa.Addr.tipcAddr()
+
 	return unsafe.Pointer(&sa.raw), SizeofSockaddrTIPC, nil
 }
 
@@ -869,7 +874,9 @@ type SockaddrL2TPIP struct {
 func (sa *SockaddrL2TPIP) sockaddr() (unsafe.Pointer, _Socklen, error) {
 	sa.raw.Family = AF_INET
 	sa.raw.Conn_id = sa.ConnId
-	sa.raw.Addr = sa.Addr
+	for i := 0; i < len(sa.Addr); i++ {
+		sa.raw.Addr[i] = sa.Addr[i]
+	}
 	return unsafe.Pointer(&sa.raw), SizeofSockaddrL2TPIP, nil
 }
 
@@ -885,7 +892,9 @@ func (sa *SockaddrL2TPIP6) sockaddr() (unsafe.Pointer, _Socklen, error) {
 	sa.raw.Family = AF_INET6
 	sa.raw.Conn_id = sa.ConnId
 	sa.raw.Scope_id = sa.ZoneId
-	sa.raw.Addr = sa.Addr
+	for i := 0; i < len(sa.Addr); i++ {
+		sa.raw.Addr[i] = sa.Addr[i]
+	}
 	return unsafe.Pointer(&sa.raw), SizeofSockaddrL2TPIP6, nil
 }
 
@@ -981,7 +990,9 @@ func anyToSockaddr(fd int, rsa *RawSockaddrAny) (Sockaddr, error) {
 		sa.Hatype = pp.Hatype
 		sa.Pkttype = pp.Pkttype
 		sa.Halen = pp.Halen
-		sa.Addr = pp.Addr
+		for i := 0; i < len(sa.Addr); i++ {
+			sa.Addr[i] = pp.Addr[i]
+		}
 		return sa, nil
 
 	case AF_UNIX:
@@ -1020,14 +1031,18 @@ func anyToSockaddr(fd int, rsa *RawSockaddrAny) (Sockaddr, error) {
 			pp := (*RawSockaddrL2TPIP)(unsafe.Pointer(rsa))
 			sa := new(SockaddrL2TPIP)
 			sa.ConnId = pp.Conn_id
-			sa.Addr = pp.Addr
+			for i := 0; i < len(sa.Addr); i++ {
+				sa.Addr[i] = pp.Addr[i]
+			}
 			return sa, nil
 		default:
 			pp := (*RawSockaddrInet4)(unsafe.Pointer(rsa))
 			sa := new(SockaddrInet4)
 			p := (*[2]byte)(unsafe.Pointer(&pp.Port))
 			sa.Port = int(p[0])<<8 + int(p[1])
-			sa.Addr = pp.Addr
+			for i := 0; i < len(sa.Addr); i++ {
+				sa.Addr[i] = pp.Addr[i]
+			}
 			return sa, nil
 		}
 
@@ -1043,7 +1058,9 @@ func anyToSockaddr(fd int, rsa *RawSockaddrAny) (Sockaddr, error) {
 			sa := new(SockaddrL2TPIP6)
 			sa.ConnId = pp.Conn_id
 			sa.ZoneId = pp.Scope_id
-			sa.Addr = pp.Addr
+			for i := 0; i < len(sa.Addr); i++ {
+				sa.Addr[i] = pp.Addr[i]
+			}
 			return sa, nil
 		default:
 			pp := (*RawSockaddrInet6)(unsafe.Pointer(rsa))
@@ -1051,7 +1068,9 @@ func anyToSockaddr(fd int, rsa *RawSockaddrAny) (Sockaddr, error) {
 			p := (*[2]byte)(unsafe.Pointer(&pp.Port))
 			sa.Port = int(p[0])<<8 + int(p[1])
 			sa.ZoneId = pp.Scope_id
-			sa.Addr = pp.Addr
+			for i := 0; i < len(sa.Addr); i++ {
+				sa.Addr[i] = pp.Addr[i]
+			}
 			return sa, nil
 		}
 
@@ -1778,16 +1797,6 @@ func Mount(source string, target string, fstype string, flags uintptr, data stri
 	return mount(source, target, fstype, flags, datap)
 }
 
-//sys	mountSetattr(dirfd int, pathname string, flags uint, attr *MountAttr, size uintptr) (err error) = SYS_MOUNT_SETATTR
-
-// MountSetattr is a wrapper for mount_setattr(2).
-// https://man7.org/linux/man-pages/man2/mount_setattr.2.html
-//
-// Requires kernel >= 5.12.
-func MountSetattr(dirfd int, pathname string, flags uint, attr *MountAttr) error {
-	return mountSetattr(dirfd, pathname, flags, attr, unsafe.Sizeof(*attr))
-}
-
 func Sendfile(outfd int, infd int, offset *int64, count int) (written int, err error) {
 	if raceenabled {
 		raceReleaseMerge(unsafe.Pointer(&ioSync))
@@ -2315,56 +2324,11 @@ type RemoteIovec struct {
 //sys	shmdt(addr uintptr) (err error)
 //sys	shmget(key int, size int, flag int) (id int, err error)
 
-//sys	getitimer(which int, currValue *Itimerval) (err error)
-//sys	setitimer(which int, newValue *Itimerval, oldValue *Itimerval) (err error)
-
-// MakeItimerval creates an Itimerval from interval and value durations.
-func MakeItimerval(interval, value time.Duration) Itimerval {
-	return Itimerval{
-		Interval: NsecToTimeval(interval.Nanoseconds()),
-		Value:    NsecToTimeval(value.Nanoseconds()),
-	}
-}
-
-// A value which may be passed to the which parameter for Getitimer and
-// Setitimer.
-type ItimerWhich int
-
-// Possible which values for Getitimer and Setitimer.
-const (
-	ItimerReal    ItimerWhich = ITIMER_REAL
-	ItimerVirtual ItimerWhich = ITIMER_VIRTUAL
-	ItimerProf    ItimerWhich = ITIMER_PROF
-)
-
-// Getitimer wraps getitimer(2) to return the current value of the timer
-// specified by which.
-func Getitimer(which ItimerWhich) (Itimerval, error) {
-	var it Itimerval
-	if err := getitimer(int(which), &it); err != nil {
-		return Itimerval{}, err
-	}
-
-	return it, nil
-}
-
-// Setitimer wraps setitimer(2) to arm or disarm the timer specified by which.
-// It returns the previous value of the timer.
-//
-// If the Itimerval argument is the zero value, the timer will be disarmed.
-func Setitimer(which ItimerWhich, it Itimerval) (Itimerval, error) {
-	var prev Itimerval
-	if err := setitimer(int(which), &it, &prev); err != nil {
-		return Itimerval{}, err
-	}
-
-	return prev, nil
-}
-
 /*
  * Unimplemented
  */
 // AfsSyscall
+// Alarm
 // ArchPrctl
 // Brk
 // ClockNanosleep
@@ -2380,6 +2344,7 @@ func Setitimer(which ItimerWhich, it Itimerval) (Itimerval, error) {
 // GetMempolicy
 // GetRobustList
 // GetThreadArea
+// Getitimer
 // Getpmsg
 // IoCancel
 // IoDestroy
