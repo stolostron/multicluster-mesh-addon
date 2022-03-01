@@ -101,7 +101,7 @@ func (c *istioDiscoveryController) sync(ctx context.Context, syncCtx factory.Syn
 	isUserCreatedMesh := false
 	for _, userCreatedMesh := range userCreatedMeshList.Items {
 		// skip user created mesh for discovery
-		if userCreatedMesh.GetName() == name && userCreatedMesh.Spec.ControlPlane.Namespace == namespace && userCreatedMesh.Spec.ControlPlane.Revision == istioOperator.Spec.Revision {
+		if (userCreatedMesh.GetName() == name || userCreatedMesh.GetName()+"-gateways" == name) && userCreatedMesh.Spec.ControlPlane.Namespace == namespace && userCreatedMesh.Spec.ControlPlane.Revision == istioOperator.Spec.Revision {
 			isUserCreatedMesh = true
 			break
 		}
