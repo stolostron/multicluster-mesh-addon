@@ -129,7 +129,7 @@ func (o *AgentOptions) RunAgent(ctx context.Context, controllerContext *controll
 		)
 
 		// create an ossm mesh-deploy controller
-		ossmDeployController := meshdeploy.NewDeployController(
+		ossmDeployController := meshdeploy.NewOSSMDeployController(
 			o.SpokeClusterName,
 			o.AddonNamespace,
 			hubMeshClient,
@@ -169,6 +169,15 @@ func (o *AgentOptions) RunAgent(ctx context.Context, controllerContext *controll
 		controllerContext.EventRecorder,
 	)
 
+	istioDeployController := meshdeploy.NewIstioDeployController(
+		o.SpokeClusterName,
+		o.AddonNamespace,
+		hubMeshClient,
+		hubMeshInformerFactory.Mesh().V1alpha1().Meshes(),
+		spokeDynamicClient,
+		controllerContext.EventRecorder,
+	)
+
 	// create a lease updater
 	leaseUpdater := lease.NewLeaseUpdater(
 		spokeKubeClient,
@@ -181,6 +190,7 @@ func (o *AgentOptions) RunAgent(ctx context.Context, controllerContext *controll
 	go spokeDynamicInformerFactory.Start(ctx.Done())
 	go hubMeshInformerFactory.Start(ctx.Done())
 	go istioDiscoveryController.Run(ctx, 1)
+	go istioDeployController.Run(ctx, 1)
 	go leaseUpdater.Start(ctx)
 
 	<-ctx.Done()
