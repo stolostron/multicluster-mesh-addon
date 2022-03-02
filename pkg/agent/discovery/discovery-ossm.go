@@ -21,7 +21,7 @@ import (
 	meshtranslate "github.com/stolostron/multicluster-mesh-addon/pkg/translate"
 )
 
-type discoveryController struct {
+type ossmDiscoveryController struct {
 	clusterName     string
 	addonNamespace  string
 	hubMeshClient   meshclientset.Interface
@@ -30,7 +30,7 @@ type discoveryController struct {
 	recorder        events.Recorder
 }
 
-func NewDiscoveryController(
+func NewOSSMDiscoveryController(
 	clusterName string,
 	addonNamespace string,
 	hubMeshClient meshclientset.Interface,
@@ -38,7 +38,7 @@ func NewDiscoveryController(
 	smmrInformer maistrav1informer.ServiceMeshMemberRollInformer,
 	recorder events.Recorder,
 ) factory.Controller {
-	c := &discoveryController{
+	c := &ossmDiscoveryController{
 		clusterName:     clusterName,
 		addonNamespace:  addonNamespace,
 		hubMeshClient:   hubMeshClient,
@@ -52,10 +52,10 @@ func NewDiscoveryController(
 				key, _ := cache.MetaNamespaceKeyFunc(obj)
 				return key
 			}, smcpInformer.Informer()).
-		WithSync(c.sync).ToController("multicluster-mesh-discovery-controller", recorder)
+		WithSync(c.sync).ToController("multicluster-ossm-discovery-controller", recorder)
 }
 
-func (c *discoveryController) sync(ctx context.Context, syncCtx factory.SyncContext) error {
+func (c *ossmDiscoveryController) sync(ctx context.Context, syncCtx factory.SyncContext) error {
 	key := syncCtx.QueueKey()
 	klog.V(2).Infof("Reconciling SMCP %q", key)
 
@@ -107,7 +107,7 @@ func (c *discoveryController) sync(ctx context.Context, syncCtx factory.SyncCont
 		return nil
 	}
 
-	mesh, err := meshtranslate.TranslateToLogicMesh(smcp, smmr, c.clusterName)
+	mesh, err := meshtranslate.TranslateOSSMToLogicMesh(smcp, smmr, c.clusterName)
 	if err != nil {
 		return err
 	}

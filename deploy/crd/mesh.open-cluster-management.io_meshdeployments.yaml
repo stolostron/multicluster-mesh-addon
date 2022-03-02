@@ -75,6 +75,8 @@ spec:
                     items:
                       type: string
                     type: array
+                  revision:
+                    type: string
                   version:
                     type: string
                 type: object

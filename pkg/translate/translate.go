@@ -4,6 +4,11 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/gogo/protobuf/types"
+	iopspecv1alpha1 "istio.io/api/operator/v1alpha1"
+	iopv1alpha1 "istio.io/istio/operator/pkg/apis/istio/v1alpha1"
+	iopname "istio.io/istio/operator/pkg/name"
+	ioptranslate "istio.io/istio/operator/pkg/translate"
 	corev1 "k8s.io/api/core/v1"
 	resource "k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -16,15 +21,104 @@ import (
 	utils "github.com/stolostron/multicluster-mesh-addon/pkg/utils"
 )
 
-var profileComponentsMap map[string][]string
+var ossmProfileComponentsMap, istioProfileComponentsMap map[string][]string
 
 func init() {
-	profileComponentsMap = make(map[string][]string)
-	profileComponentsMap["default"] = []string{"grafana", "istio-discovery", "istio-egress", "istio-ingress", "kiali", "mesh-config", "prometheus", "telemetry-common", "tracing"}
+	ossmProfileComponentsMap = map[string][]string{
+		"default": []string{"grafana", "istio-discovery", "istio-egress", "istio-ingress", "kiali", "mesh-config", "prometheus", "telemetry-common", "tracing"},
+	}
+	istioProfileComponentsMap = map[string][]string{
+		"empty":     []string{},
+		"minimal":   []string{"base", "istiod"},
+		"default":   []string{"base", "istiod", "istio-ingress"},
+		"demo":      []string{"base", "istiod", "istio-egress", "istio-ingress"},
+		"openshift": []string{"base", "istiod", "istio-ingress", "cni"},
+		"external":  []string{"istiod-remote"},
+	}
 }
 
-// TranslateToLogicMesh translate the physical mesh to the logical mesh
-func TranslateToLogicMesh(smcp *maistrav2.ServiceMeshControlPlane, smmr *maistrav1.ServiceMeshMemberRoll, cluster string) (*meshv1alpha1.Mesh, error) {
+// TranslateIstioToLogicMesh translate the physical istio service mesh to the logical mesh
+func TranslateIstioToLogicMesh(iop *iopv1alpha1.IstioOperator, memberNamespaces []string, cluster string) (*meshv1alpha1.Mesh, error) {
+	trustDomain := "cluster.local"
+	if iop.Spec.MeshConfig != nil {
+		td, ok := iop.Spec.MeshConfig["trustDomain"]
+		if ok && td != nil && td.(string) != "" {
+			trustDomain = td.(string)
+		}
+	}
+
+	profile, controlPlaneNamespace, enabledComponents, err := getProfileNSAndEnabledComponents(iop)
+	if err != nil {
+		return nil, err
+	}
+
+	tag, ok := iop.Spec.Tag.(string)
+	if !ok {
+		return nil, fmt.Errorf("invalid tag for IstioOperatorSpec: %v", iop.Spec.Tag)
+	}
+
+	meshName := cluster + "-" + iop.GetNamespace() + "-" + iop.GetName()
+	mesh := &meshv1alpha1.Mesh{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      meshName,
+			Namespace: cluster,
+			Labels:    map[string]string{constants.LabelKeyForDiscoveriedMesh: "true"},
+		},
+		Spec: meshv1alpha1.MeshSpec{
+			MeshProvider: meshv1alpha1.MeshProviderCommunityIstio,
+			Cluster:      cluster,
+			ControlPlane: &meshv1alpha1.MeshControlPlane{
+				Namespace:  controlPlaneNamespace,
+				Profiles:   []string{profile},
+				Version:    tag,
+				Revision:   iop.Spec.Revision,
+				Components: enabledComponents,
+			},
+			MeshMemberRoll: memberNamespaces,
+			TrustDomain:    trustDomain,
+		},
+		// Status: meshv1alpha1.MeshStatus{
+		// 	Readiness: iop.Status.Readiness,
+		// },
+	}
+
+	return mesh, nil
+}
+
+func getProfileNSAndEnabledComponents(iop *iopv1alpha1.IstioOperator) (string, string, []string, error) {
+	var enabledComponents []string
+	if iop.Spec.Components != nil {
+		for _, c := range iopname.AllCoreComponentNames {
+			enabled, err := ioptranslate.IsComponentEnabledInSpec(c, iop.Spec)
+			if err != nil {
+				return "", "", nil, fmt.Errorf("failed to check if component: %s is enabled or not: %v", string(c), err)
+			}
+			if enabled {
+				enabledComponents = append(enabledComponents, iopname.UserFacingComponentName(c))
+			}
+		}
+		for _, c := range iop.Spec.Components.IngressGateways {
+			if c.Enabled.GetValue() {
+				enabledComponents = append(enabledComponents, iopname.UserFacingComponentName(iopname.IngressComponentName))
+				break
+			}
+		}
+		for _, c := range iop.Spec.Components.EgressGateways {
+			if c.Enabled.GetValue() {
+				enabledComponents = append(enabledComponents, iopname.UserFacingComponentName(iopname.EgressComponentName))
+				break
+			}
+		}
+	}
+
+	if configuredNamespace := iopv1alpha1.Namespace(iop.Spec); configuredNamespace != "" {
+		return iop.Spec.Profile, configuredNamespace, enabledComponents, nil
+	}
+	return iop.Spec.Profile, iopname.IstioDefaultNamespace, enabledComponents, nil
+}
+
+// TranslateOSSMToLogicMesh translate the physical openshift service mesh to the logical mesh
+func TranslateOSSMToLogicMesh(smcp *maistrav2.ServiceMeshControlPlane, smmr *maistrav1.ServiceMeshMemberRoll, cluster string) (*meshv1alpha1.Mesh, error) {
 	meshMember := []string{}
 	if smmr != nil {
 		meshMember = smmr.Spec.Members
@@ -70,8 +164,151 @@ func TranslateToLogicMesh(smcp *maistrav2.ServiceMeshControlPlane, smmr *maistra
 	return mesh, nil
 }
 
-// TranslateToPhysicalMesh translate the logical mesh to the physical mesh
-func TranslateToPhysicalMesh(mesh *meshv1alpha1.Mesh) (*maistrav2.ServiceMeshControlPlane, *maistrav1.ServiceMeshMemberRoll, error) {
+// TranslateToPhysicalIstio translate the logical mesh to the physical mesh
+func TranslateToPhysicalIstio(mesh *meshv1alpha1.Mesh) (*iopv1alpha1.IstioOperator, *iopv1alpha1.IstioOperator, error) {
+	if mesh.Spec.Cluster == "" {
+		return nil, nil, fmt.Errorf("cluster field in mesh object is empty")
+	}
+	if mesh.Spec.ControlPlane == nil {
+		return nil, nil, fmt.Errorf("controlPlane field in mesh object is empty")
+	}
+	if mesh.Spec.ControlPlane.Namespace == "" {
+		return nil, nil, fmt.Errorf("controlPlane namespace field in mesh object is empty")
+	}
+	iopName := mesh.GetName()
+	isDiscoveriedMesh, ok := mesh.GetLabels()[constants.LabelKeyForDiscoveriedMesh]
+	if ok && isDiscoveriedMesh == "true" {
+		iopName = strings.Replace(iopName, mesh.Spec.Cluster+"-"+mesh.Spec.ControlPlane.Namespace+"-", "", 1)
+	}
+	namespace := mesh.Spec.ControlPlane.Namespace
+	profile := "default"
+	if len(mesh.Spec.ControlPlane.Profiles) > 0 {
+		profile = mesh.Spec.ControlPlane.Profiles[0]
+	}
+
+	disabledPbVal := &iopspecv1alpha1.BoolValueForPB{BoolValue: types.BoolValue{Value: false}}
+	enabledPbVal := &iopspecv1alpha1.BoolValueForPB{BoolValue: types.BoolValue{Value: true}}
+	egressGatewaysEnabled, ingressGatewaysEnabled, gatewaysEnabled := false, false, false
+
+	// default iop for control plane
+	controlPlaneIOP := &iopv1alpha1.IstioOperator{
+		TypeMeta: metav1.TypeMeta{
+			Kind:       "IstioOperator",
+			APIVersion: "install.istio.io/v1alpha1",
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      iopName,
+			Namespace: namespace,
+		},
+		Spec: &iopspecv1alpha1.IstioOperatorSpec{
+			Tag:       mesh.Spec.ControlPlane.Version,
+			Revision:  mesh.Spec.ControlPlane.Revision,
+			Profile:   profile,
+			Namespace: namespace,
+			Components: &iopspecv1alpha1.IstioComponentSetSpec{
+				IngressGateways: []*iopspecv1alpha1.GatewaySpec{
+					{Name: "istio-ingressgateway", Enabled: disabledPbVal},
+				},
+				EgressGateways: []*iopspecv1alpha1.GatewaySpec{
+					{Name: "istio-egressgateway", Enabled: disabledPbVal},
+				},
+			},
+			Values: map[string]interface{}{
+				"global": map[string]interface{}{
+					"istioNamespace": namespace,
+				},
+			},
+		},
+	}
+
+	// default iop for gateways
+	gatewaysIOP := &iopv1alpha1.IstioOperator{
+		TypeMeta: metav1.TypeMeta{
+			Kind:       "IstioOperator",
+			APIVersion: "install.istio.io/v1alpha1",
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      iopName + "-gateways",
+			Namespace: namespace,
+		},
+		Spec: &iopspecv1alpha1.IstioOperatorSpec{
+			Tag:        mesh.Spec.ControlPlane.Version,
+			Revision:   mesh.Spec.ControlPlane.Revision,
+			Profile:    "empty",
+			Namespace:  namespace,
+			Components: &iopspecv1alpha1.IstioComponentSetSpec{},
+			Values: map[string]interface{}{
+				"global": map[string]interface{}{
+					"istioNamespace": namespace,
+				},
+				"gateways": map[string]interface{}{
+					"istio-ingressgateway": map[string]interface{}{
+						"injectionTemplate": "gateway",
+					},
+				},
+			},
+		},
+	}
+
+	// set trust domain
+	if mesh.Spec.TrustDomain != "" {
+		controlPlaneIOP.Spec.MeshConfig = map[string]interface{}{
+			"trustDomain": mesh.Spec.TrustDomain,
+		}
+	}
+
+	// addonEnabled := false
+	if mesh.Spec.ControlPlane.Components != nil {
+		for _, c := range mesh.Spec.ControlPlane.Components {
+			// if utils.SliceContainsString(istioProfileComponentsMap[profile], c) {
+			// 	continue
+			// }
+			switch c {
+			case "base":
+				controlPlaneIOP.Spec.Components.Base = &iopspecv1alpha1.BaseComponentSpec{Enabled: enabledPbVal}
+			case "istiod":
+				controlPlaneIOP.Spec.Components.Pilot = &iopspecv1alpha1.ComponentSpec{Enabled: enabledPbVal}
+			case "istiod-remote":
+				controlPlaneIOP.Spec.Components.IstiodRemote = &iopspecv1alpha1.ComponentSpec{Enabled: enabledPbVal}
+			case "cni":
+				controlPlaneIOP.Spec.Components.Cni = &iopspecv1alpha1.ComponentSpec{Enabled: enabledPbVal}
+			case "istio-ingress":
+				gatewaysIOP.Spec.Components.IngressGateways = []*iopspecv1alpha1.GatewaySpec{
+					{Name: "istio-ingressgateway", Enabled: enabledPbVal},
+				}
+				ingressGatewaysEnabled = true
+				gatewaysEnabled = true
+			case "istio-egress":
+				gatewaysIOP.Spec.Components.EgressGateways = []*iopspecv1alpha1.GatewaySpec{
+					{Name: "istio-egressgateway", Enabled: enabledPbVal},
+				}
+				egressGatewaysEnabled = true
+				gatewaysEnabled = true
+			}
+		}
+	}
+
+	if len(mesh.Spec.ControlPlane.Peers) > 0 {
+		if !ingressGatewaysEnabled {
+			gatewaysIOP.Spec.Components.IngressGateways = []*iopspecv1alpha1.GatewaySpec{}
+		}
+		if !egressGatewaysEnabled {
+			gatewaysIOP.Spec.Components.EgressGateways = []*iopspecv1alpha1.GatewaySpec{}
+		}
+		gatewaysEnabled = true
+	}
+
+	// TODO(morvencao): handle add gateway for peers
+
+	if !gatewaysEnabled {
+		return controlPlaneIOP, nil, nil
+	}
+
+	return controlPlaneIOP, gatewaysIOP, nil
+}
+
+// TranslateToPhysicalOSSM translate the logical mesh to the physical mesh
+func TranslateToPhysicalOSSM(mesh *meshv1alpha1.Mesh) (*maistrav2.ServiceMeshControlPlane, *maistrav1.ServiceMeshMemberRoll, error) {
 	if mesh.Spec.Cluster == "" {
 		return nil, nil, fmt.Errorf("cluster field in mesh object is empty")
 	}
@@ -111,9 +348,9 @@ func TranslateToPhysicalMesh(mesh *meshv1alpha1.Mesh) (*maistrav2.ServiceMeshCon
 	// var additionalEgressGatewayConfig map[string]*maistrav2.EgressGatewayConfig
 
 	if mesh.Spec.ControlPlane.Components != nil {
-		for _, c := range profiles {
+		for _, c := range mesh.Spec.ControlPlane.Components {
 			for _, p := range profiles {
-				if utils.SliceContainsString(profileComponentsMap[p], c) {
+				if utils.SliceContainsString(ossmProfileComponentsMap[p], c) {
 					continue
 				}
 				switch c {
