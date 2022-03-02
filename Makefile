@@ -81,11 +81,15 @@ generate: controller-gen ## Generate code containing DeepCopy, DeepCopyInto, and
 
 .PHONY: update-codegen
 update-codegen: # update the client set tools.
+	go mod vendor
 	./hack/update-codegen.sh
+	rm -rf vendor
 
 .PHONY: verify-codegen
 verify-codegen: # verify the client set tools.
+	go mod vendor
 	./hack/verify-codegen.sh
+	rm -rf vendor
 
 deploy: kustomize
 	cp deploy/kustomization.yaml deploy/kustomization.yaml.tmp
