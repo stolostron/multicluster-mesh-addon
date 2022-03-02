@@ -27,6 +27,7 @@ type MeshControlPlane struct {
 	Namespace  string   `json:"namespace,omitempty"`
 	Version    string   `json:"version,omitempty"`
 	Profiles   []string `json:"profiles,omitempty"`
+	Revision   string   `json:"revision,omitempty"`
 	Components []string `json:"components,omitempty"`
 	Peers      []Peer   `json:"peers,omitempty"`
 }
@@ -47,6 +48,7 @@ type MeshStatus struct {
 //+kubebuilder:subresource:status
 //+kubebuilder:printcolumn:name="CLUSTER",type="string",JSONPath=".spec.cluster",description="Cluster of the mesh"
 //+kubebuilder:printcolumn:name="VERSION",type="string",JSONPath=".spec.controlPlane.version",description="Version of the mesh"
+//+kubebuilder:printcolumn:name="REVISION",type="string",JSONPath=".spec.controlPlane.revision",description="Revision of the istio control plane"
 //+kubebuilder:printcolumn:name="PEERS",type="string",JSONPath=".spec.controlPlane.peers[*].name"
 //+kubebuilder:printcolumn:name="AGE",type="date",JSONPath=".metadata.creationTimestamp"
 
