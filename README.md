@@ -4,7 +4,11 @@ multicluster-mesh-addon is an enhanced addon created with [addon-framework](http
 
 ## Core Concepts
 
-1. **Mesh** - a `mesh` resource is mapping to a physical service mesh in a managed cluster, it contains the desired state and status of the backend service mesh. For each physical service mesh in a managed cluster, a mesh resource is created in the managed cluster namespace of hub cluster. An example of mesh resource would resemble the following yaml snippet:
+1. **Mesh** - a `mesh` resource is mapping to a physical service mesh in a managed cluster, it contains the desired state and status of the backend service mesh.
+
+![mesh-discovery](./mesh-discovery.jpg)
+
+For each physical service mesh in a managed cluster, a mesh resource is created in the managed cluster namespace of hub cluster. An example of mesh resource would resemble the following yaml snippet:
 
 ```yaml
 apiVersion: mesh.open-cluster-management.io/v1alpha1
@@ -29,7 +33,11 @@ status:
       unready: []
 ```
 
-2. **MeshDeployment** - `meshdeployment` resource is used to deploy physical service meshes to managed cluster(s), it supports deploying multiple physical service meshes to different managed clusters with one mesh template. An example of meshdeployment resource would resemble the following yaml snippet:
+2. **MeshDeployment** - `meshdeployment` resource is used to deploy physical service meshes to managed cluster(s), it supports deploying multiple physical service meshes to different managed clusters with one mesh template.
+
+![mesh-deployment](./mesh-deployment.jpg)
+
+An example of meshdeployment resource would resemble the following yaml snippet:
 
 ```yaml
 apiVersion: mesh.open-cluster-management.io/v1alpha1
@@ -49,7 +57,11 @@ status:
   appliedMeshes: ["managedcluster1-mesh", "managedcluster2-mesh"]
 ```
 
-3. **MeshFederation** - `meshfederation` resource is used to federate service meshes so that the physical service meshes located in one cluster or different clusters to securely share and manage traffic between meshes while maintaining strong administrative boundaries in a multi-tenant environment. An example of meshfederation resource would resemble the following yaml snippet:
+3. **MeshFederation** - `meshfederation` resource is used to federate service meshes so that the physical service meshes located in one cluster or different clusters to securely share and manage traffic between meshes while maintaining strong administrative boundaries in a multi-tenant environment.
+
+![mesh-federation](./mesh-federation.jpg)
+
+An example of meshfederation resource would resemble the following yaml snippet:
 
 ```yaml
 apiVersion: mesh.open-cluster-management.io/v1alpha1
