@@ -25,6 +25,10 @@ spec:
       jsonPath: .spec.controlPlane.version
       name: VERSION
       type: string
+    - description: Revision of the istio control plane
+      jsonPath: .spec.controlPlane.revision
+      name: REVISION
+      type: string
     - jsonPath: .spec.controlPlane.peers[*].name
       name: PEERS
       type: string
@@ -77,6 +81,8 @@ spec:
                     items:
                       type: string
                     type: array
+                  revision:
+                    type: string
                   version:
                     type: string
                 type: object

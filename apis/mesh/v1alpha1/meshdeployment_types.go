@@ -22,6 +22,7 @@ type MeshDeploymentStatus struct {
 //+kubebuilder:subresource:status
 //+kubebuilder:printcolumn:name="CLUSTERS",type="string",JSONPath=".spec.clusters",description="Target clusters of the mesh deployment"
 //+kubebuilder:printcolumn:name="VERSION",type="string",JSONPath=".spec.controlPlane.version",description="Version of the mesh"
+//+kubebuilder:printcolumn:name="REVISION",type="string",JSONPath=".spec.controlPlane.revision",description="Revision of the istio control plane"
 //+kubebuilder:printcolumn:name="AGE",type="date",JSONPath=".metadata.creationTimestamp"
 
 // MeshDeployment is the Schema for the meshdeployments API

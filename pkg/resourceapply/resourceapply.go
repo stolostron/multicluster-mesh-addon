@@ -6,9 +6,13 @@ import (
 	"reflect"
 	"strings"
 
+	equality "k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	unstructured "k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	runtime "k8s.io/apimachinery/pkg/runtime"
+	schema "k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/dynamic"
 	"k8s.io/klog/v2"
 
 	"github.com/openshift/library-go/pkg/operator/events"
@@ -127,6 +131,80 @@ func ApplyOperatorGroup(ctx context.Context, client olmv1client.OperatorGroupsGe
 	actual, err := client.OperatorGroups(required.Namespace).Update(context.TODO(), existingCopy, metav1.UpdateOptions{})
 	reportUpdateEvent(recorder, required, err)
 	return actual, true, err
+}
+
+type mimicDefaultingFunc func(obj *unstructured.Unstructured)
+
+func noDefaulting(obj *unstructured.Unstructured) {}
+
+type equalityChecker interface {
+	DeepEqual(a1, a2 interface{}) bool
+}
+
+func ApplyIstioOperator(ctx context.Context, client dynamic.Interface, recorder events.Recorder, required *unstructured.Unstructured) (*unstructured.Unstructured, bool, error) {
+	iopGVR := schema.GroupVersionResource{Group: "install.istio.io", Version: "v1alpha1", Resource: "istiooperators"}
+	namespace := required.GetNamespace()
+	existing, err := client.Resource(iopGVR).Namespace(namespace).Get(ctx, required.GetName(), metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		newObj, createErr := client.Resource(iopGVR).Namespace(namespace).Create(ctx, required, metav1.CreateOptions{})
+		if createErr != nil {
+			recorder.Warningf("IstioOperator Create Failed", "Failed to create istiooperators.install.istio.io/v1alpha1: %v", createErr)
+			return nil, true, createErr
+		}
+		recorder.Eventf("IstioOperator Created", "Created istiooperators.install.istio.io/v1alpha1 because it was missing")
+		return newObj, true, nil
+	}
+	if err != nil {
+		return nil, false, err
+	}
+
+	existingCopy := existing.DeepCopy()
+	// TODO(morvencao): merged the IOP with profile before checking
+	toUpdate, modified, err := ensureGenericSpec(required, existingCopy, noDefaulting, equality.Semantic)
+	if err != nil {
+		return nil, false, err
+	}
+
+	if !modified {
+		return nil, false, nil
+	}
+
+	if klog.V(2).Enabled() {
+		klog.Infof("IstioOperator %q changes: %v", namespace+"/"+required.GetName(), openshiftresourceapply.JSONPatchNoError(existing, toUpdate))
+	}
+
+	newObj, err := client.Resource(iopGVR).Namespace(namespace).Update(ctx, toUpdate, metav1.UpdateOptions{})
+	if err != nil {
+		recorder.Warningf("IstioOperator Update Failed", "Failed to update istiooperators.install.istio.io/v1alpha1: %v", err)
+		return nil, true, err
+	}
+
+	recorder.Eventf("IstioOperator Updated", "Updated istiooperators.install.istio.io/v1alpha1 because it changed")
+	return newObj, true, err
+}
+
+func ensureGenericSpec(required, existing *unstructured.Unstructured, mimicDefaultingFn mimicDefaultingFunc, equalityChecker equalityChecker) (*unstructured.Unstructured, bool, error) {
+	requiredCopy := required.DeepCopy()
+	mimicDefaultingFn(requiredCopy)
+	requiredSpec, _, err := unstructured.NestedMap(requiredCopy.UnstructuredContent(), "spec")
+	if err != nil {
+		return nil, false, err
+	}
+	existingSpec, _, err := unstructured.NestedMap(existing.UnstructuredContent(), "spec")
+	if err != nil {
+		return nil, false, err
+	}
+
+	if equalityChecker.DeepEqual(existingSpec, requiredSpec) {
+		return existing, false, nil
+	}
+
+	existingCopy := existing.DeepCopy()
+	if err := unstructured.SetNestedMap(existingCopy.UnstructuredContent(), requiredSpec, "spec"); err != nil {
+		return nil, true, err
+	}
+
+	return existingCopy, true, nil
 }
 
 func ApplyServiceMeshControlPlane(ctx context.Context, client maistrav2client.ServiceMeshControlPlanesGetter, recorder events.Recorder, required *maistrav2.ServiceMeshControlPlane) (*maistrav2.ServiceMeshControlPlane, bool, error) {
