@@ -33,7 +33,7 @@ var (
 	smcpName     = "" // smcpName is SMCP name of thev current reconciling ingress gateway service
 )
 
-type federationController struct {
+type ossmFederationController struct {
 	clusterName          string
 	addonNamespace       string
 	hubKubeClient        kubernetes.Interface
@@ -45,7 +45,7 @@ type federationController struct {
 	recorder             events.Recorder
 }
 
-func NewFederationController(
+func NewOSSMFederationController(
 	clusterName string,
 	addonNamespace string,
 	hubKubeClient kubernetes.Interface,
@@ -56,7 +56,7 @@ func NewFederationController(
 	spokeConfigMapInformer corev1informer.ConfigMapInformer,
 	recorder events.Recorder,
 ) factory.Controller {
-	c := &federationController{
+	c := &ossmFederationController{
 		clusterName:          clusterName,
 		addonNamespace:       addonNamespace,
 		hubKubeClient:        hubKubeClient,
@@ -76,7 +76,7 @@ func NewFederationController(
 			if err != nil {
 				return false
 			}
-			// only enqueue a service with label key "federation.maistra.io/ingress-for"
+			// only enqueue service with label key "federation.maistra.io/ingress-for"
 			var ok bool
 			peerMeshName, ok = accessor.GetLabels()[constants.FederationIngressServiceLabelKey]
 			if ok {
@@ -97,7 +97,7 @@ func NewFederationController(
 			if err != nil {
 				return false
 			}
-			// only enqueue a configmap with label "istio.io/config=true"
+			// only enqueue configmap with label "istio.io/config=true"
 			labels := accessor.GetLabels()
 			lv, ok := labels[constants.IstioCAConfigmapLabel]
 			return ok && (lv == "true")
@@ -110,15 +110,15 @@ func NewFederationController(
 			if err != nil {
 				return false
 			}
-			// only enqueue a configmap with label "mesh.open-cluster.io/federation=true"
+			// only enqueue configmap with label "mesh.open-cluster.io/federation=true"
 			labels := accessor.GetLabels()
 			lv, ok := labels[constants.FederationResourcesLabelKey]
 			return ok && (lv == "true") && strings.Contains(accessor.GetName(), "-to-")
 		}, hubConfigMapInformer.Informer()).
-		WithSync(c.sync).ToController("multicluster-mesh-federation-controller", recorder)
+		WithSync(c.sync).ToController("multicluster-ossm-federation-controller", recorder)
 }
 
-func (c *federationController) sync(ctx context.Context, syncCtx factory.SyncContext) error {
+func (c *ossmFederationController) sync(ctx context.Context, syncCtx factory.SyncContext) error {
 	key := syncCtx.QueueKey()
 	klog.V(2).Infof("Reconciling federation resources %q", key)
 
@@ -144,23 +144,23 @@ func (c *federationController) sync(ctx context.Context, syncCtx factory.SyncCon
 
 		sourceMeshNamespace, ok := federationConfigMap.Data[constants.FederationConfigMapMeshNamespaceLabelKey]
 		if !ok {
-			return fmt.Errorf("no source mesh namespace found in federation configmap :%s/%s", namespace, name)
+			return fmt.Errorf("no source mesh namespace found in federation configmap :%q/%q", namespace, name)
 		}
 		targetMeshNamespace, ok := federationConfigMap.Data[constants.FederationConfigMapMeshPeerNamespaceLabelKey]
 		if !ok {
-			return fmt.Errorf("no target mesh namespace found in federation configmap :%s/%s", namespace, name)
+			return fmt.Errorf("no target mesh namespace found in federation configmap :%q/%q", namespace, name)
 		}
 		targetMeshCA, ok := federationConfigMap.Data[constants.FederationConfigMapMeshPeerCALabelKey]
 		if !ok {
-			return fmt.Errorf("no target mesh CA found in federation configmap :%s/%s", namespace, name)
+			return fmt.Errorf("no target mesh CA found in federation configmap :%q/%q", namespace, name)
 		}
 		targetMeshEndpoint, ok := federationConfigMap.Data[constants.FederationConfigMapMeshPeerEndpointLabelKey]
 		if !ok {
-			return fmt.Errorf("no target mesh endpoint found in federation configmap :%s/%s", namespace, name)
+			return fmt.Errorf("no target mesh endpoint found in federation configmap :%q/%q", namespace, name)
 		}
 		targetMeshTrustDomain, ok := federationConfigMap.Data[constants.FederationConfigMapMeshPeerTrustDomainLabelKey]
 		if !ok {
-			return fmt.Errorf("no target mesh trust domain found in federation configmap :%s/%s", namespace, name)
+			return fmt.Errorf("no target mesh trust domain found in federation configmap :%q/%q", namespace, name)
 		}
 
 		strSplit := strings.Split(name, "-to-")
@@ -296,7 +296,7 @@ func (c *federationController) sync(ctx context.Context, syncCtx factory.SyncCon
 	}
 }
 
-func (c *federationController) removeMeshFederationResources(ctx context.Context, namespace, smcpName, peerMeshName string) error {
+func (c *ossmFederationController) removeMeshFederationResources(ctx context.Context, namespace, smcpName, peerMeshName string) error {
 	klog.V(2).Infof("removing federation resources: configmap %q/%q", c.clusterName, smcpName+"-ep4-"+peerMeshName)
 	err := c.hubKubeClient.CoreV1().ConfigMaps(c.clusterName).Delete(ctx, smcpName+"-ep4-"+peerMeshName, metav1.DeleteOptions{})
 	if err != nil && !errors.IsNotFound(err) {

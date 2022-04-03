@@ -94,6 +94,11 @@ func (c *meshDeploymentController) sync(ctx context.Context, syncCtx factory.Syn
 		meshName := fmt.Sprintf("%s-%s", cluster, meshDeployment.GetName())
 		// trust domain for each mesh need to be different, since the self generated CA for each mesh is different
 		trustDomain := fmt.Sprintf("%s.local", meshName)
+		if meshDeployment.Spec.MeshProvider == meshv1alpha1.MeshProviderCommunityIstio {
+			// for community mesh, the trust is built wirth shared CA, so the trust domain should be the same
+			// TODO(morvencao): fix the trust domain issue
+			trustDomain = "cluster.local"
+		}
 		mesh := &meshv1alpha1.Mesh{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      meshName,

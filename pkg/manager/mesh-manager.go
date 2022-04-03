@@ -113,6 +113,7 @@ func runController(ctx context.Context, controllerContext *controllercmd.Control
 		kubeClient,
 		meshClient,
 		kubeInformerFactory.Core().V1().ConfigMaps(),
+		kubeInformerFactory.Core().V1().Secrets(),
 		meshInformerFactory.Mesh().V1alpha1().MeshFederations(),
 		controllerContext.EventRecorder,
 	)

@@ -6,6 +6,8 @@ import (
 	"reflect"
 	"strings"
 
+	istionetworkv1alpha3 "istio.io/client-go/pkg/apis/networking/v1alpha3"
+	istiov1alpha3client "istio.io/client-go/pkg/clientset/versioned/typed/networking/v1alpha3"
 	equality "k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -265,6 +267,37 @@ func ApplyServiceMeshMemberRoll(ctx context.Context, client maistrav1client.Serv
 
 	klog.V(2).Infof("ServiceMeshMemberRoll %q changes: %v", required.Namespace+"/"+required.Name, openshiftresourceapply.JSONPatchNoError(existing, required))
 	actual, err := client.ServiceMeshMemberRolls(required.Namespace).Update(context.TODO(), existingCopy, metav1.UpdateOptions{})
+	reportUpdateEvent(recorder, required, err)
+	return actual, true, err
+}
+
+func ApplyIstioGateway(ctx context.Context, client istiov1alpha3client.GatewaysGetter, recorder events.Recorder, required *istionetworkv1alpha3.Gateway) (*istionetworkv1alpha3.Gateway, bool, error) {
+	existing, err := client.Gateways(required.Namespace).Get(context.TODO(), required.Name, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		requiredCopy := required.DeepCopy()
+		actual, err := client.Gateways(requiredCopy.Namespace).
+			Create(context.TODO(), resourcemerge.WithCleanLabelsAndAnnotations(requiredCopy).(*istionetworkv1alpha3.Gateway), metav1.CreateOptions{})
+		reportCreateEvent(recorder, requiredCopy, err)
+		return actual, true, err
+	}
+	if err != nil {
+		return nil, false, err
+	}
+
+	modified := resourcemerge.BoolPtr(false)
+	existingCopy := existing.DeepCopy()
+
+	resourcemerge.EnsureObjectMeta(modified, &existingCopy.ObjectMeta, required.ObjectMeta)
+	specSame := reflect.DeepEqual(&existingCopy.Spec, required.Spec)
+	if !*modified && specSame {
+		return existingCopy, false, nil
+	}
+	if !specSame {
+		existingCopy.Spec = required.Spec
+	}
+
+	klog.V(2).Infof("Istio Gateway %q changes: %v", required.Namespace+"/"+required.Name, openshiftresourceapply.JSONPatchNoError(existing, required))
+	actual, err := client.Gateways(required.Namespace).Update(context.TODO(), existingCopy, metav1.UpdateOptions{})
 	reportUpdateEvent(recorder, required, err)
 	return actual, true, err
 }

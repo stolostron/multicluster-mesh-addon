@@ -9,6 +9,7 @@ import (
 	"github.com/openshift/library-go/pkg/operator/resource/resourceapply"
 	olmclientset "github.com/operator-framework/operator-lifecycle-manager/pkg/api/client/clientset/versioned"
 	"github.com/spf13/cobra"
+	istioclientset "istio.io/client-go/pkg/clientset/versioned"
 	crdclientset "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
@@ -132,6 +133,12 @@ func (o *AgentOptions) RunAgent(ctx context.Context, controllerContext *controll
 	// build spoke dynamic informer factory
 	spokeDynamicInformerFactory := dynamicinformer.NewDynamicSharedInformerFactory(spokeDynamicClient, 10*time.Minute)
 
+	// build spoke istio api client
+	spokeIstioApiClient, err := istioclientset.NewForConfig(controllerContext.KubeConfig)
+	if err != nil {
+		return err
+	}
+
 	// check if current managed cluster is an openshift cluster
 	isOpenshift := utils.IsOpenshift(spokeKubeClient)
 	if isOpenshift {
@@ -173,7 +180,7 @@ func (o *AgentOptions) RunAgent(ctx context.Context, controllerContext *controll
 		)
 
 		// create an ossm mesh-federation controller
-		ossmFederationController := meshfederation.NewFederationController(
+		ossmFederationController := meshfederation.NewOSSMFederationController(
 			o.SpokeClusterName,
 			o.AddonNamespace,
 			hubKubeClient,
@@ -201,12 +208,26 @@ func (o *AgentOptions) RunAgent(ctx context.Context, controllerContext *controll
 		controllerContext.EventRecorder,
 	)
 
+	// create an istio mesh-deploy controller
 	istioDeployController := meshdeploy.NewIstioDeployController(
 		o.SpokeClusterName,
 		o.AddonNamespace,
 		hubMeshClient,
 		hubMeshInformerFactory.Mesh().V1alpha1().Meshes(),
 		spokeDynamicClient,
+		spokeKubeClient,
+		spokeIstioApiClient,
+		controllerContext.EventRecorder,
+	)
+
+	// create an istio mesh-federation controller
+	istioFederationController := meshfederation.NewIstioFederationController(
+		o.SpokeClusterName,
+		o.AddonNamespace,
+		hubKubeClient,
+		spokeKubeClient,
+		hubKubeInformerFactory.Core().V1().Secrets(),
+		hubMeshInformerFactory.Mesh().V1alpha1().Meshes(),
 		controllerContext.EventRecorder,
 	)
 
@@ -223,6 +244,7 @@ func (o *AgentOptions) RunAgent(ctx context.Context, controllerContext *controll
 	go hubMeshInformerFactory.Start(ctx.Done())
 	go istioDiscoveryController.Run(ctx, 1)
 	go istioDeployController.Run(ctx, 1)
+	go istioFederationController.Run(ctx, 1)
 	go leaseUpdater.Start(ctx)
 
 	<-ctx.Done()

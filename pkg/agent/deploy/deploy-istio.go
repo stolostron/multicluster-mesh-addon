@@ -9,6 +9,7 @@ import (
 
 	"github.com/openshift/library-go/pkg/controller/factory"
 	"github.com/openshift/library-go/pkg/operator/events"
+	istioclientset "istio.io/client-go/pkg/clientset/versioned"
 	istioctlcmd "istio.io/istio/istioctl/cmd"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -17,6 +18,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog/v2"
 
@@ -37,6 +39,8 @@ type istioDeployController struct {
 	hubMeshClient      meshclientset.Interface
 	hubMeshLister      meshv1alpha1lister.MeshLister
 	spokeDynamicClient dynamic.Interface
+	spokeKubeClient    kubernetes.Interface
+	spokeIstioClient   istioclientset.Interface
 	recorder           events.Recorder
 }
 
@@ -46,6 +50,8 @@ func NewIstioDeployController(
 	hubMeshClient meshclientset.Interface,
 	meshInformer meshv1alpha1informer.MeshInformer,
 	spokeDynamicClient dynamic.Interface,
+	spokeKubeClient kubernetes.Interface,
+	spokeIstioClient istioclientset.Interface,
 	recorder events.Recorder,
 ) factory.Controller {
 	c := &istioDeployController{
@@ -54,6 +60,8 @@ func NewIstioDeployController(
 		hubMeshClient:      hubMeshClient,
 		hubMeshLister:      meshInformer.Lister(),
 		spokeDynamicClient: spokeDynamicClient,
+		spokeKubeClient:    spokeKubeClient,
+		spokeIstioClient:   spokeIstioClient,
 		recorder:           recorder,
 	}
 	return factory.New().
@@ -119,13 +127,13 @@ func (c *istioDeployController) sync(ctx context.Context, syncCtx factory.SyncCo
 	}
 
 	if mesh.Spec.ControlPlane == nil {
-		return fmt.Errorf("empty controlPlane field  in mesh spec: %v", mesh)
+		return fmt.Errorf("empty controlPlane field in mesh spec: %v", mesh)
 	}
 	if err := c.applyIstioOperator(ctx, mesh.Spec.ControlPlane.Version, mesh.Spec.ControlPlane.Revision, mesh.Spec.ControlPlane.Namespace); err != nil {
 		return nil
 	}
 
-	controlPlaneIOP, gatewaysIOP, err := meshtranslate.TranslateToPhysicalIstio(mesh)
+	controlPlaneIOP, gatewaysIOP, eastwestgw, err := meshtranslate.TranslateToPhysicalIstio(mesh)
 	if err != nil {
 		return err
 	}
@@ -140,6 +148,26 @@ func (c *istioDeployController) sync(ctx context.Context, syncCtx factory.SyncCo
 		return err
 	}
 
+	klog.V(2).Infof("wait until the istiod is started up and running before install gateway resource...")
+	istiodNamespace := mesh.Spec.ControlPlane.Namespace
+	istiodName := "istiod"
+	if mesh.Spec.ControlPlane.Revision != "" {
+		istiodName = "-" + mesh.Spec.ControlPlane.Revision
+	}
+	err = wait.Poll(5*time.Second, 300*time.Second, func() (bool, error) {
+		istiod, err := c.spokeKubeClient.AppsV1().Deployments(istiodNamespace).Get(ctx, istiodName, metav1.GetOptions{})
+		if err != nil {
+			return false, nil
+		}
+		if istiod.Status.ReadyReplicas != istiod.Status.Replicas || istiod.Status.UpdatedReplicas != istiod.Status.Replicas {
+			return false, nil
+		}
+		return true, nil
+	})
+	if err != nil {
+		return fmt.Errorf("timeout wait for the istiod(%q/%q) is started", istiodNamespace, istiodName)
+	}
+
 	if gatewaysIOP != nil {
 		klog.V(2).Infof("applying istiooperator cr for gateways: %q/%q", gatewaysIOP.GetNamespace(), gatewaysIOP.GetName())
 		gwIOPObj, err := runtime.DefaultUnstructuredConverter.ToUnstructured(gatewaysIOP)
@@ -148,6 +176,27 @@ func (c *istioDeployController) sync(ctx context.Context, syncCtx factory.SyncCo
 		}
 		_, _, err = meshresourceapply.ApplyIstioOperator(ctx, c.spokeDynamicClient, c.recorder, &unstructured.Unstructured{Object: gwIOPObj})
 		if err != nil {
+			return err
+		}
+	}
+
+	if eastwestgw != nil {
+		klog.V(2).Infof("applying eastwest Gateway resource: %q/%q", eastwestgw.GetNamespace(), eastwestgw.GetName())
+		err = wait.Poll(5*time.Second, 300*time.Second, func() (bool, error) {
+			_, _, err = meshresourceapply.ApplyIstioGateway(ctx, c.spokeIstioClient.NetworkingV1alpha3(), c.recorder, eastwestgw)
+			if err != nil {
+				return false, nil
+			}
+			return true, nil
+		})
+		if err != nil {
+			return fmt.Errorf("timeout for applying eastwest Gateway resource: %q/%q", eastwestgw.GetNamespace(), eastwestgw.GetName())
+		}
+	} else {
+		// try to clean up the istio gateway resource if the eastwest gateway exists
+		klog.V(2).Infof("trying to remove eastwest Gateway resource: %q/%q for current mesh: %q/%q", mesh.Spec.ControlPlane.Namespace, "cross-network-gateway", mesh.GetNamespace(), mesh.GetName())
+		err := c.spokeIstioClient.NetworkingV1alpha3().Gateways(mesh.Spec.ControlPlane.Namespace).Delete(ctx, "cross-network-gateway", metav1.DeleteOptions{})
+		if err != nil && !errors.IsNotFound(err) {
 			return err
 		}
 	}
@@ -222,9 +271,28 @@ func (c *istioDeployController) removeMeshResources(ctx context.Context, mesh *m
 		return nil
 	}
 
-	controlPlaneIOP, gatewaysIOP, err := meshtranslate.TranslateToPhysicalIstio(mesh)
+	controlPlaneIOP, gatewaysIOP, eastwestgw, err := meshtranslate.TranslateToPhysicalIstio(mesh)
 	if err != nil {
 		return err
+	}
+
+	if eastwestgw != nil {
+		klog.V(2).Infof("removing eastwest Gateway resource: %q/%q", eastwestgw.GetNamespace(), eastwestgw.GetName())
+		err = c.spokeIstioClient.NetworkingV1alpha3().Gateways(eastwestgw.GetNamespace()).Delete(ctx, eastwestgw.GetName(), metav1.DeleteOptions{})
+		if err != nil && !errors.IsNotFound(err) {
+			return err
+		}
+
+		err = wait.Poll(5*time.Second, 60*time.Second, func() (bool, error) {
+			_, err := c.spokeIstioClient.NetworkingV1alpha3().Gateways(eastwestgw.GetNamespace()).Get(ctx, eastwestgw.GetName(), metav1.GetOptions{})
+			if err != nil && errors.IsNotFound(err) {
+				return true, nil
+			}
+			return false, nil
+		})
+		if err != nil {
+			return err
+		}
 	}
 
 	if gatewaysIOP != nil {
