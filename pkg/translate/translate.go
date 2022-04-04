@@ -5,7 +5,10 @@ import (
 	"strings"
 
 	"github.com/gogo/protobuf/types"
+	istioapimeshv1alpha1 "istio.io/api/mesh/v1alpha1"
+	istioapinetworkv1alpha3 "istio.io/api/networking/v1alpha3"
 	iopspecv1alpha1 "istio.io/api/operator/v1alpha1"
+	istionetworkv1alpha3 "istio.io/client-go/pkg/apis/networking/v1alpha3"
 	iopv1alpha1 "istio.io/istio/operator/pkg/apis/istio/v1alpha1"
 	iopname "istio.io/istio/operator/pkg/name"
 	ioptranslate "istio.io/istio/operator/pkg/translate"
@@ -165,15 +168,15 @@ func TranslateOSSMToLogicMesh(smcp *maistrav2.ServiceMeshControlPlane, smmr *mai
 }
 
 // TranslateToPhysicalIstio translate the logical mesh to the physical mesh
-func TranslateToPhysicalIstio(mesh *meshv1alpha1.Mesh) (*iopv1alpha1.IstioOperator, *iopv1alpha1.IstioOperator, error) {
+func TranslateToPhysicalIstio(mesh *meshv1alpha1.Mesh) (*iopv1alpha1.IstioOperator, *iopv1alpha1.IstioOperator, *istionetworkv1alpha3.Gateway, error) {
 	if mesh.Spec.Cluster == "" {
-		return nil, nil, fmt.Errorf("cluster field in mesh object is empty")
+		return nil, nil, nil, fmt.Errorf("cluster field in mesh object is empty")
 	}
 	if mesh.Spec.ControlPlane == nil {
-		return nil, nil, fmt.Errorf("controlPlane field in mesh object is empty")
+		return nil, nil, nil, fmt.Errorf("controlPlane field in mesh object is empty")
 	}
 	if mesh.Spec.ControlPlane.Namespace == "" {
-		return nil, nil, fmt.Errorf("controlPlane namespace field in mesh object is empty")
+		return nil, nil, nil, fmt.Errorf("controlPlane namespace field in mesh object is empty")
 	}
 	iopName := mesh.GetName()
 	isDiscoveriedMesh, ok := mesh.GetLabels()[constants.LabelKeyForDiscoveriedMesh]
@@ -188,7 +191,7 @@ func TranslateToPhysicalIstio(mesh *meshv1alpha1.Mesh) (*iopv1alpha1.IstioOperat
 
 	disabledPbVal := &iopspecv1alpha1.BoolValueForPB{BoolValue: types.BoolValue{Value: false}}
 	enabledPbVal := &iopspecv1alpha1.BoolValueForPB{BoolValue: types.BoolValue{Value: true}}
-	egressGatewaysEnabled, ingressGatewaysEnabled, gatewaysEnabled := false, false, false
+	ingressGatewaysEnabled, gatewaysEnabled := false, false
 
 	// default iop for control plane
 	controlPlaneIOP := &iopv1alpha1.IstioOperator{
@@ -282,29 +285,123 @@ func TranslateToPhysicalIstio(mesh *meshv1alpha1.Mesh) (*iopv1alpha1.IstioOperat
 				gatewaysIOP.Spec.Components.EgressGateways = []*iopspecv1alpha1.GatewaySpec{
 					{Name: "istio-egressgateway", Enabled: enabledPbVal},
 				}
-				egressGatewaysEnabled = true
 				gatewaysEnabled = true
 			}
 		}
 	}
 
+	var eastwestgw *istionetworkv1alpha3.Gateway
 	if len(mesh.Spec.ControlPlane.Peers) > 0 {
-		if !ingressGatewaysEnabled {
-			gatewaysIOP.Spec.Components.IngressGateways = []*iopspecv1alpha1.GatewaySpec{}
+		defaultConfig := &istioapimeshv1alpha1.ProxyConfig{
+			ProxyMetadata: map[string]string{
+				"ISTIO_META_DNS_CAPTURE":       "true",
+				"ISTIO_META_DNS_AUTO_ALLOCATE": "true",
+			},
 		}
-		if !egressGatewaysEnabled {
-			gatewaysIOP.Spec.Components.EgressGateways = []*iopspecv1alpha1.GatewaySpec{}
+		outboundTrafficPolicy := &istioapimeshv1alpha1.MeshConfig_OutboundTrafficPolicy{
+			Mode: istioapimeshv1alpha1.MeshConfig_OutboundTrafficPolicy_ALLOW_ANY,
+		}
+		if len(controlPlaneIOP.Spec.MeshConfig) > 0 {
+			controlPlaneIOP.Spec.MeshConfig["defaultConfig"] = defaultConfig
+			controlPlaneIOP.Spec.MeshConfig["outboundTrafficPolicy"] = outboundTrafficPolicy
+		} else {
+			controlPlaneIOP.Spec.MeshConfig = map[string]interface{}{
+				"defaultConfig":         defaultConfig,
+				"outboundTrafficPolicy": outboundTrafficPolicy,
+			}
+		}
+		controlPlaneIOP.Spec.Components.Pilot = &iopspecv1alpha1.ComponentSpec{
+			Enabled: enabledPbVal,
+			K8S: &iopspecv1alpha1.KubernetesResourcesSpec{
+				Env: []*iopspecv1alpha1.EnvVar{
+					{
+						Name:  "PILOT_SKIP_VALIDATE_TRUST_DOMAIN",
+						Value: "true",
+					},
+				},
+			},
+		}
+
+		globalValues := controlPlaneIOP.Spec.Values["global"].(map[string]interface{})
+		if len(globalValues) > 0 {
+			globalValues["network"] = iopName
+			globalValues["multiCluster"] = map[string]interface{}{"clusterName": iopName}
+		} else {
+			globalValues = map[string]interface{}{
+				"network":      iopName,
+				"multiCluster": map[string]interface{}{"clusterName": iopName},
+			}
+		}
+		controlPlaneIOP.Spec.Values["global"] = globalValues
+
+		eastwestgateway := &iopspecv1alpha1.GatewaySpec{
+			Name:    "istio-eastwestgateway",
+			Enabled: enabledPbVal,
+			Label: map[string]string{
+				"istio": "eastwestgateway",
+				"app":   "istio-eastwestgateway",
+			},
+			K8S: &iopspecv1alpha1.KubernetesResourcesSpec{
+				Service: &iopspecv1alpha1.ServiceSpec{
+					Type: "LoadBalancer",
+					Ports: []*iopspecv1alpha1.ServicePort{
+						{
+							Name:       "status-port",
+							Port:       15021,
+							TargetPort: &iopspecv1alpha1.IntOrStringForPB{IntOrString: intstr.FromInt(15021)},
+						},
+						{
+							Name:       "http2",
+							Port:       80,
+							TargetPort: &iopspecv1alpha1.IntOrStringForPB{IntOrString: intstr.FromInt(8080)},
+						},
+						{
+							Name:       "https",
+							Port:       443,
+							TargetPort: &iopspecv1alpha1.IntOrStringForPB{IntOrString: intstr.FromInt(8443)},
+						},
+						{
+							Name:       "tls",
+							Port:       15443,
+							TargetPort: &iopspecv1alpha1.IntOrStringForPB{IntOrString: intstr.FromInt(15443)},
+						},
+					},
+				},
+			},
+		}
+
+		if !ingressGatewaysEnabled {
+			gatewaysIOP.Spec.Components.IngressGateways = []*iopspecv1alpha1.GatewaySpec{eastwestgateway}
+		} else {
+			gatewaysIOP.Spec.Components.IngressGateways = append(gatewaysIOP.Spec.Components.IngressGateways, eastwestgateway)
 		}
 		gatewaysEnabled = true
+		eastwestgw = &istionetworkv1alpha3.Gateway{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "cross-network-gateway",
+				Namespace: namespace,
+			},
+			Spec: istioapinetworkv1alpha3.Gateway{
+				Selector: map[string]string{
+					"istio": "eastwestgateway",
+					"app":   "istio-eastwestgateway",
+				},
+				Servers: []*istioapinetworkv1alpha3.Server{
+					{
+						Hosts: []string{"*.global"},
+						Port:  &istioapinetworkv1alpha3.Port{Name: "tls", Number: 15443, Protocol: "TLS"},
+						Tls:   &istioapinetworkv1alpha3.ServerTLSSettings{Mode: istioapinetworkv1alpha3.ServerTLSSettings_AUTO_PASSTHROUGH},
+					},
+				},
+			},
+		}
 	}
-
-	// TODO(morvencao): handle add gateway for peers
 
 	if !gatewaysEnabled {
-		return controlPlaneIOP, nil, nil
+		return controlPlaneIOP, nil, nil, nil
 	}
 
-	return controlPlaneIOP, gatewaysIOP, nil
+	return controlPlaneIOP, gatewaysIOP, eastwestgw, nil
 }
 
 // TranslateToPhysicalOSSM translate the logical mesh to the physical mesh

@@ -4,7 +4,7 @@ metadata:
   name: multicluster-mesh-addon
 rules:
 - apiGroups: [""]
-  resources: ["configmaps", "events"]
+  resources: ["configmaps", "events", "secrets"]
   verbs: ["get", "list", "watch", "create", "update", "delete", "deletecollection", "patch"]
 - apiGroups: ["rbac.authorization.k8s.io"]
   resources: ["roles", "rolebindings"]

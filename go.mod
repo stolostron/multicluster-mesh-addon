@@ -9,8 +9,10 @@ require (
 	github.com/operator-framework/operator-lifecycle-manager v0.20.0
 	github.com/spf13/cobra v1.3.0
 	istio.io/api v0.0.0-20220225184955-0511549a0fae
+	istio.io/client-go v1.13.1-0.20220211222436-b8be5918f051
 	istio.io/istio v0.0.0-20220218170501-5f3b5ed958ae
 	k8s.io/api v0.23.4
+	k8s.io/apiextensions-apiserver v0.23.1
 	k8s.io/apimachinery v0.23.4
 	k8s.io/client-go v0.23.4
 	k8s.io/code-generator v0.23.4
@@ -228,10 +230,8 @@ require (
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 	gopkg.in/yaml.v3 v3.0.0-20210107192922-496545a6307b // indirect
 	helm.sh/helm/v3 v3.8.0 // indirect
-	istio.io/client-go v1.13.1-0.20220211222436-b8be5918f051 // indirect
 	istio.io/gogo-genproto v0.0.0-20220210173915-60ecc9c22101 // indirect
 	istio.io/pkg v0.0.0-20220218005410-1d45ba8be719 // indirect
-	k8s.io/apiextensions-apiserver v0.23.1 // indirect
 	k8s.io/apiserver v0.23.1 // indirect
 	k8s.io/cli-runtime v0.23.4 // indirect
 	k8s.io/gengo v0.0.0-20210813121822-485abfe95c7c // indirect
