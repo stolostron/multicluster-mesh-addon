@@ -140,10 +140,12 @@ func (c *ossmDeployController) sync(ctx context.Context, syncCtx factory.SyncCon
 		return err
 	}
 
-	klog.V(2).Infof("applying servicemeshmemberroll %q/%q", smmr.GetNamespace(), smmr.GetName())
-	_, _, err = meshresourceapply.ApplyServiceMeshMemberRoll(ctx, c.spokeMaistraClient.CoreV1(), c.recorder, smmr)
-	if err != nil {
-		return err
+	if smmr != nil {
+		klog.V(2).Infof("applying servicemeshmemberroll %q/%q", smmr.GetNamespace(), smmr.GetName())
+		_, _, err = meshresourceapply.ApplyServiceMeshMemberRoll(ctx, c.spokeMaistraClient.CoreV1(), c.recorder, smmr)
+		if err != nil {
+			return err
+		}
 	}
 
 	return nil

@@ -77,8 +77,7 @@ func NewOSSMFederationController(
 				return false
 			}
 			// only enqueue service with label key "federation.maistra.io/ingress-for"
-			var ok bool
-			peerMeshName, ok = accessor.GetLabels()[constants.FederationIngressServiceLabelKey]
+			peerName, ok := accessor.GetLabels()[constants.FederationIngressServiceLabelKey]
 			if ok {
 				for _, ref := range accessor.GetOwnerReferences() {
 					if ref.Kind == "ServiceMeshControlPlane" {
@@ -87,7 +86,11 @@ func NewOSSMFederationController(
 					}
 				}
 			}
-			return ok
+			if ok && peerName != "" {
+				peerMeshName = peerName
+				return true
+			}
+			return false
 		}, spokeServiceInformer.Informer()).
 		WithFilteredEventsInformersQueueKeyFunc(func(obj runtime.Object) string {
 			key, _ := cache.MetaNamespaceKeyFunc(obj)
