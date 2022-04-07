@@ -32,7 +32,11 @@ import (
 
 //go:embed manifests
 var fs embed.FS
-var istiooperatorcrd = "manifests/crd-istiooperator.yaml"
+var (
+	istiooperatorCrd = "manifests/crd-istiooperator.yaml"
+	ossmSmcpCrd      = "manifests/crd-smcp.yaml"
+	ossmSmmrCrd      = "manifests/crd-smmr.yaml"
+)
 
 func NewAgentCommand(addonName string) *cobra.Command {
 	o := NewAgentOptions(addonName)
@@ -105,43 +109,30 @@ func (o *AgentOptions) RunAgent(ctx context.Context, controllerContext *controll
 		return err
 	}
 
-	results := resourceapply.ApplyDirectly(context.Background(),
-		resourceapply.NewClientHolder().WithAPIExtensionsClient(spokeCrdClient),
-		controllerContext.EventRecorder,
-		resourceapply.NewResourceCache(),
-		func(name string) ([]byte, error) {
-			template, err := fs.ReadFile(istiooperatorcrd)
-			if err != nil {
-				return nil, err
-			}
-			return template, err
-		},
-		istiooperatorcrd,
-	)
-	for _, result := range results {
-		if result.Error != nil {
-			return result.Error
-		}
-	}
-
-	// build dynamic client of managed cluster
-	spokeDynamicClient, err := dynamic.NewForConfig(controllerContext.KubeConfig)
-	if err != nil {
-		return err
-	}
-
-	// build spoke dynamic informer factory
-	spokeDynamicInformerFactory := dynamicinformer.NewDynamicSharedInformerFactory(spokeDynamicClient, 10*time.Minute)
-
-	// build spoke istio api client
-	spokeIstioApiClient, err := istioclientset.NewForConfig(controllerContext.KubeConfig)
-	if err != nil {
-		return err
-	}
-
 	// check if current managed cluster is an openshift cluster
 	isOpenshift := utils.IsOpenshift(spokeKubeClient)
-	if isOpenshift {
+	if isOpenshift { // handle openshift managed clusters
+		// apply the CRDs for SMCP and SMMR
+		results := resourceapply.ApplyDirectly(ctx,
+			resourceapply.NewClientHolder().WithAPIExtensionsClient(spokeCrdClient),
+			controllerContext.EventRecorder,
+			resourceapply.NewResourceCache(),
+			func(name string) ([]byte, error) {
+				template, err := fs.ReadFile(name)
+				if err != nil {
+					return nil, err
+				}
+				return template, err
+			},
+			ossmSmcpCrd,
+			ossmSmmrCrd,
+		)
+		for _, result := range results {
+			if result.Error != nil {
+				return result.Error
+			}
+		}
+
 		// build olm client of managed cluster
 		spokeOLMClient, err := olmclientset.NewForConfig(controllerContext.KubeConfig)
 		if err != nil {
@@ -196,40 +187,79 @@ func (o *AgentOptions) RunAgent(ctx context.Context, controllerContext *controll
 		go ossmDiscoveryController.Run(ctx, 1)
 		go ossmDeployController.Run(ctx, 1)
 		go ossmFederationController.Run(ctx, 1)
+	} else { // handle non-openshift(*KS) managed clusters
+		results := resourceapply.ApplyDirectly(ctx,
+			resourceapply.NewClientHolder().WithAPIExtensionsClient(spokeCrdClient),
+			controllerContext.EventRecorder,
+			resourceapply.NewResourceCache(),
+			func(name string) ([]byte, error) {
+				template, err := fs.ReadFile(name)
+				if err != nil {
+					return nil, err
+				}
+				return template, err
+			},
+			istiooperatorCrd,
+		)
+		for _, result := range results {
+			if result.Error != nil {
+				return result.Error
+			}
+		}
+
+		// build dynamic client of managed cluster
+		spokeDynamicClient, err := dynamic.NewForConfig(controllerContext.KubeConfig)
+		if err != nil {
+			return err
+		}
+
+		// build spoke dynamic informer factory
+		spokeDynamicInformerFactory := dynamicinformer.NewDynamicSharedInformerFactory(spokeDynamicClient, 10*time.Minute)
+
+		// build spoke istio api client
+		spokeIstioApiClient, err := istioclientset.NewForConfig(controllerContext.KubeConfig)
+		if err != nil {
+			return err
+		}
+
+		// create an upstream istio discovery controller
+		istioDiscoveryController := meshdiscovery.NewIstioDiscoveryController(
+			o.SpokeClusterName,
+			o.AddonNamespace,
+			hubMeshClient,
+			spokeKubeClient,
+			spokeDynamicInformerFactory.ForResource(schema.GroupVersionResource{Group: "install.istio.io", Version: "v1alpha1", Resource: "istiooperators"}),
+			controllerContext.EventRecorder,
+		)
+
+		// create an istio mesh-deploy controller
+		istioDeployController := meshdeploy.NewIstioDeployController(
+			o.SpokeClusterName,
+			o.AddonNamespace,
+			hubMeshClient,
+			hubMeshInformerFactory.Mesh().V1alpha1().Meshes(),
+			spokeDynamicClient,
+			spokeKubeClient,
+			spokeIstioApiClient,
+			controllerContext.EventRecorder,
+		)
+
+		// create an istio mesh-federation controller
+		istioFederationController := meshfederation.NewIstioFederationController(
+			o.SpokeClusterName,
+			o.AddonNamespace,
+			hubKubeClient,
+			spokeKubeClient,
+			hubKubeInformerFactory.Core().V1().Secrets(),
+			hubMeshInformerFactory.Mesh().V1alpha1().Meshes(),
+			controllerContext.EventRecorder,
+		)
+
+		go spokeDynamicInformerFactory.Start(ctx.Done())
+		go istioDiscoveryController.Run(ctx, 1)
+		go istioDeployController.Run(ctx, 1)
+		go istioFederationController.Run(ctx, 1)
 	}
-
-	// create an community istio discovery controller
-	istioDiscoveryController := meshdiscovery.NewIstioDiscoveryController(
-		o.SpokeClusterName,
-		o.AddonNamespace,
-		hubMeshClient,
-		spokeKubeClient,
-		spokeDynamicInformerFactory.ForResource(schema.GroupVersionResource{Group: "install.istio.io", Version: "v1alpha1", Resource: "istiooperators"}),
-		controllerContext.EventRecorder,
-	)
-
-	// create an istio mesh-deploy controller
-	istioDeployController := meshdeploy.NewIstioDeployController(
-		o.SpokeClusterName,
-		o.AddonNamespace,
-		hubMeshClient,
-		hubMeshInformerFactory.Mesh().V1alpha1().Meshes(),
-		spokeDynamicClient,
-		spokeKubeClient,
-		spokeIstioApiClient,
-		controllerContext.EventRecorder,
-	)
-
-	// create an istio mesh-federation controller
-	istioFederationController := meshfederation.NewIstioFederationController(
-		o.SpokeClusterName,
-		o.AddonNamespace,
-		hubKubeClient,
-		spokeKubeClient,
-		hubKubeInformerFactory.Core().V1().Secrets(),
-		hubMeshInformerFactory.Mesh().V1alpha1().Meshes(),
-		controllerContext.EventRecorder,
-	)
 
 	// create a lease updater
 	leaseUpdater := lease.NewLeaseUpdater(
@@ -240,11 +270,7 @@ func (o *AgentOptions) RunAgent(ctx context.Context, controllerContext *controll
 
 	go hubKubeInformerFactory.Start(ctx.Done())
 	go spokeKubeInformerFactory.Start(ctx.Done())
-	go spokeDynamicInformerFactory.Start(ctx.Done())
 	go hubMeshInformerFactory.Start(ctx.Done())
-	go istioDiscoveryController.Run(ctx, 1)
-	go istioDeployController.Run(ctx, 1)
-	go istioFederationController.Run(ctx, 1)
 	go leaseUpdater.Start(ctx)
 
 	<-ctx.Done()

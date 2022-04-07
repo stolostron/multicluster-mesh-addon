@@ -89,7 +89,7 @@ func (c *ossmDiscoveryController) sync(ctx context.Context, syncCtx factory.Sync
 	smmr, err := c.spokeSMMRLister.ServiceMeshMemberRolls(namespace).Get("default")
 	switch {
 	case errors.IsNotFound(err):
-		return nil
+		klog.V(2).Infof("no SMMR found for the SMMR resource %q/%q", namespace, name)
 	case err != nil:
 		return err
 	}
