@@ -21,12 +21,17 @@ kubectl apply -n bookinfo -f https://raw.githubusercontent.com/istio/istio/relea
 kubectl apply -n bookinfo -f https://raw.githubusercontent.com/istio/istio/release-1.8/samples/bookinfo/platform/kube/bookinfo.yaml -l 'account=ratings'
 ```
 
-3. Create the following `serviceentry` in managed cluster `eks1` to discovery service(reviews-v3) from mesh `eks2-istio`:
+3. Get the the network load balancer IP of eastwest gateway from mesh `eks2-istio`:
 
 _Note:_ Make sure the cloud provider support the network load balancer IP before proceeding.
 
 ```bash
 EASTWAST_GW_IP=$(kubectl -n istio-system get svc istio-eastwestgateway -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+```
+
+4. Create the following `serviceentry` in managed cluster `eks1` to discovery service(reviews-v3) from mesh `eks2-istio` with the IP retrieved from the last step:
+
+```bash
 cat << EOF | kubectl apply -f -
 apiVersion: networking.istio.io/v1beta1
 kind: ServiceEntry
@@ -54,7 +59,7 @@ spec:
 EOF
 ```
 
-4. Create the following `serviceentry` and `destinationrule` resources in managed cluster `eks2` to expose service(reviews-v3) in mesh `eks2-istio`:
+5. Create the following `serviceentry` and `destinationrule` resources in managed cluster `eks2` to expose service(reviews-v3) in mesh `eks2-istio`:
 
 ```bash
 REVIEW_V3_IP=$(kubectl -n bookinfo get pod -l app=reviews -o jsonpath="{.items[0].status.podIP}")
@@ -96,7 +101,7 @@ spec:
 EOF
 ```
 
-5. Create the following `virtualservice` and `destinationrule` resources in managed cluster `eks1` to route traffic from mesh `eks1-istio` to mesh `eks2-istio`:
+6. Create the following `virtualservice` and `destinationrule` resources in managed cluster `eks1` to route traffic from mesh `eks1-istio` to mesh `eks2-istio`:
 
 ```bash
 cat << EOF | kubectl apply -f -
@@ -161,7 +166,7 @@ spec:
 EOF
 ```
 
-6. Access the bookinfo from your browser with the following address from `eks1` cluster:
+7. Access the bookinfo from your browser with the following address from `eks1` cluster:
 
 ```bash
 INGRESS_GW_IP=$(kubectl -n istio-system get svc istio-ingressgateway -o jsonpath='{.status.loadBalancer.ingress[0].ip}')

@@ -78,4 +78,4 @@ EOF
 echo http://$(oc -n mesh-system get route istio-ingressgateway -o jsonpath={.spec.host})/productpage
 ```
 
-_Note_: The expected result is that by refreshing the page several times, you should see different versions of reviews shown in productpage, presented in a round robin style (red stars, black stars, no stars). Because reviews-v2, reviews-v3 and ratings service are running in another mesh, if you could see black stars and red stars reviews, then it means traffic across meshes are successfully routed.
+_Note_: It may take a few miniutes for the mesh federation controller to discovery the services in peer mesh. Normally, after 2-3 minutes, the expected result is that by refreshing the productpage several times, you should see different versions of reviews shown in productpage, presented in a round robin style (red stars, black stars, no stars). Because reviews-v2, reviews-v3 and ratings service are running in another mesh, if you could see black stars and red stars reviews, then it means traffic across meshes are successfully routed.
