@@ -26,7 +26,8 @@ To simplify the configuration and operation of service meshes, we created the fo
         version: v2.1
       meshMemberRoll: ["istio-apps"]
       meshProvider: Openshift Service Mesh
-      trustDomain: cluster.local
+      meshConfig:
+        trustDomain: cluster.local
     status:
       readiness:
         components:
@@ -234,6 +235,35 @@ _Note_: For now, [Openshift Service Mesh](https://docs.openshift.com/container-p
 
     - [Mesh federation verify for Openshift Service Mesh](mesh-federation-verify-ossm.md)
     - [Mesh federation verify for upstream Istio](mesh-federation-verify-istio.md)
+
+## TroubleShooting
+
+If the traffic across meshes/clusters can't be routed successfully after creating MeshFederation resource, follow these steps to discover the root cause for different mesh providers:
+
+1. For Openshift Service Mesh provider:
+
+  - Make sure the services are exported from source mesh and imported into target mesh.
+  - Make sure the `ServiceMeshPeer` resource is created and its remotes connected status is `true` for each peer mesh.
+  - Make sure the mesh CA are exchanged by checking the CA configmap named `<peer-mesh-name>-ca-root-cert` is created in each mesh.
+  - Make sure the ingress gateway named `<peer-mesh-name>-ingress` and egress gateway named `<peer-mesh-name>-egress` for peer mesh traffic is created in each mesh.
+
+2. For Istio provider:
+
+  - Make sure the services are exported by creating corresponding `ServiceEntry` resources.
+  - Make sure the eastwest gateway for each mesh is created and has a loader balancer IP allocated.
+  - Make sure `ServiceEntry` resource for remote service has the loader balancer IP of eastwest gateway for the peer mesh.
+  - Make sure the configMap named `cacerts` for the intermediate CA is created for each mesh.
+
+If the cross meshes/clusters traffic is still not routed successfully after all above checks, then open the access logs for the gateways by editting the MeshDeployment resources to add the following section to the `spec`:
+
+```yaml
+  meshConfig:
+    proxyConfig:
+      accessLogging:
+        file: /dev/stdout
+```
+
+Then check the access logs for the easteast gateways for each mesh.
 
 ## Future Work
 
