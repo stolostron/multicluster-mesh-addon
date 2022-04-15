@@ -25,9 +25,9 @@ spec:
       jsonPath: .spec.controlPlane.version
       name: VERSION
       type: string
-    - description: Revision of the istio control plane
-      jsonPath: .spec.controlPlane.revision
-      name: REVISION
+    - description: Provider of the mesh
+      jsonPath: .spec.meshProvider
+      name: PROVIDER
       type: string
     - jsonPath: .spec.controlPlane.peers[*].name
       name: PEERS
@@ -86,13 +86,33 @@ spec:
                   version:
                     type: string
                 type: object
+              meshConfig:
+                description: MeshConfig defines the config for the mesh(data plane)
+                properties:
+                  proxyConfig:
+                    description: ProxyConfig defines the config for the proxy(gateway
+                      proxy and proxy sidecars)
+                    properties:
+                      accessLogging:
+                        description: AccessLogging defines the config for the proxy
+                          access logs
+                        properties:
+                          encoding:
+                            type: string
+                          file:
+                            type: string
+                          format:
+                            type: string
+                        type: object
+                    type: object
+                  trustDomain:
+                    type: string
+                type: object
               meshMemberRoll:
                 items:
                   type: string
                 type: array
               meshProvider:
-                type: string
-              trustDomain:
                 type: string
             type: object
           status:

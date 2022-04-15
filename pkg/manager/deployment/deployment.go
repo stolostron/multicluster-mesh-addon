@@ -92,12 +92,13 @@ func (c *meshDeploymentController) sync(ctx context.Context, syncCtx factory.Syn
 	for _, cluster := range meshDeployment.Spec.Clusters {
 		// add cluster name prefix to mesh name to distinguish meshes in mesh federation
 		meshName := fmt.Sprintf("%s-%s", cluster, meshDeployment.GetName())
-		// trust domain for each mesh need to be different, since the self generated CA for each mesh is different
-		trustDomain := fmt.Sprintf("%s.local", meshName)
-		if meshDeployment.Spec.MeshProvider == meshv1alpha1.MeshProviderCommunityIstio {
-			// for community mesh, the trust is built wirth shared CA, so the trust domain should be the same
-			// TODO(morvencao): fix the trust domain issue
-			trustDomain = "cluster.local"
+		meshConfig := meshDeployment.Spec.MeshConfig
+		if meshConfig == nil {
+			meshConfig = &meshv1alpha1.MeshConfig{}
+		}
+		if meshDeployment.Spec.MeshProvider == meshv1alpha1.MeshProviderOpenshift {
+			// for OSSM, trust domain for each mesh need to be different, since the self generated CA for each mesh is different
+			meshConfig.TrustDomain = fmt.Sprintf("%s.local", meshName)
 		}
 		mesh := &meshv1alpha1.Mesh{
 			ObjectMeta: metav1.ObjectMeta{
@@ -108,11 +109,10 @@ func (c *meshDeploymentController) sync(ctx context.Context, syncCtx factory.Syn
 				MeshProvider:   meshDeployment.Spec.MeshProvider,
 				Cluster:        cluster,
 				ControlPlane:   meshDeployment.Spec.ControlPlane,
+				MeshConfig:     meshConfig,
 				MeshMemberRoll: meshDeployment.Spec.MeshMemberRoll,
-				TrustDomain:    trustDomain,
 			},
 		}
-
 		_, err := c.meshClient.MeshV1alpha1().Meshes(cluster).Get(ctx, meshName, metav1.GetOptions{})
 		if errors.IsNotFound(err) {
 			klog.V(2).Infof("applying mesh %q/%q for meshdeployment", mesh.GetNamespace(), mesh.GetName())

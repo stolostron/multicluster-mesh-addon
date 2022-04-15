@@ -10,8 +10,8 @@ type MeshSpec struct {
 	MeshProvider   MeshProvider      `json:"meshProvider,omitempty"`
 	Cluster        string            `json:"cluster,omitempty"`
 	ControlPlane   *MeshControlPlane `json:"controlPlane,omitempty"`
+	MeshConfig     *MeshConfig       `json:"meshConfig,omitempty"`
 	MeshMemberRoll []string          `json:"meshMemberRoll,omitempty"`
-	TrustDomain    string            `json:"trustDomain,omitempty"`
 }
 
 type MeshProvider string
@@ -32,6 +32,24 @@ type MeshControlPlane struct {
 	Peers      []Peer   `json:"peers,omitempty"`
 }
 
+// MeshConfig defines the config for the mesh(data plane)
+type MeshConfig struct {
+	ProxyConfig *ProxyConfig `json:"proxyConfig,omitempty"`
+	TrustDomain string       `json:"trustDomain,omitempty"`
+}
+
+// ProxyConfig defines the config for the proxy(gateway proxy and proxy sidecars)
+type ProxyConfig struct {
+	AccessLogging *AccessLogging `json:"accessLogging,omitempty"`
+}
+
+// AccessLogging defines the config for the proxy access logs
+type AccessLogging struct {
+	File     string `json:"file,omitempty"`
+	Encoding string `json:"encoding,omitempty"`
+	Format   string `json:"format,omitempty"`
+}
+
 // Peer defines mesh peer
 type Peer struct {
 	Name    string `json:"name,omitempty"`
@@ -48,7 +66,7 @@ type MeshStatus struct {
 //+kubebuilder:subresource:status
 //+kubebuilder:printcolumn:name="CLUSTER",type="string",JSONPath=".spec.cluster",description="Cluster of the mesh"
 //+kubebuilder:printcolumn:name="VERSION",type="string",JSONPath=".spec.controlPlane.version",description="Version of the mesh"
-//+kubebuilder:printcolumn:name="REVISION",type="string",JSONPath=".spec.controlPlane.revision",description="Revision of the istio control plane"
+//+kubebuilder:printcolumn:name="PROVIDER",type="string",JSONPath=".spec.meshProvider",description="Provider of the mesh"
 //+kubebuilder:printcolumn:name="PEERS",type="string",JSONPath=".spec.controlPlane.peers[*].name"
 //+kubebuilder:printcolumn:name="AGE",type="date",JSONPath=".metadata.creationTimestamp"
 

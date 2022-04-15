@@ -219,7 +219,7 @@ func (c *meshFederationController) sync(ctx context.Context, syncCtx factory.Syn
 				currentMeshName = meshName
 				currentMeshCluster = mesh.Spec.Cluster
 				currentMeshNamespace = mesh.Spec.ControlPlane.Namespace
-				currentMeshTrustDomain = mesh.Spec.TrustDomain
+				currentMeshTrustDomain = mesh.Spec.MeshConfig.TrustDomain
 			} else if mesh.GetName() == peerMeshName {
 				peerMeshCluster = mesh.Spec.Cluster
 				peerMeshNamespace = mesh.Spec.ControlPlane.Namespace
