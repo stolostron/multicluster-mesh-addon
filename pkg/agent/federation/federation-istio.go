@@ -185,7 +185,7 @@ func (c *istioFederationController) sync(ctx context.Context, syncCtx factory.Sy
 			}
 		} else {
 			// remove existing intermediate CA, CSR and privatekey secret when peers are removed
-			klog.V(2).Infof("removing intermediate CA, CSR and privatekey secrets because no peers for current mesh(%q/%q)", mesh.GetNamespace(), mesh.GetName())
+			klog.V(2).Infof("trying to remove intermediate CA, CSR and privatekey secrets if existing, because no peers for current mesh(%q/%q)", mesh.GetNamespace(), mesh.GetName())
 			err := c.spokeKubeClient.CoreV1().Secrets(mesh.Spec.ControlPlane.Namespace).Delete(ctx, constants.IstioCASecretName, metav1.DeleteOptions{})
 			if err != nil && !errors.IsNotFound(err) {
 				return err
@@ -222,7 +222,11 @@ func (c *istioFederationController) buildCSRAndPrivateKeyForMesh(mesh *meshv1alp
 		return nil, nil, fmt.Errorf("mesh(%q/%q) with peer should have federation owner annotation", mesh.GetNamespace(), mesh.GetName())
 	}
 
-	spiffeURI := fmt.Sprintf("%s%s/ns/%s/sa/%s", istiospiffe.URIPrefix, mesh.Spec.TrustDomain, mesh.Spec.ControlPlane.Namespace, "istiod-"+mesh.Spec.ControlPlane.Revision)
+	trustDomain := "cluster.local"
+	if mesh.Spec.MeshConfig != nil && mesh.Spec.MeshConfig.TrustDomain != "" {
+		trustDomain = mesh.Spec.MeshConfig.TrustDomain
+	}
+	spiffeURI := fmt.Sprintf("%s%s/ns/%s/sa/%s", istiospiffe.URIPrefix, trustDomain, mesh.Spec.ControlPlane.Namespace, "istiod-"+mesh.Spec.ControlPlane.Revision)
 	hosts := []string{spiffeURI}
 
 	// create the CSR and private key for the mesh

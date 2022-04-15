@@ -43,10 +43,41 @@ func init() {
 // TranslateIstioToLogicMesh translate the physical istio service mesh to the logical mesh
 func TranslateIstioToLogicMesh(iop *iopv1alpha1.IstioOperator, memberNamespaces []string, cluster string) (*meshv1alpha1.Mesh, error) {
 	trustDomain := "cluster.local"
+	accessLogFile, accessLogFormat, accessLogEncoding := "", "", ""
 	if iop.Spec.MeshConfig != nil {
-		td, ok := iop.Spec.MeshConfig["trustDomain"]
-		if ok && td != nil && td.(string) != "" {
-			trustDomain = td.(string)
+		trustDomainVal, ok := iop.Spec.MeshConfig["trustDomain"]
+		if ok && trustDomainVal != nil && trustDomainVal.(string) != "" {
+			trustDomain = trustDomainVal.(string)
+		}
+		accessLogFileVal, ok := iop.Spec.MeshConfig["accessLogFile"]
+		if ok && accessLogFileVal != nil && accessLogFileVal.(string) != "" {
+			accessLogFile = accessLogFileVal.(string)
+		}
+		accessLogFormatVal, ok := iop.Spec.MeshConfig["accessLogFormat"]
+		if ok && accessLogFormatVal != nil && accessLogFormatVal.(string) != "" {
+			accessLogFormat = accessLogFormatVal.(string)
+		}
+		accessLogEncodingVal, ok := iop.Spec.MeshConfig["accessLogEncoding"]
+		if ok && accessLogEncodingVal != nil && accessLogEncodingVal.(string) != "" {
+			accessLogEncoding = accessLogEncodingVal.(string)
+		}
+	}
+
+	meshConfig := &meshv1alpha1.MeshConfig{
+		TrustDomain: trustDomain,
+	}
+	if accessLogFile != "" || accessLogFormat != "" || accessLogEncoding != "" {
+		meshConfig.ProxyConfig = &meshv1alpha1.ProxyConfig{
+			AccessLogging: &meshv1alpha1.AccessLogging{},
+		}
+		if accessLogFile != "" {
+			meshConfig.ProxyConfig.AccessLogging.File = accessLogFile
+		}
+		if accessLogFormat != "" {
+			meshConfig.ProxyConfig.AccessLogging.Format = accessLogFormat
+		}
+		if accessLogEncoding != "" {
+			meshConfig.ProxyConfig.AccessLogging.Encoding = accessLogEncoding
 		}
 	}
 
@@ -77,8 +108,8 @@ func TranslateIstioToLogicMesh(iop *iopv1alpha1.IstioOperator, memberNamespaces 
 				Revision:   iop.Spec.Revision,
 				Components: enabledComponents,
 			},
+			MeshConfig:     meshConfig,
 			MeshMemberRoll: memberNamespaces,
-			TrustDomain:    trustDomain,
 		},
 		// Status: meshv1alpha1.MeshStatus{
 		// 	Readiness: iop.Status.Readiness,
@@ -128,8 +159,33 @@ func TranslateOSSMToLogicMesh(smcp *maistrav2.ServiceMeshControlPlane, smmr *mai
 	}
 
 	trustDomain := "cluster.local"
+	accessLogFile, accessLogFormat, accessLogEncoding := "", "", ""
 	if smcp.Spec.Security != nil && smcp.Spec.Security.Trust != nil && smcp.Spec.Security.Trust.Domain != "" {
 		trustDomain = smcp.Spec.Security.Trust.Domain
+	}
+
+	if smcp.Spec.Proxy != nil && smcp.Spec.Proxy.AccessLogging != nil && smcp.Spec.Proxy.AccessLogging.File != nil {
+		accessLogFile = smcp.Spec.Proxy.AccessLogging.File.Name
+		accessLogFormat = smcp.Spec.Proxy.AccessLogging.File.Format
+		accessLogEncoding = smcp.Spec.Proxy.AccessLogging.File.Encoding
+	}
+
+	meshConfig := &meshv1alpha1.MeshConfig{
+		TrustDomain: trustDomain,
+	}
+	if accessLogFile != "" || accessLogFormat != "" || accessLogEncoding != "" {
+		meshConfig.ProxyConfig = &meshv1alpha1.ProxyConfig{
+			AccessLogging: &meshv1alpha1.AccessLogging{},
+		}
+		if accessLogFile != "" {
+			meshConfig.ProxyConfig.AccessLogging.File = accessLogFile
+		}
+		if accessLogFormat != "" {
+			meshConfig.ProxyConfig.AccessLogging.Format = accessLogFormat
+		}
+		if accessLogEncoding != "" {
+			meshConfig.ProxyConfig.AccessLogging.Encoding = accessLogEncoding
+		}
 	}
 
 	allComponents := make([]string, 0, 4)
@@ -156,8 +212,8 @@ func TranslateOSSMToLogicMesh(smcp *maistrav2.ServiceMeshControlPlane, smmr *mai
 				Version:    smcp.Spec.Version,
 				Components: allComponents,
 			},
+			MeshConfig:     meshConfig,
 			MeshMemberRoll: meshMember,
-			TrustDomain:    trustDomain,
 		},
 		Status: meshv1alpha1.MeshStatus{
 			Readiness: smcp.Status.Readiness,
@@ -253,10 +309,21 @@ func TranslateToPhysicalIstio(mesh *meshv1alpha1.Mesh) (*iopv1alpha1.IstioOperat
 		},
 	}
 
-	// set trust domain
-	if mesh.Spec.TrustDomain != "" {
-		controlPlaneIOP.Spec.MeshConfig = map[string]interface{}{
-			"trustDomain": mesh.Spec.TrustDomain,
+	if mesh.Spec.MeshConfig != nil {
+		controlPlaneIOP.Spec.MeshConfig = map[string]interface{}{}
+		if mesh.Spec.MeshConfig.TrustDomain != "" {
+			controlPlaneIOP.Spec.MeshConfig["trustDomain"] = mesh.Spec.MeshConfig.TrustDomain
+		}
+		if mesh.Spec.MeshConfig.ProxyConfig != nil && mesh.Spec.MeshConfig.ProxyConfig.AccessLogging != nil {
+			if mesh.Spec.MeshConfig.ProxyConfig.AccessLogging.File != "" {
+				controlPlaneIOP.Spec.MeshConfig["accessLogFile"] = mesh.Spec.MeshConfig.ProxyConfig.AccessLogging.File
+			}
+			if mesh.Spec.MeshConfig.ProxyConfig.AccessLogging.Format != "" {
+				controlPlaneIOP.Spec.MeshConfig["accessLogFormat"] = mesh.Spec.MeshConfig.ProxyConfig.AccessLogging.Format
+			}
+			if mesh.Spec.MeshConfig.ProxyConfig.AccessLogging.Encoding != "" {
+				controlPlaneIOP.Spec.MeshConfig["accessLogEncoding"] = mesh.Spec.MeshConfig.ProxyConfig.AccessLogging.Encoding
+			}
 		}
 	}
 
@@ -564,12 +631,25 @@ func TranslateToPhysicalOSSM(mesh *meshv1alpha1.Mesh) (*maistrav2.ServiceMeshCon
 		smcp.Spec.Tracing = tracingConfig
 	}
 
-	// set trust domain
-	if mesh.Spec.TrustDomain != "" {
-		smcp.Spec.Security = &maistrav2.SecurityConfig{
-			Trust: &maistrav2.TrustConfig{
-				Domain: mesh.Spec.TrustDomain,
-			},
+	if mesh.Spec.MeshConfig != nil {
+		if mesh.Spec.MeshConfig.TrustDomain != "" {
+			smcp.Spec.Security = &maistrav2.SecurityConfig{
+				Trust: &maistrav2.TrustConfig{
+					Domain: mesh.Spec.MeshConfig.TrustDomain,
+				},
+			}
+		}
+		if mesh.Spec.MeshConfig.ProxyConfig != nil && mesh.Spec.MeshConfig.ProxyConfig.AccessLogging != nil {
+			smcp.Spec.Proxy = &maistrav2.ProxyConfig{
+				AccessLogging: &maistrav2.ProxyAccessLoggingConfig{
+					File: &maistrav2.ProxyFileAccessLogConfig{},
+				},
+			}
+			if mesh.Spec.MeshConfig.ProxyConfig.AccessLogging.File != "" {
+				smcp.Spec.Proxy.AccessLogging.File.Name = mesh.Spec.MeshConfig.ProxyConfig.AccessLogging.File
+				smcp.Spec.Proxy.AccessLogging.File.Format = mesh.Spec.MeshConfig.ProxyConfig.AccessLogging.Format
+				smcp.Spec.Proxy.AccessLogging.File.Encoding = mesh.Spec.MeshConfig.ProxyConfig.AccessLogging.Encoding
+			}
 		}
 	}
 
