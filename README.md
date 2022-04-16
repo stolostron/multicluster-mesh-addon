@@ -2,7 +2,7 @@
 
 The multicluster-mesh-addon is an enhanced service mesh addon created with [addon-framework](http://github.com/open-cluster-management-io/addon-framework), it is used to manage(discovery, deploy and federate) service meshes across multiple clusters in [Red Hat Advanced Cluster Management for Kubernetes](https://access.redhat.com/documentation/en-us/red_hat_advanced_cluster_management_for_kubernetes/). With multicluster-mesh-addon, you can unify the configuration and operation of your services spanning from single cluster to multiple clusters in hybrid cloud.
 
-![multicluster-mesh-addon-overview](assets/multicluster-mesh-addon.drawio.svg)
+![multicluster-mesh-addon-overview](assets/multicluster-mesh-addon.png)
 
 ## Core Concepts
 
