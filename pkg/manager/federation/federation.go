@@ -181,9 +181,17 @@ func (c *meshFederationController) sync(ctx context.Context, syncCtx factory.Syn
 			Type: corev1.SecretTypeOpaque,
 		}
 
-		klog.V(2).Infof("applying intermediate certificate secret(%q/%q) for mesh(%q/%q)", newCertificateSecret.GetNamespace(), newCertificateSecret.GetName(), newCertificateSecret.GetNamespace(), strings.TrimSuffix(csrSecret.GetName(), "-csr"))
-		_, _, err = resourceapply.ApplySecret(ctx, c.kubeClient.CoreV1(), c.recorder, newCertificateSecret)
-		return err
+		// check if the intermediate certificate secret for the current mesh already exists, only create it it it doesn't exist
+		// TODO(morvencao): add expiration check of the certificate
+		_, err = c.kubeClient.CoreV1().Secrets(newCertificateSecret.GetNamespace()).Get(ctx, newCertificateSecret.GetName(), metav1.GetOptions{})
+		if err != nil && errors.IsNotFound(err) {
+			klog.V(2).Infof("applying intermediate certificate secret(%q/%q) for mesh(%q/%q)", newCertificateSecret.GetNamespace(), newCertificateSecret.GetName(), newCertificateSecret.GetNamespace(), strings.TrimSuffix(csrSecret.GetName(), "-csr"))
+			if _, _, err = resourceapply.ApplySecret(ctx, c.kubeClient.CoreV1(), c.recorder, newCertificateSecret); err != nil {
+				return err
+			}
+		}
+
+		return nil
 	case strings.HasSuffix(key, "-ossm-federation"):
 		klog.V(2).Infof("Reconciling federation cm resources %q", key)
 		key = strings.TrimSuffix(key, "-ossm-federation")
