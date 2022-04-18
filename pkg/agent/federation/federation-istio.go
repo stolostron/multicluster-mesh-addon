@@ -136,13 +136,16 @@ func (c *istioFederationController) sync(ctx context.Context, syncCtx factory.Sy
 		}
 
 		klog.V(2).Infof("applying CA secret(%q/%q) for mesh(%q/%q)", intermediateCAForMeshSecret.GetNamespace(), intermediateCAForMeshSecret.GetName(), mesh.GetNamespace(), mesh.GetName())
-		if _, _, err = resourceapply.ApplySecret(ctx, c.spokeKubeClient.CoreV1(), c.recorder, intermediateCAForMeshSecret); err != nil {
+		_, caChanged, err := resourceapply.ApplySecret(ctx, c.spokeKubeClient.CoreV1(), c.recorder, intermediateCAForMeshSecret)
+		if err != nil {
 			return err
 		}
-
-		// restart istiod pod(s) to take the new CA
-		klog.V(2).Infof("restarting the istiod pod(s) to take the new CA for mesh(%q/%q)", mesh.GetNamespace(), mesh.GetName())
-		return c.spokeKubeClient.CoreV1().Pods(mesh.Spec.ControlPlane.Namespace).DeleteCollection(ctx, metav1.DeleteOptions{}, metav1.ListOptions{LabelSelector: "app=istiod"})
+		if caChanged {
+			// restart istiod pod(s) to take the new CA
+			klog.V(2).Infof("restarting the istiod pod(s) to take the new CA for mesh(%q/%q)", mesh.GetNamespace(), mesh.GetName())
+			return c.spokeKubeClient.CoreV1().Pods(mesh.Spec.ControlPlane.Namespace).DeleteCollection(ctx, metav1.DeleteOptions{}, metav1.ListOptions{LabelSelector: "app=istiod"})
+		}
+		return nil
 	} else {
 		klog.V(2).Infof("Reconciling mesh resources %q", key)
 
