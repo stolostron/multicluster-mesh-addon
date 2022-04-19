@@ -127,7 +127,6 @@ func runController(ctx context.Context, controllerContext *controllercmd.Control
 	go meshInformerFactory.Start(ctx.Done())
 	go meshDeploymentController.Run(ctx, 1)
 	go meshFederationController.Run(ctx, 1)
-	go meshFederationController.Run(ctx, 1)
 	<-ctx.Done()
 
 	return nil
