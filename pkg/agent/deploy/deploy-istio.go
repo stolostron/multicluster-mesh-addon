@@ -91,7 +91,7 @@ func (c *istioDeployController) sync(ctx context.Context, syncCtx factory.SyncCo
 		return err
 	}
 
-	if mesh.Spec.MeshProvider != meshv1alpha1.MeshProviderCommunityIstio {
+	if mesh.Spec.MeshProvider != meshv1alpha1.MeshProviderUpstreamIstio {
 		return nil
 	}
 

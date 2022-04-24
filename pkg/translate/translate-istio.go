@@ -91,7 +91,7 @@ func TranslateIstioToLogicMesh(iop *iopv1alpha1.IstioOperator, memberNamespaces 
 			Labels:    map[string]string{constants.LabelKeyForDiscoveriedMesh: "true"},
 		},
 		Spec: meshv1alpha1.MeshSpec{
-			MeshProvider: meshv1alpha1.MeshProviderCommunityIstio,
+			MeshProvider: meshv1alpha1.MeshProviderUpstreamIstio,
 			Cluster:      cluster,
 			ControlPlane: &meshv1alpha1.MeshControlPlane{
 				Namespace:  controlPlaneNamespace,

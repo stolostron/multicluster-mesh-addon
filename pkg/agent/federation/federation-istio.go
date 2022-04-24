@@ -164,7 +164,7 @@ func (c *istioFederationController) sync(ctx context.Context, syncCtx factory.Sy
 		}
 
 		// skip other mesh provider
-		if mesh.Spec.MeshProvider != meshv1alpha1.MeshProviderCommunityIstio {
+		if mesh.Spec.MeshProvider != meshv1alpha1.MeshProviderUpstreamIstio {
 			return nil
 		}
 

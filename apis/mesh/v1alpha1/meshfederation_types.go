@@ -20,7 +20,7 @@ type TrustType string
 
 const (
 	TrustTypeLimited  TrustType = "Limited"  // limited trust gated at gateways, used by OSSM
-	TrustTypeComplete TrustType = "Complete" // complete trust by shared CA, used by community istio
+	TrustTypeComplete TrustType = "Complete" // complete trust by shared CA, used by upstream istio
 )
 
 // TrustConfig defines the trust configuratin for mesh peers
