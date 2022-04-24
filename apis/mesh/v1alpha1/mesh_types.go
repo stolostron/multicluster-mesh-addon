@@ -17,8 +17,8 @@ type MeshSpec struct {
 type MeshProvider string
 
 const (
-	MeshProviderOpenshift      MeshProvider = "Openshift Service Mesh"
-	MeshProviderCommunityIstio MeshProvider = "Community Istio"
+	MeshProviderOpenshift     MeshProvider = "Openshift Service Mesh"
+	MeshProviderUpstreamIstio MeshProvider = "Upstream Istio"
 	// more providers come later
 )
 

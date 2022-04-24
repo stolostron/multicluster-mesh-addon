@@ -371,15 +371,15 @@ func (c *meshFederationController) sync(ctx context.Context, syncCtx factory.Syn
 			}
 
 			if trustType == meshv1alpha1.TrustTypeComplete {
-				if mesh1.Spec.MeshProvider != meshv1alpha1.MeshProviderCommunityIstio || mesh2.Spec.MeshProvider != meshv1alpha1.MeshProviderCommunityIstio {
-					klog.Errorf("only community istio supports federate meshes with complete trust by shared CA, skipping mesh peers: %s and %s", mesh1.GetName()+mesh1.Spec.Cluster, mesh2.GetName()+mesh2.Spec.Cluster)
+				if mesh1.Spec.MeshProvider != meshv1alpha1.MeshProviderUpstreamIstio || mesh2.Spec.MeshProvider != meshv1alpha1.MeshProviderUpstreamIstio {
+					klog.Errorf("only upstream istio supports federate meshes with complete trust by shared CA, skipping mesh peers: %s and %s", mesh1.GetName()+mesh1.Spec.Cluster, mesh2.GetName()+mesh2.Spec.Cluster)
 					continue
 				}
 			}
 
 			if trustType == meshv1alpha1.TrustTypeLimited {
-				if mesh1.Spec.MeshProvider != meshv1alpha1.MeshProviderOpenshift || mesh2.Spec.MeshProvider != meshv1alpha1.MeshProviderOpenshift {
-					klog.Errorf("only openshift service mesh supports limited trust gated at gateways, skipping mesh peers: %s and %s", mesh1.GetName()+mesh1.Spec.Cluster, mesh2.GetName()+mesh2.Spec.Cluster)
+				if mesh1.Spec.MeshProvider == meshv1alpha1.MeshProviderUpstreamIstio || mesh2.Spec.MeshProvider == meshv1alpha1.MeshProviderUpstreamIstio {
+					klog.Errorf("Currently upstream istio doesn't support limited trust gated at gateways, skipping mesh peers: %s and %s", mesh1.GetName()+mesh1.Spec.Cluster, mesh2.GetName()+mesh2.Spec.Cluster)
 					continue
 				}
 			}
@@ -393,7 +393,7 @@ func (c *meshFederationController) sync(ctx context.Context, syncCtx factory.Syn
 			}
 			if !ewgwExisting {
 				mesh1.Spec.ControlPlane.Peers = append(mesh1.Spec.ControlPlane.Peers, meshv1alpha1.Peer{Name: mesh2.GetName(), Cluster: mesh2.GetNamespace()})
-				if mesh1.Spec.MeshProvider == meshv1alpha1.MeshProviderCommunityIstio {
+				if mesh1.Spec.MeshProvider == meshv1alpha1.MeshProviderUpstreamIstio {
 					annotations := mesh1.GetAnnotations()
 					if annotations == nil {
 						annotations = map[string]string{
@@ -421,7 +421,7 @@ func (c *meshFederationController) sync(ctx context.Context, syncCtx factory.Syn
 			}
 			if !ewgwExisting {
 				mesh2.Spec.ControlPlane.Peers = append(mesh2.Spec.ControlPlane.Peers, meshv1alpha1.Peer{Name: mesh1.GetName(), Cluster: mesh1.GetNamespace()})
-				if mesh2.Spec.MeshProvider == meshv1alpha1.MeshProviderCommunityIstio {
+				if mesh2.Spec.MeshProvider == meshv1alpha1.MeshProviderUpstreamIstio {
 					annotations := mesh2.GetAnnotations()
 					if annotations == nil {
 						annotations = map[string]string{
