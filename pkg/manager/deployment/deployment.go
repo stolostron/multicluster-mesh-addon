@@ -3,6 +3,7 @@ package deployment
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/openshift/library-go/pkg/controller/factory"
 	"github.com/openshift/library-go/pkg/operator/events"
@@ -112,6 +113,11 @@ func (c *meshDeploymentController) sync(ctx context.Context, syncCtx factory.Syn
 				MeshConfig:     meshConfig,
 				MeshMemberRoll: meshDeployment.Spec.MeshMemberRoll,
 			},
+		}
+		// apply control plane "revision" from the control plane "version" if the "revision" is empty to avoid conflict with other istio control planes
+		// for example, if the "version" is "1.13.2" and "revision" is empty, then apply the revision "1-13-2" to the mesh resources.
+		if meshDeployment.Spec.ControlPlane.Revision == "" {
+			mesh.Spec.ControlPlane.Revision = strings.ReplaceAll(meshDeployment.Spec.ControlPlane.Version, ".", "-")
 		}
 		_, err := c.meshClient.MeshV1alpha1().Meshes(cluster).Get(ctx, meshName, metav1.GetOptions{})
 		if errors.IsNotFound(err) {

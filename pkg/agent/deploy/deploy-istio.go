@@ -152,7 +152,7 @@ func (c *istioDeployController) sync(ctx context.Context, syncCtx factory.SyncCo
 	istiodNamespace := mesh.Spec.ControlPlane.Namespace
 	istiodName := "istiod"
 	if mesh.Spec.ControlPlane.Revision != "" {
-		istiodName = "-" + mesh.Spec.ControlPlane.Revision
+		istiodName = istiodName + "-" + mesh.Spec.ControlPlane.Revision
 	}
 	err = wait.Poll(5*time.Second, 300*time.Second, func() (bool, error) {
 		istiod, err := c.spokeKubeClient.AppsV1().Deployments(istiodNamespace).Get(ctx, istiodName, metav1.GetOptions{})

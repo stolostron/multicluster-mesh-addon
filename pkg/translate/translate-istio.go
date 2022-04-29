@@ -264,13 +264,25 @@ func TranslateToPhysicalIstio(mesh *meshv1alpha1.Mesh) (*iopv1alpha1.IstioOperat
 				controlPlaneIOP.Spec.Components.Cni = &iopspecv1alpha1.ComponentSpec{Enabled: enabledPbVal}
 			case "istio-ingress":
 				gatewaysIOP.Spec.Components.IngressGateways = []*iopspecv1alpha1.GatewaySpec{
-					{Name: "istio-ingressgateway", Enabled: enabledPbVal},
+					{
+						Name:    "istio-ingressgateway",
+						Enabled: enabledPbVal,
+						K8S: &iopspecv1alpha1.KubernetesResourcesSpec{
+							ImagePullPolicy: "IfNotPresent",
+						},
+					},
 				}
 				ingressGatewaysEnabled = true
 				gatewaysEnabled = true
 			case "istio-egress":
 				gatewaysIOP.Spec.Components.EgressGateways = []*iopspecv1alpha1.GatewaySpec{
-					{Name: "istio-egressgateway", Enabled: enabledPbVal},
+					{
+						Name:    "istio-egressgateway",
+						Enabled: enabledPbVal,
+						K8S: &iopspecv1alpha1.KubernetesResourcesSpec{
+							ImagePullPolicy: "IfNotPresent",
+						},
+					},
 				}
 				gatewaysEnabled = true
 			}
@@ -329,6 +341,7 @@ func TranslateToPhysicalIstio(mesh *meshv1alpha1.Mesh) (*iopv1alpha1.IstioOperat
 				"app":   "istio-eastwestgateway",
 			},
 			K8S: &iopspecv1alpha1.KubernetesResourcesSpec{
+				ImagePullPolicy: "IfNotPresent",
 				Service: &iopspecv1alpha1.ServiceSpec{
 					Type: "LoadBalancer",
 					Ports: []*iopspecv1alpha1.ServicePort{
