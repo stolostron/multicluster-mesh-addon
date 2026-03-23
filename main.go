@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 
+	operatorsv1 "github.com/operator-framework/api/pkg/operators/v1"
+	operatorsv1alpha1 "github.com/operator-framework/api/pkg/operators/v1alpha1"
 	"github.com/openshift/library-go/pkg/controller/controllercmd"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
@@ -16,6 +18,9 @@ import (
 	logs "k8s.io/component-base/logs/api/v1"
 	"k8s.io/klog/v2"
 	"k8s.io/utils/clock"
+	clusterv1 "open-cluster-management.io/api/cluster/v1"
+	clusterv1beta2 "open-cluster-management.io/api/cluster/v1beta2"
+	workv1 "open-cluster-management.io/api/work/v1"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
@@ -31,6 +36,11 @@ var (
 func init() {
 	utilruntime.Must(scheme.AddToScheme(runtimeScheme))
 	utilruntime.Must(meshv1alpha1.Install(runtimeScheme))
+	utilruntime.Must(clusterv1.Install(runtimeScheme))
+	utilruntime.Must(clusterv1beta2.Install(runtimeScheme))
+	utilruntime.Must(workv1.Install(runtimeScheme))
+	utilruntime.Must(operatorsv1.AddToScheme(runtimeScheme))
+	utilruntime.Must(operatorsv1alpha1.AddToScheme(runtimeScheme))
 }
 
 func main() {
