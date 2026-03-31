@@ -25,18 +25,21 @@ import (
 )
 
 const (
-	operatorNameOCP = "servicemeshoperator3"
-	operatorName    = "sailoperator"
+	OperatorNameOSSM = "servicemeshoperator3"
+	OperatorNameSail = "sailoperator"
 
-	defaultOCPOperatorNs = "openshift-operators"
-	defaultOperatorNs    = "sail-operator"
+	DefaultOCPOperatorNs = "openshift-operators"
+	DefaultOperatorNs    = "sail-operator"
 
-	defaultOCPCatalogSource = "redhat-operators"
-	defaultOCPCatalogNs     = "openshift-marketplace"
-	defaultCatalogSource    = "operatorhubio-catalog"
-	defaultCatalogNs        = "olm"
+	DefaultOCPCatalogSource = "redhat-operators"
+	DefaultOCPCatalogNs     = "openshift-marketplace"
+	DefaultCatalogSource    = "operatorhubio-catalog"
+	DefaultCatalogNs        = "olm"
 
-	defaultChannel = "stable"
+	DefaultChannel = "stable"
+
+	ManifestWorkNameOSSM = "multicluster-mesh-operator-ossm"
+	ManifestWorkNameSail = "multicluster-mesh-operator-sail"
 
 	clusterClaimProduct = "product.open-cluster-management.io"
 
@@ -46,6 +49,10 @@ const (
 	ProductARO  = "ARO"
 	ProductROKS = "ROKS"
 	ProductOSD  = "OpenShiftDedicated"
+)
+
+var (
+	MissingClaimRequeueDelay = 30 * time.Second
 )
 
 // Reconciler reconciles MultiClusterMesh resources
@@ -116,7 +123,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 
 	if missingClaims {
 		klog.Infof("Some clusters are missing product claims, requeueing the reconcile request")
-		return reconcile.Result{RequeueAfter: 30 * time.Second}, nil
+		return reconcile.Result{RequeueAfter: MissingClaimRequeueDelay}, nil
 	}
 
 	klog.Infof("Successfully reconciled MultiClusterMesh %s/%s", mesh.Namespace, mesh.Name)
@@ -215,9 +222,9 @@ func getProductClaim(cluster *clusterv1.ManagedCluster) string {
 
 func getOperatorManifestWorkName(isOCP bool) string {
 	if isOCP {
-		return "multicluster-mesh-operator-ossm"
+		return ManifestWorkNameOSSM
 	}
-	return "multicluster-mesh-operator-sail"
+	return ManifestWorkNameSail
 }
 
 func (r *Reconciler) getClustersFromSet(ctx context.Context, clusterSetName string) ([]clusterv1.ManagedCluster, error) {
@@ -251,7 +258,7 @@ func (r *Reconciler) buildOperatorManifestWork(config meshv1alpha1.OperatorConfi
 	config = r.applyOperatorDefaults(config, isOCP)
 
 	// openshift-operators exists by default on OCP and already has a global OperatorGroup
-	if config.Namespace != defaultOCPOperatorNs {
+	if config.Namespace != DefaultOCPOperatorNs {
 		manifests = append(manifests, workv1.Manifest{
 			RawExtension: runtime.RawExtension{Object: &corev1.Namespace{
 				TypeMeta: metav1.TypeMeta{
@@ -281,9 +288,9 @@ func (r *Reconciler) buildOperatorManifestWork(config meshv1alpha1.OperatorConfi
 		})
 	}
 
-	packageName := operatorName
+	packageName := OperatorNameSail
 	if isOCP {
-		packageName = operatorNameOCP
+		packageName = OperatorNameOSSM
 	}
 
 	manifests = append(manifests, workv1.Manifest{
@@ -324,30 +331,30 @@ func (r *Reconciler) buildOperatorManifestWork(config meshv1alpha1.OperatorConfi
 func (r *Reconciler) applyOperatorDefaults(config meshv1alpha1.OperatorConfig, isOCP bool) meshv1alpha1.OperatorConfig {
 	if config.Namespace == "" {
 		if isOCP {
-			config.Namespace = defaultOCPOperatorNs
+			config.Namespace = DefaultOCPOperatorNs
 		} else {
-			config.Namespace = defaultOperatorNs
+			config.Namespace = DefaultOperatorNs
 		}
 	}
 
 	if config.Source == "" {
 		if isOCP {
-			config.Source = defaultOCPCatalogSource
+			config.Source = DefaultOCPCatalogSource
 		} else {
-			config.Source = defaultCatalogSource
+			config.Source = DefaultCatalogSource
 		}
 	}
 
 	if config.SourceNamespace == "" {
 		if isOCP {
-			config.SourceNamespace = defaultOCPCatalogNs
+			config.SourceNamespace = DefaultOCPCatalogNs
 		} else {
-			config.SourceNamespace = defaultCatalogNs
+			config.SourceNamespace = DefaultCatalogNs
 		}
 	}
 
 	if config.Channel == "" {
-		config.Channel = defaultChannel
+		config.Channel = DefaultChannel
 	}
 
 	if config.InstallPlanApproval == "" {
