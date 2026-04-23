@@ -21,6 +21,8 @@ import (
 	clusterv1 "open-cluster-management.io/api/cluster/v1"
 	clusterv1beta2 "open-cluster-management.io/api/cluster/v1beta2"
 	workv1 "open-cluster-management.io/api/work/v1"
+	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
@@ -98,6 +100,7 @@ func newControllerCommand() *cobra.Command {
 }
 
 func runController(ctx context.Context, controllerContext *controllercmd.ControllerContext) error {
+	ctrl.SetLogger(zap.New(zap.UseDevMode(true)))
 	klog.Info("Starting Multi Cluster Mesh Add On controller...")
 
 	// Create controller-runtime manager
