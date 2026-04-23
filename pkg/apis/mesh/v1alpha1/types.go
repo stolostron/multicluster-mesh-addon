@@ -1,6 +1,7 @@
 package v1alpha1
 
 import (
+	operatorsv1alpha1 "github.com/operator-framework/api/pkg/operators/v1alpha1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -75,7 +76,8 @@ type OperatorConfig struct {
 	// InstallPlanApproval is the approval strategy (Automatic or Manual)
 	// +optional
 	// +kubebuilder:default="Automatic"
-	InstallPlanApproval string `json:"installPlanApproval,omitempty"`
+	// +kubebuilder:validation:Enum=Automatic;Manual
+	InstallPlanApproval operatorsv1alpha1.Approval `json:"installPlanApproval,omitempty"`
 }
 
 // SecurityConfig defines trust and discovery configuration

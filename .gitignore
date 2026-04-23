@@ -15,3 +15,7 @@ bin/
 .idea/
 .vscode/
 *~
+
+# Generated files
+config/
+test/integration/crds/
