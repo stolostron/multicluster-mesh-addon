@@ -105,11 +105,17 @@ type CertManagerConfig struct {
 	IssuerRef IssuerReference `json:"issuerRef"`
 }
 
-// IssuerReference references a cert-manager Issuer
+// IssuerReference references a cert-manager Issuer or ClusterIssuer
 type IssuerReference struct {
-	// Name of the Issuer
+	// Name of the Issuer or ClusterIssuer
 	// +required
 	Name string `json:"name"`
+
+	// Kind of the issuer (Issuer or ClusterIssuer)
+	// +optional
+	// +kubebuilder:default="ClusterIssuer"
+	// +kubebuilder:validation:Enum=Issuer;ClusterIssuer
+	Kind string `json:"kind,omitempty"`
 }
 
 // DiscoveryConfig defines endpoint discovery token configuration
