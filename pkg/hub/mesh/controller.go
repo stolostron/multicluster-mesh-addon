@@ -18,6 +18,7 @@ import (
 	workv1 "open-cluster-management.io/api/work/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
@@ -40,6 +41,8 @@ const (
 
 	ManifestWorkNameOSSM = "multicluster-mesh-operator-ossm"
 	ManifestWorkNameSail = "multicluster-mesh-operator-sail"
+
+	FinalizerName = "mesh.open-cluster-management.io/finalizer"
 
 	clusterClaimProduct = "product.open-cluster-management.io"
 
@@ -96,6 +99,15 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		return r.handleDeletion(ctx, mesh)
 	}
 
+	if !controllerutil.ContainsFinalizer(mesh, FinalizerName) {
+		klog.Infof("Adding finalizer to MultiClusterMesh %s/%s", mesh.Namespace, mesh.Name)
+		controllerutil.AddFinalizer(mesh, FinalizerName)
+		if err := r.Update(ctx, mesh); err != nil {
+			return reconcile.Result{}, fmt.Errorf("failed to add finalizer: %w", err)
+		}
+		return reconcile.Result{}, nil
+	}
+
 	klog.Infof("MultiClusterMesh reconciling: %s/%s, ClusterSet: %s",
 		req.Namespace, req.Name, mesh.Spec.ClusterSet)
 	clusters, err := r.getClustersFromSet(ctx, mesh.Spec.ClusterSet)
@@ -132,10 +144,15 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 
 // handleDeletion handles cleanup when the MultiClusterMesh is being deleted
 func (r *Reconciler) handleDeletion(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh) (reconcile.Result, error) {
+	if !controllerutil.ContainsFinalizer(mesh, FinalizerName) {
+		klog.V(4).Infof("MultiClusterMesh %s/%s has no finalizer, nothing to clean up", mesh.Namespace, mesh.Name)
+		return reconcile.Result{}, nil
+	}
+
 	klog.Infof("Handling deletion for MultiClusterMesh %s/%s", mesh.Namespace, mesh.Name)
 	clusters, err := r.getClustersFromSet(ctx, mesh.Spec.ClusterSet)
-	if err != nil {
-		return reconcile.Result{}, fmt.Errorf("failed to get clusters for cleanup: %w", err)
+	if err != nil && !errors.IsNotFound(err) {
+		return reconcile.Result{}, fmt.Errorf("failed to get clusters from set %s: %w", mesh.Spec.ClusterSet, err)
 	}
 
 	for _, cluster := range clusters {
@@ -164,8 +181,12 @@ func (r *Reconciler) handleDeletion(ctx context.Context, mesh *meshv1alpha1.Mult
 		}
 	}
 
-	// TODO: We don't remove finalizer here since we haven't added one yet
-	// This will be added when we implement more complex lifecycle management
+	klog.Infof("Removing finalizer from MultiClusterMesh %s/%s", mesh.Namespace, mesh.Name)
+	controllerutil.RemoveFinalizer(mesh, FinalizerName)
+	if err := r.Update(ctx, mesh); err != nil {
+		return reconcile.Result{}, fmt.Errorf("failed to remove finalizer: %w", err)
+	}
+
 	return reconcile.Result{}, nil
 }
 
