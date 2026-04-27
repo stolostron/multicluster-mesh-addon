@@ -64,12 +64,17 @@ vet: ## Run go vet
 	go vet ./...
 
 .PHONY: verify
-verify: verify-gofmt vet ## Verify code passes all checks without modifying files
+verify: verify-gofmt verify-modules vet ## Verify code passes all checks without modifying files
 
 .PHONY: verify-gofmt
 verify-gofmt: ## Verify code is formatted correctly
 	@echo "Verifying gofmt..."
 	@test -z "$$(gofmt -s -l . | grep -v zz_generated)" || (echo "Code not formatted, run 'make fmt'" && exit 1)
+
+.PHONY: verify-modules
+verify-modules: ## Verify go modules are up to date
+	@echo "Verifying go modules..."
+	@go mod tidy -diff || (echo "ERROR: go.mod/go.sum are out of date. Run 'go mod tidy'" && exit 1)
 
 .PHONY: golangci-lint
 golangci-lint: ## Run golangci-lint
