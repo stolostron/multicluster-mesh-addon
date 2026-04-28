@@ -224,6 +224,25 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 
 			expectResourceDeleted(&meshv1alpha1.MultiClusterMesh{}, meshName, testNs)
 		})
+
+		It("should delete ManifestWork even when the ClusterSet is deleted first", func() {
+			util.CreateK8sManagedCluster(ctx, k8sClient, clusterName, testClusterSet)
+			util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet, meshv1alpha1.OperatorConfig{})
+			expectFinalizer(meshName, testNs)
+			expectSailManifestWork(clusterName)
+
+			clusterSet := &clusterv1beta2.ManagedClusterSet{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: testClusterSet}, clusterSet)).To(Succeed())
+			Expect(k8sClient.Delete(ctx, clusterSet)).To(Succeed())
+			expectResourceDeleted(&clusterv1beta2.ManagedClusterSet{}, testClusterSet, "")
+
+			mesh := &meshv1alpha1.MultiClusterMesh{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: meshName, Namespace: testNs}, mesh)).To(Succeed())
+			Expect(k8sClient.Delete(ctx, mesh)).To(Succeed())
+
+			expectResourceDeleted(&workv1.ManifestWork{}, meshcontroller.ManifestWorkNameSail, clusterName)
+			expectResourceDeleted(&meshv1alpha1.MultiClusterMesh{}, meshName, testNs)
+		})
 	})
 
 	Context("Platform detection", func() {

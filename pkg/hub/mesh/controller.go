@@ -44,6 +44,9 @@ const (
 
 	FinalizerName = "mesh.open-cluster-management.io/finalizer"
 
+	LabelMeshName      = "mesh.open-cluster-management.io/mesh-name"
+	LabelMeshNamespace = "mesh.open-cluster-management.io/mesh-namespace"
+
 	clusterClaimProduct = "product.open-cluster-management.io"
 
 	// Product claim values from github.com/stolostron/multicloud-operators-foundation/pkg/klusterlet/clusterclaim
@@ -150,34 +153,26 @@ func (r *Reconciler) handleDeletion(ctx context.Context, mesh *meshv1alpha1.Mult
 	}
 
 	klog.Infof("Handling deletion for MultiClusterMesh %s/%s", mesh.Namespace, mesh.Name)
-	clusters, err := r.getClustersFromSet(ctx, mesh.Spec.ClusterSet)
-	if err != nil && !errors.IsNotFound(err) {
-		return reconcile.Result{}, fmt.Errorf("failed to get clusters from set %s: %w", mesh.Spec.ClusterSet, err)
+	workList := &workv1.ManifestWorkList{}
+	labelSelector := client.MatchingLabels{
+		LabelMeshName:      mesh.Name,
+		LabelMeshNamespace: mesh.Namespace,
 	}
 
-	for _, cluster := range clusters {
-		workName := getOperatorManifestWorkName(isOpenShift(&cluster))
-		work := &workv1.ManifestWork{}
-		err := r.Get(ctx, types.NamespacedName{
-			Name:      workName,
-			Namespace: cluster.Name,
-		}, work)
+	if err := r.List(ctx, workList, labelSelector); err != nil {
+		return reconcile.Result{}, fmt.Errorf("failed to list ManifestWorks for cleanup: %w", err)
+	}
 
-		if err != nil {
-			if errors.IsNotFound(err) {
-				klog.V(4).Infof("ManifestWork %s/%s already deleted", cluster.Name, workName)
-				continue
-			}
-			return reconcile.Result{}, fmt.Errorf("failed to get ManifestWork %s/%s: %w", cluster.Name, workName, err)
-		}
-
+	klog.V(4).Infof("Found %d ManifestWorks to clean up for MultiClusterMesh %s/%s", len(workList.Items), mesh.Namespace, mesh.Name)
+	for i := range workList.Items {
+		work := &workList.Items[i]
 		if err := r.Delete(ctx, work); err != nil {
 			if !errors.IsNotFound(err) {
-				return reconcile.Result{}, fmt.Errorf("failed to delete ManifestWork %s/%s: %w", cluster.Name, workName, err)
+				return reconcile.Result{}, fmt.Errorf("failed to delete ManifestWork %s/%s: %w", work.Namespace, work.Name, err)
 			}
-			klog.V(4).Infof("ManifestWork %s/%s already deleted", cluster.Name, workName)
+			klog.V(4).Infof("ManifestWork %s/%s already deleted", work.Namespace, work.Name)
 		} else {
-			klog.Infof("Deleted ManifestWork %s/%s", cluster.Name, workName)
+			klog.Infof("Deleted ManifestWork %s/%s", work.Namespace, work.Name)
 		}
 	}
 
@@ -213,7 +208,7 @@ func (r *Reconciler) ensureOperatorInstalled(ctx context.Context, mesh *meshv1al
 	}
 
 	klog.Infof("Creating ManifestWork to install operator on cluster %s", cluster.Name)
-	work := r.buildOperatorManifestWork(mesh.Spec.Operator, cluster)
+	work := r.buildOperatorManifestWork(mesh, cluster)
 
 	if err := r.Create(ctx, work); err != nil {
 		return fmt.Errorf("failed to create ManifestWork: %w", err)
@@ -273,10 +268,10 @@ func (r *Reconciler) getClustersFromSet(ctx context.Context, clusterSetName stri
 	return clusterList.Items, nil
 }
 
-func (r *Reconciler) buildOperatorManifestWork(config meshv1alpha1.OperatorConfig, cluster *clusterv1.ManagedCluster) *workv1.ManifestWork {
+func (r *Reconciler) buildOperatorManifestWork(mesh *meshv1alpha1.MultiClusterMesh, cluster *clusterv1.ManagedCluster) *workv1.ManifestWork {
 	manifests := []workv1.Manifest{}
 	isOCP := isOpenShift(cluster)
-	config = r.applyOperatorDefaults(config, isOCP)
+	config := r.applyOperatorDefaults(mesh.Spec.Operator, isOCP)
 
 	// openshift-operators exists by default on OCP and already has a global OperatorGroup
 	if config.Namespace != DefaultOCPOperatorNs {
@@ -339,6 +334,10 @@ func (r *Reconciler) buildOperatorManifestWork(config meshv1alpha1.OperatorConfi
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      getOperatorManifestWorkName(isOCP),
 			Namespace: cluster.Name,
+			Labels: map[string]string{
+				LabelMeshName:      mesh.Name,
+				LabelMeshNamespace: mesh.Namespace,
+			},
 		},
 		Spec: workv1.ManifestWorkSpec{
 			Workload: workv1.ManifestsTemplate{
