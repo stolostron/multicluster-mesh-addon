@@ -19,6 +19,11 @@ type MultiClusterMesh struct {
 	Status MultiClusterMeshStatus `json:"status,omitempty"`
 }
 
+// GetTrustDomain returns the trust domain for this mesh.
+func (m *MultiClusterMesh) GetTrustDomain() string {
+	return m.Name
+}
+
 // MultiClusterMeshSpec defines the desired state of a multi-cluster mesh
 type MultiClusterMeshSpec struct {
 	// ClusterSet references the ACM ManagedClusterSet that defines cluster membership

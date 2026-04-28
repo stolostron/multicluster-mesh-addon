@@ -428,10 +428,8 @@ func (r *Reconciler) ensureCertificatesCreated(ctx context.Context, mesh *meshv1
 		return nil
 	}
 
-	trustDomain := mesh.Name
-
 	for _, cluster := range clusters {
-		if err := r.ensureCertificateForCluster(ctx, mesh, &cluster, issuerRef.Name, trustDomain); err != nil {
+		if err := r.ensureCertificateForCluster(ctx, mesh, &cluster, issuerRef.Name); err != nil {
 			return fmt.Errorf("failed to ensure certificate for cluster %s: %w", cluster.Name, err)
 		}
 	}
@@ -440,7 +438,7 @@ func (r *Reconciler) ensureCertificatesCreated(ctx context.Context, mesh *meshv1
 }
 
 // ensureCertificateForCluster creates a Certificate resource for a specific cluster
-func (r *Reconciler) ensureCertificateForCluster(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, cluster *clusterv1.ManagedCluster, issuerName, trustDomain string) error {
+func (r *Reconciler) ensureCertificateForCluster(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, cluster *clusterv1.ManagedCluster, issuerName string) error {
 	certName := getCacertsName(cluster.Name)
 	cert := &certmanagerv1.Certificate{}
 	err := r.Get(ctx, types.NamespacedName{
@@ -482,7 +480,7 @@ func (r *Reconciler) ensureCertificateForCluster(ctx context.Context, mesh *mesh
 			},
 			Duration:    &metav1.Duration{Duration: 1440 * time.Hour},
 			RenewBefore: &metav1.Duration{Duration: 360 * time.Hour},
-			CommonName:  fmt.Sprintf("intermediate-ca.%s.%s", cluster.Name, trustDomain),
+			CommonName:  fmt.Sprintf("intermediate-ca.%s.%s", cluster.Name, mesh.GetTrustDomain()),
 			IsCA:        true,
 			Usages: []certmanagerv1.KeyUsage{
 				certmanagerv1.UsageDigitalSignature,
