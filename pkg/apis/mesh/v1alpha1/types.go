@@ -112,8 +112,9 @@ type IssuerReference struct {
 	Name string `json:"name"`
 
 	// Kind of the issuer (Issuer or ClusterIssuer)
+	// MVP only supports namespace-scoped Issuer
 	// +optional
-	// +kubebuilder:default="ClusterIssuer"
+	// +kubebuilder:default="Issuer"
 	// +kubebuilder:validation:Enum=Issuer;ClusterIssuer
 	Kind string `json:"kind,omitempty"`
 }

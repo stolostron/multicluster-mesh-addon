@@ -45,8 +45,7 @@ const (
 	ManifestWorkNameSail    = "multicluster-mesh-operator-sail"
 	ManifestWorkNameCacerts = "multicluster-mesh-cacerts"
 
-	CacertsSecretName      = "cacerts"
-	CacertsCertificateName = "cacerts"
+	CacertsSecretName = "cacerts"
 
 	clusterClaimProduct = "product.open-cluster-management.io"
 
@@ -400,10 +399,6 @@ func (r *Reconciler) mapSecretToMesh(ctx context.Context, obj client.Object) []r
 		return nil
 	}
 
-	if secret.Name != CacertsSecretName {
-		return nil
-	}
-
 	meshName := secret.Labels[MeshNameLabel]
 	meshNamespace := secret.Labels[MeshNamespaceLabel]
 	if meshName == "" || meshNamespace == "" {
@@ -421,6 +416,11 @@ func (r *Reconciler) mapSecretToMesh(ctx context.Context, obj client.Object) []r
 	}}
 }
 
+// getCacertsName returns the name for the certificate and secret for a specific cluster
+func getCacertsName(clusterName string) string {
+	return fmt.Sprintf("cacerts-%s", clusterName)
+}
+
 // ensureCertificatesCreated creates Certificate resources for each cluster in the mesh
 func (r *Reconciler) ensureCertificatesCreated(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, clusters []clusterv1.ManagedCluster) error {
 	issuerRef := mesh.Spec.Security.Trust.CertManager.IssuerRef
@@ -430,7 +430,7 @@ func (r *Reconciler) ensureCertificatesCreated(ctx context.Context, mesh *meshv1
 
 	issuerKind := issuerRef.Kind
 	if issuerKind == "" {
-		issuerKind = "ClusterIssuer"
+		issuerKind = "Issuer"
 	}
 
 	trustDomain := mesh.Name
@@ -446,14 +446,15 @@ func (r *Reconciler) ensureCertificatesCreated(ctx context.Context, mesh *meshv1
 
 // ensureCertificateForCluster creates a Certificate resource for a specific cluster
 func (r *Reconciler) ensureCertificateForCluster(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, cluster *clusterv1.ManagedCluster, issuerName, issuerKind, trustDomain string) error {
+	certName := getCacertsName(cluster.Name)
 	cert := &certmanagerv1.Certificate{}
 	err := r.Get(ctx, types.NamespacedName{
-		Name:      CacertsCertificateName,
-		Namespace: cluster.Name,
+		Name:      certName,
+		Namespace: mesh.Namespace,
 	}, cert)
 
 	if err == nil {
-		klog.V(4).Infof("Certificate %s/%s already exists", cluster.Name, CacertsCertificateName)
+		klog.V(4).Infof("Certificate %s/%s already exists", mesh.Namespace, certName)
 		return nil
 	}
 
@@ -461,12 +462,12 @@ func (r *Reconciler) ensureCertificateForCluster(ctx context.Context, mesh *mesh
 		return fmt.Errorf("failed to get Certificate: %w", err)
 	}
 
-	klog.Infof("Creating Certificate %s/%s for cluster %s", cluster.Name, CacertsCertificateName, cluster.Name)
+	klog.Infof("Creating Certificate %s/%s for cluster %s", mesh.Namespace, certName, cluster.Name)
 
 	cert = &certmanagerv1.Certificate{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      CacertsCertificateName,
-			Namespace: cluster.Name,
+			Name:      certName,
+			Namespace: mesh.Namespace,
 			Labels: map[string]string{
 				ManagedByLabel:     "multicluster-mesh-addon",
 				MeshNameLabel:      mesh.Name,
@@ -475,7 +476,7 @@ func (r *Reconciler) ensureCertificateForCluster(ctx context.Context, mesh *mesh
 			},
 		},
 		Spec: certmanagerv1.CertificateSpec{
-			SecretName: CacertsSecretName,
+			SecretName: certName,
 			SecretTemplate: &certmanagerv1.CertificateSecretTemplate{
 				Labels: map[string]string{
 					ManagedByLabel:     "multicluster-mesh-addon",
@@ -505,7 +506,7 @@ func (r *Reconciler) ensureCertificateForCluster(ctx context.Context, mesh *mesh
 		return fmt.Errorf("failed to create Certificate: %w", err)
 	}
 
-	klog.Infof("Successfully created Certificate %s/%s", cluster.Name, CacertsCertificateName)
+	klog.Infof("Successfully created Certificate %s/%s", mesh.Namespace, certName)
 	return nil
 }
 
@@ -532,15 +533,16 @@ func (r *Reconciler) ensureCacertsDistributed(ctx context.Context, mesh *meshv1a
 
 // ensureCacertsManifestWork creates a ManifestWork to distribute the cacerts secret to a cluster
 func (r *Reconciler) ensureCacertsManifestWork(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, cluster *clusterv1.ManagedCluster, controlPlaneNamespace string) error {
+	secretName := getCacertsName(cluster.Name)
 	secret := &corev1.Secret{}
 	err := r.Get(ctx, types.NamespacedName{
-		Name:      CacertsSecretName,
-		Namespace: cluster.Name,
+		Name:      secretName,
+		Namespace: mesh.Namespace,
 	}, secret)
 
 	if err != nil {
 		if errors.IsNotFound(err) {
-			klog.V(4).Infof("Secret %s/%s not found yet, waiting for cert-manager to create it", cluster.Name, CacertsSecretName)
+			klog.V(4).Infof("Secret %s/%s not found yet, waiting for cert-manager to create it", mesh.Namespace, secretName)
 			return nil
 		}
 		return fmt.Errorf("failed to get secret: %w", err)
