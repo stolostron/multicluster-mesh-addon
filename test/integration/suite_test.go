@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	certmanagerv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	operatorsv1 "github.com/operator-framework/api/pkg/operators/v1"
@@ -55,8 +56,9 @@ var _ = BeforeSuite(func() {
 
 	testEnv = &envtest.Environment{
 		CRDDirectoryPaths: []string{
-			filepath.Join("..", "..", "config", "crd"),                      // Custom MultiClusterMesh CRD
-			filepath.Join("..", "..", "test", "integration", "crds", "ocm"), // OCM CRDs
+			filepath.Join("..", "..", "config", "crd"),                               // Custom MultiClusterMesh CRD
+			filepath.Join("..", "..", "test", "integration", "crds", "ocm"),          // OCM CRDs
+			filepath.Join("..", "..", "test", "integration", "crds", "cert-manager"), // cert-manager CRDs
 		},
 		ErrorIfCRDPathMissing: true,
 	}
@@ -72,6 +74,7 @@ var _ = BeforeSuite(func() {
 	mustAddToScheme(workv1.Install, scheme.Scheme)
 	mustAddToScheme(operatorsv1.AddToScheme, scheme.Scheme)
 	mustAddToScheme(operatorsv1alpha1.AddToScheme, scheme.Scheme)
+	mustAddToScheme(certmanagerv1.AddToScheme, scheme.Scheme)
 
 	k8sClient, err = client.New(cfg, client.Options{Scheme: scheme.Scheme})
 	Expect(err).NotTo(HaveOccurred())

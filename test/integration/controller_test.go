@@ -12,6 +12,7 @@ import (
 	operatorsv1 "github.com/operator-framework/api/pkg/operators/v1"
 	operatorsv1alpha1 "github.com/operator-framework/api/pkg/operators/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	clusterv1 "open-cluster-management.io/api/cluster/v1"
@@ -185,6 +186,104 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 			// Now add the product claim and expect the corresponding ManifestWork to be created
 			util.SetProductClaim(ctx, k8sClient, clusterName, "Other")
 			expectSailManifestWork(clusterName)
+		})
+	})
+
+	Context("Certificate distribution", func() {
+		It("should create ManifestWork when cacerts secret is created", func() {
+			util.CreateK8sManagedCluster(ctx, k8sClient, clusterName, testClusterSet)
+			util.CreateMultiClusterMeshWithCertManager(ctx, k8sClient, meshName, testNs, testClusterSet, "mesh-issuer")
+
+			// Wait for operator ManifestWork to be created first
+			expectSailManifestWork(clusterName)
+
+			// Simulate cert-manager creating the cacerts secret
+			util.CreateCacertsSecret(ctx, k8sClient, testNs, clusterName, meshName, testNs)
+
+			// Verify cacerts ManifestWork is created
+			work := expectManifestWork(meshcontroller.ManifestWorkNameCacerts, clusterName)
+
+			// Verify the ManifestWork contains a secret
+			Expect(work.Spec.Workload.Manifests).To(HaveLen(1))
+
+			secret := &corev1.Secret{}
+			Expect(unmarshalManifest(work.Spec.Workload.Manifests[0], secret)).To(Succeed())
+			Expect(secret.Name).To(Equal("cacerts"))
+			Expect(secret.Namespace).To(Equal("istio-system"))
+			Expect(secret.Data).To(HaveKey("tls.crt"))
+			Expect(secret.Data).To(HaveKey("tls.key"))
+		})
+
+		It("should create ManifestWork for each cluster when secrets are created", func() {
+			cluster1 := util.UniqueName("cluster")
+			cluster2 := util.UniqueName("cluster")
+
+			util.CreateK8sManagedCluster(ctx, k8sClient, cluster1, testClusterSet)
+			util.CreateK8sManagedCluster(ctx, k8sClient, cluster2, testClusterSet)
+			util.CreateMultiClusterMeshWithCertManager(ctx, k8sClient, meshName, testNs, testClusterSet, "mesh-issuer")
+
+			// Wait for operator ManifestWorks
+			expectSailManifestWork(cluster1)
+			expectSailManifestWork(cluster2)
+
+			// Simulate cert-manager creating secrets for both clusters
+			util.CreateCacertsSecret(ctx, k8sClient, testNs, cluster1, meshName, testNs)
+			util.CreateCacertsSecret(ctx, k8sClient, testNs, cluster2, meshName, testNs)
+
+			// Verify cacerts ManifestWorks are created for both clusters
+			expectManifestWork(meshcontroller.ManifestWorkNameCacerts, cluster1)
+			expectManifestWork(meshcontroller.ManifestWorkNameCacerts, cluster2)
+		})
+
+		It("should update ManifestWork when cacerts secret is updated", func() {
+			util.CreateK8sManagedCluster(ctx, k8sClient, clusterName, testClusterSet)
+			util.CreateMultiClusterMeshWithCertManager(ctx, k8sClient, meshName, testNs, testClusterSet, "mesh-issuer")
+
+			expectSailManifestWork(clusterName)
+			util.CreateCacertsSecret(ctx, k8sClient, testNs, clusterName, meshName, testNs)
+
+			work := expectManifestWork(meshcontroller.ManifestWorkNameCacerts, clusterName)
+			initialResourceVersion := work.ResourceVersion
+
+			// Update the secret
+			secret := &corev1.Secret{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{
+				Name:      fmt.Sprintf("cacerts-%s", clusterName),
+				Namespace: testNs,
+			}, secret)).To(Succeed())
+
+			secret.Data["tls.crt"] = []byte("updated-cert-data")
+			Expect(k8sClient.Update(ctx, secret)).To(Succeed())
+
+			// Verify ManifestWork is updated
+			Eventually(func() string {
+				work := &workv1.ManifestWork{}
+				if err := k8sClient.Get(ctx, types.NamespacedName{
+					Name:      meshcontroller.ManifestWorkNameCacerts,
+					Namespace: clusterName,
+				}, work); err != nil {
+					return ""
+				}
+				return work.ResourceVersion
+			}).ShouldNot(Equal(initialResourceVersion))
+		})
+
+		It("should not create cacerts ManifestWork when no issuer is configured", func() {
+			util.CreateK8sManagedCluster(ctx, k8sClient, clusterName, testClusterSet)
+			util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet, meshv1alpha1.OperatorConfig{})
+
+			expectSailManifestWork(clusterName)
+
+			// Give controller time to process
+			time.Sleep(2 * time.Second)
+
+			// Verify no cacerts ManifestWork is created
+			work := &workv1.ManifestWork{}
+			err := k8sClient.Get(ctx, types.NamespacedName{
+				Name:      meshcontroller.ManifestWorkNameCacerts,
+				Namespace: clusterName,
+			}, work)
+			Expect(errors.IsNotFound(err)).To(BeTrue())
 		})
 	})
 

@@ -80,7 +80,7 @@ test: ## Run unit tests
 	go test -short ./pkg/...
 
 .PHONY: update-test-crds
-update-test-crds: ## Update test CRDs from OCM API dependency
+update-test-crds: ## Update test CRDs from OCM API and cert-manager dependencies
 	@echo "Updating test CRDs from open-cluster-management.io/api..."
 	@OCM_API_PATH=$$(go list -m -f '{{.Dir}}' open-cluster-management.io/api 2>/dev/null); \
 	if [ -z "$$OCM_API_PATH" ]; then \
@@ -94,6 +94,18 @@ update-test-crds: ## Update test CRDs from OCM API dependency
 	cp -v $$OCM_API_PATH/cluster/v1beta2/*.crd.yaml $(TEST_CRD_DIR)/ocm/ 2>/dev/null || true; \
 	cp -v $$OCM_API_PATH/work/v1/*.crd.yaml $(TEST_CRD_DIR)/ocm/ 2>/dev/null || true; \
 	echo "Test CRDs updated successfully in $(TEST_CRD_DIR)/ocm/"
+	@echo "Updating test CRDs from cert-manager..."
+	@CERTMANAGER_PATH=$$(go list -m -f '{{.Dir}}' github.com/cert-manager/cert-manager 2>/dev/null); \
+	if [ -z "$$CERTMANAGER_PATH" ]; then \
+		echo "Error: github.com/cert-manager/cert-manager not found in go.mod"; \
+		echo "Run: go mod download github.com/cert-manager/cert-manager"; \
+		exit 1; \
+	fi; \
+	mkdir -p $(TEST_CRD_DIR)/cert-manager; \
+	echo "Copying CRDs from $$CERTMANAGER_PATH..."; \
+	cp -v $$CERTMANAGER_PATH/deploy/crds/cert-manager.io_certificates.yaml $(TEST_CRD_DIR)/cert-manager/ 2>/dev/null || true; \
+	cp -v $$CERTMANAGER_PATH/deploy/crds/cert-manager.io_issuers.yaml $(TEST_CRD_DIR)/cert-manager/ 2>/dev/null || true; \
+	echo "Test CRDs updated successfully in $(TEST_CRD_DIR)/cert-manager/"
 
 .PHONY: test-integration
 test-integration: $(ENVTEST) gen-crds update-test-crds ## Run integration tests
