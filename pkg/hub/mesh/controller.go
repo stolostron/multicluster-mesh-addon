@@ -428,15 +428,10 @@ func (r *Reconciler) ensureCertificatesCreated(ctx context.Context, mesh *meshv1
 		return nil
 	}
 
-	issuerKind := issuerRef.Kind
-	if issuerKind == "" {
-		issuerKind = "Issuer"
-	}
-
 	trustDomain := mesh.Name
 
 	for _, cluster := range clusters {
-		if err := r.ensureCertificateForCluster(ctx, mesh, &cluster, issuerRef.Name, issuerKind, trustDomain); err != nil {
+		if err := r.ensureCertificateForCluster(ctx, mesh, &cluster, issuerRef.Name, trustDomain); err != nil {
 			return fmt.Errorf("failed to ensure certificate for cluster %s: %w", cluster.Name, err)
 		}
 	}
@@ -445,7 +440,7 @@ func (r *Reconciler) ensureCertificatesCreated(ctx context.Context, mesh *meshv1
 }
 
 // ensureCertificateForCluster creates a Certificate resource for a specific cluster
-func (r *Reconciler) ensureCertificateForCluster(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, cluster *clusterv1.ManagedCluster, issuerName, issuerKind, trustDomain string) error {
+func (r *Reconciler) ensureCertificateForCluster(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, cluster *clusterv1.ManagedCluster, issuerName, trustDomain string) error {
 	certName := getCacertsName(cluster.Name)
 	cert := &certmanagerv1.Certificate{}
 	err := r.Get(ctx, types.NamespacedName{
@@ -496,7 +491,7 @@ func (r *Reconciler) ensureCertificateForCluster(ctx context.Context, mesh *mesh
 			},
 			IssuerRef: cmmeta.ObjectReference{
 				Name:  issuerName,
-				Kind:  issuerKind,
+				Kind:  "Issuer",
 				Group: "cert-manager.io",
 			},
 		},
