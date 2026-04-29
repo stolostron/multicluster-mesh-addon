@@ -21,6 +21,7 @@ import (
 	meshv1alpha1 "github.com/stolostron/multicluster-mesh-addon/pkg/apis/mesh/v1alpha1"
 	meshcontroller "github.com/stolostron/multicluster-mesh-addon/pkg/hub/mesh"
 	"github.com/stolostron/multicluster-mesh-addon/test/util"
+	msav1alpha1 "open-cluster-management.io/managed-serviceaccount/apis/authentication/v1alpha1"
 )
 
 var _ = Describe("MultiClusterMesh Controller", func() {
@@ -185,6 +186,25 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 			// Now add the product claim and expect the corresponding ManifestWork to be created
 			util.SetProductClaim(ctx, k8sClient, clusterName, "Other")
 			expectSailManifestWork(clusterName)
+		})
+
+		It("should create ManagedServiceAccount resources for each cluster in the ClusterSet", func() {
+			clusterSet := []string{util.UniqueName("test-set-1"), util.UniqueName("test-set-2")}
+			util.CreateManagedCluster(ctx, k8sClient, clusterName, clusterSet)
+			util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, clusterSet, meshv1alpha1.OperatorConfig{})
+
+			// Give controller time to process reconciliation
+			time.Sleep(2 * time.Second)
+
+			msa := &msav1alpha1.ManagedServiceAccount{}
+			Expect(k8sClient.List(ctx, msa)).To(Succeed())
+			Expect(k8sClient.List(ctx, msa)).To(HaveLen(2))
+
+			// Each ManagedServiceAccount should create a secret with the cluster name
+			for _, cluster := range clusterSet {
+				secret := &corev1.Secret{Name: cluster, Namespace: cluster}
+				Expect(k8sClient.List(ctx, secret)).To(Succeed())
+			}
 		})
 	})
 
