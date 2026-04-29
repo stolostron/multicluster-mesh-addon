@@ -35,8 +35,8 @@ func CreateCacertsSecret(ctx context.Context, k8sClient client.Client, namespace
 			Namespace: namespace,
 			Labels: map[string]string{
 				meshcontroller.ManagedByLabel:     "multicluster-mesh-addon",
-				meshcontroller.MeshNameLabel:      meshName,
-				meshcontroller.MeshNamespaceLabel: meshNamespace,
+				meshcontroller.LabelMeshName:      meshName,
+				meshcontroller.LabelMeshNamespace: meshNamespace,
 				meshcontroller.ClusterNameLabel:   clusterName,
 			},
 		},
