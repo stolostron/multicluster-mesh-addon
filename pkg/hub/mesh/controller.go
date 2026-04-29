@@ -504,7 +504,7 @@ func (r *Reconciler) ensureCertificateForCluster(ctx context.Context, mesh *mesh
 				certmanagerv1.UsageKeyEncipherment,
 				certmanagerv1.UsageCertSign,
 			},
-			IssuerRef: cmmeta.ObjectReference{
+			IssuerRef: cmmeta.IssuerReference{
 				Name:  mesh.Spec.Security.Trust.CertManager.IssuerRef.Name,
 				Kind:  "Issuer",
 				Group: "cert-manager.io",
