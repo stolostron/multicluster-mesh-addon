@@ -18,6 +18,7 @@ import (
 	clusterv1 "open-cluster-management.io/api/cluster/v1"
 	clusterv1beta2 "open-cluster-management.io/api/cluster/v1beta2"
 	workv1 "open-cluster-management.io/api/work/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	meshv1alpha1 "github.com/stolostron/multicluster-mesh-addon/pkg/apis/mesh/v1alpha1"
 	meshcontroller "github.com/stolostron/multicluster-mesh-addon/pkg/hub/mesh"
@@ -187,6 +188,61 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 			util.SetProductClaim(ctx, k8sClient, clusterName, "Other")
 			expectSailManifestWork(clusterName)
 		})
+
+		It("should add finalizer on MultiClusterMesh creation", func() {
+			util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet, meshv1alpha1.OperatorConfig{})
+			expectFinalizer(meshName, testNs)
+		})
+	})
+
+	Context("Deleting MultiClusterMesh", func() {
+		It("should delete related ManifestWorks", func() {
+			cluster2 := util.UniqueName("cluster2")
+			util.CreateK8sManagedCluster(ctx, k8sClient, clusterName, testClusterSet)
+			util.CreateOCPManagedCluster(ctx, k8sClient, cluster2, testClusterSet, meshcontroller.ProductOCP)
+			util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet, meshv1alpha1.OperatorConfig{})
+			expectFinalizer(meshName, testNs)
+			expectSailManifestWork(clusterName)
+			expectOSSMManifestWork(cluster2)
+
+			mesh := &meshv1alpha1.MultiClusterMesh{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: meshName, Namespace: testNs}, mesh)).To(Succeed())
+			Expect(k8sClient.Delete(ctx, mesh)).To(Succeed())
+
+			expectResourceDeleted(&workv1.ManifestWork{}, meshcontroller.ManifestWorkNameSail, clusterName)
+			expectResourceDeleted(&workv1.ManifestWork{}, meshcontroller.ManifestWorkNameOSSM, cluster2)
+			expectResourceDeleted(&meshv1alpha1.MultiClusterMesh{}, meshName, testNs)
+		})
+
+		It("should work when ClusterSet doesn't exist", func() {
+			util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, util.UniqueName("nonexistent-set"), meshv1alpha1.OperatorConfig{})
+			expectFinalizer(meshName, testNs)
+
+			mesh := &meshv1alpha1.MultiClusterMesh{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: meshName, Namespace: testNs}, mesh)).To(Succeed())
+			Expect(k8sClient.Delete(ctx, mesh)).To(Succeed())
+
+			expectResourceDeleted(&meshv1alpha1.MultiClusterMesh{}, meshName, testNs)
+		})
+
+		It("should delete ManifestWork even when the ClusterSet is deleted first", func() {
+			util.CreateK8sManagedCluster(ctx, k8sClient, clusterName, testClusterSet)
+			util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet, meshv1alpha1.OperatorConfig{})
+			expectFinalizer(meshName, testNs)
+			expectSailManifestWork(clusterName)
+
+			clusterSet := &clusterv1beta2.ManagedClusterSet{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: testClusterSet}, clusterSet)).To(Succeed())
+			Expect(k8sClient.Delete(ctx, clusterSet)).To(Succeed())
+			expectResourceDeleted(&clusterv1beta2.ManagedClusterSet{}, testClusterSet, "")
+
+			mesh := &meshv1alpha1.MultiClusterMesh{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: meshName, Namespace: testNs}, mesh)).To(Succeed())
+			Expect(k8sClient.Delete(ctx, mesh)).To(Succeed())
+
+			expectResourceDeleted(&workv1.ManifestWork{}, meshcontroller.ManifestWorkNameSail, clusterName)
+			expectResourceDeleted(&meshv1alpha1.MultiClusterMesh{}, meshName, testNs)
+		})
 	})
 
 	Context("Certificate distribution", func() {
@@ -322,6 +378,23 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 		})
 	})
 })
+
+func expectFinalizer(name, namespace string) {
+	Eventually(func() []string {
+		mesh := &meshv1alpha1.MultiClusterMesh{}
+		if err := k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: namespace}, mesh); err != nil {
+			return nil
+		}
+		return mesh.Finalizers
+	}).Should(ContainElement(meshcontroller.FinalizerName))
+}
+
+func expectResourceDeleted(obj client.Object, name, namespace string) {
+	Eventually(func() bool {
+		err := k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: namespace}, obj)
+		return errors.IsNotFound(err)
+	}).Should(BeTrue())
+}
 
 func expectManifestWork(name, namespace string) *workv1.ManifestWork {
 	work := &workv1.ManifestWork{}

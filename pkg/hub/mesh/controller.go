@@ -20,6 +20,7 @@ import (
 	workv1 "open-cluster-management.io/api/work/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -47,6 +48,11 @@ const (
 
 	CacertsSecretName = "cacerts"
 
+	FinalizerName = "mesh.open-cluster-management.io/finalizer"
+
+	LabelMeshName      = "mesh.open-cluster-management.io/mesh-name"
+	LabelMeshNamespace = "mesh.open-cluster-management.io/mesh-namespace"
+
 	clusterClaimProduct = "product.open-cluster-management.io"
 
 	// Product claim values from github.com/stolostron/multicloud-operators-foundation/pkg/klusterlet/clusterclaim
@@ -57,10 +63,8 @@ const (
 	ProductOSD  = "OpenShiftDedicated"
 
 	// Label to identify secrets managed by this controller
-	ManagedByLabel      = "mesh.open-cluster-management.io/managed-by"
-	MeshNameLabel       = "mesh.open-cluster-management.io/mesh-name"
-	MeshNamespaceLabel  = "mesh.open-cluster-management.io/mesh-namespace"
-	ClusterNameLabel    = "mesh.open-cluster-management.io/cluster-name"
+	ManagedByLabel   = "mesh.open-cluster-management.io/managed-by"
+	ClusterNameLabel = "mesh.open-cluster-management.io/cluster-name"
 )
 
 var (
@@ -109,6 +113,15 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	if !mesh.DeletionTimestamp.IsZero() {
 		klog.Infof("MultiClusterMesh being deleted: %s/%s", req.Namespace, req.Name)
 		return r.handleDeletion(ctx, mesh)
+	}
+
+	if !controllerutil.ContainsFinalizer(mesh, FinalizerName) {
+		klog.Infof("Adding finalizer to MultiClusterMesh %s/%s", mesh.Namespace, mesh.Name)
+		controllerutil.AddFinalizer(mesh, FinalizerName)
+		if err := r.Update(ctx, mesh); err != nil {
+			return reconcile.Result{}, fmt.Errorf("failed to add finalizer: %w", err)
+		}
+		return reconcile.Result{}, nil
 	}
 
 	klog.Infof("MultiClusterMesh reconciling: %s/%s, ClusterSet: %s",
@@ -160,40 +173,41 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 
 // handleDeletion handles cleanup when the MultiClusterMesh is being deleted
 func (r *Reconciler) handleDeletion(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh) (reconcile.Result, error) {
-	klog.Infof("Handling deletion for MultiClusterMesh %s/%s", mesh.Namespace, mesh.Name)
-	clusters, err := r.getClustersFromSet(ctx, mesh.Spec.ClusterSet)
-	if err != nil {
-		return reconcile.Result{}, fmt.Errorf("failed to get clusters for cleanup: %w", err)
+	if !controllerutil.ContainsFinalizer(mesh, FinalizerName) {
+		klog.V(4).Infof("MultiClusterMesh %s/%s has no finalizer, nothing to clean up", mesh.Namespace, mesh.Name)
+		return reconcile.Result{}, nil
 	}
 
-	for _, cluster := range clusters {
-		workName := getOperatorManifestWorkName(isOpenShift(&cluster))
-		work := &workv1.ManifestWork{}
-		err := r.Get(ctx, types.NamespacedName{
-			Name:      workName,
-			Namespace: cluster.Name,
-		}, work)
+	klog.Infof("Handling deletion for MultiClusterMesh %s/%s", mesh.Namespace, mesh.Name)
+	workList := &workv1.ManifestWorkList{}
+	labelSelector := client.MatchingLabels{
+		LabelMeshName:      mesh.Name,
+		LabelMeshNamespace: mesh.Namespace,
+	}
 
-		if err != nil {
-			if errors.IsNotFound(err) {
-				klog.V(4).Infof("ManifestWork %s/%s already deleted", cluster.Name, workName)
-				continue
-			}
-			return reconcile.Result{}, fmt.Errorf("failed to get ManifestWork %s/%s: %w", cluster.Name, workName, err)
-		}
+	if err := r.List(ctx, workList, labelSelector); err != nil {
+		return reconcile.Result{}, fmt.Errorf("failed to list ManifestWorks for cleanup: %w", err)
+	}
 
+	klog.V(4).Infof("Found %d ManifestWorks to clean up for MultiClusterMesh %s/%s", len(workList.Items), mesh.Namespace, mesh.Name)
+	for i := range workList.Items {
+		work := &workList.Items[i]
 		if err := r.Delete(ctx, work); err != nil {
 			if !errors.IsNotFound(err) {
-				return reconcile.Result{}, fmt.Errorf("failed to delete ManifestWork %s/%s: %w", cluster.Name, workName, err)
+				return reconcile.Result{}, fmt.Errorf("failed to delete ManifestWork %s/%s: %w", work.Namespace, work.Name, err)
 			}
-			klog.V(4).Infof("ManifestWork %s/%s already deleted", cluster.Name, workName)
+			klog.V(4).Infof("ManifestWork %s/%s already deleted", work.Namespace, work.Name)
 		} else {
-			klog.Infof("Deleted ManifestWork %s/%s", cluster.Name, workName)
+			klog.Infof("Deleted ManifestWork %s/%s", work.Namespace, work.Name)
 		}
 	}
 
-	// TODO: We don't remove finalizer here since we haven't added one yet
-	// This will be added when we implement more complex lifecycle management
+	klog.Infof("Removing finalizer from MultiClusterMesh %s/%s", mesh.Namespace, mesh.Name)
+	controllerutil.RemoveFinalizer(mesh, FinalizerName)
+	if err := r.Update(ctx, mesh); err != nil {
+		return reconcile.Result{}, fmt.Errorf("failed to remove finalizer: %w", err)
+	}
+
 	return reconcile.Result{}, nil
 }
 
@@ -220,7 +234,7 @@ func (r *Reconciler) ensureOperatorInstalled(ctx context.Context, mesh *meshv1al
 	}
 
 	klog.Infof("Creating ManifestWork to install operator on cluster %s", cluster.Name)
-	work := r.buildOperatorManifestWork(mesh.Spec.Operator, cluster)
+	work := r.buildOperatorManifestWork(mesh, cluster)
 
 	if err := r.Create(ctx, work); err != nil {
 		return fmt.Errorf("failed to create ManifestWork: %w", err)
@@ -280,10 +294,10 @@ func (r *Reconciler) getClustersFromSet(ctx context.Context, clusterSetName stri
 	return clusterList.Items, nil
 }
 
-func (r *Reconciler) buildOperatorManifestWork(config meshv1alpha1.OperatorConfig, cluster *clusterv1.ManagedCluster) *workv1.ManifestWork {
+func (r *Reconciler) buildOperatorManifestWork(mesh *meshv1alpha1.MultiClusterMesh, cluster *clusterv1.ManagedCluster) *workv1.ManifestWork {
 	manifests := []workv1.Manifest{}
 	isOCP := isOpenShift(cluster)
-	config = r.applyOperatorDefaults(config, isOCP)
+	config := r.applyOperatorDefaults(mesh.Spec.Operator, isOCP)
 
 	// openshift-operators exists by default on OCP and already has a global OperatorGroup
 	if config.Namespace != DefaultOCPOperatorNs {
@@ -346,6 +360,10 @@ func (r *Reconciler) buildOperatorManifestWork(config meshv1alpha1.OperatorConfi
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      getOperatorManifestWorkName(isOCP),
 			Namespace: cluster.Name,
+			Labels: map[string]string{
+				LabelMeshName:      mesh.Name,
+				LabelMeshNamespace: mesh.Namespace,
+			},
 		},
 		Spec: workv1.ManifestWorkSpec{
 			Workload: workv1.ManifestsTemplate{
@@ -399,8 +417,8 @@ func (r *Reconciler) mapSecretToMesh(ctx context.Context, obj client.Object) []r
 		return nil
 	}
 
-	meshName := secret.Labels[MeshNameLabel]
-	meshNamespace := secret.Labels[MeshNamespaceLabel]
+	meshName := secret.Labels[LabelMeshName]
+	meshNamespace := secret.Labels[LabelMeshNamespace]
 	if meshName == "" || meshNamespace == "" {
 		return nil
 	}
@@ -462,8 +480,8 @@ func (r *Reconciler) ensureCertificateForCluster(ctx context.Context, mesh *mesh
 			Namespace: mesh.Namespace,
 			Labels: map[string]string{
 				ManagedByLabel:     "multicluster-mesh-addon",
-				MeshNameLabel:      mesh.Name,
-				MeshNamespaceLabel: mesh.Namespace,
+				LabelMeshName:      mesh.Name,
+				LabelMeshNamespace: mesh.Namespace,
 				ClusterNameLabel:   cluster.Name,
 			},
 		},
@@ -472,8 +490,8 @@ func (r *Reconciler) ensureCertificateForCluster(ctx context.Context, mesh *mesh
 			SecretTemplate: &certmanagerv1.CertificateSecretTemplate{
 				Labels: map[string]string{
 					ManagedByLabel:     "multicluster-mesh-addon",
-					MeshNameLabel:      mesh.Name,
-					MeshNamespaceLabel: mesh.Namespace,
+					LabelMeshName:      mesh.Name,
+					LabelMeshNamespace: mesh.Namespace,
 					ClusterNameLabel:   cluster.Name,
 				},
 			},
