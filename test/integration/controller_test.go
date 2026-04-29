@@ -164,34 +164,92 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 		It("should not create ManifestWorks when ClusterSet doesn't exist", func() {
 			util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, util.UniqueName("set"), meshv1alpha1.OperatorConfig{})
 
-			// Give controller time to process reconciliation
-			time.Sleep(2 * time.Second)
-
-			workList := &workv1.ManifestWorkList{}
-			Expect(k8sClient.List(ctx, workList)).To(Succeed())
-			Expect(workList.Items).To(BeEmpty())
+			awaitReconcileFinished()
+			expectNoManifestWorks()
 		})
 
-		It("should skip clusters without product claims and requeue", func() {
-			util.CreateManagedCluster(ctx, k8sClient, clusterName, testClusterSet)
-			util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet, meshv1alpha1.OperatorConfig{})
+		When("referencing an empty ClusterSet", func() {
+			BeforeEach(func() {
+				util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet, meshv1alpha1.OperatorConfig{})
+				awaitReconcileFinished()
+			})
 
-			// Give controller time to process reconciliation
-			time.Sleep(2 * time.Second)
+			It("should not process it", func() {
+				expectNoManifestWorks()
+			})
 
-			// No ManifestWork should be created because the cluster lacks product claim
-			workList := &workv1.ManifestWorkList{}
-			Expect(k8sClient.List(ctx, workList)).To(Succeed())
-			Expect(workList.Items).To(BeEmpty())
+			It("shouldn't process a cluster without clusterset label", func() {
+				util.CreateK8sManagedCluster(ctx, k8sClient, clusterName, "")
+				awaitReconcileFinished()
+				expectNoManifestWorks()
+			})
 
-			// Now add the product claim and expect the corresponding ManifestWork to be created
-			util.SetProductClaim(ctx, k8sClient, clusterName, "Other")
-			expectSailManifestWork(clusterName)
+			It("should process a cluster when it's added", func() {
+				util.CreateK8sManagedCluster(ctx, k8sClient, clusterName, testClusterSet)
+				expectSailManifestWork(clusterName)
+			})
+		})
+
+		When("referencing a cluster with no product claim", func() {
+			BeforeEach(func() {
+				util.CreateManagedCluster(ctx, k8sClient, clusterName, testClusterSet)
+				util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet, meshv1alpha1.OperatorConfig{})
+				awaitReconcileFinished()
+			})
+
+			It("should skip it", func() {
+				expectNoManifestWorks()
+			})
+
+			It("should process it when a claim is set", func() {
+				util.SetProductClaim(ctx, k8sClient, clusterName, "Other")
+				expectSailManifestWork(clusterName)
+			})
 		})
 
 		It("should add finalizer on MultiClusterMesh creation", func() {
 			util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet, meshv1alpha1.OperatorConfig{})
 			expectFinalizer(meshName, testNs)
+		})
+
+		When("referencing a set with a cluster", func() {
+			BeforeEach(func() {
+				util.CreateK8sManagedCluster(ctx, k8sClient, clusterName, testClusterSet)
+				util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet, meshv1alpha1.OperatorConfig{})
+				expectSailManifestWork(clusterName)
+			})
+
+			It("should cleanup ManifestWork when the cluster is removed from ClusterSet", func() {
+				updateClusterSetLabel(clusterName, "")
+				awaitReconcileFinished()
+				expectNoManifestWorks()
+			})
+
+			It("should cleanup ManifestWork when the cluster is deleted", func() {
+				cluster := &clusterv1.ManagedCluster{}
+				Expect(k8sClient.Get(ctx, types.NamespacedName{Name: clusterName}, cluster)).To(Succeed())
+				Expect(k8sClient.Delete(ctx, cluster)).To(Succeed())
+				expectResourceDeleted(&clusterv1.ManagedCluster{}, testClusterSet, "")
+
+				awaitReconcileFinished()
+				expectNoManifestWorks()
+			})
+
+			When("moving the cluster between sets", func() {
+				var otherClusterSet string
+
+				BeforeEach(func() {
+					otherClusterSet = util.UniqueName("other-set")
+					util.CreateManagedClusterSet(ctx, k8sClient, otherClusterSet)
+					awaitReconcileFinished()
+				})
+
+				It("should cleanup ManifestWork", func() {
+					updateClusterSetLabel(clusterName, otherClusterSet)
+					awaitReconcileFinished()
+					expectNoManifestWorks()
+				})
+			})
 		})
 	})
 
@@ -296,6 +354,23 @@ func expectResourceDeleted(obj client.Object, name, namespace string) {
 		err := k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: namespace}, obj)
 		return errors.IsNotFound(err)
 	}).Should(BeTrue())
+}
+
+func awaitReconcileFinished() {
+	time.Sleep(1 * time.Second)
+}
+
+func updateClusterSetLabel(clusterName, newClusterSet string) {
+	cluster := &clusterv1.ManagedCluster{}
+	Expect(k8sClient.Get(ctx, types.NamespacedName{Name: clusterName}, cluster)).To(Succeed())
+	cluster.Labels[meshcontroller.ClusterSetLabel] = newClusterSet
+	Expect(k8sClient.Update(ctx, cluster)).To(Succeed())
+}
+
+func expectNoManifestWorks() {
+	workList := &workv1.ManifestWorkList{}
+	Expect(k8sClient.List(ctx, workList)).To(Succeed())
+	Expect(workList.Items).To(BeEmpty())
 }
 
 func expectManifestWork(name, namespace string) *workv1.ManifestWork {

@@ -3,7 +3,6 @@ package mesh
 import (
 	"context"
 	"fmt"
-	"time"
 
 	operatorsv1 "github.com/operator-framework/api/pkg/operators/v1"
 	operatorsv1alpha1 "github.com/operator-framework/api/pkg/operators/v1alpha1"
@@ -19,6 +18,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
@@ -47,6 +47,7 @@ const (
 	LabelMeshName      = "mesh.open-cluster-management.io/mesh-name"
 	LabelMeshNamespace = "mesh.open-cluster-management.io/mesh-namespace"
 
+	ClusterSetLabel     = "cluster.open-cluster-management.io/clusterset"
 	clusterClaimProduct = "product.open-cluster-management.io"
 
 	// Product claim values from github.com/stolostron/multicloud-operators-foundation/pkg/klusterlet/clusterclaim
@@ -55,10 +56,6 @@ const (
 	ProductARO  = "ARO"
 	ProductROKS = "ROKS"
 	ProductOSD  = "OpenShiftDedicated"
-)
-
-var (
-	MissingClaimRequeueDelay = 30 * time.Second
 )
 
 // Reconciler reconciles MultiClusterMesh resources
@@ -76,6 +73,10 @@ func RegisterController(mgr manager.Manager) error {
 
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&meshv1alpha1.MultiClusterMesh{}).
+		Watches(
+			&clusterv1.ManagedCluster{},
+			handler.EnqueueRequestsFromMapFunc(reconciler.findMeshesForCluster),
+		).
 		Complete(reconciler)
 }
 
@@ -121,12 +122,9 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 
 	klog.Infof("Found %d clusters in set %s", len(clusters), mesh.Spec.ClusterSet)
 
-	// Install the operator on each cluster
-	missingClaims := false
 	for _, cluster := range clusters {
 		if getProductClaim(&cluster) == "" {
-			klog.V(4).Infof("Cluster %s missing product claim (needed for platform detection), skipping (will requeue)", cluster.Name)
-			missingClaims = true
+			klog.V(4).Infof("Cluster %s missing product claim (needed for platform detection), skipping", cluster.Name)
 			continue
 		}
 
@@ -136,13 +134,44 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		}
 	}
 
-	if missingClaims {
-		klog.Infof("Some clusters are missing product claims, requeueing the reconcile request")
-		return reconcile.Result{RequeueAfter: MissingClaimRequeueDelay}, nil
+	if err := r.cleanupOrphanedManifestWorks(ctx, mesh, clusters); err != nil {
+		klog.Errorf("Failed to cleanup orphaned ManifestWorks: %v", err)
+		return reconcile.Result{}, err
 	}
 
 	klog.Infof("Successfully reconciled MultiClusterMesh %s/%s", mesh.Namespace, mesh.Name)
 	return reconcile.Result{}, nil
+}
+
+// findMeshesForCluster returns a list of all meshes to reconcile following a cluster change
+func (r *Reconciler) findMeshesForCluster(ctx context.Context, obj client.Object) (requests []reconcile.Request) {
+	cluster := obj.(*clusterv1.ManagedCluster)
+	clusterSetName := cluster.Labels[ClusterSetLabel]
+	if clusterSetName == "" {
+		klog.V(4).Infof("Cluster %s has no clusterset label, skipping", cluster.Name)
+		return
+	}
+
+	meshList := &meshv1alpha1.MultiClusterMeshList{}
+	if err := r.List(ctx, meshList); err != nil {
+		klog.Errorf("Failed to list MultiClusterMeshes when handling cluster %s: %v", cluster.Name, err)
+		return
+	}
+
+	for _, mesh := range meshList.Items {
+		if mesh.Spec.ClusterSet == clusterSetName {
+			klog.V(4).Infof("Cluster %s change triggers reconciliation of MultiClusterMesh %s/%s",
+				cluster.Name, mesh.Namespace, mesh.Name)
+			requests = append(requests, reconcile.Request{
+				NamespacedName: types.NamespacedName{
+					Name:      mesh.Name,
+					Namespace: mesh.Namespace,
+				},
+			})
+		}
+	}
+
+	return requests
 }
 
 // handleDeletion handles cleanup when the MultiClusterMesh is being deleted
@@ -154,12 +183,7 @@ func (r *Reconciler) handleDeletion(ctx context.Context, mesh *meshv1alpha1.Mult
 
 	klog.Infof("Handling deletion for MultiClusterMesh %s/%s", mesh.Namespace, mesh.Name)
 	workList := &workv1.ManifestWorkList{}
-	labelSelector := client.MatchingLabels{
-		LabelMeshName:      mesh.Name,
-		LabelMeshNamespace: mesh.Namespace,
-	}
-
-	if err := r.List(ctx, workList, labelSelector); err != nil {
+	if err := r.List(ctx, workList, meshLabelSelector(mesh)); err != nil {
 		return reconcile.Result{}, fmt.Errorf("failed to list ManifestWorks for cleanup: %w", err)
 	}
 
@@ -198,6 +222,10 @@ func (r *Reconciler) ensureOperatorInstalled(ctx context.Context, mesh *meshv1al
 	}, existingWork)
 
 	if err == nil {
+		if !existingWork.DeletionTimestamp.IsZero() {
+			return fmt.Errorf("ManifestWork is terminating, requeueing")
+		}
+
 		klog.V(4).Infof("ManifestWork %s/%s already exists", cluster.Name, workName)
 		// TODO: Add logic to check if the work needs updating (e.g., channel change)
 		return nil
@@ -216,6 +244,44 @@ func (r *Reconciler) ensureOperatorInstalled(ctx context.Context, mesh *meshv1al
 
 	klog.Infof("Successfully created ManifestWork %s/%s for operator installation", cluster.Name, work.Name)
 	return nil
+}
+
+func (r *Reconciler) cleanupOrphanedManifestWorks(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, clusters []clusterv1.ManagedCluster) error {
+	expectedClusters := make(map[string]bool)
+	for _, cluster := range clusters {
+		expectedClusters[cluster.Name] = true
+	}
+
+	// List ALL ManifestWorks that were created for this mesh, some of which might be orphaned
+	workList := &workv1.ManifestWorkList{}
+	if err := r.List(ctx, workList, meshLabelSelector(mesh)); err != nil {
+		return fmt.Errorf("failed to list ManifestWorks: %w", err)
+	}
+
+	for i := range workList.Items {
+		work := &workList.Items[i]
+		clusterName := work.Namespace
+
+		// Skip any clusters that are still in the set the mesh is referencing
+		if expectedClusters[clusterName] {
+			continue
+		}
+
+		klog.Infof("Deleting orphaned ManifestWork %s/%s (cluster no longer in ClusterSet %s)",
+			work.Namespace, work.Name, mesh.Spec.ClusterSet)
+		if err := r.Delete(ctx, work); err != nil && !errors.IsNotFound(err) {
+			return fmt.Errorf("failed to delete orphaned ManifestWork %s/%s: %w", work.Namespace, work.Name, err)
+		}
+	}
+
+	return nil
+}
+
+func meshLabelSelector(mesh *meshv1alpha1.MultiClusterMesh) client.MatchingLabels {
+	return client.MatchingLabels{
+		LabelMeshName:      mesh.Name,
+		LabelMeshNamespace: mesh.Namespace,
+	}
 }
 
 func isOpenShift(cluster *clusterv1.ManagedCluster) bool {
@@ -246,6 +312,10 @@ func getOperatorManifestWorkName(isOCP bool) string {
 func (r *Reconciler) getClustersFromSet(ctx context.Context, clusterSetName string) ([]clusterv1.ManagedCluster, error) {
 	clusterSet := &clusterv1beta2.ManagedClusterSet{}
 	if err := r.Get(ctx, types.NamespacedName{Name: clusterSetName}, clusterSet); err != nil {
+		if errors.IsNotFound(err) {
+			klog.V(4).Infof("ManagedClusterSet %s not found, will reconcile when it is created", clusterSetName)
+			return []clusterv1.ManagedCluster{}, nil
+		}
 		return nil, fmt.Errorf("failed to get ManagedClusterSet %s: %w", clusterSetName, err)
 	}
 
@@ -258,7 +328,7 @@ func (r *Reconciler) getClustersFromSet(ctx context.Context, clusterSetName stri
 
 	clusterList := &clusterv1.ManagedClusterList{}
 	labelSelector := client.MatchingLabels{
-		"cluster.open-cluster-management.io/clusterset": clusterSetName,
+		ClusterSetLabel: clusterSetName,
 	}
 
 	if err := r.List(ctx, clusterList, labelSelector); err != nil {
