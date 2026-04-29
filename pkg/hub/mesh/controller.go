@@ -63,8 +63,8 @@ const (
 	ProductOSD  = "OpenShiftDedicated"
 
 	// Label to identify secrets managed by this controller
-	ManagedByLabel   = "app.kubernetes.io/managed-by"
-	ClusterNameLabel = "mesh.open-cluster-management.io/cluster-name"
+	LabelManagedBy   = "app.kubernetes.io/managed-by"
+	LabelClusterName = "mesh.open-cluster-management.io/cluster-name"
 )
 
 var (
@@ -479,20 +479,20 @@ func (r *Reconciler) ensureCertificateForCluster(ctx context.Context, mesh *mesh
 			Name:      certName,
 			Namespace: mesh.Namespace,
 			Labels: map[string]string{
-				ManagedByLabel:     "multicluster-mesh-addon",
+				LabelManagedBy:     "multicluster-mesh-addon",
 				LabelMeshName:      mesh.Name,
 				LabelMeshNamespace: mesh.Namespace,
-				ClusterNameLabel:   cluster.Name,
+				LabelClusterName:   cluster.Name,
 			},
 		},
 		Spec: certmanagerv1.CertificateSpec{
 			SecretName: certName,
 			SecretTemplate: &certmanagerv1.CertificateSecretTemplate{
 				Labels: map[string]string{
-					ManagedByLabel:     "multicluster-mesh-addon",
+					LabelManagedBy:     "multicluster-mesh-addon",
 					LabelMeshName:      mesh.Name,
 					LabelMeshNamespace: mesh.Namespace,
-					ClusterNameLabel:   cluster.Name,
+					LabelClusterName:   cluster.Name,
 				},
 			},
 			Duration:    &metav1.Duration{Duration: 1440 * time.Hour},

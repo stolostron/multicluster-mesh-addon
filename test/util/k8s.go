@@ -34,10 +34,10 @@ func CreateCacertsSecret(ctx context.Context, k8sClient client.Client, namespace
 			Name:      fmt.Sprintf("cacerts-%s", clusterName),
 			Namespace: namespace,
 			Labels: map[string]string{
-				meshcontroller.ManagedByLabel:     "multicluster-mesh-addon",
+				meshcontroller.LabelManagedBy:     "multicluster-mesh-addon",
 				meshcontroller.LabelMeshName:      meshName,
 				meshcontroller.LabelMeshNamespace: meshNamespace,
-				meshcontroller.ClusterNameLabel:   clusterName,
+				meshcontroller.LabelClusterName:   clusterName,
 			},
 		},
 		Type: corev1.SecretTypeTLS,
