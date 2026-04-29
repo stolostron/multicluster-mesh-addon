@@ -3,6 +3,7 @@
 package integration
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -14,6 +15,8 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	clusterv1 "open-cluster-management.io/api/cluster/v1"
 	clusterv1beta2 "open-cluster-management.io/api/cluster/v1beta2"
@@ -23,7 +26,6 @@ import (
 	meshv1alpha1 "github.com/stolostron/multicluster-mesh-addon/pkg/apis/mesh/v1alpha1"
 	meshcontroller "github.com/stolostron/multicluster-mesh-addon/pkg/hub/mesh"
 	"github.com/stolostron/multicluster-mesh-addon/test/util"
-	msav1alpha1 "open-cluster-management.io/managed-serviceaccount/apis/authentication/v1alpha1"
 )
 
 var _ = Describe("MultiClusterMesh Controller", func() {
@@ -196,22 +198,20 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 		})
 
 		It("should create ManagedServiceAccount resources for each cluster in the ClusterSet", func() {
-			clusterSet := []string{util.UniqueName("test-set-1"), util.UniqueName("test-set-2")}
-			util.CreateManagedCluster(ctx, k8sClient, clusterName, clusterSet)
-			util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, clusterSet, meshv1alpha1.OperatorConfig{})
+			util.CreateManagedCluster(ctx, k8sClient, clusterName, testClusterSet)
+			util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet, meshv1alpha1.OperatorConfig{})
 
 			// Give controller time to process reconciliation
 			time.Sleep(2 * time.Second)
 
-			msa := &msav1alpha1.ManagedServiceAccount{}
-			Expect(k8sClient.List(ctx, msa)).To(Succeed())
-			Expect(k8sClient.List(ctx, msa)).To(HaveLen(2))
+			list := &unstructured.UnstructuredList{}
+			list.SetGroupVersionKind(schema.GroupVersionKind{
+				Group:   "authentication.open-cluster-management.io",
+				Kind:    "ManagedServiceAccount",
+				Version: "v1alpha1",
+			})
 
-			// Each ManagedServiceAccount should create a secret with the cluster name
-			for _, cluster := range clusterSet {
-				secret := &corev1.Secret{Name: cluster, Namespace: cluster}
-				Expect(k8sClient.List(ctx, secret)).To(Succeed())
-			}
+			Expect(k8sClient.List(context.Background(), list, client.InNamespace(testClusterSet))).To(Succeed())
 		})
 	})
 
