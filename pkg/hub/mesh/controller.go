@@ -50,8 +50,10 @@ const (
 
 	FinalizerName = "mesh.open-cluster-management.io/finalizer"
 
+	LabelManagedBy     = "app.kubernetes.io/managed-by"
 	LabelMeshName      = "mesh.open-cluster-management.io/mesh-name"
 	LabelMeshNamespace = "mesh.open-cluster-management.io/mesh-namespace"
+	LabelClusterName   = "mesh.open-cluster-management.io/cluster-name"
 
 	clusterClaimProduct = "product.open-cluster-management.io"
 
@@ -61,10 +63,6 @@ const (
 	ProductARO  = "ARO"
 	ProductROKS = "ROKS"
 	ProductOSD  = "OpenShiftDedicated"
-
-	// Label to identify secrets managed by this controller
-	LabelManagedBy   = "app.kubernetes.io/managed-by"
-	LabelClusterName = "mesh.open-cluster-management.io/cluster-name"
 )
 
 var (
