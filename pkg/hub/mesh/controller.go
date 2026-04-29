@@ -63,7 +63,7 @@ const (
 	ProductOSD  = "OpenShiftDedicated"
 
 	// Label to identify secrets managed by this controller
-	ManagedByLabel   = "mesh.open-cluster-management.io/managed-by"
+	ManagedByLabel   = "app.kubernetes.io/managed-by"
 	ClusterNameLabel = "mesh.open-cluster-management.io/cluster-name"
 )
 
