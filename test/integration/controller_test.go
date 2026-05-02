@@ -198,7 +198,11 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 		})
 
 		It("should create ManagedServiceAccount resources for each cluster in the ClusterSet", func() {
-			util.CreateManagedCluster(ctx, k8sClient, clusterName, testClusterSet)
+			cluster1 := util.UniqueName("cluster")
+			cluster2 := util.UniqueName("cluster")
+
+			util.CreateK8sManagedCluster(ctx, k8sClient, cluster1, testClusterSet)
+			util.CreateK8sManagedCluster(ctx, k8sClient, cluster2, testClusterSet)
 			util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet, meshv1alpha1.OperatorConfig{})
 
 			// Give controller time to process reconciliation
@@ -211,7 +215,8 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 				Version: "v1alpha1",
 			})
 
-			Expect(k8sClient.List(context.Background(), list, client.InNamespace(testClusterSet))).To(Succeed())
+			Expect(k8sClient.List(context.Background(), list, client.InNamespace(cluster1))).To(Succeed())
+			Expect(k8sClient.List(context.Background(), list, client.InNamespace(cluster2))).To(Succeed())
 		})
 	})
 
