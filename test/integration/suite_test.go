@@ -24,6 +24,7 @@ import (
 
 	meshv1alpha1 "github.com/stolostron/multicluster-mesh-addon/pkg/apis/mesh/v1alpha1"
 	meshcontroller "github.com/stolostron/multicluster-mesh-addon/pkg/hub/mesh"
+	msav1alpha1 "open-cluster-management.io/managed-serviceaccount/apis/authentication/v1alpha1"
 )
 
 var (
@@ -57,6 +58,7 @@ var _ = BeforeSuite(func() {
 		CRDDirectoryPaths: []string{
 			filepath.Join("..", "..", "config", "crd"),                      // Custom MultiClusterMesh CRD
 			filepath.Join("..", "..", "test", "integration", "crds", "ocm"), // OCM CRDs
+			filepath.Join("..", "..", "test", "integration", "external-crds", "ocm"), // OCM ManagedServiceAccount CRD
 		},
 		ErrorIfCRDPathMissing: true,
 	}
@@ -72,6 +74,7 @@ var _ = BeforeSuite(func() {
 	mustAddToScheme(workv1.Install, scheme.Scheme)
 	mustAddToScheme(operatorsv1.AddToScheme, scheme.Scheme)
 	mustAddToScheme(operatorsv1alpha1.AddToScheme, scheme.Scheme)
+	mustAddToScheme(msav1alpha1.AddToScheme,scheme.Scheme)
 
 	k8sClient, err = client.New(cfg, client.Options{Scheme: scheme.Scheme})
 	Expect(err).NotTo(HaveOccurred())
