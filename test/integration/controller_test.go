@@ -3,6 +3,7 @@
 package integration
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -14,6 +15,8 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	clusterv1 "open-cluster-management.io/api/cluster/v1"
 	clusterv1beta2 "open-cluster-management.io/api/cluster/v1beta2"
@@ -192,6 +195,28 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 		It("should add finalizer on MultiClusterMesh creation", func() {
 			util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet, meshv1alpha1.OperatorConfig{})
 			expectFinalizer(meshName, testNs)
+		})
+
+		It("should create ManagedServiceAccount resources for each cluster in the ClusterSet", func() {
+			cluster1 := util.UniqueName("cluster")
+			cluster2 := util.UniqueName("cluster")
+
+			util.CreateK8sManagedCluster(ctx, k8sClient, cluster1, testClusterSet)
+			util.CreateK8sManagedCluster(ctx, k8sClient, cluster2, testClusterSet)
+			util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet, meshv1alpha1.OperatorConfig{})
+
+			// Give controller time to process reconciliation
+			time.Sleep(2 * time.Second)
+
+			list := &unstructured.UnstructuredList{}
+			list.SetGroupVersionKind(schema.GroupVersionKind{
+				Group:   "authentication.open-cluster-management.io",
+				Kind:    "ManagedServiceAccount",
+				Version: "v1alpha1",
+			})
+
+			Expect(k8sClient.List(context.Background(), list, client.InNamespace(cluster1))).To(Succeed())
+			Expect(k8sClient.List(context.Background(), list, client.InNamespace(cluster2))).To(Succeed())
 		})
 	})
 

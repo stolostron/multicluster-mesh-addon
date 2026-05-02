@@ -23,6 +23,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	meshv1alpha1 "github.com/stolostron/multicluster-mesh-addon/pkg/apis/mesh/v1alpha1"
+	msav1alpha1 "open-cluster-management.io/managed-serviceaccount/apis/authentication/v1alpha1"
 )
 
 const (
@@ -57,9 +58,7 @@ const (
 	ProductOSD  = "OpenShiftDedicated"
 )
 
-var (
-	MissingClaimRequeueDelay = 30 * time.Second
-)
+var MissingClaimRequeueDelay = 30 * time.Second
 
 // Reconciler reconciles MultiClusterMesh resources
 type Reconciler struct {
@@ -139,6 +138,14 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	if missingClaims {
 		klog.Infof("Some clusters are missing product claims, requeueing the reconcile request")
 		return reconcile.Result{RequeueAfter: MissingClaimRequeueDelay}, nil
+	}
+
+	// Create ManagedServiceAccount resources for each managed cluster
+	for _, cluster := range clusters {
+		if err := r.CreateManagedServiceAccount(ctx, cluster, mesh); err != nil {
+			klog.Errorf("Failed to create a ManagedServiceAccount for cluster %s: %v", cluster.Name, err)
+			return reconcile.Result{}, err
+		}
 	}
 
 	klog.Infof("Successfully reconciled MultiClusterMesh %s/%s", mesh.Namespace, mesh.Name)
@@ -382,4 +389,32 @@ func (r *Reconciler) applyOperatorDefaults(config meshv1alpha1.OperatorConfig, i
 	}
 
 	return config
+}
+
+// CreateManagedServiceAccount creates a ManagedServiceAccount resource for a cluster in the ClusterSet
+func (r *Reconciler) CreateManagedServiceAccount(ctx context.Context, cluster clusterv1.ManagedCluster, mesh *meshv1alpha1.MultiClusterMesh) error {
+	klog.Infof("Creating a ManagedServiceAccount for a managed cluster: %s", cluster.Name)
+	validity, err := time.ParseDuration(mesh.Spec.Security.Discovery.TokenValidity) // this is derived from the MultiClusterMesh spec.security.discovery.tokenValidity
+	if err != nil {
+		return fmt.Errorf("failed to parse validity duration: %w", err)
+	}
+
+	msa := &msav1alpha1.ManagedServiceAccount{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      fmt.Sprintf("%s-%s", cluster.Name, mesh.Name), // Naming convention: <cluster-name>-<mesh-name>
+			Namespace: cluster.Name,
+		},
+		Spec: msav1alpha1.ManagedServiceAccountSpec{
+			Rotation: msav1alpha1.ManagedServiceAccountRotation{
+				Enabled:  false,
+				Validity: metav1.Duration{Duration: validity},
+			},
+		},
+	}
+
+	if err := r.Create(ctx, msa); err != nil {
+		return fmt.Errorf("failed to create a ManagedServiceAccount: %w", err)
+	}
+	klog.Infof("Successfully created a ManagedServiceAccount %s in namespace: %s", msa.ObjectMeta.Name, msa.ObjectMeta.Namespace)
+	return nil
 }
