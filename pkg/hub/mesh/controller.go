@@ -72,6 +72,8 @@ const (
 
 var (
 	MissingClaimRequeueDelay = 30 * time.Second
+
+	Day = 24 * time.Hour
 )
 
 // Reconciler reconciles MultiClusterMesh resources
@@ -495,8 +497,8 @@ func (r *Reconciler) ensureCertificateForCluster(ctx context.Context, mesh *mesh
 					LabelClusterName:   cluster.Name,
 				},
 			},
-			Duration:    &metav1.Duration{Duration: 1440 * time.Hour},
-			RenewBefore: &metav1.Duration{Duration: 360 * time.Hour},
+			Duration:    &metav1.Duration{Duration: 60 * Day},
+			RenewBefore: &metav1.Duration{Duration: 15 * Day},
 			CommonName:  fmt.Sprintf("intermediate-ca.%s.%s", cluster.Name, mesh.GetTrustDomain()),
 			IsCA:        true,
 			Usages: []certmanagerv1.KeyUsage{
