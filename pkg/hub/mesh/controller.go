@@ -418,7 +418,7 @@ func (r *Reconciler) applyOperatorDefaults(config meshv1alpha1.OperatorConfig, i
 }
 
 // mapSecretToMesh maps a Secret to the MultiClusterMesh that owns it
-func (r *Reconciler) mapSecretToMesh(ctx context.Context, obj client.Object) []reconcile.Request {
+func (r *Reconciler) mapSecretToMesh(_ context.Context, obj client.Object) []reconcile.Request {
 	secret, ok := obj.(*corev1.Secret)
 	if !ok {
 		return nil
@@ -426,9 +426,6 @@ func (r *Reconciler) mapSecretToMesh(ctx context.Context, obj client.Object) []r
 
 	meshName := secret.Labels[LabelMeshName]
 	meshNamespace := secret.Labels[LabelMeshNamespace]
-	if meshName == "" || meshNamespace == "" {
-		return nil
-	}
 
 	klog.V(4).Infof("Secret %s/%s changed, triggering reconcile for mesh %s/%s",
 		secret.Namespace, secret.Name, meshNamespace, meshName)
