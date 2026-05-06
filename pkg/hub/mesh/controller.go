@@ -515,17 +515,11 @@ func (r *Reconciler) ensureCertificateForCluster(ctx context.Context, mesh *mesh
 
 // ensureCacertsDistributed creates ManifestWorks to distribute cacerts secrets to clusters
 func (r *Reconciler) ensureCacertsDistributed(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, clusters []clusterv1.ManagedCluster) error {
-	controlPlaneNamespace := mesh.Spec.ControlPlane.Namespace
-	if controlPlaneNamespace == "" {
-		controlPlaneNamespace = "istio-system"
-	}
-
 	for _, cluster := range clusters {
-		if err := r.ensureCacertsManifestWork(ctx, mesh, &cluster, controlPlaneNamespace); err != nil {
+		if err := r.ensureCacertsManifestWork(ctx, mesh, &cluster, mesh.GetControlPlaneNamespace()); err != nil {
 			return fmt.Errorf("failed to ensure cacerts ManifestWork for cluster %s: %w", cluster.Name, err)
 		}
 	}
-
 	return nil
 }
 
