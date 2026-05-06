@@ -19,10 +19,12 @@ import (
 	clusterv1beta2 "open-cluster-management.io/api/cluster/v1beta2"
 	workv1 "open-cluster-management.io/api/work/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	meshv1alpha1 "github.com/stolostron/multicluster-mesh-addon/pkg/apis/mesh/v1alpha1"
@@ -86,7 +88,12 @@ func RegisterController(mgr manager.Manager) error {
 
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&meshv1alpha1.MultiClusterMesh{}).
-		Watches(&corev1.Secret{}, handler.EnqueueRequestsFromMapFunc(reconciler.mapSecretToMesh)).
+		Watches(&corev1.Secret{},
+			handler.EnqueueRequestsFromMapFunc(reconciler.mapSecretToMesh),
+			builder.WithPredicates(predicate.NewPredicateFuncs(func(obj client.Object) bool {
+				return obj.GetLabels()[LabelMeshName] != "" && obj.GetLabels()[LabelMeshNamespace] != ""
+			})),
+		).
 		Complete(reconciler)
 }
 
