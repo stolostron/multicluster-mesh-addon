@@ -325,16 +325,15 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 			util.CreateK8sManagedCluster(ctx, k8sClient, clusterName, testClusterSet)
 			util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet, meshv1alpha1.OperatorConfig{})
 
-			// Give controller time to process
-			time.Sleep(2 * time.Second)
-
 			// Verify no cacerts ManifestWork is created
-			work := &workv1.ManifestWork{}
-			err := k8sClient.Get(ctx, types.NamespacedName{
-				Name:      meshcontroller.ManifestWorkNameCacerts,
-				Namespace: clusterName,
-			}, work)
-			Expect(errors.IsNotFound(err)).To(BeTrue())
+			Consistently(func() bool {
+				work := &workv1.ManifestWork{}
+				err := k8sClient.Get(ctx, types.NamespacedName{
+					Name:      meshcontroller.ManifestWorkNameCacerts,
+					Namespace: clusterName,
+				}, work)
+				return errors.IsNotFound(err)
+			}).Should(BeTrue())
 		})
 	})
 
