@@ -427,7 +427,7 @@ func (r *Reconciler) mapSecretToMesh(_ context.Context, obj client.Object) []rec
 	meshName := secret.Labels[LabelMeshName]
 	meshNamespace := secret.Labels[LabelMeshNamespace]
 
-	klog.V(4).Infof("Secret %s/%s changed, triggering reconcile for mesh %s/%s",
+	klog.V(4).Infof("Secret %s/%s triggered reconcile for mesh %s/%s",
 		secret.Namespace, secret.Name, meshNamespace, meshName)
 
 	return []reconcile.Request{{
