@@ -263,8 +263,10 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 			Expect(unmarshalManifest(work.Spec.Workload.Manifests[0], secret)).To(Succeed())
 			Expect(secret.Name).To(Equal("cacerts"))
 			Expect(secret.Namespace).To(Equal("istio-system"))
+			Expect(secret.Type).To(Equal(corev1.SecretTypeTLS))
 			Expect(secret.Data).To(HaveKey("tls.crt"))
 			Expect(secret.Data).To(HaveKey("tls.key"))
+			Expect(secret.Data).To(HaveKey("ca.crt"))
 		})
 
 		It("should create ManifestWork for each cluster when secrets are created", func() {
