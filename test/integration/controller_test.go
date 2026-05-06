@@ -292,8 +292,7 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 
 			util.CreateCacertsSecret(ctx, k8sClient, testNs, clusterName, meshName, testNs)
 
-			work := expectManifestWork(meshcontroller.ManifestWorkNameCacerts, clusterName)
-			initialResourceVersion := work.ResourceVersion
+			expectManifestWork(meshcontroller.ManifestWorkNameCacerts, clusterName)
 
 			// Update the secret
 			secret := &corev1.Secret{}
@@ -305,7 +304,7 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 			secret.Data["tls.crt"] = []byte("updated-cert-data")
 			Expect(k8sClient.Update(ctx, secret)).To(Succeed())
 
-			// Verify ManifestWork is updated
+			// Verify ManifestWork data is updated
 			Eventually(func() string {
 				work := &workv1.ManifestWork{}
 				if err := k8sClient.Get(ctx, types.NamespacedName{
@@ -314,8 +313,12 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 				}, work); err != nil {
 					return ""
 				}
-				return work.ResourceVersion
-			}).ShouldNot(Equal(initialResourceVersion))
+				manifestSecret := &corev1.Secret{}
+				if err := unmarshalManifest(work.Spec.Workload.Manifests[0], manifestSecret); err != nil {
+					return ""
+				}
+				return string(manifestSecret.Data["tls.crt"])
+			}).Should(Equal("updated-cert-data"))
 		})
 
 		It("should not create cacerts ManifestWork when no issuer is configured", func() {
