@@ -250,9 +250,6 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 			util.CreateK8sManagedCluster(ctx, k8sClient, clusterName, testClusterSet)
 			util.CreateMultiClusterMeshWithCertManager(ctx, k8sClient, meshName, testNs, testClusterSet, "mesh-issuer")
 
-			// Wait for operator ManifestWork to be created first
-			expectSailManifestWork(clusterName)
-
 			// Simulate cert-manager creating the cacerts secret
 			util.CreateCacertsSecret(ctx, k8sClient, testNs, clusterName, meshName, testNs)
 
@@ -278,10 +275,6 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 			util.CreateK8sManagedCluster(ctx, k8sClient, cluster2, testClusterSet)
 			util.CreateMultiClusterMeshWithCertManager(ctx, k8sClient, meshName, testNs, testClusterSet, "mesh-issuer")
 
-			// Wait for operator ManifestWorks
-			expectSailManifestWork(cluster1)
-			expectSailManifestWork(cluster2)
-
 			// Simulate cert-manager creating secrets for both clusters
 			util.CreateCacertsSecret(ctx, k8sClient, testNs, cluster1, meshName, testNs)
 			util.CreateCacertsSecret(ctx, k8sClient, testNs, cluster2, meshName, testNs)
@@ -295,7 +288,6 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 			util.CreateK8sManagedCluster(ctx, k8sClient, clusterName, testClusterSet)
 			util.CreateMultiClusterMeshWithCertManager(ctx, k8sClient, meshName, testNs, testClusterSet, "mesh-issuer")
 
-			expectSailManifestWork(clusterName)
 			util.CreateCacertsSecret(ctx, k8sClient, testNs, clusterName, meshName, testNs)
 
 			work := expectManifestWork(meshcontroller.ManifestWorkNameCacerts, clusterName)
@@ -327,8 +319,6 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 		It("should not create cacerts ManifestWork when no issuer is configured", func() {
 			util.CreateK8sManagedCluster(ctx, k8sClient, clusterName, testClusterSet)
 			util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet, meshv1alpha1.OperatorConfig{})
-
-			expectSailManifestWork(clusterName)
 
 			// Give controller time to process
 			time.Sleep(2 * time.Second)
