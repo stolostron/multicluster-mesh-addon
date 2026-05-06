@@ -520,11 +520,6 @@ func (r *Reconciler) ensureCertificateForCluster(ctx context.Context, mesh *mesh
 
 // ensureCacertsDistributed creates ManifestWorks to distribute cacerts secrets to clusters
 func (r *Reconciler) ensureCacertsDistributed(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, clusters []clusterv1.ManagedCluster) error {
-	issuerRef := mesh.Spec.Security.Trust.CertManager.IssuerRef
-	if issuerRef.Name == "" {
-		return nil
-	}
-
 	controlPlaneNamespace := mesh.Spec.ControlPlane.Namespace
 	if controlPlaneNamespace == "" {
 		controlPlaneNamespace = "istio-system"
