@@ -7,6 +7,7 @@ import (
 
 	certmanagerv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
 	cmmeta "github.com/cert-manager/cert-manager/pkg/apis/meta/v1"
+	"github.com/google/go-cmp/cmp"
 	operatorsv1 "github.com/operator-framework/api/pkg/operators/v1"
 	operatorsv1alpha1 "github.com/operator-framework/api/pkg/operators/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
@@ -611,7 +612,13 @@ func (r *Reconciler) buildCacertsManifestWork(mesh *meshv1alpha1.MultiClusterMes
 func (r *Reconciler) updateCacertsManifestWorkIfNeeded(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, work *workv1.ManifestWork, secret *corev1.Secret) error {
 	newWork := r.buildCacertsManifestWork(mesh, work.Namespace, secret)
 
+	if cmp.Equal(work.Spec, newWork.Spec) {
+		klog.V(4).Infof("ManifestWork %s/%s is up to date, no changes needed", work.Namespace, work.Name)
+		return nil
+	}
+
 	work.Spec = newWork.Spec
+	// TODO: handle label reconciliation
 	work.Labels = newWork.Labels
 
 	if err := r.Update(ctx, work); err != nil {
