@@ -439,16 +439,11 @@ func getCacertsName(clusterName string) string {
 
 // ensureCertificatesCreated creates Certificate resources for each cluster in the mesh
 func (r *Reconciler) ensureCertificatesCreated(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, clusters []clusterv1.ManagedCluster) error {
-	if mesh.Spec.Security.Trust.CertManager.IssuerRef.Name == "" {
-		return nil
-	}
-
 	for _, cluster := range clusters {
 		if err := r.ensureCertificateForCluster(ctx, mesh, &cluster); err != nil {
 			return fmt.Errorf("failed to ensure certificate for cluster %s: %w", cluster.Name, err)
 		}
 	}
-
 	return nil
 }
 
