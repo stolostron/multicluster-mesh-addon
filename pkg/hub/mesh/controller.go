@@ -29,6 +29,8 @@ import (
 )
 
 const (
+	ControllerName = "multicluster-mesh-addon"
+
 	OperatorNameOSSM = "servicemeshoperator3"
 	OperatorNameSail = "sailoperator"
 
@@ -472,7 +474,7 @@ func (r *Reconciler) ensureCertificateForCluster(ctx context.Context, mesh *mesh
 			Name:      certName,
 			Namespace: mesh.Namespace,
 			Labels: map[string]string{
-				LabelManagedBy:     "multicluster-mesh-addon",
+				LabelManagedBy:     ControllerName,
 				LabelMeshName:      mesh.Name,
 				LabelMeshNamespace: mesh.Namespace,
 				LabelClusterName:   cluster.Name,
@@ -482,7 +484,7 @@ func (r *Reconciler) ensureCertificateForCluster(ctx context.Context, mesh *mesh
 			SecretName: certName,
 			SecretTemplate: &certmanagerv1.CertificateSecretTemplate{
 				Labels: map[string]string{
-					LabelManagedBy:     "multicluster-mesh-addon",
+					LabelManagedBy:     ControllerName,
 					LabelMeshName:      mesh.Name,
 					LabelMeshNamespace: mesh.Namespace,
 					LabelClusterName:   cluster.Name,
