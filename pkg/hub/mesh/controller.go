@@ -522,7 +522,7 @@ func (r *Reconciler) ensureCertificateForCluster(ctx context.Context, mesh *mesh
 // ensureCacertsDistributed creates ManifestWorks to distribute cacerts secrets to clusters
 func (r *Reconciler) ensureCacertsDistributed(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, clusters []clusterv1.ManagedCluster) error {
 	for _, cluster := range clusters {
-		if err := r.ensureCacertsManifestWork(ctx, mesh, &cluster, mesh.GetControlPlaneNamespace()); err != nil {
+		if err := r.ensureCacertsManifestWork(ctx, mesh, &cluster); err != nil {
 			return fmt.Errorf("failed to ensure cacerts ManifestWork for cluster %s: %w", cluster.Name, err)
 		}
 	}
@@ -530,7 +530,7 @@ func (r *Reconciler) ensureCacertsDistributed(ctx context.Context, mesh *meshv1a
 }
 
 // ensureCacertsManifestWork creates a ManifestWork to distribute the cacerts secret to a cluster
-func (r *Reconciler) ensureCacertsManifestWork(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, cluster *clusterv1.ManagedCluster, controlPlaneNamespace string) error {
+func (r *Reconciler) ensureCacertsManifestWork(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, cluster *clusterv1.ManagedCluster) error {
 	secretName := getCacertsName(cluster.Name)
 	secret := &corev1.Secret{}
 	err := r.Get(ctx, types.NamespacedName{
@@ -554,7 +554,7 @@ func (r *Reconciler) ensureCacertsManifestWork(ctx context.Context, mesh *meshv1
 
 	if err == nil {
 		klog.V(4).Infof("ManifestWork %s/%s already exists, checking if update is needed", cluster.Name, ManifestWorkNameCacerts)
-		return r.updateCacertsManifestWorkIfNeeded(ctx, existingWork, secret, controlPlaneNamespace)
+		return r.updateCacertsManifestWorkIfNeeded(ctx, mesh, existingWork, secret)
 	}
 
 	if !errors.IsNotFound(err) {
@@ -563,7 +563,7 @@ func (r *Reconciler) ensureCacertsManifestWork(ctx context.Context, mesh *meshv1
 
 	klog.Infof("Creating ManifestWork %s/%s to distribute cacerts secret", cluster.Name, ManifestWorkNameCacerts)
 
-	work := r.buildCacertsManifestWork(cluster.Name, secret, controlPlaneNamespace)
+	work := r.buildCacertsManifestWork(mesh, cluster.Name, secret)
 
 	if err := r.Create(ctx, work); err != nil {
 		return fmt.Errorf("failed to create ManifestWork: %w", err)
@@ -574,7 +574,7 @@ func (r *Reconciler) ensureCacertsManifestWork(ctx context.Context, mesh *meshv1
 }
 
 // buildCacertsManifestWork builds a ManifestWork for distributing the cacerts secret
-func (r *Reconciler) buildCacertsManifestWork(clusterName string, secret *corev1.Secret, controlPlaneNamespace string) *workv1.ManifestWork {
+func (r *Reconciler) buildCacertsManifestWork(mesh *meshv1alpha1.MultiClusterMesh, clusterName string, secret *corev1.Secret) *workv1.ManifestWork {
 	cacertsSecret := &corev1.Secret{
 		TypeMeta: metav1.TypeMeta{
 			APIVersion: "v1",
@@ -582,7 +582,7 @@ func (r *Reconciler) buildCacertsManifestWork(clusterName string, secret *corev1
 		},
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      CacertsSecretName,
-			Namespace: controlPlaneNamespace,
+			Namespace: mesh.GetControlPlaneNamespace(),
 		},
 		Type: corev1.SecretTypeTLS,
 		Data: secret.Data,
@@ -592,6 +592,10 @@ func (r *Reconciler) buildCacertsManifestWork(clusterName string, secret *corev1
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      ManifestWorkNameCacerts,
 			Namespace: clusterName,
+			Labels: map[string]string{
+				LabelMeshName:      mesh.Name,
+				LabelMeshNamespace: mesh.Namespace,
+			},
 		},
 		Spec: workv1.ManifestWorkSpec{
 			Workload: workv1.ManifestsTemplate{
@@ -604,10 +608,11 @@ func (r *Reconciler) buildCacertsManifestWork(clusterName string, secret *corev1
 }
 
 // updateCacertsManifestWorkIfNeeded updates the ManifestWork if the secret data has changed
-func (r *Reconciler) updateCacertsManifestWorkIfNeeded(ctx context.Context, work *workv1.ManifestWork, secret *corev1.Secret, controlPlaneNamespace string) error {
-	newWork := r.buildCacertsManifestWork(work.Namespace, secret, controlPlaneNamespace)
+func (r *Reconciler) updateCacertsManifestWorkIfNeeded(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, work *workv1.ManifestWork, secret *corev1.Secret) error {
+	newWork := r.buildCacertsManifestWork(mesh, work.Namespace, secret)
 
 	work.Spec = newWork.Spec
+	work.Labels = newWork.Labels
 
 	if err := r.Update(ctx, work); err != nil {
 		return fmt.Errorf("failed to update ManifestWork: %w", err)
