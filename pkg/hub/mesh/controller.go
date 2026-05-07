@@ -66,6 +66,12 @@ type Reconciler struct {
 
 // RegisterController registers the MultiClusterMesh controller with the manager
 func RegisterController(mgr manager.Manager) error {
+	if err := mgr.GetFieldIndexer().IndexField(context.Background(), &meshv1alpha1.MultiClusterMesh{}, "spec.clusterSet", func(obj client.Object) []string {
+		return []string{obj.(*meshv1alpha1.MultiClusterMesh).Spec.ClusterSet}
+	}); err != nil {
+		return fmt.Errorf("failed to create field index: %w", err)
+	}
+
 	reconciler := &Reconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
@@ -153,22 +159,18 @@ func (r *Reconciler) findMeshesForCluster(ctx context.Context, obj client.Object
 	}
 
 	meshList := &meshv1alpha1.MultiClusterMeshList{}
-	if err := r.List(ctx, meshList); err != nil {
+	if err := r.List(ctx, meshList, client.MatchingFields{"spec.clusterSet": clusterSetName}); err != nil {
 		klog.Errorf("Failed to list MultiClusterMeshes when handling cluster %s: %v", cluster.Name, err)
 		return
 	}
 
 	for _, mesh := range meshList.Items {
-		if mesh.Spec.ClusterSet == clusterSetName {
-			klog.V(4).Infof("Cluster %s change triggers reconciliation of MultiClusterMesh %s/%s",
-				cluster.Name, mesh.Namespace, mesh.Name)
-			requests = append(requests, reconcile.Request{
-				NamespacedName: types.NamespacedName{
-					Name:      mesh.Name,
-					Namespace: mesh.Namespace,
-				},
-			})
-		}
+		requests = append(requests, reconcile.Request{
+			NamespacedName: types.NamespacedName{
+				Name:      mesh.Name,
+				Namespace: mesh.Namespace,
+			},
+		})
 	}
 
 	return requests
@@ -258,18 +260,15 @@ func (r *Reconciler) cleanupOrphanedManifestWorks(ctx context.Context, mesh *mes
 		return fmt.Errorf("failed to list ManifestWorks: %w", err)
 	}
 
-	for i := range workList.Items {
-		work := &workList.Items[i]
-		clusterName := work.Namespace
-
+	for _, work := range workList.Items {
 		// Skip any clusters that are still in the set the mesh is referencing
-		if expectedClusters[clusterName] {
+		if expectedClusters[work.Namespace] {
 			continue
 		}
 
 		klog.Infof("Deleting orphaned ManifestWork %s/%s (cluster no longer in ClusterSet %s)",
 			work.Namespace, work.Name, mesh.Spec.ClusterSet)
-		if err := r.Delete(ctx, work); err != nil && !errors.IsNotFound(err) {
+		if err := r.Delete(ctx, &work); err != nil && !errors.IsNotFound(err) {
 			return fmt.Errorf("failed to delete orphaned ManifestWork %s/%s: %w", work.Namespace, work.Name, err)
 		}
 	}
@@ -313,7 +312,7 @@ func (r *Reconciler) getClustersFromSet(ctx context.Context, clusterSetName stri
 	clusterSet := &clusterv1beta2.ManagedClusterSet{}
 	if err := r.Get(ctx, types.NamespacedName{Name: clusterSetName}, clusterSet); err != nil {
 		if errors.IsNotFound(err) {
-			klog.V(4).Infof("ManagedClusterSet %s not found, will reconcile when it is created", clusterSetName)
+			klog.V(4).Infof("ManagedClusterSet %s not found", clusterSetName)
 			return []clusterv1.ManagedCluster{}, nil
 		}
 		return nil, fmt.Errorf("failed to get ManagedClusterSet %s: %w", clusterSetName, err)
