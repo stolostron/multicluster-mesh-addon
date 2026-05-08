@@ -480,22 +480,12 @@ func (r *Reconciler) ensureCertificateForCluster(ctx context.Context, mesh *mesh
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      certName,
 			Namespace: mesh.Namespace,
-			Labels: map[string]string{
-				LabelManagedBy:     ControllerName,
-				LabelMeshName:      mesh.Name,
-				LabelMeshNamespace: mesh.Namespace,
-				LabelClusterName:   cluster.Name,
-			},
+			Labels:    certificateLabels(mesh, cluster.Name),
 		},
 		Spec: certmanagerv1.CertificateSpec{
 			SecretName: certName,
 			SecretTemplate: &certmanagerv1.CertificateSecretTemplate{
-				Labels: map[string]string{
-					LabelManagedBy:     ControllerName,
-					LabelMeshName:      mesh.Name,
-					LabelMeshNamespace: mesh.Namespace,
-					LabelClusterName:   cluster.Name,
-				},
+				Labels: certificateLabels(mesh, cluster.Name),
 			},
 			Duration:    &metav1.Duration{Duration: 60 * Day},
 			RenewBefore: &metav1.Duration{Duration: 15 * Day},
@@ -629,4 +619,13 @@ func (r *Reconciler) updateCacertsManifestWorkIfNeeded(ctx context.Context, mesh
 
 	klog.V(4).Infof("Updated ManifestWork %s/%s", work.Namespace, work.Name)
 	return nil
+}
+
+func certificateLabels(mesh *meshv1alpha1.MultiClusterMesh, clusterName string) map[string]string {
+	return map[string]string{
+		LabelManagedBy:     ControllerName,
+		LabelMeshName:      mesh.Name,
+		LabelMeshNamespace: mesh.Namespace,
+		LabelClusterName:   clusterName,
+	}
 }
