@@ -164,25 +164,23 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 		It("should not create ManifestWorks when ClusterSet doesn't exist", func() {
 			util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, util.UniqueName("set"), meshv1alpha1.OperatorConfig{})
 
-			// Give controller time to process reconciliation
-			time.Sleep(2 * time.Second)
-
-			workList := &workv1.ManifestWorkList{}
-			Expect(k8sClient.List(ctx, workList)).To(Succeed())
-			Expect(workList.Items).To(BeEmpty())
+			Consistently(func() []workv1.ManifestWork {
+				workList := &workv1.ManifestWorkList{}
+				Expect(k8sClient.List(ctx, workList)).To(Succeed())
+				return workList.Items
+			}, 2*time.Second, 500*time.Millisecond).Should(BeEmpty())
 		})
 
 		It("should skip clusters without product claims and requeue", func() {
 			util.CreateManagedCluster(ctx, k8sClient, clusterName, testClusterSet)
 			util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet, meshv1alpha1.OperatorConfig{})
 
-			// Give controller time to process reconciliation
-			time.Sleep(2 * time.Second)
-
 			// No ManifestWork should be created because the cluster lacks product claim
-			workList := &workv1.ManifestWorkList{}
-			Expect(k8sClient.List(ctx, workList)).To(Succeed())
-			Expect(workList.Items).To(BeEmpty())
+			Consistently(func() []workv1.ManifestWork {
+				workList := &workv1.ManifestWorkList{}
+				Expect(k8sClient.List(ctx, workList)).To(Succeed())
+				return workList.Items
+			}, 2*time.Second, 500*time.Millisecond).Should(BeEmpty())
 
 			// Now add the product claim and expect the corresponding ManifestWork to be created
 			util.SetProductClaim(ctx, k8sClient, clusterName, "Other")
