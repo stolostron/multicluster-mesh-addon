@@ -489,7 +489,7 @@ func (r *Reconciler) ensureCertificateForCluster(ctx context.Context, mesh *mesh
 			},
 			Duration:    &metav1.Duration{Duration: 60 * Day},
 			RenewBefore: &metav1.Duration{Duration: 15 * Day},
-			CommonName:  fmt.Sprintf("intermediate-ca.%s.%s", cluster.Name, mesh.GetTrustDomain()),
+			CommonName:  "Intermediate Istio CA",
 			IsCA:        true,
 			Usages: []certmanagerv1.KeyUsage{
 				certmanagerv1.UsageDigitalSignature,
