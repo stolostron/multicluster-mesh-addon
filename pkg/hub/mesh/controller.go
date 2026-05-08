@@ -68,12 +68,12 @@ const (
 	ProductARO  = "ARO"
 	ProductROKS = "ROKS"
 	ProductOSD  = "OpenShiftDedicated"
+
+	Day = 24 * time.Hour
 )
 
 var (
 	MissingClaimRequeueDelay = 30 * time.Second
-
-	Day = 24 * time.Hour
 )
 
 // Reconciler reconciles MultiClusterMesh resources
