@@ -163,8 +163,6 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 
 		It("should not create ManifestWorks when ClusterSet doesn't exist", func() {
 			util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, util.UniqueName("set"), meshv1alpha1.OperatorConfig{})
-
-			awaitReconcileFinished()
 			expectNoManifestWorks()
 		})
 
@@ -180,7 +178,6 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 
 			It("shouldn't process a cluster without clusterset label", func() {
 				util.CreateK8sManagedCluster(ctx, k8sClient, clusterName, "")
-				awaitReconcileFinished()
 				expectNoManifestWorks()
 			})
 
@@ -221,34 +218,25 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 
 			It("should cleanup ManifestWork when the cluster is removed from ClusterSet", func() {
 				updateClusterSetLabel(clusterName, "")
-				awaitReconcileFinished()
-				expectNoManifestWorks()
+				expectAllManifestWorksDeleted()
 			})
 
 			It("should cleanup ManifestWork when the cluster is deleted", func() {
 				cluster := &clusterv1.ManagedCluster{}
 				Expect(k8sClient.Get(ctx, types.NamespacedName{Name: clusterName}, cluster)).To(Succeed())
 				Expect(k8sClient.Delete(ctx, cluster)).To(Succeed())
-				expectResourceDeleted(&clusterv1.ManagedCluster{}, testClusterSet, "")
+				expectResourceDeleted(&clusterv1.ManagedCluster{}, clusterName, "")
 
-				awaitReconcileFinished()
-				expectNoManifestWorks()
+				expectAllManifestWorksDeleted()
 			})
 
-			When("moving the cluster between sets", func() {
-				var otherClusterSet string
+			It("should cleanup ManifestWork when moving the cluster to another set", func() {
+				otherClusterSet := util.UniqueName("other-set")
+				util.CreateManagedClusterSet(ctx, k8sClient, otherClusterSet)
+				awaitReconcileFinished()
 
-				BeforeEach(func() {
-					otherClusterSet = util.UniqueName("other-set")
-					util.CreateManagedClusterSet(ctx, k8sClient, otherClusterSet)
-					awaitReconcileFinished()
-				})
-
-				It("should cleanup ManifestWork", func() {
-					updateClusterSetLabel(clusterName, otherClusterSet)
-					awaitReconcileFinished()
-					expectNoManifestWorks()
-				})
+				updateClusterSetLabel(clusterName, otherClusterSet)
+				expectAllManifestWorksDeleted()
 			})
 		})
 	})
@@ -367,10 +355,22 @@ func updateClusterSetLabel(clusterName, newClusterSet string) {
 	Expect(k8sClient.Update(ctx, cluster)).To(Succeed())
 }
 
+// expectNoManifestWorks makes sure that no ManifestWorks are created, checking consistently
 func expectNoManifestWorks() {
-	workList := &workv1.ManifestWorkList{}
-	Expect(k8sClient.List(ctx, workList)).To(Succeed())
-	Expect(workList.Items).To(BeEmpty())
+	Consistently(func() []workv1.ManifestWork {
+		workList := &workv1.ManifestWorkList{}
+		Expect(k8sClient.List(ctx, workList)).To(Succeed())
+		return workList.Items
+	}).Should(BeEmpty())
+}
+
+// expectAllManifestWorksDeleted makes sure ManifestWorks are deleted and none remain
+func expectAllManifestWorksDeleted() {
+	Eventually(func() []workv1.ManifestWork {
+		workList := &workv1.ManifestWorkList{}
+		Expect(k8sClient.List(ctx, workList)).To(Succeed())
+		return workList.Items
+	}).Should(BeEmpty())
 }
 
 func expectManifestWork(name, namespace string) *workv1.ManifestWork {
