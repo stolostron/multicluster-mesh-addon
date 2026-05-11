@@ -93,8 +93,8 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 				return len(workList.Items)
 			}).Should(Equal(2))
 
-			work1 := expectSailManifestWork(cluster1)
-			work2 := expectOSSMManifestWork(cluster2)
+			work1 := expectOperatorManifestWork(cluster1)
+			work2 := expectOperatorManifestWork(cluster2)
 
 			Expect(work1.Labels[meshcontroller.ManagedByLabel]).To(Equal(meshcontroller.ManagedByValue))
 			Expect(work2.Labels[meshcontroller.ManagedByLabel]).To(Equal(meshcontroller.ManagedByValue))
@@ -113,7 +113,7 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 			util.CreateK8sManagedCluster(ctx, k8sClient, clusterName, testClusterSet)
 			util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet, customConfig)
 
-			work := expectSailManifestWork(clusterName)
+			work := expectOperatorManifestWork(clusterName)
 
 			Expect(work.Spec.Workload.Manifests).To(HaveLen(3))
 			expectNamespace(work, 0, customConfig.Namespace)
@@ -145,7 +145,7 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 			util.CreateOCPManagedCluster(ctx, k8sClient, clusterName, testClusterSet, meshcontroller.ProductOCP)
 			util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet, customConfig)
 
-			work := expectOSSMManifestWork(clusterName)
+			work := expectOperatorManifestWork(clusterName)
 
 			Expect(work.Spec.Workload.Manifests).To(HaveLen(3))
 			expectNamespace(work, 0, customConfig.Namespace)
@@ -186,7 +186,7 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 
 			It("should process a cluster when it's added", func() {
 				util.CreateK8sManagedCluster(ctx, k8sClient, clusterName, testClusterSet)
-				expectSailManifestWork(clusterName)
+				expectOperatorManifestWork(clusterName)
 			})
 		})
 
@@ -203,7 +203,7 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 
 			It("should process it when a claim is set", func() {
 				util.SetProductClaim(ctx, k8sClient, clusterName, "Other")
-				expectSailManifestWork(clusterName)
+				expectOperatorManifestWork(clusterName)
 			})
 		})
 
@@ -216,7 +216,7 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 			BeforeEach(func() {
 				util.CreateK8sManagedCluster(ctx, k8sClient, clusterName, testClusterSet)
 				util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet, meshv1alpha1.OperatorConfig{})
-				expectSailManifestWork(clusterName)
+				expectOperatorManifestWork(clusterName)
 			})
 
 			It("should cleanup ManifestWork when the cluster is removed from ClusterSet", func() {
@@ -255,7 +255,7 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 					updateClusterSetLabel(clusterName, otherClusterSet)
 					awaitReconcileFinished()
 
-					expectSailManifestWork(clusterName)
+					expectOperatorManifestWork(clusterName)
 				})
 			})
 
@@ -274,7 +274,7 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 					util.DeleteMultiClusterMesh(ctx, k8sClient, otherMesh, otherNs)
 					expectResourceDeleted(&meshv1alpha1.MultiClusterMesh{}, otherMesh, otherNs)
 
-					expectSailManifestWork(clusterName)
+					expectOperatorManifestWork(clusterName)
 				})
 
 				It("should delete the ManifestWork when both meshes are deleted", func() {
@@ -298,15 +298,15 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 			util.CreateOCPManagedCluster(ctx, k8sClient, cluster2, testClusterSet, meshcontroller.ProductOCP)
 			util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet, meshv1alpha1.OperatorConfig{})
 			expectFinalizer(meshName, testNs)
-			expectSailManifestWork(clusterName)
-			expectOSSMManifestWork(cluster2)
+			expectOperatorManifestWork(clusterName)
+			expectOperatorManifestWork(cluster2)
 
 			mesh := &meshv1alpha1.MultiClusterMesh{}
 			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: meshName, Namespace: testNs}, mesh)).To(Succeed())
 			Expect(k8sClient.Delete(ctx, mesh)).To(Succeed())
 
-			expectResourceDeleted(&workv1.ManifestWork{}, meshcontroller.ManifestWorkNameSail, clusterName)
-			expectResourceDeleted(&workv1.ManifestWork{}, meshcontroller.ManifestWorkNameOSSM, cluster2)
+			expectResourceDeleted(&workv1.ManifestWork{}, meshcontroller.OperatorManifestWorkName, clusterName)
+			expectResourceDeleted(&workv1.ManifestWork{}, meshcontroller.OperatorManifestWorkName, cluster2)
 			expectResourceDeleted(&meshv1alpha1.MultiClusterMesh{}, meshName, testNs)
 		})
 
@@ -325,7 +325,7 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 			util.CreateK8sManagedCluster(ctx, k8sClient, clusterName, testClusterSet)
 			util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet, meshv1alpha1.OperatorConfig{})
 			expectFinalizer(meshName, testNs)
-			expectSailManifestWork(clusterName)
+			expectOperatorManifestWork(clusterName)
 
 			clusterSet := &clusterv1beta2.ManagedClusterSet{}
 			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: testClusterSet}, clusterSet)).To(Succeed())
@@ -336,7 +336,7 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: meshName, Namespace: testNs}, mesh)).To(Succeed())
 			Expect(k8sClient.Delete(ctx, mesh)).To(Succeed())
 
-			expectResourceDeleted(&workv1.ManifestWork{}, meshcontroller.ManifestWorkNameSail, clusterName)
+			expectResourceDeleted(&workv1.ManifestWork{}, meshcontroller.OperatorManifestWorkName, clusterName)
 			expectResourceDeleted(&meshv1alpha1.MultiClusterMesh{}, meshName, testNs)
 		})
 	})
@@ -347,7 +347,7 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 				util.CreateOCPManagedCluster(ctx, k8sClient, clusterName, testClusterSet, productClaim)
 				util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet, meshv1alpha1.OperatorConfig{})
 
-				work := expectOSSMManifestWork(clusterName)
+				work := expectOperatorManifestWork(clusterName)
 
 				// OpenShift: expect only Subscription (openshift-operators namespace/OperatorGroup exist by default)
 				Expect(work.Spec.Workload.Manifests).To(HaveLen(1))
@@ -365,7 +365,7 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 			util.CreateK8sManagedCluster(ctx, k8sClient, clusterName, testClusterSet)
 			util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet, meshv1alpha1.OperatorConfig{})
 
-			work := expectSailManifestWork(clusterName)
+			work := expectOperatorManifestWork(clusterName)
 
 			// Kubernetes: Namespace + OperatorGroup + Subscription (unlike OpenShift)
 			Expect(work.Spec.Workload.Manifests).To(HaveLen(3))
@@ -434,12 +434,8 @@ func expectManifestWork(name, namespace string) *workv1.ManifestWork {
 	return work
 }
 
-func expectSailManifestWork(clusterNamespace string) *workv1.ManifestWork {
-	return expectManifestWork(meshcontroller.ManifestWorkNameSail, clusterNamespace)
-}
-
-func expectOSSMManifestWork(clusterNamespace string) *workv1.ManifestWork {
-	return expectManifestWork(meshcontroller.ManifestWorkNameOSSM, clusterNamespace)
+func expectOperatorManifestWork(clusterNamespace string) *workv1.ManifestWork {
+	return expectManifestWork(meshcontroller.OperatorManifestWorkName, clusterNamespace)
 }
 
 // unmarshalManifest extracts a manifest from ManifestWork's RawExtension.

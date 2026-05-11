@@ -39,8 +39,7 @@ const (
 
 	DefaultChannel = "stable"
 
-	ManifestWorkNameOSSM = "multicluster-mesh-operator-ossm"
-	ManifestWorkNameSail = "multicluster-mesh-operator-sail"
+	OperatorManifestWorkName = "multicluster-mesh-operator"
 
 	FinalizerName = "mesh.open-cluster-management.io/finalizer"
 
@@ -199,13 +198,10 @@ func (r *Reconciler) handleDeletion(ctx context.Context, mesh *meshv1alpha1.Mult
 
 func (r *Reconciler) ensureOperatorInstalled(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, cluster *clusterv1.ManagedCluster) error {
 	klog.V(4).Infof("Ensuring mesh operator on cluster %s for mesh %s", cluster.Name, mesh.Name)
-	isOCP := isOpenShift(cluster)
-	workName := getOperatorManifestWorkName(isOCP)
 
-	// Check if ManifestWork already exists
 	existingWork := &workv1.ManifestWork{}
 	err := r.Get(ctx, types.NamespacedName{
-		Name:      workName,
+		Name:      OperatorManifestWorkName,
 		Namespace: cluster.Name,
 	}, existingWork)
 
@@ -214,7 +210,7 @@ func (r *Reconciler) ensureOperatorInstalled(ctx context.Context, mesh *meshv1al
 			return fmt.Errorf("ManifestWork is terminating, requeueing")
 		}
 
-		klog.V(4).Infof("ManifestWork %s/%s already exists", cluster.Name, workName)
+		klog.V(4).Infof("ManifestWork %s/%s already exists", cluster.Name, OperatorManifestWorkName)
 		// TODO: Add logic to check if the work needs updating (e.g., channel change)
 		return nil
 	}
@@ -224,13 +220,11 @@ func (r *Reconciler) ensureOperatorInstalled(ctx context.Context, mesh *meshv1al
 	}
 
 	klog.Infof("Creating ManifestWork to install operator on cluster %s", cluster.Name)
-	work := r.buildOperatorManifestWork(mesh, cluster)
-
-	if err := r.Create(ctx, work); err != nil {
+	if err := r.Create(ctx, r.buildOperatorManifestWork(mesh, cluster)); err != nil {
 		return fmt.Errorf("failed to create ManifestWork: %w", err)
 	}
 
-	klog.Infof("Successfully created ManifestWork %s/%s for operator installation", cluster.Name, work.Name)
+	klog.Infof("Successfully created ManifestWork %s/%s for operator installation", cluster.Name, OperatorManifestWorkName)
 	return nil
 }
 
@@ -289,14 +283,6 @@ func (r *Reconciler) getClustersNeededByAnyMesh(ctx context.Context) (map[string
 	return needed, nil
 }
 
-func isOpenShift(cluster *clusterv1.ManagedCluster) bool {
-	switch getProductClaim(cluster) {
-	case ProductOCP, ProductROSA, ProductARO, ProductROKS, ProductOSD:
-		return true
-	}
-	return false
-}
-
 // getProductClaim returns the value for the cluster, or empty string if not found
 func getProductClaim(cluster *clusterv1.ManagedCluster) string {
 	for _, claim := range cluster.Status.ClusterClaims {
@@ -305,13 +291,6 @@ func getProductClaim(cluster *clusterv1.ManagedCluster) string {
 		}
 	}
 	return ""
-}
-
-func getOperatorManifestWorkName(isOCP bool) string {
-	if isOCP {
-		return ManifestWorkNameOSSM
-	}
-	return ManifestWorkNameSail
 }
 
 func (r *Reconciler) getClustersFromSet(ctx context.Context, clusterSetName string) ([]clusterv1.ManagedCluster, error) {
@@ -345,7 +324,12 @@ func (r *Reconciler) getClustersFromSet(ctx context.Context, clusterSetName stri
 
 func (r *Reconciler) buildOperatorManifestWork(mesh *meshv1alpha1.MultiClusterMesh, cluster *clusterv1.ManagedCluster) *workv1.ManifestWork {
 	manifests := []workv1.Manifest{}
-	isOCP := isOpenShift(cluster)
+	isOCP := false
+	switch getProductClaim(cluster) {
+	case ProductOCP, ProductROSA, ProductARO, ProductROKS, ProductOSD:
+		isOCP = true
+	}
+
 	config := r.applyOperatorDefaults(mesh.Spec.Operator, isOCP)
 
 	// openshift-operators exists by default on OCP and already has a global OperatorGroup
@@ -407,7 +391,7 @@ func (r *Reconciler) buildOperatorManifestWork(mesh *meshv1alpha1.MultiClusterMe
 
 	return &workv1.ManifestWork{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      getOperatorManifestWorkName(isOCP),
+			Name:      OperatorManifestWorkName,
 			Namespace: cluster.Name,
 			Labels: map[string]string{
 				ManagedByLabel: ManagedByValue,
