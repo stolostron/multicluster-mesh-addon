@@ -82,7 +82,7 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 			cluster2 := util.UniqueName("cluster")
 
 			util.CreateK8sManagedCluster(ctx, k8sClient, cluster1, testClusterSet)
-			util.CreateK8sManagedCluster(ctx, k8sClient, cluster2, testClusterSet)
+			util.CreateOCPManagedCluster(ctx, k8sClient, cluster2, testClusterSet, meshcontroller.ProductOCP)
 			util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet, meshv1alpha1.OperatorConfig{})
 
 			Eventually(func() int {
@@ -93,8 +93,11 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 				return len(workList.Items)
 			}).Should(Equal(2))
 
-			expectSailManifestWork(cluster1)
-			expectSailManifestWork(cluster2)
+			work1 := expectSailManifestWork(cluster1)
+			work2 := expectOSSMManifestWork(cluster2)
+
+			Expect(work1.Labels[meshcontroller.ManagedByLabel]).To(Equal(meshcontroller.ManagedByValue))
+			Expect(work2.Labels[meshcontroller.ManagedByLabel]).To(Equal(meshcontroller.ManagedByValue))
 		})
 
 		It("should use custom operator configuration on K8s when specified", func() {
@@ -230,15 +233,62 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 				expectAllManifestWorksDeleted()
 			})
 
-			It("should cleanup ManifestWork when moving the cluster to another set", func() {
-				otherClusterSet := util.UniqueName("other-set")
-				util.CreateManagedClusterSet(ctx, k8sClient, otherClusterSet)
-				awaitReconcileFinished()
+			When("moving the cluster between sets", func() {
+				var otherClusterSet string
 
-				updateClusterSetLabel(clusterName, otherClusterSet)
-				expectAllManifestWorksDeleted()
+				BeforeEach(func() {
+					otherClusterSet = util.UniqueName("other-set")
+					util.CreateManagedClusterSet(ctx, k8sClient, otherClusterSet)
+					awaitReconcileFinished()
+				})
+
+				It("should cleanup ManifestWork when no mesh targets the new set", func() {
+					updateClusterSetLabel(clusterName, otherClusterSet)
+					expectAllManifestWorksDeleted()
+				})
+
+				It("should keep ManifestWork when another mesh targets the new set", func() {
+					otherMesh := util.UniqueName("other-mesh")
+					util.CreateMultiClusterMesh(ctx, k8sClient, otherMesh, testNs, otherClusterSet, meshv1alpha1.OperatorConfig{})
+					awaitReconcileFinished()
+
+					updateClusterSetLabel(clusterName, otherClusterSet)
+					awaitReconcileFinished()
+
+					expectSailManifestWork(clusterName)
+				})
+			})
+
+			When("two meshes target the same cluster", func() {
+				var otherNs, otherMesh string
+
+				BeforeEach(func() {
+					otherNs = util.UniqueName("other-ns")
+					otherMesh = util.UniqueName("other-mesh")
+					util.CreateNamespace(ctx, k8sClient, otherNs)
+					util.CreateMultiClusterMesh(ctx, k8sClient, otherMesh, otherNs, testClusterSet, meshv1alpha1.OperatorConfig{})
+					awaitReconcileFinished()
+				})
+
+				It("should keep the ManifestWork when one mesh is deleted", func() {
+					util.DeleteMultiClusterMesh(ctx, k8sClient, otherMesh, otherNs)
+					expectResourceDeleted(&meshv1alpha1.MultiClusterMesh{}, otherMesh, otherNs)
+
+					expectSailManifestWork(clusterName)
+				})
+
+				It("should delete the ManifestWork when both meshes are deleted", func() {
+					util.DeleteMultiClusterMesh(ctx, k8sClient, meshName, testNs)
+					expectResourceDeleted(&meshv1alpha1.MultiClusterMesh{}, meshName, testNs)
+
+					util.DeleteMultiClusterMesh(ctx, k8sClient, otherMesh, otherNs)
+					expectResourceDeleted(&meshv1alpha1.MultiClusterMesh{}, otherMesh, otherNs)
+
+					expectAllManifestWorksDeleted()
+				})
 			})
 		})
+
 	})
 
 	Context("Deleting MultiClusterMesh", func() {

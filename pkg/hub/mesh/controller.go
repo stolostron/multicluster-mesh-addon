@@ -44,8 +44,8 @@ const (
 
 	FinalizerName = "mesh.open-cluster-management.io/finalizer"
 
-	LabelMeshName      = "mesh.open-cluster-management.io/mesh-name"
-	LabelMeshNamespace = "mesh.open-cluster-management.io/mesh-namespace"
+	ManagedByLabel = "app.kubernetes.io/managed-by"
+	ManagedByValue = "multicluster-mesh-addon"
 
 	ClusterSetLabel     = "cluster.open-cluster-management.io/clusterset"
 	clusterClaimProduct = "product.open-cluster-management.io"
@@ -140,8 +140,8 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		}
 	}
 
-	if err := r.cleanupOrphanedManifestWorks(ctx, mesh, clusters); err != nil {
-		klog.Errorf("Failed to cleanup orphaned ManifestWorks: %v", err)
+	if err := r.cleanupOperatorManifestWorks(ctx); err != nil {
+		klog.Errorf("Failed to cleanup operator ManifestWorks: %v", err)
 		return reconcile.Result{}, err
 	}
 
@@ -184,22 +184,8 @@ func (r *Reconciler) handleDeletion(ctx context.Context, mesh *meshv1alpha1.Mult
 	}
 
 	klog.Infof("Handling deletion for MultiClusterMesh %s/%s", mesh.Namespace, mesh.Name)
-	workList := &workv1.ManifestWorkList{}
-	if err := r.List(ctx, workList, meshLabelSelector(mesh)); err != nil {
-		return reconcile.Result{}, fmt.Errorf("failed to list ManifestWorks for cleanup: %w", err)
-	}
-
-	klog.V(4).Infof("Found %d ManifestWorks to clean up for MultiClusterMesh %s/%s", len(workList.Items), mesh.Namespace, mesh.Name)
-	for i := range workList.Items {
-		work := &workList.Items[i]
-		if err := r.Delete(ctx, work); err != nil {
-			if !errors.IsNotFound(err) {
-				return reconcile.Result{}, fmt.Errorf("failed to delete ManifestWork %s/%s: %w", work.Namespace, work.Name, err)
-			}
-			klog.V(4).Infof("ManifestWork %s/%s already deleted", work.Namespace, work.Name)
-		} else {
-			klog.Infof("Deleted ManifestWork %s/%s", work.Namespace, work.Name)
-		}
+	if err := r.cleanupOperatorManifestWorks(ctx); err != nil {
+		return reconcile.Result{}, fmt.Errorf("failed to cleanup operator ManifestWorks: %w", err)
 	}
 
 	klog.Infof("Removing finalizer from MultiClusterMesh %s/%s", mesh.Namespace, mesh.Name)
@@ -248,39 +234,59 @@ func (r *Reconciler) ensureOperatorInstalled(ctx context.Context, mesh *meshv1al
 	return nil
 }
 
-func (r *Reconciler) cleanupOrphanedManifestWorks(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, clusters []clusterv1.ManagedCluster) error {
-	expectedClusters := make(map[string]bool)
-	for _, cluster := range clusters {
-		expectedClusters[cluster.Name] = true
+// cleanupOperatorManifestWorks deletes operator ManifestWorks on clusters that no mesh needs anymore.
+func (r *Reconciler) cleanupOperatorManifestWorks(ctx context.Context) error {
+	neededClusters, err := r.getClustersNeededByAnyMesh(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to determine needed clusters: %w", err)
 	}
 
-	// List ALL ManifestWorks that were created for this mesh, some of which might be orphaned
 	workList := &workv1.ManifestWorkList{}
-	if err := r.List(ctx, workList, meshLabelSelector(mesh)); err != nil {
-		return fmt.Errorf("failed to list ManifestWorks: %w", err)
+	if err := r.List(ctx, workList, client.MatchingLabels{ManagedByLabel: ManagedByValue}); err != nil {
+		return fmt.Errorf("failed to list operator ManifestWorks: %w", err)
 	}
 
 	for _, work := range workList.Items {
-		// Skip any clusters that are still in the set the mesh is referencing
-		if expectedClusters[work.Namespace] {
+		if neededClusters[work.Namespace] {
 			continue
 		}
 
-		klog.Infof("Deleting orphaned ManifestWork %s/%s (cluster no longer in ClusterSet %s)",
-			work.Namespace, work.Name, mesh.Spec.ClusterSet)
+		klog.Infof("Deleting operator ManifestWork %s/%s (no mesh targets this cluster)", work.Namespace, work.Name)
 		if err := r.Delete(ctx, &work); err != nil && !errors.IsNotFound(err) {
-			return fmt.Errorf("failed to delete orphaned ManifestWork %s/%s: %w", work.Namespace, work.Name, err)
+			return fmt.Errorf("failed to delete operator ManifestWork %s/%s: %w", work.Namespace, work.Name, err)
 		}
 	}
 
 	return nil
 }
 
-func meshLabelSelector(mesh *meshv1alpha1.MultiClusterMesh) client.MatchingLabels {
-	return client.MatchingLabels{
-		LabelMeshName:      mesh.Name,
-		LabelMeshNamespace: mesh.Namespace,
+// getClustersNeededByAnyMesh returns a set of cluster names that are targeted by at least one active mesh.
+func (r *Reconciler) getClustersNeededByAnyMesh(ctx context.Context) (map[string]bool, error) {
+	needed := make(map[string]bool)
+	checkedSets := make(map[string]bool)
+
+	meshList := &meshv1alpha1.MultiClusterMeshList{}
+	if err := r.List(ctx, meshList); err != nil {
+		return nil, fmt.Errorf("failed to list meshes: %w", err)
 	}
+
+	for _, mesh := range meshList.Items {
+		if !mesh.DeletionTimestamp.IsZero() || checkedSets[mesh.Spec.ClusterSet] {
+			continue
+		}
+
+		checkedSets[mesh.Spec.ClusterSet] = true
+		clusters, err := r.getClustersFromSet(ctx, mesh.Spec.ClusterSet)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get clusters from set %s: %w", mesh.Spec.ClusterSet, err)
+		}
+
+		for _, cluster := range clusters {
+			needed[cluster.Name] = true
+		}
+	}
+
+	return needed, nil
 }
 
 func isOpenShift(cluster *clusterv1.ManagedCluster) bool {
@@ -404,8 +410,7 @@ func (r *Reconciler) buildOperatorManifestWork(mesh *meshv1alpha1.MultiClusterMe
 			Name:      getOperatorManifestWorkName(isOCP),
 			Namespace: cluster.Name,
 			Labels: map[string]string{
-				LabelMeshName:      mesh.Name,
-				LabelMeshNamespace: mesh.Namespace,
+				ManagedByLabel: ManagedByValue,
 			},
 		},
 		Spec: workv1.ManifestWorkSpec{
