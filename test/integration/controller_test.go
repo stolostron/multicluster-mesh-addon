@@ -334,9 +334,7 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 				util.CreateCacertsSecret(ctx, k8sClient, testNs, clusterName, meshName, testNs)
 
 				work := expectCacertsManifestWork(clusterName)
-
-				Expect(work.Spec.Workload.Manifests).To(HaveLen(1))
-				expectCacertsSecret(work, 0)
+				expectCacertsSecret(work)
 			})
 
 			It("should update ManifestWork when cacerts secret is updated", func() {
@@ -504,9 +502,10 @@ func expectNoCacertsManifestWork(clusterNamespace string) {
 	}).Should(BeTrue())
 }
 
-func expectCacertsSecret(work *workv1.ManifestWork, index int) {
+func expectCacertsSecret(work *workv1.ManifestWork) {
+	Expect(work.Spec.Workload.Manifests).To(HaveLen(1))
 	secret := &corev1.Secret{}
-	Expect(unmarshalManifest(work.Spec.Workload.Manifests[index], secret)).To(Succeed())
+	Expect(unmarshalManifest(work.Spec.Workload.Manifests[0], secret)).To(Succeed())
 	Expect(secret.Name).To(Equal("cacerts"))
 	Expect(secret.Namespace).To(Equal("istio-system"))
 	Expect(secret.Type).To(Equal(corev1.SecretTypeTLS))
