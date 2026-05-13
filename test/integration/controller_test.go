@@ -12,13 +12,11 @@ import (
 	operatorsv1 "github.com/operator-framework/api/pkg/operators/v1"
 	operatorsv1alpha1 "github.com/operator-framework/api/pkg/operators/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	clusterv1 "open-cluster-management.io/api/cluster/v1"
 	clusterv1beta2 "open-cluster-management.io/api/cluster/v1beta2"
 	workv1 "open-cluster-management.io/api/work/v1"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	meshv1alpha1 "github.com/stolostron/multicluster-mesh-addon/pkg/apis/mesh/v1alpha1"
 	meshcontroller "github.com/stolostron/multicluster-mesh-addon/pkg/hub/mesh"
@@ -225,11 +223,7 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 			})
 
 			It("should cleanup ManifestWork when the cluster is deleted", func() {
-				cluster := &clusterv1.ManagedCluster{}
-				Expect(k8sClient.Get(ctx, types.NamespacedName{Name: clusterName}, cluster)).To(Succeed())
-				Expect(k8sClient.Delete(ctx, cluster)).To(Succeed())
-				expectResourceDeleted(&clusterv1.ManagedCluster{}, clusterName, "")
-
+				util.DeleteResource(ctx, k8sClient, &clusterv1.ManagedCluster{}, clusterName, "")
 				expectAllManifestWorksDeleted()
 			})
 
@@ -271,19 +265,13 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 				})
 
 				It("should keep the ManifestWork when one mesh is deleted", func() {
-					util.DeleteMultiClusterMesh(ctx, k8sClient, otherMesh, otherNs)
-					expectResourceDeleted(&meshv1alpha1.MultiClusterMesh{}, otherMesh, otherNs)
-
+					util.DeleteResource(ctx, k8sClient, &meshv1alpha1.MultiClusterMesh{}, otherMesh, otherNs)
 					expectOperatorManifestWork(clusterName)
 				})
 
 				It("should delete the ManifestWork when both meshes are deleted", func() {
-					util.DeleteMultiClusterMesh(ctx, k8sClient, meshName, testNs)
-					expectResourceDeleted(&meshv1alpha1.MultiClusterMesh{}, meshName, testNs)
-
-					util.DeleteMultiClusterMesh(ctx, k8sClient, otherMesh, otherNs)
-					expectResourceDeleted(&meshv1alpha1.MultiClusterMesh{}, otherMesh, otherNs)
-
+					util.DeleteResource(ctx, k8sClient, &meshv1alpha1.MultiClusterMesh{}, meshName, testNs)
+					util.DeleteResource(ctx, k8sClient, &meshv1alpha1.MultiClusterMesh{}, otherMesh, otherNs)
 					expectAllManifestWorksDeleted()
 				})
 			})
@@ -301,24 +289,16 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 			expectOperatorManifestWork(clusterName)
 			expectOperatorManifestWork(cluster2)
 
-			mesh := &meshv1alpha1.MultiClusterMesh{}
-			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: meshName, Namespace: testNs}, mesh)).To(Succeed())
-			Expect(k8sClient.Delete(ctx, mesh)).To(Succeed())
-
-			expectResourceDeleted(&workv1.ManifestWork{}, meshcontroller.OperatorManifestWorkName, clusterName)
-			expectResourceDeleted(&workv1.ManifestWork{}, meshcontroller.OperatorManifestWorkName, cluster2)
-			expectResourceDeleted(&meshv1alpha1.MultiClusterMesh{}, meshName, testNs)
+			util.DeleteResource(ctx, k8sClient, &meshv1alpha1.MultiClusterMesh{}, meshName, testNs)
+			util.ExpectResourceDeleted(ctx, k8sClient, &workv1.ManifestWork{}, meshcontroller.OperatorManifestWorkName, clusterName)
+			util.ExpectResourceDeleted(ctx, k8sClient, &workv1.ManifestWork{}, meshcontroller.OperatorManifestWorkName, cluster2)
 		})
 
 		It("should work when ClusterSet doesn't exist", func() {
 			util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, util.UniqueName("nonexistent-set"), meshv1alpha1.OperatorConfig{})
 			expectFinalizer(meshName, testNs)
 
-			mesh := &meshv1alpha1.MultiClusterMesh{}
-			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: meshName, Namespace: testNs}, mesh)).To(Succeed())
-			Expect(k8sClient.Delete(ctx, mesh)).To(Succeed())
-
-			expectResourceDeleted(&meshv1alpha1.MultiClusterMesh{}, meshName, testNs)
+			util.DeleteResource(ctx, k8sClient, &meshv1alpha1.MultiClusterMesh{}, meshName, testNs)
 		})
 
 		It("should delete ManifestWork even when the ClusterSet is deleted first", func() {
@@ -327,17 +307,10 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 			expectFinalizer(meshName, testNs)
 			expectOperatorManifestWork(clusterName)
 
-			clusterSet := &clusterv1beta2.ManagedClusterSet{}
-			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: testClusterSet}, clusterSet)).To(Succeed())
-			Expect(k8sClient.Delete(ctx, clusterSet)).To(Succeed())
-			expectResourceDeleted(&clusterv1beta2.ManagedClusterSet{}, testClusterSet, "")
+			util.DeleteResource(ctx, k8sClient, &clusterv1beta2.ManagedClusterSet{}, testClusterSet, "")
+			util.DeleteResource(ctx, k8sClient, &meshv1alpha1.MultiClusterMesh{}, meshName, testNs)
 
-			mesh := &meshv1alpha1.MultiClusterMesh{}
-			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: meshName, Namespace: testNs}, mesh)).To(Succeed())
-			Expect(k8sClient.Delete(ctx, mesh)).To(Succeed())
-
-			expectResourceDeleted(&workv1.ManifestWork{}, meshcontroller.OperatorManifestWorkName, clusterName)
-			expectResourceDeleted(&meshv1alpha1.MultiClusterMesh{}, meshName, testNs)
+			util.ExpectResourceDeleted(ctx, k8sClient, &workv1.ManifestWork{}, meshcontroller.OperatorManifestWorkName, clusterName)
 		})
 	})
 
@@ -385,13 +358,6 @@ func expectFinalizer(name, namespace string) {
 		}
 		return mesh.Finalizers
 	}).Should(ContainElement(meshcontroller.FinalizerName))
-}
-
-func expectResourceDeleted(obj client.Object, name, namespace string) {
-	Eventually(func() bool {
-		err := k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: namespace}, obj)
-		return errors.IsNotFound(err)
-	}).Should(BeTrue())
 }
 
 func awaitReconcileFinished() {

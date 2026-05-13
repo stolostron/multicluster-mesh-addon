@@ -8,7 +8,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	meshv1alpha1 "github.com/stolostron/multicluster-mesh-addon/pkg/apis/mesh/v1alpha1"
-	"k8s.io/apimachinery/pkg/types"
 )
 
 // CreateMultiClusterMesh creates a MultiClusterMesh resource with optional operator configuration.
@@ -24,11 +23,4 @@ func CreateMultiClusterMesh(ctx context.Context, k8sClient client.Client, name, 
 		},
 	}
 	Expect(k8sClient.Create(ctx, mesh)).To(Succeed())
-}
-
-// DeleteMultiClusterMesh deletes a MultiClusterMesh resource.
-func DeleteMultiClusterMesh(ctx context.Context, k8sClient client.Client, name, namespace string) {
-	mesh := &meshv1alpha1.MultiClusterMesh{}
-	Expect(k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: namespace}, mesh)).To(Succeed())
-	Expect(k8sClient.Delete(ctx, mesh)).To(Succeed())
 }
