@@ -70,6 +70,10 @@ The controller manages the `MultiClusterMesh` custom resource on the hub cluster
 - Sign commits with `-s` flag
 - Never amend or rewrite existing commits unless explicitly asked to do so
 
+## Design
+
+See [docs/design.md](docs/design.md) for architecture, design decisions, and the CRD spec. Implementation should follow the design doc unless the user explicitly requests a deviation and acknowledges it. If a deviation is agreed upon, update the design doc to reflect the change.
+
 ## OCM Concepts
 
 - **ManagedCluster**: A cluster registered with the hub
