@@ -32,8 +32,6 @@ import (
 )
 
 const (
-	ControllerName = "multicluster-mesh-addon"
-
 	OperatorNameOSSM = "servicemeshoperator3"
 	OperatorNameSail = "sailoperator"
 
@@ -47,8 +45,8 @@ const (
 
 	DefaultChannel = "stable"
 
-	OperatorManifestWorkName    = "multicluster-mesh-operator"
-	ManifestWorkNameCacerts     = "multicluster-mesh-cacerts"
+	OperatorManifestWorkName = "multicluster-mesh-operator"
+	ManifestWorkNameCacerts  = "multicluster-mesh-cacerts"
 
 	CacertsSecretName = "cacerts"
 
@@ -708,7 +706,7 @@ func (r *Reconciler) updateCacertsManifestWorkIfNeeded(ctx context.Context, mesh
 
 func certificateLabels(mesh *meshv1alpha1.MultiClusterMesh, clusterName string) map[string]string {
 	return map[string]string{
-		ManagedByLabel:     ControllerName,
+		ManagedByLabel:     ManagedByValue,
 		LabelMeshName:      mesh.Name,
 		LabelMeshNamespace: mesh.Namespace,
 		LabelClusterName:   clusterName,
