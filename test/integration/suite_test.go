@@ -52,7 +52,6 @@ var _ = BeforeSuite(func() {
 	SetDefaultEventuallyPollingInterval(250 * time.Millisecond)
 	SetDefaultConsistentlyDuration(2 * time.Second)
 	SetDefaultConsistentlyPollingInterval(250 * time.Millisecond)
-	meshcontroller.MissingClaimRequeueDelay = 1 * time.Second
 
 	testEnv = &envtest.Environment{
 		CRDDirectoryPaths: []string{
