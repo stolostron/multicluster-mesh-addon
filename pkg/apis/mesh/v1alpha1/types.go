@@ -19,11 +19,6 @@ type MultiClusterMesh struct {
 	Status MultiClusterMeshStatus `json:"status,omitempty"`
 }
 
-// GetTrustDomain returns the trust domain for this mesh.
-func (m *MultiClusterMesh) GetTrustDomain() string {
-	return m.Name
-}
-
 // GetControlPlaneNamespace returns the control plane namespace, defaulting to "istio-system".
 func (m *MultiClusterMesh) GetControlPlaneNamespace() string {
 	if m.Spec.ControlPlane.Namespace == "" {
