@@ -162,9 +162,24 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 			})
 		})
 
-		It("should not create ManifestWorks when ClusterSet doesn't exist", func() {
-			util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, util.UniqueName("set"), meshv1alpha1.OperatorConfig{})
-			expectNoManifestWorks()
+		When("referencing a non-existent ClusterSet", func() {
+			var otherClusterSet string
+
+			BeforeEach(func() {
+				otherClusterSet = util.UniqueName("late-set")
+				util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, otherClusterSet, meshv1alpha1.OperatorConfig{})
+				awaitReconcileFinished()
+			})
+
+			It("should not create ManifestWorks", func() {
+				expectNoManifestWorks()
+			})
+
+			It("should reconcile when the ClusterSet is created", func() {
+				util.CreateK8sManagedCluster(ctx, k8sClient, clusterName, otherClusterSet)
+				util.CreateManagedClusterSet(ctx, k8sClient, otherClusterSet)
+				expectOperatorManifestWork(clusterName)
+			})
 		})
 
 		When("referencing an empty ClusterSet", func() {
@@ -224,6 +239,11 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 
 			It("should cleanup ManifestWork when the cluster is deleted", func() {
 				util.DeleteResource(ctx, k8sClient, &clusterv1.ManagedCluster{}, clusterName, "")
+				expectAllManifestWorksDeleted()
+			})
+
+			It("should cleanup ManifestWork when the ClusterSet is deleted", func() {
+				util.DeleteResource(ctx, k8sClient, &clusterv1beta2.ManagedClusterSet{}, testClusterSet, "")
 				expectAllManifestWorksDeleted()
 			})
 
@@ -299,18 +319,6 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 			expectFinalizer(meshName, testNs)
 
 			util.DeleteResource(ctx, k8sClient, &meshv1alpha1.MultiClusterMesh{}, meshName, testNs)
-		})
-
-		It("should delete ManifestWork even when the ClusterSet is deleted first", func() {
-			util.CreateK8sManagedCluster(ctx, k8sClient, clusterName, testClusterSet)
-			util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet, meshv1alpha1.OperatorConfig{})
-			expectFinalizer(meshName, testNs)
-			expectOperatorManifestWork(clusterName)
-
-			util.DeleteResource(ctx, k8sClient, &clusterv1beta2.ManagedClusterSet{}, testClusterSet, "")
-			util.DeleteResource(ctx, k8sClient, &meshv1alpha1.MultiClusterMesh{}, meshName, testNs)
-
-			util.ExpectResourceDeleted(ctx, k8sClient, &workv1.ManifestWork{}, meshcontroller.OperatorManifestWorkName, clusterName)
 		})
 	})
 

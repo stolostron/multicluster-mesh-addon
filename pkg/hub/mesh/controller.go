@@ -82,6 +82,10 @@ func RegisterController(mgr manager.Manager) error {
 			&clusterv1.ManagedCluster{},
 			handler.EnqueueRequestsFromMapFunc(reconciler.findMeshesForCluster),
 		).
+		Watches(
+			&clusterv1beta2.ManagedClusterSet{},
+			handler.EnqueueRequestsFromMapFunc(reconciler.findMeshesForClusterSet),
+		).
 		Complete(reconciler)
 }
 
@@ -160,6 +164,28 @@ func (r *Reconciler) findMeshesForCluster(ctx context.Context, obj client.Object
 	meshList := &meshv1alpha1.MultiClusterMeshList{}
 	if err := r.List(ctx, meshList, client.MatchingFields{"spec.clusterSet": clusterSetName}); err != nil {
 		klog.Errorf("Failed to list MultiClusterMeshes when handling cluster %s: %v", cluster.Name, err)
+		return
+	}
+
+	for _, mesh := range meshList.Items {
+		requests = append(requests, reconcile.Request{
+			NamespacedName: types.NamespacedName{
+				Name:      mesh.Name,
+				Namespace: mesh.Namespace,
+			},
+		})
+	}
+
+	return requests
+}
+
+// findMeshesForClusterSet returns a list of all meshes to reconcile following a ClusterSet change
+func (r *Reconciler) findMeshesForClusterSet(ctx context.Context, obj client.Object) (requests []reconcile.Request) {
+	clusterSet := obj.(*clusterv1beta2.ManagedClusterSet)
+
+	meshList := &meshv1alpha1.MultiClusterMeshList{}
+	if err := r.List(ctx, meshList, client.MatchingFields{"spec.clusterSet": clusterSet.Name}); err != nil {
+		klog.Errorf("Failed to list MultiClusterMeshes when handling ClusterSet %s: %v", clusterSet.Name, err)
 		return
 	}
 
