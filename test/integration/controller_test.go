@@ -249,6 +249,11 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 				expectAllManifestWorksDeleted()
 			})
 
+			It("should recreate ManifestWork when it is externally deleted", func() {
+				util.DeleteResource(ctx, k8sClient, &workv1.ManifestWork{}, meshcontroller.OperatorManifestWorkName, clusterName)
+				expectOperatorManifestWork(clusterName)
+			})
+
 			When("moving the cluster between sets", func() {
 				var otherClusterSet string
 

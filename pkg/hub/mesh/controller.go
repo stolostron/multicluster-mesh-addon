@@ -110,6 +110,13 @@ func RegisterController(mgr manager.Manager) error {
 				return obj.GetLabels()[MeshNameLabel] != "" && obj.GetLabels()[MeshNamespaceLabel] != ""
 			})),
 		).
+		Watches(
+			&workv1.ManifestWork{},
+			handler.EnqueueRequestsFromMapFunc(reconciler.findMeshesForManifestWork),
+			builder.WithPredicates(predicate.NewPredicateFuncs(func(obj client.Object) bool {
+				return obj.GetLabels()[ManagedByLabel] == ManagedByValue
+			})),
+		).
 		Complete(reconciler)
 }
 
@@ -242,6 +249,19 @@ func (r *Reconciler) findMeshesForClusterSet(ctx context.Context, obj client.Obj
 	}
 
 	return requests
+}
+
+// findMeshesForManifestWork returns a list of all meshes to reconcile following a ManifestWork change
+func (r *Reconciler) findMeshesForManifestWork(ctx context.Context, obj client.Object) []reconcile.Request {
+	cluster := &clusterv1.ManagedCluster{}
+	if err := r.Get(ctx, types.NamespacedName{Name: obj.GetNamespace()}, cluster); err != nil {
+		if !errors.IsNotFound(err) {
+			klog.Errorf("Failed to get ManagedCluster %s for ManifestWork %s: %v", obj.GetNamespace(), obj.GetName(), err)
+		}
+		return nil
+	}
+
+	return r.findMeshesForCluster(ctx, cluster)
 }
 
 // handleDeletion handles cleanup when the MultiClusterMesh is being deleted
