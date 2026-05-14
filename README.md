@@ -63,6 +63,30 @@ To remove the deployment:
 make undeploy
 ```
 
+#### Running Locally
+
+To run the controller from localhost for development:
+
+```bash
+# Build the binary
+make build
+
+# Run with leader election disabled (no namespace/RBAC requirements)
+./bin/multicluster-mesh-addon controller --leader-elect=false
+```
+
+This runs the controller against your current kubeconfig context. Leader election is disabled to avoid requiring the `multicluster-mesh-system` namespace and associated RBAC permissions during local development.
+
+If you need to test with leader election enabled:
+
+```bash
+# Create the required namespace
+kubectl create namespace multicluster-mesh-system
+
+# Run with leader election (default)
+./bin/multicluster-mesh-addon controller
+```
+
 ### Usage
 
 Create a namespace to host your multi cluster mesh resources.

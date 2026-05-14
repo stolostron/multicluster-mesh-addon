@@ -85,6 +85,7 @@ func newCommand() *cobra.Command {
 var (
 	metricsAddr string
 	probeAddr   string
+	leaderElect bool
 )
 
 func newControllerCommand() *cobra.Command {
@@ -98,6 +99,7 @@ func newControllerCommand() *cobra.Command {
 
 	cmd.Flags().StringVar(&metricsAddr, "metrics-addr", ":8080", "The address the metric endpoint binds to.")
 	cmd.Flags().StringVar(&probeAddr, "health-probe-addr", ":8081", "The address the probe endpoint binds to.")
+	cmd.Flags().BoolVar(&leaderElect, "leader-elect", true, "Enable leader election for controller manager.")
 
 	return cmd
 }
@@ -106,15 +108,15 @@ func runController(ctx context.Context, controllerContext *controllercmd.Control
 	ctrl.SetLogger(zap.New(zap.UseDevMode(true)))
 	klog.Info("Starting Multi Cluster Mesh Add On controller...")
 
-	// Create controller-runtime manager with built-in leader election
+	// Create controller-runtime manager with configurable leader election
 	mgr, err := manager.New(controllerContext.KubeConfig, manager.Options{
 		Scheme: runtimeScheme,
 		Metrics: metricsserver.Options{
 			BindAddress: metricsAddr,
 		},
-		HealthProbeBindAddress: probeAddr,
-		LeaderElection:         true,
-		LeaderElectionID:       "multicluster-mesh-addon-controller-lock",
+		HealthProbeBindAddress:  probeAddr,
+		LeaderElection:          leaderElect,
+		LeaderElectionID:        "multicluster-mesh-addon-controller-lock",
 		LeaderElectionNamespace: "multicluster-mesh-system",
 	})
 	if err != nil {
