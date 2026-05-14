@@ -34,7 +34,34 @@ The addon manages the "plumbing" (trust and connectivity) while users configure 
 
 ### Installation
 
-TBD
+#### Development Deployment
+
+To build and deploy the controller to your cluster:
+
+```bash
+# Build, push image, and deploy to cluster
+make deploy
+
+# Or run individual steps:
+make images      # Build container image
+make push        # Push to registry
+make deploy      # Apply CRDs and deployment
+```
+
+The `deploy` target will:
+1. Build and push the container image to the registry (default: `quay.io/sail-dev`)
+2. Apply the CRD manifests from `config/crd/`
+3. Deploy the controller with the built image
+
+**Configuration:**
+- `REGISTRY_BASE`: Override the image registry (default: `quay.io/sail-dev`)
+- `IMG`: Full image reference (default: `${REGISTRY_BASE}/multicluster-mesh-addon:${GIT_VERSION}`)
+
+To remove the deployment:
+
+```bash
+make undeploy
+```
 
 ### Usage
 

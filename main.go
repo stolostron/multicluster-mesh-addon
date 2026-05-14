@@ -22,6 +22,7 @@ import (
 	clusterv1beta2 "open-cluster-management.io/api/cluster/v1beta2"
 	workv1 "open-cluster-management.io/api/work/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
@@ -121,6 +122,16 @@ func runController(ctx context.Context, controllerContext *controllercmd.Control
 	// Register MultiClusterMesh controller
 	if err := meshcontroller.RegisterController(mgr); err != nil {
 		klog.Errorf("Unable to register MultiClusterMesh controller: %v", err)
+		return err
+	}
+
+	// Add health and readiness checks
+	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
+		klog.Errorf("Unable to set up health check: %v", err)
+		return err
+	}
+	if err := mgr.AddReadyzCheck("readyz", healthz.Ping); err != nil {
+		klog.Errorf("Unable to set up ready check: %v", err)
 		return err
 	}
 
