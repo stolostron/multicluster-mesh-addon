@@ -125,7 +125,7 @@ push: images ## Push the container image
 	$(CONTAINER_ENGINE) push $(IMG)
 
 .PHONY: deploy
-deploy: push ## Deploy the controller to the cluster
+deploy: gen-crds push ## Deploy the controller to the cluster
 	kubectl apply -f config/crd/
 	sed 's|image:.*|image: $(IMG)|' config/deploy/deployment.yaml | kubectl apply -f -
 
