@@ -24,6 +24,8 @@ The addon leverages OCM's hub-and-spoke architecture and integrates with core OC
 
 The addon manages the "plumbing" (trust and connectivity) while users configure their mesh control planes using GitOps or the Istio CR directly.
 
+For detailed architecture and design decisions, see [docs/design.md](docs/design.md).
+
 ## Getting Started
 
 ### Prerequisites
