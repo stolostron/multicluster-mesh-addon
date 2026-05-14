@@ -3,6 +3,7 @@ package mesh
 import (
 	"context"
 	"fmt"
+	"time"
 
 	operatorsv1 "github.com/operator-framework/api/pkg/operators/v1"
 	operatorsv1alpha1 "github.com/operator-framework/api/pkg/operators/v1alpha1"
@@ -137,9 +138,13 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 			continue
 		}
 
-		if err := r.ensureOperatorInstalled(ctx, mesh, &cluster); err != nil {
+		result, err := r.ensureOperatorInstalled(ctx, mesh, &cluster)
+		if err != nil {
 			klog.Errorf("Failed to ensure mesh operator on cluster %s: %v", cluster.Name, err)
 			return reconcile.Result{}, err
+		}
+		if result.RequeueAfter > 0 {
+			return result, nil
 		}
 	}
 
@@ -222,7 +227,7 @@ func (r *Reconciler) handleDeletion(ctx context.Context, mesh *meshv1alpha1.Mult
 	return reconcile.Result{}, nil
 }
 
-func (r *Reconciler) ensureOperatorInstalled(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, cluster *clusterv1.ManagedCluster) error {
+func (r *Reconciler) ensureOperatorInstalled(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, cluster *clusterv1.ManagedCluster) (reconcile.Result, error) {
 	klog.V(4).Infof("Ensuring mesh operator on cluster %s for mesh %s", cluster.Name, mesh.Name)
 
 	existingWork := &workv1.ManifestWork{}
@@ -233,25 +238,26 @@ func (r *Reconciler) ensureOperatorInstalled(ctx context.Context, mesh *meshv1al
 
 	if err == nil {
 		if !existingWork.DeletionTimestamp.IsZero() {
-			return fmt.Errorf("ManifestWork is terminating, requeueing")
+			klog.V(4).Infof("ManifestWork %s/%s is terminating, requeueing", cluster.Name, OperatorManifestWorkName)
+			return reconcile.Result{RequeueAfter: 5 * time.Second}, nil
 		}
 
 		klog.V(4).Infof("ManifestWork %s/%s already exists", cluster.Name, OperatorManifestWorkName)
 		// TODO: Add logic to check if the work needs updating (e.g., channel change)
-		return nil
+		return reconcile.Result{}, nil
 	}
 
 	if !errors.IsNotFound(err) {
-		return fmt.Errorf("failed to get ManifestWork: %w", err)
+		return reconcile.Result{}, fmt.Errorf("failed to get ManifestWork: %w", err)
 	}
 
 	klog.Infof("Creating ManifestWork to install operator on cluster %s", cluster.Name)
 	if err := r.Create(ctx, r.buildOperatorManifestWork(mesh, cluster)); err != nil {
-		return fmt.Errorf("failed to create ManifestWork: %w", err)
+		return reconcile.Result{}, fmt.Errorf("failed to create ManifestWork: %w", err)
 	}
 
 	klog.Infof("Successfully created ManifestWork %s/%s for operator installation", cluster.Name, OperatorManifestWorkName)
-	return nil
+	return reconcile.Result{}, nil
 }
 
 // cleanupOperatorManifestWorks deletes operator ManifestWorks on clusters that no mesh needs anymore.
