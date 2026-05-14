@@ -88,9 +88,11 @@ var (
 )
 
 func newControllerCommand() *cobra.Command {
-	cmd := controllercmd.
-		NewControllerCommandConfig("multicluster-mesh-addon-controller", version.Get(), runController, clock.RealClock{}).
-		NewCommand()
+	cmdConfig := controllercmd.NewControllerCommandConfig("multicluster-mesh-addon-controller", version.Get(), runController, clock.RealClock{})
+	// Disable library-go leader election - controller-runtime will handle it
+	cmdConfig.DisableLeaderElection = true
+
+	cmd := cmdConfig.NewCommand()
 	cmd.Use = "controller"
 	cmd.Short = "Start the addon controller"
 
@@ -104,15 +106,16 @@ func runController(ctx context.Context, controllerContext *controllercmd.Control
 	ctrl.SetLogger(zap.New(zap.UseDevMode(true)))
 	klog.Info("Starting Multi Cluster Mesh Add On controller...")
 
-	// Create controller-runtime manager
-	// Leader election is handled by library-go controllercmd (enabled by default)
+	// Create controller-runtime manager with built-in leader election
 	mgr, err := manager.New(controllerContext.KubeConfig, manager.Options{
 		Scheme: runtimeScheme,
 		Metrics: metricsserver.Options{
 			BindAddress: metricsAddr,
 		},
 		HealthProbeBindAddress: probeAddr,
-		LeaderElection:         false,
+		LeaderElection:         true,
+		LeaderElectionID:       "multicluster-mesh-addon-controller-lock",
+		LeaderElectionNamespace: "multicluster-mesh-system",
 	})
 	if err != nil {
 		klog.Errorf("Unable to set up controller manager: %v", err)
@@ -125,7 +128,7 @@ func runController(ctx context.Context, controllerContext *controllercmd.Control
 		return err
 	}
 
-	// Add health and readiness checks
+	// Add health and readiness checks - these run on all pods, not just the leader
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
 		klog.Errorf("Unable to set up health check: %v", err)
 		return err
