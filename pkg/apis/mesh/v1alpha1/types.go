@@ -19,6 +19,14 @@ type MultiClusterMesh struct {
 	Status MultiClusterMeshStatus `json:"status,omitempty"`
 }
 
+// GetControlPlaneNamespace returns the control plane namespace, defaulting to "istio-system".
+func (m *MultiClusterMesh) GetControlPlaneNamespace() string {
+	if m.Spec.ControlPlane.Namespace == "" {
+		return "istio-system"
+	}
+	return m.Spec.ControlPlane.Namespace
+}
+
 // MultiClusterMeshSpec defines the desired state of a multi-cluster mesh
 type MultiClusterMeshSpec struct {
 	// ClusterSet references the ACM ManagedClusterSet that defines cluster membership

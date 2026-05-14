@@ -3,7 +3,11 @@ package mesh
 import (
 	"context"
 	"fmt"
+	"reflect"
+	"time"
 
+	certmanagerv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
+	cmmeta "github.com/cert-manager/cert-manager/pkg/apis/meta/v1"
 	operatorsv1 "github.com/operator-framework/api/pkg/operators/v1"
 	operatorsv1alpha1 "github.com/operator-framework/api/pkg/operators/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
@@ -42,11 +46,17 @@ const (
 	DefaultChannel = "stable"
 
 	OperatorManifestWorkName = "multicluster-mesh-operator"
+	ManifestWorkNameCacerts  = "multicluster-mesh-cacerts"
+
+	CacertsSecretName = "cacerts"
 
 	FinalizerName = "mesh.open-cluster-management.io/finalizer"
 
-	ManagedByLabel = "app.kubernetes.io/managed-by"
-	ManagedByValue = "multicluster-mesh-addon"
+	ManagedByLabel     = "app.kubernetes.io/managed-by"
+	ManagedByValue     = "multicluster-mesh-addon"
+	LabelMeshName      = "mesh.open-cluster-management.io/mesh-name"
+	LabelMeshNamespace = "mesh.open-cluster-management.io/mesh-namespace"
+	LabelClusterName   = "mesh.open-cluster-management.io/cluster-name"
 
 	ClusterSetLabel     = "cluster.open-cluster-management.io/clusterset"
 	clusterClaimProduct = "product.open-cluster-management.io"
@@ -57,6 +67,8 @@ const (
 	ProductARO  = "ARO"
 	ProductROKS = "ROKS"
 	ProductOSD  = "OpenShiftDedicated"
+
+	Day = 24 * time.Hour
 )
 
 // Reconciler reconciles MultiClusterMesh resources
@@ -89,6 +101,12 @@ func RegisterController(mgr manager.Manager) error {
 			handler.EnqueueRequestsFromMapFunc(reconciler.findMeshesForClusterSet),
 			builder.WithPredicates(predicate.GenerationChangedPredicate{}),
 		).
+		Watches(&corev1.Secret{},
+			handler.EnqueueRequestsFromMapFunc(reconciler.mapSecretToMesh),
+			builder.WithPredicates(predicate.NewPredicateFuncs(func(obj client.Object) bool {
+				return obj.GetLabels()[LabelMeshName] != "" && obj.GetLabels()[LabelMeshNamespace] != ""
+			})),
+		).
 		Complete(reconciler)
 }
 
@@ -98,6 +116,8 @@ func RegisterController(mgr manager.Manager) error {
 //+kubebuilder:rbac:groups=cluster.open-cluster-management.io,resources=managedclusters,verbs=get;list;watch
 //+kubebuilder:rbac:groups=cluster.open-cluster-management.io,resources=managedclustersets,verbs=get;list;watch
 //+kubebuilder:rbac:groups=work.open-cluster-management.io,resources=manifestworks,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=cert-manager.io,resources=certificates,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
 
 // Reconcile implements the reconcile loop for MultiClusterMesh resources
 func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
@@ -142,6 +162,19 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 
 		if err := r.ensureOperatorInstalled(ctx, mesh, &cluster); err != nil {
 			klog.Errorf("Failed to ensure mesh operator on cluster %s: %v", cluster.Name, err)
+			return reconcile.Result{}, err
+		}
+	}
+
+	// Create certificates for each cluster if cert-manager is configured
+	if mesh.Spec.Security.Trust.CertManager.IssuerRef.Name != "" {
+		if err := r.ensureCertificatesCreated(ctx, mesh, clusters); err != nil {
+			klog.Errorf("Failed to ensure certificates: %v", err)
+			return reconcile.Result{}, err
+		}
+
+		if err := r.ensureCacertsDistributed(ctx, mesh, clusters); err != nil {
+			klog.Errorf("Failed to distribute cacerts: %v", err)
 			return reconcile.Result{}, err
 		}
 	}
@@ -469,4 +502,214 @@ func (r *Reconciler) applyOperatorDefaults(config meshv1alpha1.OperatorConfig, i
 	}
 
 	return config
+}
+
+// mapSecretToMesh maps a Secret to the MultiClusterMesh that owns it
+func (r *Reconciler) mapSecretToMesh(_ context.Context, obj client.Object) []reconcile.Request {
+	secret, ok := obj.(*corev1.Secret)
+	if !ok {
+		return nil
+	}
+
+	meshName := secret.Labels[LabelMeshName]
+	meshNamespace := secret.Labels[LabelMeshNamespace]
+
+	klog.V(4).Infof("Secret %s/%s triggered reconcile for mesh %s/%s",
+		secret.Namespace, secret.Name, meshNamespace, meshName)
+
+	return []reconcile.Request{{
+		NamespacedName: types.NamespacedName{
+			Name:      meshName,
+			Namespace: meshNamespace,
+		},
+	}}
+}
+
+// getCacertsName returns the name for the certificate and secret for a specific cluster
+func getCacertsName(clusterName string) string {
+	return fmt.Sprintf("cacerts-%s", clusterName)
+}
+
+// ensureCertificatesCreated creates Certificate resources for each cluster in the mesh
+func (r *Reconciler) ensureCertificatesCreated(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, clusters []clusterv1.ManagedCluster) error {
+	for _, cluster := range clusters {
+		if err := r.ensureCertificateForCluster(ctx, mesh, &cluster); err != nil {
+			return fmt.Errorf("failed to ensure certificate for cluster %s: %w", cluster.Name, err)
+		}
+	}
+	return nil
+}
+
+// ensureCertificateForCluster creates a Certificate resource for a specific cluster
+func (r *Reconciler) ensureCertificateForCluster(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, cluster *clusterv1.ManagedCluster) error {
+	certName := getCacertsName(cluster.Name)
+	cert := &certmanagerv1.Certificate{}
+	err := r.Get(ctx, types.NamespacedName{
+		Name:      certName,
+		Namespace: mesh.Namespace,
+	}, cert)
+
+	if err == nil {
+		klog.V(4).Infof("Certificate %s/%s already exists", mesh.Namespace, certName)
+		return nil
+	}
+
+	if !errors.IsNotFound(err) {
+		return fmt.Errorf("failed to get Certificate: %w", err)
+	}
+
+	klog.Infof("Creating Certificate %s/%s for cluster %s", mesh.Namespace, certName, cluster.Name)
+
+	cert = &certmanagerv1.Certificate{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      certName,
+			Namespace: mesh.Namespace,
+			Labels:    certificateLabels(mesh, cluster.Name),
+		},
+		Spec: certmanagerv1.CertificateSpec{
+			SecretName: certName,
+			SecretTemplate: &certmanagerv1.CertificateSecretTemplate{
+				Labels: certificateLabels(mesh, cluster.Name),
+			},
+			Duration:    &metav1.Duration{Duration: 60 * Day},
+			RenewBefore: &metav1.Duration{Duration: 15 * Day},
+			CommonName:  "Intermediate Istio CA",
+			IsCA:        true,
+			Usages: []certmanagerv1.KeyUsage{
+				certmanagerv1.UsageDigitalSignature,
+				certmanagerv1.UsageKeyEncipherment,
+				certmanagerv1.UsageCertSign,
+			},
+			IssuerRef: cmmeta.IssuerReference{
+				Name:  mesh.Spec.Security.Trust.CertManager.IssuerRef.Name,
+				Kind:  "Issuer",
+				Group: "cert-manager.io",
+			},
+		},
+	}
+
+	if err := r.Create(ctx, cert); err != nil {
+		return fmt.Errorf("failed to create Certificate: %w", err)
+	}
+
+	klog.Infof("Successfully created Certificate %s/%s", mesh.Namespace, certName)
+	return nil
+}
+
+// ensureCacertsDistributed creates ManifestWorks to distribute cacerts secrets to clusters
+func (r *Reconciler) ensureCacertsDistributed(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, clusters []clusterv1.ManagedCluster) error {
+	for _, cluster := range clusters {
+		if err := r.ensureCacertsManifestWork(ctx, mesh, &cluster); err != nil {
+			return fmt.Errorf("failed to ensure cacerts ManifestWork for cluster %s: %w", cluster.Name, err)
+		}
+	}
+	return nil
+}
+
+// ensureCacertsManifestWork creates a ManifestWork to distribute the cacerts secret to a cluster
+func (r *Reconciler) ensureCacertsManifestWork(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, cluster *clusterv1.ManagedCluster) error {
+	secretName := getCacertsName(cluster.Name)
+	secret := &corev1.Secret{}
+	err := r.Get(ctx, types.NamespacedName{
+		Name:      secretName,
+		Namespace: mesh.Namespace,
+	}, secret)
+
+	if err != nil {
+		if errors.IsNotFound(err) {
+			klog.V(4).Infof("Secret %s/%s not found yet, waiting for cert-manager to create it", mesh.Namespace, secretName)
+			return nil
+		}
+		return fmt.Errorf("failed to get secret: %w", err)
+	}
+
+	existingWork := &workv1.ManifestWork{}
+	err = r.Get(ctx, types.NamespacedName{
+		Name:      ManifestWorkNameCacerts,
+		Namespace: cluster.Name,
+	}, existingWork)
+
+	if err == nil {
+		klog.V(4).Infof("ManifestWork %s/%s already exists, checking if update is needed", cluster.Name, ManifestWorkNameCacerts)
+		return r.updateCacertsManifestWorkIfNeeded(ctx, mesh, existingWork, secret)
+	}
+
+	if !errors.IsNotFound(err) {
+		return fmt.Errorf("failed to get ManifestWork: %w", err)
+	}
+
+	klog.Infof("Creating ManifestWork %s/%s to distribute cacerts secret", cluster.Name, ManifestWorkNameCacerts)
+
+	work := r.buildCacertsManifestWork(mesh, cluster.Name, secret)
+
+	if err := r.Create(ctx, work); err != nil {
+		return fmt.Errorf("failed to create ManifestWork: %w", err)
+	}
+
+	klog.Infof("Successfully created ManifestWork %s/%s", cluster.Name, ManifestWorkNameCacerts)
+	return nil
+}
+
+// buildCacertsManifestWork builds a ManifestWork for distributing the cacerts secret
+func (r *Reconciler) buildCacertsManifestWork(mesh *meshv1alpha1.MultiClusterMesh, clusterName string, secret *corev1.Secret) *workv1.ManifestWork {
+	cacertsSecret := &corev1.Secret{
+		TypeMeta: metav1.TypeMeta{
+			APIVersion: "v1",
+			Kind:       "Secret",
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      CacertsSecretName,
+			Namespace: mesh.GetControlPlaneNamespace(),
+		},
+		Type: corev1.SecretTypeTLS,
+		Data: secret.Data,
+	}
+
+	return &workv1.ManifestWork{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      ManifestWorkNameCacerts,
+			Namespace: clusterName,
+			Labels: map[string]string{
+				LabelMeshName:      mesh.Name,
+				LabelMeshNamespace: mesh.Namespace,
+			},
+		},
+		Spec: workv1.ManifestWorkSpec{
+			Workload: workv1.ManifestsTemplate{
+				Manifests: []workv1.Manifest{{
+					RawExtension: runtime.RawExtension{Object: cacertsSecret},
+				}},
+			},
+		},
+	}
+}
+
+// updateCacertsManifestWorkIfNeeded updates the ManifestWork if the secret data has changed
+func (r *Reconciler) updateCacertsManifestWorkIfNeeded(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, work *workv1.ManifestWork, secret *corev1.Secret) error {
+	newWork := r.buildCacertsManifestWork(mesh, work.Namespace, secret)
+
+	if reflect.DeepEqual(work.Spec, newWork.Spec) {
+		klog.V(4).Infof("ManifestWork %s/%s is up to date, no changes needed", work.Namespace, work.Name)
+		return nil
+	}
+
+	work.Spec = newWork.Spec
+	// TODO: handle label reconciliation
+	work.Labels = newWork.Labels
+
+	if err := r.Update(ctx, work); err != nil {
+		return fmt.Errorf("failed to update ManifestWork: %w", err)
+	}
+
+	klog.V(4).Infof("Updated ManifestWork %s/%s", work.Namespace, work.Name)
+	return nil
+}
+
+func certificateLabels(mesh *meshv1alpha1.MultiClusterMesh, clusterName string) map[string]string {
+	return map[string]string{
+		ManagedByLabel:     ManagedByValue,
+		LabelMeshName:      mesh.Name,
+		LabelMeshNamespace: mesh.Namespace,
+		LabelClusterName:   clusterName,
+	}
 }
