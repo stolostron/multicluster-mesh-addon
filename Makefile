@@ -130,7 +130,7 @@ deploy: gen-crds push ## Deploy the controller to the cluster
 	sed 's|image:.*|image: $(IMG)|' config/deploy/deployment.yaml | kubectl apply -f -
 
 .PHONY: undeploy
-undeploy: ## Remove the controller from the cluster
+undeploy: gen-crds ## Remove the controller from the cluster
 	kubectl delete -f config/deploy/deployment.yaml --ignore-not-found=true
 	kubectl delete -f config/crd/ --ignore-not-found=true
 
