@@ -22,6 +22,7 @@ import (
 	clusterv1beta2 "open-cluster-management.io/api/cluster/v1beta2"
 	workv1 "open-cluster-management.io/api/work/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
@@ -84,17 +85,26 @@ func newCommand() *cobra.Command {
 var (
 	metricsAddr string
 	probeAddr   string
+	leaderElect bool
 )
 
 func newControllerCommand() *cobra.Command {
-	cmd := controllercmd.
-		NewControllerCommandConfig("multicluster-mesh-addon-controller", version.Get(), runController, clock.RealClock{}).
-		NewCommand()
+	cmdConfig := controllercmd.NewControllerCommandConfig("multicluster-mesh-addon-controller", version.Get(), runController, clock.RealClock{})
+	// Disable library-go leader election because it blocks before runController executes,
+	// preventing non-leader pods from registering health/readiness checks.
+	// This causes new pods to fail readiness probes and restart after timeout during deployment rollouts.
+	// Old pod can't terminate because new pod never becomes ready.
+	// Controller-runtime's leader election runs after manager setup,
+	// allowing all pods to serve health endpoints while only the leader runs controllers.
+	cmdConfig.DisableLeaderElection = true
+
+	cmd := cmdConfig.NewCommand()
 	cmd.Use = "controller"
 	cmd.Short = "Start the addon controller"
 
 	cmd.Flags().StringVar(&metricsAddr, "metrics-addr", ":8080", "The address the metric endpoint binds to.")
 	cmd.Flags().StringVar(&probeAddr, "health-probe-addr", ":8081", "The address the probe endpoint binds to.")
+	cmd.Flags().BoolVar(&leaderElect, "leader-elect", true, "Enable leader election for controller manager.")
 
 	return cmd
 }
@@ -103,15 +113,30 @@ func runController(ctx context.Context, controllerContext *controllercmd.Control
 	ctrl.SetLogger(zap.New(zap.UseDevMode(true)))
 	klog.Info("Starting Multi Cluster Mesh Add On controller...")
 
-	// Create controller-runtime manager
-	// Leader election is handled by library-go controllercmd (enabled by default)
+	// Get namespace from POD_NAMESPACE environment variable
+	controllerNamespace := os.Getenv("POD_NAMESPACE")
+	if controllerNamespace == "" {
+		// Fallback to reading from service account namespace file
+		if namespaceBytes, err := os.ReadFile("/var/run/secrets/kubernetes.io/serviceaccount/namespace"); err == nil {
+			controllerNamespace = string(namespaceBytes)
+			klog.Info("POD_NAMESPACE not set, using namespace from service account: ", controllerNamespace)
+		} else {
+			// Final fallback to default namespace
+			controllerNamespace = "multicluster-mesh-system"
+			klog.Warning("POD_NAMESPACE not set and service account namespace file not readable, using default: multicluster-mesh-system")
+		}
+	}
+
+	// Create controller-runtime manager with configurable leader election
 	mgr, err := manager.New(controllerContext.KubeConfig, manager.Options{
 		Scheme: runtimeScheme,
 		Metrics: metricsserver.Options{
 			BindAddress: metricsAddr,
 		},
-		HealthProbeBindAddress: probeAddr,
-		LeaderElection:         false,
+		HealthProbeBindAddress:  probeAddr,
+		LeaderElection:          leaderElect,
+		LeaderElectionID:        "multicluster-mesh-addon-controller-lock",
+		LeaderElectionNamespace: controllerNamespace,
 	})
 	if err != nil {
 		klog.Errorf("Unable to set up controller manager: %v", err)
@@ -121,6 +146,16 @@ func runController(ctx context.Context, controllerContext *controllercmd.Control
 	// Register MultiClusterMesh controller
 	if err := meshcontroller.RegisterController(mgr); err != nil {
 		klog.Errorf("Unable to register MultiClusterMesh controller: %v", err)
+		return err
+	}
+
+	// Add health and readiness checks - these run on all pods, not just the leader
+	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
+		klog.Errorf("Unable to set up health check: %v", err)
+		return err
+	}
+	if err := mgr.AddReadyzCheck("readyz", healthz.Ping); err != nil {
+		klog.Errorf("Unable to set up ready check: %v", err)
 		return err
 	}
 

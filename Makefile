@@ -35,7 +35,7 @@ $(ENVTEST): $(BIN_DIR)
 	@test -s $(ENVTEST) || GOBIN=$(BIN_DIR) go install sigs.k8s.io/controller-runtime/tools/setup-envtest@$(CONTROLLER_RUNTIME_BRANCH)
 
 # Image registry and name
-REGISTRY_BASE ?= quay.io/stolostron
+REGISTRY_BASE ?= quay.io/sail-dev
 IMG ?= $(REGISTRY_BASE)/multicluster-mesh-addon:$(GIT_VERSION)
 
 .PHONY: deps
@@ -119,6 +119,21 @@ clean: ## Clean build artifacts
 .PHONY: images
 images: ## Build the container image
 	$(CONTAINER_ENGINE) build -t $(IMG) .
+
+.PHONY: push
+push: images ## Push the container image
+	$(CONTAINER_ENGINE) push $(IMG)
+
+.PHONY: deploy
+deploy: gen-crds push ## Deploy the controller to the cluster
+	kubectl apply -f config/crd/
+	sed 's|image:.*|image: $(IMG)|' config/deploy/deployment.yaml | kubectl apply -f -
+
+.PHONY: undeploy
+undeploy: gen-crds ## Remove the controller from the cluster
+	kubectl delete multiclustermeshes.mesh.open-cluster-management.io --all --all-namespaces --ignore-not-found=true || true
+	kubectl delete -f config/deploy/deployment.yaml --ignore-not-found=true
+	kubectl delete -f config/crd/ --ignore-not-found=true
 
 .PHONY: help
 help: ## Display this help
