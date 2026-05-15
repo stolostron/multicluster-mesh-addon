@@ -142,7 +142,7 @@ spec:
       serviceAccountName: multicluster-mesh-controller
       containers:
       - name: controller
-        image: quay.io/stolostron/multicluster-mesh-addon:latest
+        image: quay.io/sail-dev/multicluster-mesh-addon:latest
         imagePullPolicy: Always
         command:
         - /multicluster-mesh-addon
