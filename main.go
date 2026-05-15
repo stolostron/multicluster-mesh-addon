@@ -113,6 +113,20 @@ func runController(ctx context.Context, controllerContext *controllercmd.Control
 	ctrl.SetLogger(zap.New(zap.UseDevMode(true)))
 	klog.Info("Starting Multi Cluster Mesh Add On controller...")
 
+	// Get namespace from POD_NAMESPACE environment variable
+	controllerNamespace := os.Getenv("POD_NAMESPACE")
+	if controllerNamespace == "" {
+		// Fallback to reading from service account namespace file
+		if namespaceBytes, err := os.ReadFile("/var/run/secrets/kubernetes.io/serviceaccount/namespace"); err == nil {
+			controllerNamespace = string(namespaceBytes)
+			klog.Info("POD_NAMESPACE not set, using namespace from service account: ", controllerNamespace)
+		} else {
+			// Final fallback to default namespace
+			controllerNamespace = "multicluster-mesh-system"
+			klog.Warning("POD_NAMESPACE not set and service account namespace file not readable, using default: multicluster-mesh-system")
+		}
+	}
+
 	// Create controller-runtime manager with configurable leader election
 	mgr, err := manager.New(controllerContext.KubeConfig, manager.Options{
 		Scheme: runtimeScheme,
@@ -122,7 +136,7 @@ func runController(ctx context.Context, controllerContext *controllercmd.Control
 		HealthProbeBindAddress:  probeAddr,
 		LeaderElection:          leaderElect,
 		LeaderElectionID:        "multicluster-mesh-addon-controller-lock",
-		LeaderElectionNamespace: "multicluster-mesh-system",
+		LeaderElectionNamespace: controllerNamespace,
 	})
 	if err != nil {
 		klog.Errorf("Unable to set up controller manager: %v", err)
