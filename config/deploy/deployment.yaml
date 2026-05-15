@@ -16,13 +16,6 @@ metadata:
   namespace: multicluster-mesh-system
 rules:
 - apiGroups:
-  - ""
-  resources:
-  - pods
-  verbs:
-  - get
-  - list
-- apiGroups:
   - coordination.k8s.io
   resources:
   - leases
