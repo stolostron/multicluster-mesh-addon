@@ -92,7 +92,7 @@ If you need to test with leader election enabled:
 kubectl create namespace multicluster-mesh-system
 
 # Run with leader election (default)
-./bin/multicluster-mesh-addon controller
+./bin/multicluster-mesh-addon controller --kubeconfig=/path/to/kubeconfig
 ```
 
 ### Usage
