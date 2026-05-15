@@ -90,7 +90,12 @@ var (
 
 func newControllerCommand() *cobra.Command {
 	cmdConfig := controllercmd.NewControllerCommandConfig("multicluster-mesh-addon-controller", version.Get(), runController, clock.RealClock{})
-	// Disable library-go leader election - controller-runtime will handle it
+	// Disable library-go leader election because it blocks before runController executes,
+	// preventing non-leader pods from registering health/readiness checks.
+	// This causes new pods to fail readiness probes and restart after timeout during deployment rollouts.
+	// Old pod can't terminate because new pod never becomes ready.
+	// Controller-runtime's leader election runs after manager setup,
+	// allowing all pods to serve health endpoints while only the leader runs controllers.
 	cmdConfig.DisableLeaderElection = true
 
 	cmd := cmdConfig.NewCommand()

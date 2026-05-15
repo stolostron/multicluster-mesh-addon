@@ -36,6 +36,13 @@ The addon manages the "plumbing" (trust and connectivity) while users configure 
 
 #### Development Deployment
 
+**Prerequisites:**
+- Valid kubeconfig pointing to an existing cluster
+- ACM or OCM (Advanced Cluster Management or Open Cluster Management) installed on the cluster
+- `kubectl` CLI installed
+- `make` and Go toolchain installed
+- Push access to the container registry (default: `quay.io/sail-dev`, override with `REGISTRY_BASE`)
+
 To build and deploy the controller to your cluster:
 
 ```bash
