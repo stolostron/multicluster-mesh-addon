@@ -131,6 +131,7 @@ deploy: gen-crds push ## Deploy the controller to the cluster
 
 .PHONY: undeploy
 undeploy: gen-crds ## Remove the controller from the cluster
+	kubectl delete multiclustermeshes.mesh.open-cluster-management.io --all --all-namespaces --ignore-not-found=true || true
 	kubectl delete -f config/deploy/deployment.yaml --ignore-not-found=true
 	kubectl delete -f config/crd/ --ignore-not-found=true
 
