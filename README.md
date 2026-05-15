@@ -68,14 +68,22 @@ make undeploy
 To run the controller from localhost for development:
 
 ```bash
+# Generate and install CRDs
+make gen-crds
+kubectl apply -f config/crd/
+
 # Build the binary
 make build
 
-# Run with leader election disabled (no namespace/RBAC requirements)
-./bin/multicluster-mesh-addon controller --leader-elect=false
+# Run with leader election disabled (no namespace/RBAC requirements). It's necessary to specify the kubeconfig explicitly.
+./bin/multicluster-mesh-addon controller --leader-elect=false --kubeconfig=/path/to/kubeconfig
 ```
 
-This runs the controller against your current kubeconfig context. Leader election is disabled to avoid requiring the `multicluster-mesh-system` namespace and associated RBAC permissions during local development.
+**Prerequisites:**
+- CRDs must be installed in the cluster (via `kubectl apply -f config/crd/`)
+- Valid kubeconfig pointing to your cluster (specify with `--kubeconfig` flag)
+
+The controller runs against the specified kubeconfig context. Leader election is disabled to avoid requiring the `multicluster-mesh-system` namespace and associated RBAC permissions during local development.
 
 If you need to test with leader election enabled:
 
