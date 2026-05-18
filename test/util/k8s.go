@@ -37,9 +37,9 @@ func CreateCacertsSecret(ctx context.Context, k8sClient client.Client, namespace
 			Namespace: namespace,
 			Labels: map[string]string{
 				meshcontroller.ManagedByLabel:     meshcontroller.ManagedByValue,
-				meshcontroller.LabelMeshName:      meshName,
-				meshcontroller.LabelMeshNamespace: meshNamespace,
-				meshcontroller.LabelClusterName:   clusterName,
+				meshcontroller.MeshNameLabel:      meshName,
+				meshcontroller.MeshNamespaceLabel: meshNamespace,
+				meshcontroller.ClusterNameLabel:   clusterName,
 			},
 		},
 		Type: corev1.SecretTypeTLS,

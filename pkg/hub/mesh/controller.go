@@ -52,11 +52,11 @@ const (
 
 	FinalizerName = "mesh.open-cluster-management.io/finalizer"
 
+	ClusterNameLabel   = "mesh.open-cluster-management.io/cluster-name"
 	ManagedByLabel     = "app.kubernetes.io/managed-by"
 	ManagedByValue     = "multicluster-mesh-addon"
-	LabelMeshName      = "mesh.open-cluster-management.io/mesh-name"
-	LabelMeshNamespace = "mesh.open-cluster-management.io/mesh-namespace"
-	LabelClusterName   = "mesh.open-cluster-management.io/cluster-name"
+	MeshNameLabel      = "mesh.open-cluster-management.io/mesh-name"
+	MeshNamespaceLabel = "mesh.open-cluster-management.io/mesh-namespace"
 
 	ClusterSetLabel     = "cluster.open-cluster-management.io/clusterset"
 	clusterClaimProduct = "product.open-cluster-management.io"
@@ -103,7 +103,7 @@ func RegisterController(mgr manager.Manager) error {
 		Watches(&corev1.Secret{},
 			handler.EnqueueRequestsFromMapFunc(reconciler.mapSecretToMesh),
 			builder.WithPredicates(predicate.NewPredicateFuncs(func(obj client.Object) bool {
-				return obj.GetLabels()[LabelMeshName] != "" && obj.GetLabels()[LabelMeshNamespace] != ""
+				return obj.GetLabels()[MeshNameLabel] != "" && obj.GetLabels()[MeshNamespaceLabel] != ""
 			})),
 		).
 		Complete(reconciler)
@@ -510,8 +510,8 @@ func (r *Reconciler) mapSecretToMesh(_ context.Context, obj client.Object) []rec
 		return nil
 	}
 
-	meshName := secret.Labels[LabelMeshName]
-	meshNamespace := secret.Labels[LabelMeshNamespace]
+	meshName := secret.Labels[MeshNameLabel]
+	meshNamespace := secret.Labels[MeshNamespaceLabel]
 
 	klog.V(4).Infof("Secret %s/%s triggered reconcile for mesh %s/%s",
 		secret.Namespace, secret.Name, meshNamespace, meshName)
@@ -669,8 +669,8 @@ func (r *Reconciler) buildCacertsManifestWork(mesh *meshv1alpha1.MultiClusterMes
 			Name:      ManifestWorkNameCacerts,
 			Namespace: clusterName,
 			Labels: map[string]string{
-				LabelMeshName:      mesh.Name,
-				LabelMeshNamespace: mesh.Namespace,
+				MeshNameLabel:      mesh.Name,
+				MeshNamespaceLabel: mesh.Namespace,
 			},
 		},
 		Spec: workv1.ManifestWorkSpec{
@@ -707,8 +707,8 @@ func (r *Reconciler) updateCacertsManifestWorkIfNeeded(ctx context.Context, mesh
 func certificateLabels(mesh *meshv1alpha1.MultiClusterMesh, clusterName string) map[string]string {
 	return map[string]string{
 		ManagedByLabel:     ManagedByValue,
-		LabelMeshName:      mesh.Name,
-		LabelMeshNamespace: mesh.Namespace,
-		LabelClusterName:   clusterName,
+		MeshNameLabel:      mesh.Name,
+		MeshNamespaceLabel: mesh.Namespace,
+		ClusterNameLabel:   clusterName,
 	}
 }
