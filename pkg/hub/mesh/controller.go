@@ -17,13 +17,13 @@ import (
 	clusterv1beta2 "open-cluster-management.io/api/cluster/v1beta2"
 	workv1 "open-cluster-management.io/api/work/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
-	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+	"sigs.k8s.io/controller-runtime/pkg/source"
 
 	meshv1alpha1 "github.com/stolostron/multicluster-mesh-addon/pkg/apis/mesh/v1alpha1"
 )
@@ -81,14 +81,20 @@ func RegisterController(mgr manager.Manager) error {
 
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&meshv1alpha1.MultiClusterMesh{}).
-		Watches(
-			&clusterv1.ManagedCluster{},
-			handler.EnqueueRequestsFromMapFunc(reconciler.findMeshesForCluster),
+		WatchesRawSource(
+			source.TypedKind(
+				mgr.GetCache(),
+				&clusterv1.ManagedCluster{},
+				handler.TypedEnqueueRequestsFromMapFunc(reconciler.findMeshesForCluster),
+			),
 		).
-		Watches(
-			&clusterv1beta2.ManagedClusterSet{},
-			handler.EnqueueRequestsFromMapFunc(reconciler.findMeshesForClusterSet),
-			builder.WithPredicates(predicate.GenerationChangedPredicate{}),
+		WatchesRawSource(
+			source.TypedKind(
+				mgr.GetCache(),
+				&clusterv1beta2.ManagedClusterSet{},
+				handler.TypedEnqueueRequestsFromMapFunc(reconciler.findMeshesForClusterSet),
+				predicate.TypedGenerationChangedPredicate[*clusterv1beta2.ManagedClusterSet]{},
+			),
 		).
 		Complete(reconciler)
 }
@@ -161,8 +167,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 }
 
 // findMeshesForCluster returns a list of all meshes to reconcile following a cluster change
-func (r *Reconciler) findMeshesForCluster(ctx context.Context, obj client.Object) (requests []reconcile.Request) {
-	cluster := obj.(*clusterv1.ManagedCluster)
+func (r *Reconciler) findMeshesForCluster(ctx context.Context, cluster *clusterv1.ManagedCluster) (requests []reconcile.Request) {
 	clusterSetName := cluster.Labels[ClusterSetLabel]
 	if clusterSetName == "" {
 		klog.V(4).Infof("Cluster %s has no clusterset label, skipping", cluster.Name)
@@ -188,8 +193,7 @@ func (r *Reconciler) findMeshesForCluster(ctx context.Context, obj client.Object
 }
 
 // findMeshesForClusterSet returns a list of all meshes to reconcile following a ClusterSet change
-func (r *Reconciler) findMeshesForClusterSet(ctx context.Context, obj client.Object) (requests []reconcile.Request) {
-	clusterSet := obj.(*clusterv1beta2.ManagedClusterSet)
+func (r *Reconciler) findMeshesForClusterSet(ctx context.Context, clusterSet *clusterv1beta2.ManagedClusterSet) (requests []reconcile.Request) {
 
 	meshList := &meshv1alpha1.MultiClusterMeshList{}
 	if err := r.List(ctx, meshList, client.MatchingFields{"spec.clusterSet": clusterSet.Name}); err != nil {
