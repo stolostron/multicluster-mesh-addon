@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	certmanagerv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	operatorsv1 "github.com/operator-framework/api/pkg/operators/v1"
@@ -330,6 +331,10 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 				util.CreateMultiClusterMeshWithCertManager(ctx, k8sClient, meshName, testNs, testClusterSet, "mesh-issuer")
 			})
 
+			It("should create Certificate resource", func() {
+				expectCertificate(testNs, clusterName, "mesh-issuer")
+			})
+
 			It("should create ManifestWork when cacerts secret is created", func() {
 				util.CreateCacertsSecret(ctx, k8sClient, testNs, clusterName, meshName, testNs)
 
@@ -500,6 +505,23 @@ func expectNoCacertsManifestWork(clusterNamespace string) {
 		}, work)
 		return errors.IsNotFound(err)
 	}).Should(BeTrue())
+}
+
+func expectCertificate(namespace, clusterName, issuerName string) *certmanagerv1.Certificate {
+	cert := &certmanagerv1.Certificate{}
+	Eventually(func() error {
+		return k8sClient.Get(ctx, types.NamespacedName{
+			Name:      fmt.Sprintf("cacerts-%s", clusterName),
+			Namespace: namespace,
+		}, cert)
+	}).Should(Succeed())
+
+	Expect(cert.Labels[meshcontroller.ManagedByLabel]).To(Equal(meshcontroller.ManagedByValue))
+	Expect(cert.Spec.SecretName).To(Equal(fmt.Sprintf("cacerts-%s", clusterName)))
+	Expect(cert.Spec.IsCA).To(BeTrue())
+	Expect(cert.Spec.IssuerRef.Name).To(Equal(issuerName))
+	Expect(cert.Spec.IssuerRef.Kind).To(Equal("Issuer"))
+	return cert
 }
 
 func expectCacertsSecret(work *workv1.ManifestWork) {
