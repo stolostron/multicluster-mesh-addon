@@ -336,6 +336,7 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 			})
 
 			It("should create ManifestWork when cacerts secret is created", func() {
+				// simulate creating the cacerts secret by cert-manager
 				util.CreateCacertsSecret(ctx, k8sClient, testNs, clusterName, meshName, testNs)
 
 				work := expectCacertsManifestWork(clusterName)
