@@ -29,6 +29,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	meshv1alpha1 "github.com/stolostron/multicluster-mesh-addon/pkg/apis/mesh/v1alpha1"
+	"github.com/stolostron/multicluster-mesh-addon/pkg/util"
 )
 
 const (
@@ -682,12 +683,17 @@ func (r *Reconciler) buildCacertsManifestWork(mesh *meshv1alpha1.MultiClusterMes
 
 // updateCacertsManifestWorkIfNeeded updates the ManifestWork if the secret data has changed
 func (r *Reconciler) updateCacertsManifestWorkIfNeeded(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, work *workv1.ManifestWork, secret *corev1.Secret) error {
-	newWork := r.buildCacertsManifestWork(mesh, work.Namespace, secret)
+	existingSecret := &corev1.Secret{}
+	if err := util.UnmarshalManifest(work.Spec.Workload.Manifests[0], existingSecret); err != nil {
+		return fmt.Errorf("failed to unmarshal existing manifest: %w", err)
+	}
 
-	if reflect.DeepEqual(work.Spec, newWork.Spec) {
+	if reflect.DeepEqual(existingSecret.Data, secret.Data) {
 		klog.V(4).Infof("ManifestWork %s/%s is up to date, no changes needed", work.Namespace, work.Name)
 		return nil
 	}
+
+	newWork := r.buildCacertsManifestWork(mesh, work.Namespace, secret)
 
 	work.Spec = newWork.Spec
 	// TODO: handle label reconciliation

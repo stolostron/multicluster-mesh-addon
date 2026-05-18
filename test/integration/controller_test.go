@@ -3,7 +3,6 @@
 package integration
 
 import (
-	"encoding/json"
 	"fmt"
 	"time"
 
@@ -21,6 +20,7 @@ import (
 
 	meshv1alpha1 "github.com/stolostron/multicluster-mesh-addon/pkg/apis/mesh/v1alpha1"
 	meshcontroller "github.com/stolostron/multicluster-mesh-addon/pkg/hub/mesh"
+	pkgutil "github.com/stolostron/multicluster-mesh-addon/pkg/util"
 	"github.com/stolostron/multicluster-mesh-addon/test/util"
 )
 
@@ -515,12 +515,8 @@ func expectCacertsSecret(work *workv1.ManifestWork) {
 }
 
 // unmarshalManifest extracts a manifest from ManifestWork's RawExtension.
-// The Object field is nil when reading from API, so we unmarshal from Raw bytes.
 func unmarshalManifest(manifest workv1.Manifest, into interface{}) error {
-	if manifest.RawExtension.Object != nil {
-		return fmt.Errorf("Object field should be nil when reading from API")
-	}
-	return json.Unmarshal(manifest.RawExtension.Raw, into)
+	return pkgutil.UnmarshalManifest(manifest, into)
 }
 
 func expectNamespace(work *workv1.ManifestWork, index int, expectedName string) {
