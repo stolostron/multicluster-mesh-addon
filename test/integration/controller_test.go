@@ -236,20 +236,45 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 			util.CreateK8sManagedCluster(ctx, k8sClient, cluster1, testClusterSet)
 			util.CreateK8sManagedCluster(ctx, k8sClient, cluster2, testClusterSet)
 			util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet, meshv1alpha1.OperatorConfig{})
-
-			// Give controller time to process reconciliation
-			time.Sleep(2 * time.Second)
+			awaitReconcileFinished()
 
 			list := &unstructured.UnstructuredList{}
 			list.SetGroupVersionKind(schema.GroupVersionKind{
 				Group:   "authentication.open-cluster-management.io",
 				Kind:    "ManagedServiceAccount",
-				Version: "v1alpha1",
+				Version: "v1beta1",
 			})
 
 			Expect(k8sClient.List(context.Background(), list, client.InNamespace(cluster1))).To(Succeed())
 			Expect(k8sClient.List(context.Background(), list, client.InNamespace(cluster2))).To(Succeed())
 		})
+
+		When("the ManagedServiceAccount resource exists", func() {
+			BeforeEach(func() {
+				util.CreateK8sManagedCluster(ctx, k8sClient, clusterName, testClusterSet)
+				util.CreateManagedServiceAccount(ctx, k8sClient, fmt.Sprintf("%s-%s", clusterName, meshName), clusterName)
+			})
+
+			It("should reconcile successfully", func() {
+				util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet, meshv1alpha1.OperatorConfig{})
+				awaitReconcileFinished()
+
+				list := &unstructured.UnstructuredList{}
+				list.SetGroupVersionKind(schema.GroupVersionKind{
+					Group:   "authentication.open-cluster-management.io",
+					Kind:    "ManagedServiceAccount",
+					Version: "v1beta1",
+				})
+
+				Eventually(func() int {
+					if err := k8sClient.List(ctx, list, client.InNamespace(clusterName)); err != nil {
+						return 0
+					}
+					return len(list.Items)
+				}).Should(Equal(1))
+			})
+		})
+
 		When("referencing a set with a cluster", func() {
 			BeforeEach(func() {
 				util.CreateK8sManagedCluster(ctx, k8sClient, clusterName, testClusterSet)
@@ -321,7 +346,6 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 				})
 			})
 		})
-
 	})
 
 	Context("Deleting MultiClusterMesh", func() {

@@ -10,7 +10,9 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/klog/v2"
 	clusterv1 "open-cluster-management.io/api/cluster/v1"
@@ -26,7 +28,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	meshv1alpha1 "github.com/stolostron/multicluster-mesh-addon/pkg/apis/mesh/v1alpha1"
-	msav1alpha1 "open-cluster-management.io/managed-serviceaccount/apis/authentication/v1alpha1"
+	msav1v1beta1 "open-cluster-management.io/managed-serviceaccount/apis/authentication/v1beta1"
 )
 
 const (
@@ -158,10 +160,22 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	}
 
 	// Create ManagedServiceAccount resources for each managed cluster
+	msaList := &unstructured.UnstructuredList{}
+	msaList.SetGroupVersionKind(schema.GroupVersionKind{
+		Group:   "authentication.open-cluster-management.io",
+		Kind:    "ManagedServiceAccount",
+		Version: "v1beta1",
+	})
+
 	for _, cluster := range clusters {
-		if err := r.CreateManagedServiceAccount(ctx, cluster, mesh); err != nil {
-			klog.Errorf("Failed to create a ManagedServiceAccount for cluster %s: %v", cluster.Name, err)
-			return reconcile.Result{}, err
+		if err := r.List(ctx, msaList, client.InNamespace(cluster.Name),
+			client.MatchingFields{"metadata.name": fmt.Sprintf("%s-%s", cluster.Name, mesh.Name)}); err == nil && len(msaList.Items) == 1 {
+			klog.Infof("Cluster %s has an existing ManagedServiceAccount resource, skipping CreateManagedServiceAccount", cluster.Name)
+		} else {
+			if err := r.CreateManagedServiceAccount(ctx, cluster, mesh); err != nil {
+				klog.Errorf("Failed to create a ManagedServiceAccount for cluster %s: %v", cluster.Name, err)
+				return reconcile.Result{}, err
+			}
 		}
 	}
 
@@ -494,13 +508,13 @@ func (r *Reconciler) CreateManagedServiceAccount(ctx context.Context, cluster cl
 		return fmt.Errorf("failed to parse validity duration: %w", err)
 	}
 
-	msa := &msav1alpha1.ManagedServiceAccount{
+	msa := &msav1v1beta1.ManagedServiceAccount{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      fmt.Sprintf("%s-%s", cluster.Name, mesh.Name), // Naming convention: <cluster-name>-<mesh-name>
 			Namespace: cluster.Name,
 		},
-		Spec: msav1alpha1.ManagedServiceAccountSpec{
-			Rotation: msav1alpha1.ManagedServiceAccountRotation{
+		Spec: msav1v1beta1.ManagedServiceAccountSpec{
+			Rotation: msav1v1beta1.ManagedServiceAccountRotation{
 				Enabled:  false,
 				Validity: metav1.Duration{Duration: validity},
 			},
