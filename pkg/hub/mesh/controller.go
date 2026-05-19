@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"slices"
+	"strings"
 	"time"
 
 	certmanagerv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
@@ -386,6 +388,11 @@ func (r *Reconciler) getClustersFromSet(ctx context.Context, clusterSetName stri
 	if err := r.List(ctx, clusterList, labelSelector); err != nil {
 		return nil, fmt.Errorf("failed to list clusters in set %s: %w", clusterSetName, err)
 	}
+
+	// Sort the clusters to guarantee a deterministic order in all operations that need them
+	slices.SortFunc(clusterList.Items, func(a, b clusterv1.ManagedCluster) int {
+		return strings.Compare(a.Name, b.Name)
+	})
 
 	return clusterList.Items, nil
 }

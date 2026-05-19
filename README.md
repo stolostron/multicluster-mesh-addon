@@ -34,7 +34,73 @@ The addon manages the "plumbing" (trust and connectivity) while users configure 
 
 ### Installation
 
-TBD
+#### Development Deployment
+
+**Prerequisites:**
+- Valid kubeconfig pointing to an existing cluster
+- ACM or OCM (Advanced Cluster Management or Open Cluster Management) installed on the cluster
+- `kubectl` CLI installed
+- `make` and Go toolchain installed
+- Push access to the container registry (default: `quay.io/sail-dev`, override with `REGISTRY_BASE`)
+
+To build and deploy the controller to your cluster:
+
+```bash
+# Build, push image, and deploy to cluster
+make deploy
+
+# Or run individual steps:
+make images      # Build container image
+make push        # Push to registry
+make deploy      # Apply CRDs and deployment
+```
+
+The `deploy` target will:
+1. Build and push the container image to the registry (default: `quay.io/sail-dev`)
+2. Apply the CRD manifests from `config/crd/`
+3. Deploy the controller with the built image
+
+**Configuration:**
+- `REGISTRY_BASE`: Override the image registry (default: `quay.io/sail-dev`)
+- `IMG`: Full image reference (default: `${REGISTRY_BASE}/multicluster-mesh-addon:${GIT_VERSION}`)
+
+To remove the deployment:
+
+```bash
+make undeploy
+```
+
+#### Running Locally
+
+To run the controller from localhost for development:
+
+```bash
+# Generate and install CRDs
+make gen-crds
+kubectl apply -f config/crd/
+
+# Build the binary
+make build
+
+# Run with leader election disabled (no namespace/RBAC requirements). It's necessary to specify the kubeconfig explicitly.
+./bin/multicluster-mesh-addon controller --leader-elect=false --kubeconfig=/path/to/kubeconfig
+```
+
+**Prerequisites:**
+- CRDs must be installed in the cluster (via `kubectl apply -f config/crd/`)
+- Valid kubeconfig pointing to your cluster (specify with `--kubeconfig` flag)
+
+The controller runs against the specified kubeconfig context. Leader election is disabled to avoid requiring the `multicluster-mesh-system` namespace and associated RBAC permissions during local development.
+
+If you need to test with leader election enabled:
+
+```bash
+# Create the required namespace
+kubectl create namespace multicluster-mesh-system
+
+# Run with leader election (default)
+./bin/multicluster-mesh-addon controller --kubeconfig=/path/to/kubeconfig
+```
 
 ### Usage
 
