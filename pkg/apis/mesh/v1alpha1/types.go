@@ -150,6 +150,9 @@ const (
 
 	// ReasonReconcileError indicates an error occurred during reconciliation
 	ReasonReconcileError = "ReconcileError"
+
+	// ReasonOperatorConfigConflict indicates a conflict with an older mesh's operator config
+	ReasonOperatorConfigConflict = "OperatorConfigConflict"
 )
 
 // MultiClusterMeshStatus defines the observed state of MultiClusterMesh
