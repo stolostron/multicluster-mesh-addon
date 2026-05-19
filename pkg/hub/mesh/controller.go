@@ -503,20 +503,17 @@ func (r *Reconciler) applyOperatorDefaults(config meshv1alpha1.OperatorConfig, i
 // CreateManagedServiceAccount creates a ManagedServiceAccount resource for a cluster in the ClusterSet
 func (r *Reconciler) CreateManagedServiceAccount(ctx context.Context, cluster clusterv1.ManagedCluster, mesh *meshv1alpha1.MultiClusterMesh) error {
 	klog.Infof("Creating a ManagedServiceAccount for a managed cluster: %s", cluster.Name)
-	validity, err := time.ParseDuration(mesh.Spec.Security.Discovery.TokenValidity) // this is derived from the MultiClusterMesh spec.security.discovery.tokenValidity
-	if err != nil {
-		return fmt.Errorf("failed to parse validity duration: %w", err)
-	}
 
 	msa := &msav1v1beta1.ManagedServiceAccount{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      fmt.Sprintf("%s-%s", cluster.Name, mesh.Name), // Naming convention: <cluster-name>-<mesh-name>
 			Namespace: cluster.Name,
+			Labels:    map[string]string{ManagedByLabel: ManagedByValue},
 		},
 		Spec: msav1v1beta1.ManagedServiceAccountSpec{
 			Rotation: msav1v1beta1.ManagedServiceAccountRotation{
-				Enabled:  false,
-				Validity: metav1.Duration{Duration: validity},
+				// Field Enabled default=true. It prescribes the ServiceAccount token will be rotated before it expires.
+				Validity: mesh.Spec.Security.Discovery.TokenValidity,
 			},
 		},
 	}
@@ -527,3 +524,6 @@ func (r *Reconciler) CreateManagedServiceAccount(ctx context.Context, cluster cl
 	klog.Infof("Successfully created a ManagedServiceAccount %s in namespace: %s", msa.ObjectMeta.Name, msa.ObjectMeta.Namespace)
 	return nil
 }
+
+// TODO: Implement DeleteManagedServiceAccount and UpdateManagedServiceAccount methods
+

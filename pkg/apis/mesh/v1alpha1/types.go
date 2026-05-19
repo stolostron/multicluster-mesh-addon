@@ -116,9 +116,10 @@ type IssuerReference struct {
 type DiscoveryConfig struct {
 	// TokenValidity defines how long discovery tokens are valid
 	// Supports hours (h), days (d), weeks (w), or months (m)
+	// It is a wrapper around time.Duration which supports correct marshaling to YAML and JSON
 	// +optional
 	// +kubebuilder:default="1m"
-	TokenValidity string `json:"tokenValidity,omitempty"`
+	TokenValidity metav1.Duration `json:"tokenValidity,omitempty"`
 }
 
 // MultiClusterMeshStatus defines the observed state of MultiClusterMesh
