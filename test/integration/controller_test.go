@@ -245,6 +245,13 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 				Version: "v1beta1",
 			})
 
+			specData := map[string]interface{}{
+				"rotation": map[string]interface{}{
+					"validity": "24h0m",
+				},
+			}
+			unstructured.SetNestedField(list.Object, specData, "spec")
+
 			Expect(k8sClient.List(context.Background(), list, client.InNamespace(cluster1))).To(Succeed())
 			Expect(k8sClient.List(context.Background(), list, client.InNamespace(cluster2))).To(Succeed())
 		})
