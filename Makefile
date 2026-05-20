@@ -123,7 +123,7 @@ update-test-crds: ## Update test CRDs from OCM API and cert-manager dependencies
 	echo "Test CRDs updated successfully in $(TEST_CRD_DIR)/cert-manager/"
 
 .PHONY: test-integration
-test-integration: $(ENVTEST) gen-crds update-test-crds ## Run integration tests
+test-integration: $(ENVTEST) gen-crds deps update-test-crds ## Run integration tests
 	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) -p path)" \
 	go run github.com/onsi/ginkgo/v2/ginkgo -v --tags=integration ./test/integration/...
 
