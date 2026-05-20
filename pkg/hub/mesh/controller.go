@@ -211,39 +211,36 @@ func (r *Reconciler) forEachMeshInClusterSet(ctx context.Context, clusterSet str
 	return nil
 }
 
+func (r *Reconciler) reconcileRequestsForClusterSet(ctx context.Context, clusterSet string) []reconcile.Request {
+	var requests []reconcile.Request
+	if err := r.forEachMeshInClusterSet(ctx, clusterSet, func(mesh *meshv1alpha1.MultiClusterMesh) {
+		requests = append(requests, reconcile.Request{
+			NamespacedName: types.NamespacedName{Name: mesh.Name, Namespace: mesh.Namespace},
+		})
+	}); err != nil {
+		klog.Errorf("Error when trying to reconcile meshes for ClusterSet %s: %v", clusterSet, err)
+	}
+	return requests
+}
+
 // findMeshesForCluster returns a list of all meshes to reconcile following a cluster change
-func (r *Reconciler) findMeshesForCluster(ctx context.Context, obj client.Object) (requests []reconcile.Request) {
+func (r *Reconciler) findMeshesForCluster(ctx context.Context, obj client.Object) []reconcile.Request {
 	cluster := obj.(*clusterv1.ManagedCluster)
 	clusterSetName := cluster.Labels[ClusterSetLabel]
 	if clusterSetName == "" {
 		klog.V(4).Infof("Cluster %s has no clusterset label, skipping", cluster.Name)
-		return
+		return nil
 	}
 
-	if err := r.forEachMeshInClusterSet(ctx, clusterSetName, func(mesh *meshv1alpha1.MultiClusterMesh) {
-		requests = append(requests, reconcile.Request{
-			NamespacedName: types.NamespacedName{Name: mesh.Name, Namespace: mesh.Namespace},
-		})
-	}); err != nil {
-		klog.Errorf("Failed to list MultiClusterMeshes when handling cluster %s: %v", cluster.Name, err)
-	}
-
-	return requests
+	klog.V(4).Infof("ManagedCluster %s changed, reconciling meshes using ClusterSet %s", cluster.Name, clusterSetName)
+	return r.reconcileRequestsForClusterSet(ctx, clusterSetName)
 }
 
 // findMeshesForClusterSet returns a list of all meshes to reconcile following a ClusterSet change
-func (r *Reconciler) findMeshesForClusterSet(ctx context.Context, obj client.Object) (requests []reconcile.Request) {
+func (r *Reconciler) findMeshesForClusterSet(ctx context.Context, obj client.Object) []reconcile.Request {
 	clusterSet := obj.(*clusterv1beta2.ManagedClusterSet)
-
-	if err := r.forEachMeshInClusterSet(ctx, clusterSet.Name, func(mesh *meshv1alpha1.MultiClusterMesh) {
-		requests = append(requests, reconcile.Request{
-			NamespacedName: types.NamespacedName{Name: mesh.Name, Namespace: mesh.Namespace},
-		})
-	}); err != nil {
-		klog.Errorf("Failed to list MultiClusterMeshes when handling ClusterSet %s: %v", clusterSet.Name, err)
-	}
-
-	return requests
+	klog.V(4).Infof("ManagedClusterSet %s changed, reconciling meshes using it", clusterSet.Name)
+	return r.reconcileRequestsForClusterSet(ctx, clusterSet.Name)
 }
 
 // handleDeletion handles cleanup when the MultiClusterMesh is being deleted
