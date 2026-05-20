@@ -195,6 +195,22 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	return reconcile.Result{}, nil
 }
 
+// forEachMeshInClusterSet lists all non-deleting meshes targeting the given ClusterSet and calls fn for each.
+func (r *Reconciler) forEachMeshInClusterSet(ctx context.Context, clusterSet string, fn func(*meshv1alpha1.MultiClusterMesh)) error {
+	meshList := &meshv1alpha1.MultiClusterMeshList{}
+	if err := r.List(ctx, meshList, client.MatchingFields{"spec.clusterSet": clusterSet}); err != nil {
+		return fmt.Errorf("failed to list meshes for ClusterSet %s: %w", clusterSet, err)
+	}
+
+	for i := range meshList.Items {
+		if meshList.Items[i].DeletionTimestamp.IsZero() {
+			fn(&meshList.Items[i])
+		}
+	}
+
+	return nil
+}
+
 // findMeshesForCluster returns a list of all meshes to reconcile following a cluster change
 func (r *Reconciler) findMeshesForCluster(ctx context.Context, obj client.Object) (requests []reconcile.Request) {
 	cluster := obj.(*clusterv1.ManagedCluster)
@@ -204,19 +220,12 @@ func (r *Reconciler) findMeshesForCluster(ctx context.Context, obj client.Object
 		return
 	}
 
-	meshList := &meshv1alpha1.MultiClusterMeshList{}
-	if err := r.List(ctx, meshList, client.MatchingFields{"spec.clusterSet": clusterSetName}); err != nil {
-		klog.Errorf("Failed to list MultiClusterMeshes when handling cluster %s: %v", cluster.Name, err)
-		return
-	}
-
-	for _, mesh := range meshList.Items {
+	if err := r.forEachMeshInClusterSet(ctx, clusterSetName, func(mesh *meshv1alpha1.MultiClusterMesh) {
 		requests = append(requests, reconcile.Request{
-			NamespacedName: types.NamespacedName{
-				Name:      mesh.Name,
-				Namespace: mesh.Namespace,
-			},
+			NamespacedName: types.NamespacedName{Name: mesh.Name, Namespace: mesh.Namespace},
 		})
+	}); err != nil {
+		klog.Errorf("Failed to list MultiClusterMeshes when handling cluster %s: %v", cluster.Name, err)
 	}
 
 	return requests
@@ -226,19 +235,12 @@ func (r *Reconciler) findMeshesForCluster(ctx context.Context, obj client.Object
 func (r *Reconciler) findMeshesForClusterSet(ctx context.Context, obj client.Object) (requests []reconcile.Request) {
 	clusterSet := obj.(*clusterv1beta2.ManagedClusterSet)
 
-	meshList := &meshv1alpha1.MultiClusterMeshList{}
-	if err := r.List(ctx, meshList, client.MatchingFields{"spec.clusterSet": clusterSet.Name}); err != nil {
-		klog.Errorf("Failed to list MultiClusterMeshes when handling ClusterSet %s: %v", clusterSet.Name, err)
-		return
-	}
-
-	for _, mesh := range meshList.Items {
+	if err := r.forEachMeshInClusterSet(ctx, clusterSet.Name, func(mesh *meshv1alpha1.MultiClusterMesh) {
 		requests = append(requests, reconcile.Request{
-			NamespacedName: types.NamespacedName{
-				Name:      mesh.Name,
-				Namespace: mesh.Namespace,
-			},
+			NamespacedName: types.NamespacedName{Name: mesh.Name, Namespace: mesh.Namespace},
 		})
+	}); err != nil {
+		klog.Errorf("Failed to list MultiClusterMeshes when handling ClusterSet %s: %v", clusterSet.Name, err)
 	}
 
 	return requests
@@ -328,17 +330,11 @@ func (r *Reconciler) cleanupOperatorManifestWorks(ctx context.Context, clusterSe
 func (r *Reconciler) getClustersNeededInClusterSet(ctx context.Context, clusterSet string) (map[string]bool, error) {
 	needed := make(map[string]bool)
 
-	meshList := &meshv1alpha1.MultiClusterMeshList{}
-	if err := r.List(ctx, meshList, client.MatchingFields{"spec.clusterSet": clusterSet}); err != nil {
-		return nil, fmt.Errorf("failed to list meshes for ClusterSet %s: %w", clusterSet, err)
-	}
-
 	hasActiveMesh := false
-	for i := range meshList.Items {
-		if meshList.Items[i].DeletionTimestamp.IsZero() {
-			hasActiveMesh = true
-			break
-		}
+	if err := r.forEachMeshInClusterSet(ctx, clusterSet, func(_ *meshv1alpha1.MultiClusterMesh) {
+		hasActiveMesh = true
+	}); err != nil {
+		return nil, err
 	}
 
 	if !hasActiveMesh {
