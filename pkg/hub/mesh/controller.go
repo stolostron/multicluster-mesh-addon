@@ -211,7 +211,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		}
 	}
 
-	if err := r.cleanupOperatorManifestWorks(ctx); err != nil {
+	if err := r.cleanupOperatorManifestWorks(ctx, mesh.Spec.ClusterSet); err != nil {
 		klog.Errorf("Failed to cleanup operator ManifestWorks: %v", err)
 		return reconcile.Result{}, err
 	}
@@ -290,7 +290,7 @@ func (r *Reconciler) handleDeletion(ctx context.Context, mesh *meshv1alpha1.Mult
 	}
 
 	klog.Infof("Handling deletion for MultiClusterMesh %s/%s", mesh.Namespace, mesh.Name)
-	if err := r.cleanupOperatorManifestWorks(ctx); err != nil {
+	if err := r.cleanupOperatorManifestWorks(ctx, mesh.Spec.ClusterSet); err != nil {
 		return reconcile.Result{}, fmt.Errorf("failed to cleanup operator ManifestWorks: %w", err)
 	}
 
@@ -316,15 +316,15 @@ func (r *Reconciler) ensureOperatorInstalled(ctx context.Context, mesh *meshv1al
 }
 
 // cleanupOperatorManifestWorks deletes operator ManifestWorks on clusters that no mesh needs anymore.
-func (r *Reconciler) cleanupOperatorManifestWorks(ctx context.Context) error {
-	neededClusters, err := r.getClustersNeededByAnyMesh(ctx)
+func (r *Reconciler) cleanupOperatorManifestWorks(ctx context.Context, clusterSet string) error {
+	neededClusters, err := r.getClustersNeededInClusterSet(ctx, clusterSet)
 	if err != nil {
 		return fmt.Errorf("failed to determine needed clusters: %w", err)
 	}
 
 	workList := &workv1.ManifestWorkList{}
-	if err := r.List(ctx, workList, client.MatchingLabels{ManagedByLabel: ManagedByValue}); err != nil {
-		return fmt.Errorf("failed to list operator ManifestWorks: %w", err)
+	if err := r.List(ctx, workList, client.MatchingLabels{ManagedByLabel: ManagedByValue, ClusterSetLabel: clusterSet}); err != nil {
+		return fmt.Errorf("failed to list ManifestWorks for ClusterSet %s: %w", clusterSet, err)
 	}
 
 	for _, work := range workList.Items {
@@ -341,30 +341,34 @@ func (r *Reconciler) cleanupOperatorManifestWorks(ctx context.Context) error {
 	return nil
 }
 
-// getClustersNeededByAnyMesh returns a set of cluster names that are targeted by at least one active mesh.
-func (r *Reconciler) getClustersNeededByAnyMesh(ctx context.Context) (map[string]bool, error) {
+// getClustersNeededInClusterSet returns a set of cluster names that are targeted by at least one active mesh in the given ClusterSet.
+func (r *Reconciler) getClustersNeededInClusterSet(ctx context.Context, clusterSet string) (map[string]bool, error) {
 	needed := make(map[string]bool)
-	checkedSets := make(map[string]bool)
 
 	meshList := &meshv1alpha1.MultiClusterMeshList{}
-	if err := r.List(ctx, meshList); err != nil {
-		return nil, fmt.Errorf("failed to list meshes: %w", err)
+	if err := r.List(ctx, meshList, client.MatchingFields{"spec.clusterSet": clusterSet}); err != nil {
+		return nil, fmt.Errorf("failed to list meshes for ClusterSet %s: %w", clusterSet, err)
 	}
 
-	for _, mesh := range meshList.Items {
-		if !mesh.DeletionTimestamp.IsZero() || checkedSets[mesh.Spec.ClusterSet] {
-			continue
+	hasActiveMesh := false
+	for i := range meshList.Items {
+		if meshList.Items[i].DeletionTimestamp.IsZero() {
+			hasActiveMesh = true
+			break
 		}
+	}
 
-		checkedSets[mesh.Spec.ClusterSet] = true
-		clusters, err := r.getClustersFromSet(ctx, mesh.Spec.ClusterSet)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get clusters from set %s: %w", mesh.Spec.ClusterSet, err)
-		}
+	if !hasActiveMesh {
+		return needed, nil
+	}
 
-		for _, cluster := range clusters {
-			needed[cluster.Name] = true
-		}
+	clusters, err := r.getClustersFromSet(ctx, clusterSet)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get clusters from set %s: %w", clusterSet, err)
+	}
+
+	for _, cluster := range clusters {
+		needed[cluster.Name] = true
 	}
 
 	return needed, nil
@@ -486,7 +490,8 @@ func (r *Reconciler) buildOperatorManifestWork(mesh *meshv1alpha1.MultiClusterMe
 			Name:      OperatorManifestWorkName,
 			Namespace: cluster.Name,
 			Labels: map[string]string{
-				ManagedByLabel: ManagedByValue,
+				ManagedByLabel:  ManagedByValue,
+				ClusterSetLabel: mesh.Spec.ClusterSet,
 			},
 		},
 		Spec: workv1.ManifestWorkSpec{
@@ -696,6 +701,7 @@ func (r *Reconciler) buildCacertsManifestWork(mesh *meshv1alpha1.MultiClusterMes
 func meshOwnedLabels(mesh *meshv1alpha1.MultiClusterMesh, clusterName string) map[string]string {
 	return map[string]string{
 		ManagedByLabel:     ManagedByValue,
+		ClusterSetLabel:    mesh.Spec.ClusterSet,
 		MeshNameLabel:      mesh.Name,
 		MeshNamespaceLabel: mesh.Namespace,
 		ClusterNameLabel:   clusterName,
