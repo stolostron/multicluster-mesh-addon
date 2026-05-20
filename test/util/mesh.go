@@ -24,3 +24,26 @@ func CreateMultiClusterMesh(ctx context.Context, k8sClient client.Client, name, 
 	}
 	Expect(k8sClient.Create(ctx, mesh)).To(Succeed())
 }
+
+// CreateMultiClusterMeshWithCertManager creates a MultiClusterMesh with cert-manager issuer configuration.
+func CreateMultiClusterMeshWithCertManager(ctx context.Context, k8sClient client.Client, name, namespace, clusterSet, issuerName string) {
+	mesh := &meshv1alpha1.MultiClusterMesh{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: namespace,
+		},
+		Spec: meshv1alpha1.MultiClusterMeshSpec{
+			ClusterSet: clusterSet,
+			Security: meshv1alpha1.SecurityConfig{
+				Trust: meshv1alpha1.TrustConfig{
+					CertManager: meshv1alpha1.CertManagerConfig{
+						IssuerRef: meshv1alpha1.IssuerReference{
+							Name: issuerName,
+						},
+					},
+				},
+			},
+		},
+	}
+	Expect(k8sClient.Create(ctx, mesh)).To(Succeed())
+}
