@@ -27,7 +27,7 @@ Without this add-on, multi-cluster mesh setup is a manual process involving cert
 
 The add-on follows OCM's hub-and-spoke model:
 
-- **Hub**: Manages `MultiClusterMesh` resources, creates [ManifestWorks][ManifestWork], orchestrates cert-manager and ManagedServiceAccount
+- **Hub**: The Mesh Add-on controller watches `MultiClusterMesh` resources and creates [ManifestWorks][ManifestWork], orchestrates cert-manager and ManagedServiceAccount
 - **Spoke** (managed clusters): Receives ManifestWorks from the hub, runs the Sail/OSSM operator and Istio control plane
 
 ```mermaid
@@ -65,20 +65,31 @@ flowchart TD
     mw_cacerts --> agent
     mw_remote --> agent
 
-    subgraph Legend
-        direction TB
-        L1([Resource])
-        L2[Component]
-        subgraph L3[Cluster Boundary]
-            L4[ ]
-        end
+    subgraph Legend[Legend #40;colors show managing component#41;]
+        L1([Resource]) ~~~ L2[Component]
+        C1[Mesh Add-on]:::addon ~~~ C2[cert-manager]:::certmgr ~~~ C3[OCM]:::ocm
     end
 
     %% fake link to make legend centered
     cacerts ~~~ Legend
 
-    style L4 fill:none,stroke:none
     style Legend fill:#d0d0d0,stroke:#999,color:#333
+    style C1 stroke:none
+    style C2 stroke:none
+    style C3 stroke:none
+
+    %% Mesh Add-on managed (blue)
+    classDef addon fill:#dbeafe,stroke:#3b82f6,color:#1e3a5f
+    class addon,mesh addon
+
+    %% cert-manager managed (green)
+    classDef certmgr fill:#d1fae5,stroke:#10b981,color:#064e3b
+    class certmanager,cert certmgr
+
+    %% OCM managed (orange)
+    classDef ocm fill:#ffedd5,stroke:#f97316,color:#7c2d12
+    class agent,msa,mw_operator,mw_cacerts,mw_remote ocm
+
 ```
 
 
@@ -98,6 +109,7 @@ flowchart TD
 - Does not enforce control plane version consistency across clusters
 - Does not deploy monitoring, observability, or application workloads
 - Does not create AuthorizationPolicies or other application-level security config
+- Does not integrate with ACM addon lifecycle (enable/disable via `ManagedClusterAddOn` and such)
 - Does not adopt pre-existing mesh deployments (brownfield)
 
 ## Supported Topologies
@@ -202,6 +214,8 @@ The user is responsible for:
 ArgoCD with ApplicationSets is the recommended approach for managing Istio configuration across clusters.
 
 **Phase 2 (Future)**: "Full" approach - the add-on also manages Istio custom resources centrally, automating topology configuration and enforcing consistency.
+
+Potential additions include ACM addon lifecycle integration (i.e. via `ClusterManagementAddOn` / `ManagedClusterAddOn`) and observability stack management.
 
 <!-- Reference links -->
 [OCM]: https://open-cluster-management.io/
