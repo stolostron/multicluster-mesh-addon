@@ -1,0 +1,33 @@
+apiVersion: mesh.open-cluster-management.io/v1alpha1
+kind: MultiClusterMesh
+metadata:
+  name: pinned-version-mesh
+  namespace: mesh-system
+spec:
+  # Reference to the ManagedClusterSet
+  clusterSet: default
+
+  controlPlane:
+    namespace: istio-system
+
+  # Operator configuration with version pinning and manual approval
+  operator:
+    namespace: sail-operator
+    channel: "stable"
+    source: operatorhubio-catalog
+    sourceNamespace: olm
+
+    # Pin to a specific operator version for controlled rollouts
+    startingCSV: "sail-operator.v1.23.0"
+
+    # Manual approval for staged deployments
+    installPlanApproval: Manual
+
+  security:
+    trust:
+      certManager:
+        issuerRef:
+          name: staging-mesh-root-ca
+    discovery:
+      # Daily token rotation for staging environments
+      tokenValidity: "1d"
