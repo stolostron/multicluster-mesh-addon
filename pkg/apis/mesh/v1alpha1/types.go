@@ -118,7 +118,7 @@ type DiscoveryConfig struct {
 	// Supports hours (h), days (d), weeks (w), or months (m)
 	// It is a wrapper around time.Duration which supports correct marshaling to YAML and JSON
 	// +optional
-	// +kubebuilder:default="1m"
+	// +kubebuilder:default="15d"
 	TokenValidity metav1.Duration `json:"tokenValidity,omitempty"`
 }
 

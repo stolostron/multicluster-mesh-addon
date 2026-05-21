@@ -28,7 +28,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	meshv1alpha1 "github.com/stolostron/multicluster-mesh-addon/pkg/apis/mesh/v1alpha1"
-	msav1v1beta1 "open-cluster-management.io/managed-serviceaccount/apis/authentication/v1beta1"
+	msav1beta1 "open-cluster-management.io/managed-serviceaccount/apis/authentication/v1beta1"
 )
 
 const (
@@ -170,9 +170,9 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	for _, cluster := range clusters {
 		if err := r.List(ctx, msaList, client.InNamespace(cluster.Name),
 			client.MatchingFields{"metadata.name": fmt.Sprintf("%s-%s", cluster.Name, mesh.Name)}); err == nil && len(msaList.Items) == 1 {
-			klog.Infof("Cluster %s has an existing ManagedServiceAccount resource, skipping CreateManagedServiceAccount", cluster.Name)
+			klog.Infof("Cluster %s has an existing ManagedServiceAccount resource, skipping createManagedServiceAccount", cluster.Name)
 		} else {
-			if err := r.CreateManagedServiceAccount(ctx, cluster, mesh); err != nil {
+			if err := r.createManagedServiceAccount(ctx, cluster, mesh); err != nil {
 				klog.Errorf("Failed to create a ManagedServiceAccount for cluster %s: %v", cluster.Name, err)
 				return reconcile.Result{}, err
 			}
@@ -500,18 +500,18 @@ func (r *Reconciler) applyOperatorDefaults(config meshv1alpha1.OperatorConfig, i
 	return config
 }
 
-// CreateManagedServiceAccount creates a ManagedServiceAccount resource for a cluster in the ClusterSet
-func (r *Reconciler) CreateManagedServiceAccount(ctx context.Context, cluster clusterv1.ManagedCluster, mesh *meshv1alpha1.MultiClusterMesh) error {
+// createManagedServiceAccount creates a ManagedServiceAccount resource for a cluster in the ClusterSet
+func (r *Reconciler) createManagedServiceAccount(ctx context.Context, cluster clusterv1.ManagedCluster, mesh *meshv1alpha1.MultiClusterMesh) error {
 	klog.Infof("Creating a ManagedServiceAccount for a managed cluster: %s", cluster.Name)
 
-	msa := &msav1v1beta1.ManagedServiceAccount{
+	msa := &msav1beta1.ManagedServiceAccount{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      fmt.Sprintf("%s-%s", cluster.Name, mesh.Name), // Naming convention: <cluster-name>-<mesh-name>
 			Namespace: cluster.Name,
 			Labels:    map[string]string{ManagedByLabel: ManagedByValue},
 		},
-		Spec: msav1v1beta1.ManagedServiceAccountSpec{
-			Rotation: msav1v1beta1.ManagedServiceAccountRotation{
+		Spec: msav1beta1.ManagedServiceAccountSpec{
+			Rotation: msav1beta1.ManagedServiceAccountRotation{
 				// Field Enabled default=true. It prescribes the ServiceAccount token will be rotated before it expires.
 				Validity: mesh.Spec.Security.Discovery.TokenValidity,
 			},

@@ -8,7 +8,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	clusterv1 "open-cluster-management.io/api/cluster/v1"
 	clusterv1beta2 "open-cluster-management.io/api/cluster/v1beta2"
-	msav1v1beta1 "open-cluster-management.io/managed-serviceaccount/apis/authentication/v1beta1"
+	msav1beta1 "open-cluster-management.io/managed-serviceaccount/apis/authentication/v1beta1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -40,7 +40,7 @@ func CreateManagedCluster(ctx context.Context, k8sClient client.Client, name, cl
 
 // CreateManagedServiceAccount creates a ManagedServiceAccount resource.
 func CreateManagedServiceAccount(ctx context.Context, k8sClient client.Client, name, namespace string) {
-	Expect(k8sClient.Create(ctx, &msav1v1beta1.ManagedServiceAccount{
+	Expect(k8sClient.Create(ctx, &msav1beta1.ManagedServiceAccount{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: namespace,
