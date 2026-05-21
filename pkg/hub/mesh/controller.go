@@ -203,9 +203,10 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	})
 
 	for _, cluster := range clusters {
-		if err := r.List(ctx, msaList, client.InNamespace(cluster.Name),
-			client.MatchingFields{"metadata.name": fmt.Sprintf("%s-%s", cluster.Name, mesh.Name)}); err == nil && len(msaList.Items) == 1 {
-			klog.Infof("Cluster %s has an existing ManagedServiceAccount resource, skipping createManagedServiceAccount", cluster.Name)
+		existing := &msav1beta1.ManagedServiceAccount{}
+		msaName := fmt.Sprintf("%s-%s-istio-reader", cluster.Name, mesh.Name)
+    if err := r.Get(ctx, types.NamespacedName{Name: msaName, Namespace: cluster.Name}, existing); err == nil {
+			klog.Infof("Cluster %s has an existing ManagedServiceAccount resource %s, skipping createManagedServiceAccount", cluster.Name, msaName)
 		} else {
 			if err := r.createManagedServiceAccount(ctx, cluster, mesh); err != nil {
 				klog.Errorf("Failed to create a ManagedServiceAccount for cluster %s: %v", cluster.Name, err)
@@ -650,6 +651,7 @@ func (r *Reconciler) ensureCacertsManifestWork(ctx context.Context, mesh *meshv1
 		Name:      secretName,
 		Namespace: mesh.Namespace,
 	}, secret)
+
 	if err != nil {
 		if errors.IsNotFound(err) {
 			klog.V(4).Infof("Secret %s/%s not found yet, waiting for cert-manager to create it", mesh.Namespace, secretName)
@@ -757,13 +759,13 @@ func (r *Reconciler) createManagedServiceAccount(ctx context.Context, cluster cl
 
 	msa := &msav1beta1.ManagedServiceAccount{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      fmt.Sprintf("%s-%s", cluster.Name, mesh.Name), // Naming convention: <cluster-name>-<mesh-name>
+			Name:      fmt.Sprintf("%s-%s-istio-reader", cluster.Name, mesh.Name), // Naming convention: <cluster-name>-<mesh-name>-istio-reader
 			Namespace: cluster.Name,
 			Labels:    map[string]string{ManagedByLabel: ManagedByValue},
 		},
 		Spec: msav1beta1.ManagedServiceAccountSpec{
 			Rotation: msav1beta1.ManagedServiceAccountRotation{
-				// Field Enabled default=true. It prescribes the ServiceAccount token will be rotated before it expires.
+				Enabled: true, // the ServiceAccount token will be rotated before it expires
 				Validity: mesh.Spec.Security.Discovery.TokenValidity,
 			},
 		},
