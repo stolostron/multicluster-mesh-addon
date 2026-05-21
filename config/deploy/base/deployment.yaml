@@ -1,0 +1,79 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: multicluster-mesh-controller
+  namespace: multicluster-mesh-system
+  labels:
+    app: multicluster-mesh-controller
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: multicluster-mesh-controller
+  template:
+    metadata:
+      labels:
+        app: multicluster-mesh-controller
+    spec:
+      serviceAccountName: multicluster-mesh-controller
+      containers:
+        - name: controller
+          image: quay.io/sail-dev/multicluster-mesh-addon:latest
+          imagePullPolicy: Always
+          command:
+            - /multicluster-mesh-addon
+            - controller
+          args:
+            - --metrics-addr=:8080
+            - --health-probe-addr=:8081
+          env:
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+          ports:
+            - containerPort: 8080
+              name: metrics
+              protocol: TCP
+            - containerPort: 8081
+              name: health
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: health
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: health
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            limits:
+              cpu: 500m
+              memory: 512Mi
+            requests:
+              cpu: 100m
+              memory: 128Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            seccompProfile:
+              type: RuntimeDefault
+      volumes:
+        - name: tmp
+          emptyDir: {}
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault

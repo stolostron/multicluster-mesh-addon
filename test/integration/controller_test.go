@@ -4,15 +4,16 @@ package integration
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"time"
 
+	certmanagerv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	operatorsv1 "github.com/operator-framework/api/pkg/operators/v1"
 	operatorsv1alpha1 "github.com/operator-framework/api/pkg/operators/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -24,6 +25,7 @@ import (
 
 	meshv1alpha1 "github.com/stolostron/multicluster-mesh-addon/pkg/apis/mesh/v1alpha1"
 	meshcontroller "github.com/stolostron/multicluster-mesh-addon/pkg/hub/mesh"
+	pkgutil "github.com/stolostron/multicluster-mesh-addon/pkg/util"
 	"github.com/stolostron/multicluster-mesh-addon/test/util"
 )
 
@@ -378,6 +380,85 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 		})
 	})
 
+	Context("Certificate distribution", func() {
+		When("cert-manager issuer is configured", func() {
+			BeforeEach(func() {
+				util.CreateK8sManagedCluster(ctx, k8sClient, clusterName, testClusterSet)
+				util.CreateMultiClusterMeshWithCertManager(ctx, k8sClient, meshName, testNs, testClusterSet, "mesh-issuer")
+			})
+
+			It("should create Certificate resource", func() {
+				expectCertificate(testNs, clusterName, "mesh-issuer")
+			})
+
+			It("should create ManifestWork when cacerts secret is created", func() {
+				// simulate creating the cacerts secret by cert-manager
+				util.CreateCacertsSecret(ctx, k8sClient, testNs, clusterName, meshName, testNs)
+
+				work := expectCacertsManifestWork(clusterName)
+				expectCacertsSecret(work)
+			})
+
+			It("should update ManifestWork when cacerts secret is updated", func() {
+				util.CreateCacertsSecret(ctx, k8sClient, testNs, clusterName, meshName, testNs)
+				expectCacertsManifestWork(clusterName)
+
+				secret := &corev1.Secret{}
+				Expect(k8sClient.Get(ctx, types.NamespacedName{
+					Name:      fmt.Sprintf("cacerts-%s", clusterName),
+					Namespace: testNs,
+				}, secret)).To(Succeed())
+
+				secret.Data["tls.crt"] = []byte("updated-cert-data")
+				Expect(k8sClient.Update(ctx, secret)).To(Succeed())
+
+				Eventually(func() string {
+					work := &workv1.ManifestWork{}
+					if err := k8sClient.Get(ctx, types.NamespacedName{
+						Name:      meshcontroller.ManifestWorkNameCacerts,
+						Namespace: clusterName,
+					}, work); err != nil {
+						return ""
+					}
+					manifestSecret := &corev1.Secret{}
+					if err := unmarshalManifest(work.Spec.Workload.Manifests[0], manifestSecret); err != nil {
+						return ""
+					}
+					return string(manifestSecret.Data["tls.crt"])
+				}).Should(Equal("updated-cert-data"))
+			})
+		})
+
+		When("multiple clusters have cacerts secrets", func() {
+			It("should create ManifestWork for each cluster", func() {
+				cluster1 := util.UniqueName("cluster")
+				cluster2 := util.UniqueName("cluster")
+
+				util.CreateK8sManagedCluster(ctx, k8sClient, cluster1, testClusterSet)
+				util.CreateK8sManagedCluster(ctx, k8sClient, cluster2, testClusterSet)
+				util.CreateMultiClusterMeshWithCertManager(ctx, k8sClient, meshName, testNs, testClusterSet, "mesh-issuer")
+
+				util.CreateCacertsSecret(ctx, k8sClient, testNs, cluster1, meshName, testNs)
+				util.CreateCacertsSecret(ctx, k8sClient, testNs, cluster2, meshName, testNs)
+
+				expectCacertsManifestWork(cluster1)
+				expectCacertsManifestWork(cluster2)
+			})
+		})
+
+		When("no issuer is configured", func() {
+			BeforeEach(func() {
+				util.CreateK8sManagedCluster(ctx, k8sClient, clusterName, testClusterSet)
+				util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet, meshv1alpha1.OperatorConfig{})
+				awaitReconcileFinished()
+			})
+
+			It("should not create cacerts ManifestWork", func() {
+				expectNoCacertsManifestWork(clusterName)
+			})
+		})
+	})
+
 	Context("Platform detection", func() {
 		DescribeTable("should detect OpenShift variants and use OSSM operator",
 			func(productClaim string) {
@@ -468,13 +549,53 @@ func expectOperatorManifestWork(clusterNamespace string) *workv1.ManifestWork {
 	return expectManifestWork(meshcontroller.OperatorManifestWorkName, clusterNamespace)
 }
 
+func expectCacertsManifestWork(clusterNamespace string) *workv1.ManifestWork {
+	return expectManifestWork(meshcontroller.ManifestWorkNameCacerts, clusterNamespace)
+}
+
+func expectNoCacertsManifestWork(clusterNamespace string) {
+	Consistently(func() bool {
+		work := &workv1.ManifestWork{}
+		err := k8sClient.Get(ctx, types.NamespacedName{
+			Name:      meshcontroller.ManifestWorkNameCacerts,
+			Namespace: clusterNamespace,
+		}, work)
+		return errors.IsNotFound(err)
+	}).Should(BeTrue())
+}
+
+func expectCertificate(namespace, clusterName, issuerName string) *certmanagerv1.Certificate {
+	cert := &certmanagerv1.Certificate{}
+	Eventually(func() error {
+		return k8sClient.Get(ctx, types.NamespacedName{
+			Name:      fmt.Sprintf("cacerts-%s", clusterName),
+			Namespace: namespace,
+		}, cert)
+	}).Should(Succeed())
+
+	Expect(cert.Labels[meshcontroller.ManagedByLabel]).To(Equal(meshcontroller.ManagedByValue))
+	Expect(cert.Spec.SecretName).To(Equal(fmt.Sprintf("cacerts-%s", clusterName)))
+	Expect(cert.Spec.IsCA).To(BeTrue())
+	Expect(cert.Spec.IssuerRef.Name).To(Equal(issuerName))
+	Expect(cert.Spec.IssuerRef.Kind).To(Equal("Issuer"))
+	return cert
+}
+
+func expectCacertsSecret(work *workv1.ManifestWork) {
+	Expect(work.Spec.Workload.Manifests).To(HaveLen(1))
+	secret := &corev1.Secret{}
+	Expect(unmarshalManifest(work.Spec.Workload.Manifests[0], secret)).To(Succeed())
+	Expect(secret.Name).To(Equal("cacerts"))
+	Expect(secret.Namespace).To(Equal("istio-system"))
+	Expect(secret.Type).To(Equal(corev1.SecretTypeTLS))
+	Expect(secret.Data).To(HaveKey("tls.crt"))
+	Expect(secret.Data).To(HaveKey("tls.key"))
+	Expect(secret.Data).To(HaveKey("ca.crt"))
+}
+
 // unmarshalManifest extracts a manifest from ManifestWork's RawExtension.
-// The Object field is nil when reading from API, so we unmarshal from Raw bytes.
 func unmarshalManifest(manifest workv1.Manifest, into interface{}) error {
-	if manifest.RawExtension.Object != nil {
-		return fmt.Errorf("Object field should be nil when reading from API")
-	}
-	return json.Unmarshal(manifest.RawExtension.Raw, into)
+	return pkgutil.UnmarshalManifest(manifest, into)
 }
 
 func expectNamespace(work *workv1.ManifestWork, index int, expectedName string) {

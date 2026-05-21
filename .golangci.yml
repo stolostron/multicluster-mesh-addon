@@ -1,0 +1,9 @@
+version: "2"
+
+linters:
+  exclusions:
+    rules:
+      - path: test/
+        linters:
+          - staticcheck
+        text: "ST1001"
