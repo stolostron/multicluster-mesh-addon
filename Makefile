@@ -237,7 +237,7 @@ deploy-addon: install-dev-deps images gen $(KUSTOMIZE) ## Build and deploy addon
 		kubectl --kubeconfig=$(HUB_KUBECONFIG) apply -f -
 	kubectl --kubeconfig=$(HUB_KUBECONFIG) rollout status deployment/multicluster-mesh-controller \
 		-n multicluster-mesh-system --timeout=180s
-	kubectl --kubeconfig=$(HUB_KUBECONFIG) apply -f config/deploy/overlays/kind/sample-mesh.yaml
+	kubectl --kubeconfig=$(HUB_KUBECONFIG) apply -f samples/kind-dev.yaml
 
 .PHONY: dev-clean
 dev-clean: ## Destroy dev clusters and remove .kube/ folder

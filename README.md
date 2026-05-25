@@ -104,6 +104,51 @@ kubectl create namespace multicluster-mesh-system
 ./bin/multicluster-mesh-addon controller --kubeconfig=/path/to/kubeconfig
 ```
 
+#### Local Kind+OCM Dev Environment
+
+Provisions a complete multi-cluster topology (1 hub + 2 managed clusters) using Kind and OCM, then builds and deploys the addon controller:
+
+```bash
+make dev-env
+```
+
+Individual targets are also available:
+
+| Target                  | Description                                            |
+|-------------------------|--------------------------------------------------------|
+| `make install-dev-deps` | Download `kind` and `clusteradm` to `.bin/`            |
+| `make create-clusters`  | Create three Kind clusters (hub, cluster1, cluster2)   |
+| `make install-olm`      | Install OLM on managed clusters                        |
+| `make init-ocm`         | Initialize hub as OCM control plane                    |
+| `make join-clusters`    | Register managed clusters and create ManagedClusterSet |
+| `make deploy-addon`     | Build and deploy addon to the hub Kind cluster         |
+| `make dev-clean`        | Destroy clusters and remove `.kube/`                   |
+
+**Configuration (override via environment or command-line):**
+
+```bash
+make dev-env K8S_VERSION=v1.31.0 OLM_VERSION=v0.42.0
+```
+
+##### Known Issues
+
+**"Too many open files" on Fedora/Linux:**
+Kind clusters may fail to start or pods may crash with `too many open files` errors due to low inotify limits. Increase them on the host:
+
+```bash
+sudo sysctl fs.inotify.max_user_watches=524288
+sudo sysctl fs.inotify.max_user_instances=512
+```
+
+To persist across reboots, add to `/etc/sysctl.conf`:
+
+```
+fs.inotify.max_user_watches = 524288
+fs.inotify.max_user_instances = 512
+```
+
+See the [Kind known issues](https://kind.sigs.k8s.io/docs/user/known-issues/#pod-errors-due-to-too-many-open-files) documentation for more details.
+
 ### Usage
 
 Create a namespace to host your multi cluster mesh resources.

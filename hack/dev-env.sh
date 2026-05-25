@@ -293,9 +293,11 @@ EOF
             --overwrite
     done
 
-    # Create product ClusterClaim on each managed cluster so the OCM registration
-    # agent syncs it to ManagedCluster.status.clusterClaims on the hub.
-    # The addon controller uses this for platform detection.
+    # On OpenShift, the product ClusterClaim is created automatically by the
+    # klusterlet agent. On vanilla Kind clusters there is no such agent,
+    # so we create it manually. The OCM registration agent syncs it to
+    # ManagedCluster.status.clusterClaims on the hub, which the addon controller
+    # uses for platform detection.
     for cluster_name in "${CLUSTER1_NAME}" "${CLUSTER2_NAME}"; do
         local kubeconfig
         case "${cluster_name}" in

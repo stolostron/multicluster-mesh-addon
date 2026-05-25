@@ -3,6 +3,9 @@ kind: Kustomization
 resources:
   - ../../base
   - rolebinding-auth-reader.yaml
+# IfNotPresent is required because images are side-loaded into Kind via
+# "kind load image-archive" and never pushed to a registry. With "Always",
+# the kubelet would try to pull from the registry and fail with ErrImagePull.
 patches:
   - target:
       kind: Deployment
