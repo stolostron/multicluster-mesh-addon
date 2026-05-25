@@ -121,6 +121,8 @@ kubectl apply -f samples/cert-manager-issuer.yaml
 kubectl apply -f samples/basic.yaml
 ```
 
+> **Note:** All samples use `clusterSet: default` as the ManagedClusterSet reference. Update this field to match your actual ManagedClusterSet name as needed.
+
 For more configuration options, see the [samples](./samples/) directory:
 
 - **[basic.yaml](./samples/basic.yaml)** - Minimal configuration using defaults

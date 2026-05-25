@@ -5,6 +5,7 @@ metadata:
   namespace: mesh-system
 spec:
   # Reference to the ManagedClusterSet that defines which clusters participate in the mesh
+  # NOTE: Update this to match your ManagedClusterSet name
   clusterSet: default
 
   # Control plane configuration
@@ -19,7 +20,7 @@ spec:
     namespace: sail-operator
 
     # OLM subscription channel
-    channel: "stable"
+    channel: stable
 
     # CatalogSource name
     # Defaults to "redhat-operators" on OpenShift, "operatorhubio-catalog" on vanilla Kubernetes
@@ -30,7 +31,7 @@ spec:
     sourceNamespace: olm
 
     # Specific operator version (optional - pins to a specific CSV)
-    # startingCSV: "sail-operator.v1.23.0"
+    # startingCSV: sail-operator.v1.23.0
 
     # Install plan approval strategy
     installPlanApproval: Automatic
@@ -49,4 +50,4 @@ spec:
     discovery:
       # How long discovery tokens remain valid
       # Supports: hours (h), days (d), weeks (w), months (m)
-      tokenValidity: "1m"
+      tokenValidity: 1m

@@ -4,7 +4,8 @@ metadata:
   name: pinned-version-mesh
   namespace: mesh-system
 spec:
-  # Reference to the ManagedClusterSet
+  # Reference to the ManagedClusterSet that defines which clusters participate in the mesh
+  # NOTE: Update this to match your ManagedClusterSet name
   clusterSet: default
 
   controlPlane:
@@ -13,12 +14,12 @@ spec:
   # Operator configuration with version pinning and manual approval
   operator:
     namespace: sail-operator
-    channel: "stable"
+    channel: stable
     source: operatorhubio-catalog
     sourceNamespace: olm
 
     # Pin to a specific operator version for controlled rollouts
-    startingCSV: "sail-operator.v1.23.0"
+    startingCSV: sail-operator.v1.23.0
 
     # Manual approval for staged deployments
     installPlanApproval: Manual
@@ -27,7 +28,7 @@ spec:
     trust:
       certManager:
         issuerRef:
-          name: staging-mesh-root-ca
+          name: mesh-root-ca
     discovery:
       # Daily token rotation for staging environments
-      tokenValidity: "1d"
+      tokenValidity: 1d
