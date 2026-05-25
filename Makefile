@@ -170,8 +170,6 @@ deploy: gen push $(KUSTOMIZE) ## Deploy the controller to the cluster (PLATFORM=
 	# kustomize edit set image writes the resolved image tag into kustomization.yaml on disk. Lets restore it to original file.
 	git checkout -- config/deploy/overlays/$(PLATFORM)/kustomization.yaml
 
-# TODO: Add deploy-local target for local development (kind/minikube) without pushing to registry
-
 .PHONY: undeploy
 undeploy: gen ## Remove the controller from the cluster (PLATFORM=openshift|kind)
 	kubectl delete multiclustermeshes.mesh.open-cluster-management.io --all --all-namespaces --ignore-not-found=true || true
@@ -181,3 +179,66 @@ undeploy: gen ## Remove the controller from the cluster (PLATFORM=openshift|kind
 .PHONY: help
 help: ## Display this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
+
+# Dev Environment (local Kind + OCM clusters)
+KIND_VERSION ?= v0.31.0
+CLUSTERADM_VERSION ?= v1.2.0
+K8S_VERSION ?= v1.30.0
+OLM_VERSION ?= v0.42.0
+
+DEV_BIN_DIR := $(CURDIR)/.bin
+DEV_KUBE_DIR := $(CURDIR)/.kube
+
+HUB_KUBECONFIG := $(DEV_KUBE_DIR)/hub.config
+CLUSTER1_KUBECONFIG := $(DEV_KUBE_DIR)/cluster1.config
+CLUSTER2_KUBECONFIG := $(DEV_KUBE_DIR)/cluster2.config
+
+KIND := $(DEV_BIN_DIR)/kind
+CLUSTERADM := $(DEV_BIN_DIR)/clusteradm
+
+DEV_ENV_SCRIPT := $(CURDIR)/hack/dev-env.sh
+DEV_ENV_VARS := DEV_BIN_DIR=$(DEV_BIN_DIR) DEV_KUBE_DIR=$(DEV_KUBE_DIR) \
+	KIND_VERSION=$(KIND_VERSION) CLUSTERADM_VERSION=$(CLUSTERADM_VERSION) K8S_VERSION=$(K8S_VERSION) \
+	OLM_VERSION=$(OLM_VERSION)
+
+.PHONY: dev-env
+dev-env: install-dev-deps create-clusters install-olm init-ocm join-clusters deploy-addon ## Provision full dev environment (Kind + OCM + addon)
+
+.PHONY: install-dev-deps
+install-dev-deps: ## Download kind and clusteradm to .bin/
+	$(DEV_ENV_VARS) $(DEV_ENV_SCRIPT) install-deps
+
+.PHONY: create-clusters
+create-clusters: ## Create 3 Kind clusters (hub, cluster1, cluster2)
+	$(DEV_ENV_VARS) $(DEV_ENV_SCRIPT) create-clusters
+
+.PHONY: install-olm
+install-olm: ## Install OLM on managed clusters (cluster1, cluster2)
+	$(DEV_ENV_VARS) $(DEV_ENV_SCRIPT) install-olm
+
+.PHONY: init-ocm
+init-ocm: ## Initialize hub as OCM control plane
+	$(DEV_ENV_VARS) $(DEV_ENV_SCRIPT) init-ocm
+
+.PHONY: join-clusters
+join-clusters: ## Register managed clusters and create ManagedClusterSet
+	$(DEV_ENV_VARS) $(DEV_ENV_SCRIPT) join-clusters
+
+.PHONY: deploy-addon
+deploy-addon: install-dev-deps images gen $(KUSTOMIZE) ## Build and deploy addon to the hub Kind cluster
+	# We use image-archive instead of docker-image because the latter is Docker-specific
+	# and fails when images are built with Podman (separate image stores).
+	$(CONTAINER_ENGINE) save $(IMG) -o $(DEV_KUBE_DIR)/.addon-image.tar
+	$(KIND) load image-archive $(DEV_KUBE_DIR)/.addon-image.tar --name hub
+	rm -f $(DEV_KUBE_DIR)/.addon-image.tar
+	kubectl --kubeconfig=$(HUB_KUBECONFIG) apply -f config/crd/
+	$(KUSTOMIZE) build config/deploy/overlays/kind | \
+		sed 's|image: quay.io/sail-dev/multicluster-mesh-addon:.*|image: $(IMG)|' | \
+		kubectl --kubeconfig=$(HUB_KUBECONFIG) apply -f -
+	kubectl --kubeconfig=$(HUB_KUBECONFIG) rollout status deployment/multicluster-mesh-controller \
+		-n multicluster-mesh-system --timeout=180s
+	kubectl --kubeconfig=$(HUB_KUBECONFIG) apply -f config/deploy/overlays/kind/sample-mesh.yaml
+
+.PHONY: dev-clean
+dev-clean: ## Destroy dev clusters and remove .kube/ folder
+	$(DEV_ENV_VARS) $(DEV_ENV_SCRIPT) clean
