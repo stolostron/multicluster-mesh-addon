@@ -135,17 +135,6 @@ init_ocm() {
     log "Initializing OCM hub on cluster: ${HUB_NAME}"
     ${CLUSTERADM} init --wait --kubeconfig="${hub_kubeconfig}"
 
-    log "Extracting join command..."
-    local join_cmd
-    join_cmd="$(${CLUSTERADM} get token --kubeconfig="${hub_kubeconfig}" | grep clusteradm)"
-
-    if [[ -z "${join_cmd}" ]]; then
-        err "Failed to extract join command from clusteradm get token"
-    fi
-
-    echo "${join_cmd}" > "${DEV_KUBE_DIR}/.ocm-join-cmd"
-    log "Join command saved to ${DEV_KUBE_DIR}/.ocm-join-cmd"
-
     log "Waiting for OCM hub components to be ready..."
     kubectl --kubeconfig="${hub_kubeconfig}" wait --for=condition=Available \
         deployment/cluster-manager -n open-cluster-management --timeout=120s
@@ -155,12 +144,21 @@ join_clusters() {
     local hub_kubeconfig
     hub_kubeconfig="$(kubeconfig_for "${HUB_NAME}")"
 
-    if [[ ! -f "${DEV_KUBE_DIR}/.ocm-join-cmd" ]]; then
-        err "OCM join command not found. Run 'make init-ocm' first."
+    if [[ ! -f "${hub_kubeconfig}" ]]; then
+        err "Hub kubeconfig not found at ${hub_kubeconfig}. Run 'make init-ocm' first."
     fi
 
-    local join_cmd
-    join_cmd="$(cat "${DEV_KUBE_DIR}/.ocm-join-cmd")"
+    log "Retrieving hub token..."
+    local token_output
+    token_output="$(${CLUSTERADM} get token --kubeconfig="${hub_kubeconfig}" 2>/dev/null)"
+
+    local hub_token hub_apiserver
+    hub_token="$(echo "${token_output}" | grep -oP '(?<=--hub-token )\S+')"
+    hub_apiserver="$(echo "${token_output}" | grep -oP '(?<=--hub-apiserver )\S+')"
+
+    if [[ -z "${hub_token}" || -z "${hub_apiserver}" ]]; then
+        err "Failed to extract hub token/apiserver from 'clusteradm get token'"
+    fi
 
     for cluster_name in "${CLUSTER1_NAME}" "${CLUSTER2_NAME}"; do
         local kubeconfig
@@ -176,9 +174,10 @@ join_clusters() {
         fi
 
         log "Joining ${cluster_name} to hub..."
-        local cluster_join_cmd
-        cluster_join_cmd="$(echo "${join_cmd}" | sed "s/<cluster_name>/${cluster_name}/g")"
-        eval "${cluster_join_cmd}" \
+        ${CLUSTERADM} join \
+            --hub-token "${hub_token}" \
+            --hub-apiserver "${hub_apiserver}" \
+            --cluster-name "${cluster_name}" \
             --force-internal-endpoint-lookup \
             --wait \
             --kubeconfig="${kubeconfig}"
