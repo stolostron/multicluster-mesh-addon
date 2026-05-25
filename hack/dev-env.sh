@@ -88,39 +88,14 @@ install_olm() {
     done
 
     # Grant the OCM work agent (klusterlet-work-sa) permission to manage OLM resources.
-    # On OpenShift, klusterlet-work-sa gets cluster-admin during import. On Kind clusters
-    # joined via clusteradm, only minimal permissions are granted.
+    local script_dir
+    script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
     for cluster_name in "${CLUSTER1_NAME}" "${CLUSTER2_NAME}"; do
         local kubeconfig
         kubeconfig="$(kubeconfig_for "${cluster_name}")"
 
         log "Granting klusterlet-work-sa OLM permissions on ${cluster_name}"
-        kubectl --kubeconfig="${kubeconfig}" apply -f - <<'EOF'
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
-metadata:
-  name: klusterlet-work-olm
-rules:
-  - apiGroups: [""]
-    resources: ["namespaces"]
-    verbs: ["create", "get", "update", "patch", "delete"]
-  - apiGroups: ["operators.coreos.com"]
-    resources: ["operatorgroups", "subscriptions", "catalogsources", "clusterserviceversions"]
-    verbs: ["create", "get", "list", "update", "patch", "delete"]
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
-metadata:
-  name: klusterlet-work-olm
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
-  name: klusterlet-work-olm
-subjects:
-  - kind: ServiceAccount
-    name: klusterlet-work-sa
-    namespace: open-cluster-management-agent
-EOF
+        kubectl --kubeconfig="${kubeconfig}" apply -f "${script_dir}/config/deploy/overlays/kind/klusterlet-work-olm.yaml"
     done
 }
 
