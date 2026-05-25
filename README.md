@@ -114,15 +114,14 @@ make dev-env
 
 Individual targets are also available:
 
-| Target                  | Description                                            |
-|-------------------------|--------------------------------------------------------|
-| `make install-dev-deps` | Download `kind` and `clusteradm` to `.bin/`            |
-| `make create-clusters`  | Create three Kind clusters (hub, cluster1, cluster2)   |
-| `make install-olm`      | Install OLM on managed clusters                        |
-| `make init-ocm`         | Initialize hub as OCM control plane                    |
-| `make join-clusters`    | Register managed clusters and create ManagedClusterSet |
-| `make deploy-addon`     | Build and deploy addon to the hub Kind cluster         |
-| `make dev-clean`        | Destroy clusters and remove `.kube/`                   |
+| Target                 | Description                                            |
+|------------------------|--------------------------------------------------------|
+| `make create-clusters` | Create three Kind clusters (hub, cluster1, cluster2)   |
+| `make install-olm`     | Install OLM on managed clusters                        |
+| `make init-ocm`        | Initialize hub as OCM control plane                    |
+| `make join-clusters`   | Register managed clusters and create ManagedClusterSet |
+| `make deploy-addon`    | Build and deploy addon to the hub Kind cluster         |
+| `make dev-clean`       | Destroy clusters and remove `.kube/`                   |
 
 **Configuration (override via environment or command-line):**
 

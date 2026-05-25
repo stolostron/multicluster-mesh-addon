@@ -2,85 +2,16 @@
 # Provisions and manages a local 3-cluster Kind/OCM development environment.
 # This file is invoked by Makefile targets with an action argument.
 #
-# Usage: hack/dev-env.sh <action> [options]
-# Actions: install-deps, create-clusters, install-olm, init-ocm, join-clusters, clean
+# Usage: hack/dev-env.sh <action>
+# Actions: create-clusters, install-olm, init-ocm, join-clusters, clean
 
 set -euo pipefail
-
-# Required environment variables that should be passed from Makefile
-required_vars=(DEV_BIN_DIR DEV_KUBE_DIR KIND_VERSION CLUSTERADM_VERSION K8S_VERSION OLM_VERSION)
-for var in "${required_vars[@]}"; do
-    if [[ -z "${!var:-}" ]]; then
-        echo "ERROR: ${var} must be set" >&2
-        exit 1
-    fi
-done
-
-KIND="${DEV_BIN_DIR}/kind"
-CLUSTERADM="${DEV_BIN_DIR}/clusteradm"
-
-HUB_KUBECONFIG="${DEV_KUBE_DIR}/hub.config"
-CLUSTER1_KUBECONFIG="${DEV_KUBE_DIR}/cluster1.config"
-CLUSTER2_KUBECONFIG="${DEV_KUBE_DIR}/cluster2.config"
-
-HUB_NAME="hub"
-CLUSTER1_NAME="cluster1"
-CLUSTER2_NAME="cluster2"
 
 log() { echo "==> $*"; }
 err() { echo "ERROR: $*" >&2; exit 1; }
 
-detect_arch() {
-    local arch
-    arch="$(uname -m)"
-    case "${arch}" in
-        x86_64)  echo "amd64" ;;
-        aarch64) echo "arm64" ;;
-        arm64)   echo "arm64" ;;
-        armv7*)  echo "arm" ;;
-        *)       err "Unsupported architecture: ${arch}" ;;
-    esac
-}
-
-detect_os() {
-    uname | tr '[:upper:]' '[:lower:]'
-}
-
-install_deps() {
-    local os arch
-    os="$(detect_os)"
-    arch="$(detect_arch)"
-
-    mkdir -p "${DEV_BIN_DIR}"
-
-    # Install kind
-    if [[ -x "${KIND}" ]] && "${KIND}" version 2>/dev/null | grep -q "${KIND_VERSION}"; then
-        log "kind ${KIND_VERSION} already installed"
-    else
-        log "Installing kind ${KIND_VERSION} (${os}/${arch})..."
-        local kind_url="https://github.com/kubernetes-sigs/kind/releases/download/${KIND_VERSION}/kind-${os}-${arch}"
-        curl -sSL "${kind_url}" -o "${KIND}"
-        chmod +x "${KIND}"
-        log "kind installed: $(${KIND} version)"
-    fi
-
-    # Install clusteradm
-    local clusteradm_ver
-    clusteradm_ver="$("${CLUSTERADM}" version 2>/dev/null || true)"
-    if [[ -x "${CLUSTERADM}" ]] && echo "${clusteradm_ver}" | grep -q "${CLUSTERADM_VERSION}"; then
-        log "clusteradm ${CLUSTERADM_VERSION} already installed"
-    else
-        log "Installing clusteradm ${CLUSTERADM_VERSION} (${os}/${arch})..."
-        local clusteradm_url="https://github.com/open-cluster-management-io/clusteradm/releases/download/${CLUSTERADM_VERSION}/clusteradm_${os}_${arch}.tar.gz"
-        local tmp_dir
-        tmp_dir="$(mktemp -d)"
-        curl -sSL "${clusteradm_url}" -o "${tmp_dir}/clusteradm.tar.gz"
-        tar xzf "${tmp_dir}/clusteradm.tar.gz" -C "${tmp_dir}"
-        mv "${tmp_dir}/clusteradm" "${CLUSTERADM}"
-        chmod +x "${CLUSTERADM}"
-        rm -rf "${tmp_dir}"
-        log "clusteradm installed: $(${CLUSTERADM} version 2>&1 | head -1)"
-    fi
+kubeconfig_for() {
+    echo "${DEV_KUBE_DIR}/${1}.config"
 }
 
 create_clusters() {
@@ -103,11 +34,7 @@ create_clusters() {
 
     for cluster_name in "${HUB_NAME}" "${CLUSTER1_NAME}" "${CLUSTER2_NAME}"; do
         local kubeconfig
-        case "${cluster_name}" in
-            "${HUB_NAME}")      kubeconfig="${HUB_KUBECONFIG}" ;;
-            "${CLUSTER1_NAME}") kubeconfig="${CLUSTER1_KUBECONFIG}" ;;
-            "${CLUSTER2_NAME}") kubeconfig="${CLUSTER2_KUBECONFIG}" ;;
-        esac
+        kubeconfig="$(kubeconfig_for "${cluster_name}")"
 
         log "Creating Kind cluster: ${cluster_name}"
         ${KIND} create cluster \
@@ -129,10 +56,7 @@ install_olm() {
 
     for cluster_name in "${CLUSTER1_NAME}" "${CLUSTER2_NAME}"; do
         local kubeconfig
-        case "${cluster_name}" in
-            "${CLUSTER1_NAME}") kubeconfig="${CLUSTER1_KUBECONFIG}" ;;
-            "${CLUSTER2_NAME}") kubeconfig="${CLUSTER2_KUBECONFIG}" ;;
-        esac
+        kubeconfig="$(kubeconfig_for "${cluster_name}")"
 
         if [[ ! -f "${kubeconfig}" ]]; then
             err "Kubeconfig not found for ${cluster_name} at ${kubeconfig}. Run 'make create-clusters' first."
@@ -168,10 +92,7 @@ install_olm() {
     # joined via clusteradm, only minimal permissions are granted.
     for cluster_name in "${CLUSTER1_NAME}" "${CLUSTER2_NAME}"; do
         local kubeconfig
-        case "${cluster_name}" in
-            "${CLUSTER1_NAME}") kubeconfig="${CLUSTER1_KUBECONFIG}" ;;
-            "${CLUSTER2_NAME}") kubeconfig="${CLUSTER2_KUBECONFIG}" ;;
-        esac
+        kubeconfig="$(kubeconfig_for "${cluster_name}")"
 
         log "Granting klusterlet-work-sa OLM permissions on ${cluster_name}"
         kubectl --kubeconfig="${kubeconfig}" apply -f - <<'EOF'
@@ -204,16 +125,19 @@ EOF
 }
 
 init_ocm() {
-    if [[ ! -f "${HUB_KUBECONFIG}" ]]; then
-        err "Hub kubeconfig not found at ${HUB_KUBECONFIG}. Run 'make create-clusters' first."
+    local hub_kubeconfig
+    hub_kubeconfig="$(kubeconfig_for "${HUB_NAME}")"
+
+    if [[ ! -f "${hub_kubeconfig}" ]]; then
+        err "Hub kubeconfig not found at ${hub_kubeconfig}. Run 'make create-clusters' first."
     fi
 
     log "Initializing OCM hub on cluster: ${HUB_NAME}"
-    ${CLUSTERADM} init --wait --kubeconfig="${HUB_KUBECONFIG}"
+    ${CLUSTERADM} init --wait --kubeconfig="${hub_kubeconfig}"
 
     log "Extracting join command..."
     local join_cmd
-    join_cmd="$(${CLUSTERADM} get token --kubeconfig="${HUB_KUBECONFIG}" | grep clusteradm)"
+    join_cmd="$(${CLUSTERADM} get token --kubeconfig="${hub_kubeconfig}" | grep clusteradm)"
 
     if [[ -z "${join_cmd}" ]]; then
         err "Failed to extract join command from clusteradm get token"
@@ -223,11 +147,14 @@ init_ocm() {
     log "Join command saved to ${DEV_KUBE_DIR}/.ocm-join-cmd"
 
     log "Waiting for OCM hub components to be ready..."
-    kubectl --kubeconfig="${HUB_KUBECONFIG}" wait --for=condition=Available \
+    kubectl --kubeconfig="${hub_kubeconfig}" wait --for=condition=Available \
         deployment/cluster-manager -n open-cluster-management --timeout=120s
 }
 
 join_clusters() {
+    local hub_kubeconfig
+    hub_kubeconfig="$(kubeconfig_for "${HUB_NAME}")"
+
     if [[ ! -f "${DEV_KUBE_DIR}/.ocm-join-cmd" ]]; then
         err "OCM join command not found. Run 'make init-ocm' first."
     fi
@@ -237,13 +164,15 @@ join_clusters() {
 
     for cluster_name in "${CLUSTER1_NAME}" "${CLUSTER2_NAME}"; do
         local kubeconfig
-        case "${cluster_name}" in
-            "${CLUSTER1_NAME}") kubeconfig="${CLUSTER1_KUBECONFIG}" ;;
-            "${CLUSTER2_NAME}") kubeconfig="${CLUSTER2_KUBECONFIG}" ;;
-        esac
+        kubeconfig="$(kubeconfig_for "${cluster_name}")"
 
         if [[ ! -f "${kubeconfig}" ]]; then
             err "Kubeconfig not found for ${cluster_name} at ${kubeconfig}"
+        fi
+
+        if kubectl --kubeconfig="${hub_kubeconfig}" get managedcluster "${cluster_name}" &>/dev/null; then
+            log "ManagedCluster ${cluster_name} already exists on hub, skipping join"
+            continue
         fi
 
         log "Joining ${cluster_name} to hub..."
@@ -258,25 +187,26 @@ join_clusters() {
     log "Accepting managed clusters on hub..."
     ${CLUSTERADM} accept \
         --clusters="${CLUSTER1_NAME},${CLUSTER2_NAME}" \
+        --skip-approve-check \
         --wait \
-        --kubeconfig="${HUB_KUBECONFIG}"
+        --kubeconfig="${hub_kubeconfig}"
 
     log "Waiting for ManagedCluster conditions..."
     for cluster_name in "${CLUSTER1_NAME}" "${CLUSTER2_NAME}"; do
-        kubectl --kubeconfig="${HUB_KUBECONFIG}" wait managedcluster/"${cluster_name}" \
+        kubectl --kubeconfig="${hub_kubeconfig}" wait managedcluster/"${cluster_name}" \
             --for=condition=HubAcceptedManagedCluster=True \
             --timeout=120s
-        kubectl --kubeconfig="${HUB_KUBECONFIG}" wait managedcluster/"${cluster_name}" \
+        kubectl --kubeconfig="${hub_kubeconfig}" wait managedcluster/"${cluster_name}" \
             --for=condition=ManagedClusterJoined=True \
-            --timeout=120s
-        kubectl --kubeconfig="${HUB_KUBECONFIG}" wait managedcluster/"${cluster_name}" \
+            --timeout=300s
+        kubectl --kubeconfig="${hub_kubeconfig}" wait managedcluster/"${cluster_name}" \
             --for=condition=ManagedClusterConditionAvailable=True \
-            --timeout=120s
+            --timeout=300s
         log "Cluster ${cluster_name} joined, accepted, and available"
     done
 
     log "Creating ManagedClusterSet: mesh-cluster-set"
-    kubectl --kubeconfig="${HUB_KUBECONFIG}" apply -f - <<'EOF'
+    kubectl --kubeconfig="${hub_kubeconfig}" apply -f - <<'EOF'
 apiVersion: cluster.open-cluster-management.io/v1beta2
 kind: ManagedClusterSet
 metadata:
@@ -288,7 +218,7 @@ EOF
 
     for cluster_name in "${CLUSTER1_NAME}" "${CLUSTER2_NAME}"; do
         log "Labeling ${cluster_name} with clusterset=mesh-cluster-set"
-        kubectl --kubeconfig="${HUB_KUBECONFIG}" label managedcluster "${cluster_name}" \
+        kubectl --kubeconfig="${hub_kubeconfig}" label managedcluster "${cluster_name}" \
             cluster.open-cluster-management.io/clusterset=mesh-cluster-set \
             --overwrite
     done
@@ -300,10 +230,7 @@ EOF
     # uses for platform detection.
     for cluster_name in "${CLUSTER1_NAME}" "${CLUSTER2_NAME}"; do
         local kubeconfig
-        case "${cluster_name}" in
-            "${CLUSTER1_NAME}") kubeconfig="${CLUSTER1_KUBECONFIG}" ;;
-            "${CLUSTER2_NAME}") kubeconfig="${CLUSTER2_KUBECONFIG}" ;;
-        esac
+        kubeconfig="$(kubeconfig_for "${cluster_name}")"
 
         log "Creating product ClusterClaim on ${cluster_name}"
         kubectl --kubeconfig="${kubeconfig}" apply -f - <<EOF
@@ -321,7 +248,7 @@ EOF
         local retries=0
         while [[ ${retries} -lt 30 ]]; do
             local claims
-            claims="$(kubectl --kubeconfig="${HUB_KUBECONFIG}" get managedcluster "${cluster_name}" \
+            claims="$(kubectl --kubeconfig="${hub_kubeconfig}" get managedcluster "${cluster_name}" \
                 -o jsonpath='{.status.clusterClaims[?(@.name=="product.open-cluster-management.io")].value}' 2>/dev/null || true)"
             if [[ -n "${claims}" ]]; then
                 log "Cluster ${cluster_name} product claim synced: ${claims}"
@@ -336,8 +263,8 @@ EOF
     done
 
     log "OCM topology ready"
-    kubectl --kubeconfig="${HUB_KUBECONFIG}" get managedclusters
-    kubectl --kubeconfig="${HUB_KUBECONFIG}" get managedclustersets
+    kubectl --kubeconfig="${hub_kubeconfig}" get managedclusters
+    kubectl --kubeconfig="${hub_kubeconfig}" get managedclustersets
 }
 
 clean() {
@@ -351,18 +278,16 @@ clean() {
 
     log "Removing dev environment state..."
     rm -rf "${DEV_KUBE_DIR}"
-    # rm -rf "${DEV_BIN_DIR}"
 
     log "Clean complete"
 }
 
 ACTION="${1:-}"
 case "${ACTION}" in
-    install-deps)    install_deps ;;
     create-clusters) create_clusters ;;
     install-olm)     install_olm ;;
     init-ocm)        init_ocm ;;
     join-clusters)   join_clusters ;;
     clean)           clean ;;
-    *)               err "Unknown action: '${ACTION}'. Valid: install-deps, create-clusters, install-olm, init-ocm, join-clusters, clean" ;;
+    *)               err "Unknown action: '${ACTION}'. Valid: create-clusters, install-olm, init-ocm, join-clusters, clean" ;;
 esac

@@ -186,46 +186,69 @@ CLUSTERADM_VERSION ?= v1.2.0
 K8S_VERSION ?= v1.30.0
 OLM_VERSION ?= v0.42.0
 
-DEV_BIN_DIR := $(CURDIR)/.bin
+OS := $(shell uname | tr '[:upper:]' '[:lower:]')
+ARCH := $(shell uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
+
 DEV_KUBE_DIR := $(CURDIR)/.kube
-
 HUB_KUBECONFIG := $(DEV_KUBE_DIR)/hub.config
-CLUSTER1_KUBECONFIG := $(DEV_KUBE_DIR)/cluster1.config
-CLUSTER2_KUBECONFIG := $(DEV_KUBE_DIR)/cluster2.config
 
-KIND := $(DEV_BIN_DIR)/kind
-CLUSTERADM := $(DEV_BIN_DIR)/clusteradm
+HUB_NAME := hub
+CLUSTER1_NAME := cluster1
+CLUSTER2_NAME := cluster2
+
+KIND := $(BIN_DIR)/kind
+CLUSTERADM := $(BIN_DIR)/clusteradm
+
+$(KIND): | $(BIN_DIR)
+	@if test -x $(KIND) && $(KIND) version 2>/dev/null | grep -q $(KIND_VERSION); then \
+		echo "kind $(KIND_VERSION) already installed"; \
+	else \
+		echo "Installing kind $(KIND_VERSION)..."; \
+		curl -sSL https://github.com/kubernetes-sigs/kind/releases/download/$(KIND_VERSION)/kind-$(OS)-$(ARCH) -o $(KIND); \
+		chmod +x $(KIND); \
+	fi
+
+$(CLUSTERADM): | $(BIN_DIR)
+	@ver="$$($(CLUSTERADM) version 2>/dev/null || true)"; \
+	if test -x $(CLUSTERADM) && echo "$$ver" | grep -q $(CLUSTERADM_VERSION); then \
+		echo "clusteradm $(CLUSTERADM_VERSION) already installed"; \
+	else \
+		echo "Installing clusteradm $(CLUSTERADM_VERSION)..."; \
+		tmp_dir=$$(mktemp -d); \
+		curl -sSL https://github.com/open-cluster-management-io/clusteradm/releases/download/$(CLUSTERADM_VERSION)/clusteradm_$(OS)_$(ARCH).tar.gz -o $$tmp_dir/clusteradm.tar.gz; \
+		tar xzf $$tmp_dir/clusteradm.tar.gz -C $$tmp_dir; \
+		mv $$tmp_dir/clusteradm $(CLUSTERADM); \
+		chmod +x $(CLUSTERADM); \
+		rm -rf $$tmp_dir; \
+	fi
 
 DEV_ENV_SCRIPT := $(CURDIR)/hack/dev-env.sh
-DEV_ENV_VARS := DEV_BIN_DIR=$(DEV_BIN_DIR) DEV_KUBE_DIR=$(DEV_KUBE_DIR) \
-	KIND_VERSION=$(KIND_VERSION) CLUSTERADM_VERSION=$(CLUSTERADM_VERSION) K8S_VERSION=$(K8S_VERSION) \
-	OLM_VERSION=$(OLM_VERSION)
+
+export DEV_KUBE_DIR K8S_VERSION OLM_VERSION
+export KIND CLUSTERADM
+export HUB_NAME CLUSTER1_NAME CLUSTER2_NAME
 
 .PHONY: dev-env
-dev-env: install-dev-deps create-clusters install-olm init-ocm join-clusters deploy-addon ## Provision full dev environment (Kind + OCM + addon)
-
-.PHONY: install-dev-deps
-install-dev-deps: ## Download kind and clusteradm to .bin/
-	$(DEV_ENV_VARS) $(DEV_ENV_SCRIPT) install-deps
+dev-env: $(KIND) $(CLUSTERADM) create-clusters install-olm init-ocm join-clusters deploy-addon ## Provision full dev environment (Kind + OCM + addon)
 
 .PHONY: create-clusters
-create-clusters: ## Create 3 Kind clusters (hub, cluster1, cluster2)
-	$(DEV_ENV_VARS) $(DEV_ENV_SCRIPT) create-clusters
+create-clusters: $(KIND) ## Create 3 Kind clusters (hub, cluster1, cluster2)
+	$(DEV_ENV_SCRIPT) create-clusters
 
 .PHONY: install-olm
 install-olm: ## Install OLM on managed clusters (cluster1, cluster2)
-	$(DEV_ENV_VARS) $(DEV_ENV_SCRIPT) install-olm
+	$(DEV_ENV_SCRIPT) install-olm
 
 .PHONY: init-ocm
-init-ocm: ## Initialize hub as OCM control plane
-	$(DEV_ENV_VARS) $(DEV_ENV_SCRIPT) init-ocm
+init-ocm: $(CLUSTERADM) ## Initialize hub as OCM control plane
+	$(DEV_ENV_SCRIPT) init-ocm
 
 .PHONY: join-clusters
-join-clusters: ## Register managed clusters and create ManagedClusterSet
-	$(DEV_ENV_VARS) $(DEV_ENV_SCRIPT) join-clusters
+join-clusters: $(CLUSTERADM) ## Register managed clusters and create ManagedClusterSet
+	$(DEV_ENV_SCRIPT) join-clusters
 
 .PHONY: deploy-addon
-deploy-addon: install-dev-deps images gen $(KUSTOMIZE) ## Build and deploy addon to the hub Kind cluster
+deploy-addon: $(KIND) images gen $(KUSTOMIZE) ## Build and deploy addon to the hub Kind cluster
 	# We use image-archive instead of docker-image because the latter is Docker-specific
 	# and fails when images are built with Podman (separate image stores).
 	$(CONTAINER_ENGINE) save $(IMG) -o $(DEV_KUBE_DIR)/.addon-image.tar
@@ -241,4 +264,4 @@ deploy-addon: install-dev-deps images gen $(KUSTOMIZE) ## Build and deploy addon
 
 .PHONY: dev-clean
 dev-clean: ## Destroy dev clusters and remove .kube/ folder
-	$(DEV_ENV_VARS) $(DEV_ENV_SCRIPT) clean
+	$(DEV_ENV_SCRIPT) clean

@@ -21,5 +21,4 @@ config/crd
 test/integration/crds/
 
 # Dev environment (make dev-env)
-.bin/
 .kube/
