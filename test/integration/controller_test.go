@@ -306,6 +306,15 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 				expectAllManifestWorksDeleted()
 			})
 
+			It("should recreate ManifestWork when it is externally deleted", func() {
+				work := expectOperatorManifestWork(clusterName)
+				originalUID := work.UID
+				Expect(k8sClient.Delete(ctx, work)).To(Succeed())
+				Eventually(func() types.UID {
+					return expectOperatorManifestWork(clusterName).UID
+				}).ShouldNot(Equal(originalUID))
+			})
+
 			When("moving the cluster between sets", func() {
 				var otherClusterSet string
 
