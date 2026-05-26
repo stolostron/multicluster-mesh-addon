@@ -1,0 +1,10 @@
+# Example cert-manager Issuer to use with MultiClusterMesh
+# This must be created in the same namespace as the MultiClusterMesh resource
+
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: mesh-root-ca
+  namespace: mesh-system
+spec:
+  selfSigned: {}

@@ -106,35 +106,37 @@ kubectl create namespace multicluster-mesh-system
 
 ### Usage
 
-Create a namespace to host your multi cluster mesh resources.
-Inside the namespace, create an `Issuer` resource that will act as the Root CA.
+#### Quick Start
 
-Create a `MultiClusterMesh` resource on the hub cluster:
-
-```yaml
-apiVersion: mesh.open-cluster-management.io/v1alpha1
-kind: MultiClusterMesh
-metadata:
-  name: prod-mesh
-  namespace: mesh-ns
-spec:
-  clusterSet: finance-prod
-  controlPlane:
-    namespace: istio-system
-  operator:
-    channel: "stable"
-    source: redhat-operators
-  security:
-    trust:
-      certManager:
-        issuerRef:
-          name: mesh-root-issuer
-    discovery:
-      tokenValidity: "1w"
+1. Create a namespace for your mesh resources:
+```bash
+kubectl create namespace mesh-system
 ```
 
+2. Create a cert-manager Issuer to act as the Root CA:
+```bash
+kubectl apply -f samples/cert-manager-issuer.yaml
+```
+
+3. Deploy a basic MultiClusterMesh:
+```bash
+kubectl apply -f samples/basic.yaml
+```
+
+> **Note:** All samples use `clusterSet: default` as the ManagedClusterSet reference. Update this field to match your actual ManagedClusterSet name as needed.
+
+For more configuration options, see the [samples](./samples/) directory:
+
+- **[basic.yaml](./samples/basic.yaml)** - Minimal configuration using defaults
+- **[complete.yaml](./samples/complete.yaml)** - All available fields with documentation
+- **[openshift.yaml](./samples/openshift.yaml)** - OpenShift-specific configuration
+- **[pinned-version.yaml](./samples/pinned-version.yaml)** - Version pinning with manual approval
+- **[cert-manager-issuer.yaml](./samples/cert-manager-issuer.yaml)** - Example cert-manager Issuer setup
+
+#### What the Addon Does
+
 The addon will:
-1. Install the Sail Operator on all clusters in the `finance-prod` ManagedClusterSet
+1. Install the Sail Operator on all clusters in the referenced ManagedClusterSet
 2. Generate and distribute intermediate CA certificates to establish trust
 3. Exchange discovery tokens between clusters for endpoint resolution
 4. Manage automatic rotation of certificates and tokens
