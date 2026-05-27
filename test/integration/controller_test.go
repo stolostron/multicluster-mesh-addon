@@ -98,6 +98,10 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 
 			Expect(work1.Labels[meshcontroller.ManagedByLabel]).To(Equal(meshcontroller.ManagedByValue))
 			Expect(work2.Labels[meshcontroller.ManagedByLabel]).To(Equal(meshcontroller.ManagedByValue))
+
+			expectMeshNotReady(meshName, testNs)
+			expectClusterOperatorConditionReason(meshName, testNs, cluster1, meshv1alpha1.ReasonManifestWorkCreated)
+			expectClusterOperatorConditionReason(meshName, testNs, cluster2, meshv1alpha1.ReasonManifestWorkCreated)
 		})
 
 		It("should use custom operator configuration on K8s when specified", func() {
@@ -175,12 +179,15 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 
 			It("should not create ManifestWorks", func() {
 				expectNoManifestWorks()
+				expectMeshNotReady(meshName, testNs)
 			})
 
 			It("should reconcile when the ClusterSet is created", func() {
 				util.CreateK8sManagedCluster(ctx, k8sClient, clusterName, otherClusterSet)
 				util.CreateManagedClusterSet(ctx, k8sClient, otherClusterSet)
 				expectOperatorManifestWork(clusterName)
+				expectMeshNotReady(meshName, testNs)
+				expectClusterOperatorConditionReason(meshName, testNs, clusterName, meshv1alpha1.ReasonManifestWorkCreated)
 			})
 		})
 
@@ -192,16 +199,20 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 
 			It("should not process it", func() {
 				expectNoManifestWorks()
+				expectMeshNotReady(meshName, testNs)
 			})
 
 			It("shouldn't process a cluster without clusterset label", func() {
 				util.CreateK8sManagedCluster(ctx, k8sClient, clusterName, "")
 				expectNoManifestWorks()
+				expectMeshNotReady(meshName, testNs)
 			})
 
 			It("should process a cluster when it's added", func() {
 				util.CreateK8sManagedCluster(ctx, k8sClient, clusterName, testClusterSet)
 				expectOperatorManifestWork(clusterName)
+				expectMeshNotReady(meshName, testNs)
+				expectClusterOperatorConditionReason(meshName, testNs, clusterName, meshv1alpha1.ReasonManifestWorkCreated)
 			})
 		})
 
@@ -212,13 +223,16 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 				awaitReconcileFinished()
 			})
 
-			It("should skip it", func() {
+			It("should skip it and report missing product claim", func() {
 				expectNoManifestWorks()
+				expectMeshNotReady(meshName, testNs)
+				expectClusterOperatorConditionReason(meshName, testNs, clusterName, meshv1alpha1.ReasonMissingProductClaim)
 			})
 
 			It("should process it when a claim is set", func() {
 				util.SetProductClaim(ctx, k8sClient, clusterName, "Other")
 				expectOperatorManifestWork(clusterName)
+				expectClusterOperatorConditionReason(meshName, testNs, clusterName, meshv1alpha1.ReasonManifestWorkCreated)
 			})
 		})
 
@@ -237,16 +251,19 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 			It("should cleanup ManifestWork when the cluster is removed from ClusterSet", func() {
 				updateClusterSetLabel(clusterName, "")
 				expectAllManifestWorksDeleted()
+				expectNoClusterStatus(meshName, testNs, clusterName)
 			})
 
 			It("should cleanup ManifestWork when the cluster is deleted", func() {
 				util.DeleteResource(ctx, k8sClient, &clusterv1.ManagedCluster{}, clusterName, "")
 				expectAllManifestWorksDeleted()
+				expectNoClusterStatus(meshName, testNs, clusterName)
 			})
 
 			It("should cleanup ManifestWork when the ClusterSet is deleted", func() {
 				util.DeleteResource(ctx, k8sClient, &clusterv1beta2.ManagedClusterSet{}, testClusterSet, "")
 				expectAllManifestWorksDeleted()
+				expectNoClusterStatus(meshName, testNs, clusterName)
 			})
 
 			It("should recreate ManifestWork when it is externally deleted", func() {
@@ -270,6 +287,7 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 				It("should cleanup ManifestWork when no mesh targets the new set", func() {
 					updateClusterSetLabel(clusterName, otherClusterSet)
 					expectAllManifestWorksDeleted()
+					expectNoClusterStatus(meshName, testNs, clusterName)
 				})
 
 				It("should keep ManifestWork when another mesh targets the new set", func() {
@@ -281,6 +299,8 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 					awaitReconcileFinished()
 
 					expectOperatorManifestWork(clusterName)
+					expectNoClusterStatus(meshName, testNs, clusterName)
+					expectClusterOperatorConditionReason(otherMesh, testNs, clusterName, meshv1alpha1.ReasonManifestWorkCreated)
 				})
 			})
 
@@ -626,4 +646,53 @@ func expectSubscription(work *workv1.ManifestWork, index int, isOCP bool, expect
 	Expect(sub.Spec.CatalogSourceNamespace).To(Equal(expectedCatalogSourceNamespace))
 	Expect(sub.Spec.Channel).To(Equal(expectedChannel))
 	Expect(sub.Spec.InstallPlanApproval).To(Equal(expectedInstallPlanApproval))
+}
+
+func expectMeshNotReady(meshName, namespace string) {
+	Eventually(func() metav1.ConditionStatus {
+		mesh := &meshv1alpha1.MultiClusterMesh{}
+		if err := k8sClient.Get(ctx, types.NamespacedName{Name: meshName, Namespace: namespace}, mesh); err != nil {
+			return ""
+		}
+		for _, c := range mesh.Status.Conditions {
+			if c.Type == meshv1alpha1.ConditionReady {
+				return c.Status
+			}
+		}
+		return ""
+	}).Should(Equal(metav1.ConditionFalse))
+}
+
+func expectClusterOperatorConditionReason(meshName, namespace, clusterName, reason string) {
+	Eventually(func() string {
+		mesh := &meshv1alpha1.MultiClusterMesh{}
+		if err := k8sClient.Get(ctx, types.NamespacedName{Name: meshName, Namespace: namespace}, mesh); err != nil {
+			return ""
+		}
+		for _, cs := range mesh.Status.ClusterStatus {
+			if cs.ClusterName == clusterName {
+				for _, c := range cs.Conditions {
+					if c.Type == meshv1alpha1.ConditionOperatorInstalled {
+						return c.Reason
+					}
+				}
+			}
+		}
+		return ""
+	}).Should(Equal(reason))
+}
+
+func expectNoClusterStatus(meshName, namespace, clusterName string) {
+	Eventually(func() bool {
+		mesh := &meshv1alpha1.MultiClusterMesh{}
+		if err := k8sClient.Get(ctx, types.NamespacedName{Name: meshName, Namespace: namespace}, mesh); err != nil {
+			return false
+		}
+		for _, cs := range mesh.Status.ClusterStatus {
+			if cs.ClusterName == clusterName {
+				return false
+			}
+		}
+		return true
+	}).Should(BeTrue())
 }
