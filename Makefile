@@ -132,6 +132,7 @@ update-test-crds: ## Update test CRDs from OCM API and cert-manager dependencies
 	mkdir -p $(TEST_CRD_DIR)/ocm; \
 	echo "Copying CRDs from $$OCP_MSA_PATH..."; \
 	cp -v $$OCP_MSA_PATH/charts/managed-serviceaccount/crds/*.yaml $(TEST_CRD_DIR)/ocm/ 2>/dev/null || true; \
+	echo "Test CRDs updated successfully in $(TEST_CRD_DIR)/ocm/"
 	@echo "Updating test CRDs from cert-manager..."
 	@CERTMANAGER_PATH=$$(go list -m -f '{{.Dir}}' github.com/cert-manager/cert-manager 2>/dev/null); \
 	if [ -z "$$CERTMANAGER_PATH" ]; then \

@@ -123,10 +123,9 @@ type IssuerReference struct {
 // DiscoveryConfig defines endpoint discovery token configuration
 type DiscoveryConfig struct {
 	// TokenValidity defines how long discovery tokens are valid
-	// Supports hours (h), days (d), weeks (w), or months (m)
-	// It is a wrapper around time.Duration which supports correct marshaling to YAML and JSON
+	// Supports hours (h), minutes (m), or seconds (s)
 	// +optional
-	// +kubebuilder:default="15d"
+	// +kubebuilder:default="360h"
 	TokenValidity metav1.Duration `json:"tokenValidity,omitempty"`
 }
 

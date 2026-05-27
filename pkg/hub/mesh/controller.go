@@ -3,7 +3,6 @@ package mesh
 import (
 	"context"
 	"fmt"
-	"reflect"
 	"slices"
 	"strings"
 	"time"
@@ -15,9 +14,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/klog/v2"
 	clusterv1 "open-cluster-management.io/api/cluster/v1"
@@ -33,8 +30,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	meshv1alpha1 "github.com/stolostron/multicluster-mesh-addon/pkg/apis/mesh/v1alpha1"
-	"github.com/stolostron/multicluster-mesh-addon/pkg/util"
-	msav1beta1 "open-cluster-management.io/managed-serviceaccount/apis/authentication/v1beta1"
 )
 
 const (
@@ -51,8 +46,9 @@ const (
 
 	DefaultChannel = "stable"
 
-	OperatorManifestWorkName = "multicluster-mesh-operator"
-	ManifestWorkNameCacerts  = "multicluster-mesh-cacerts"
+	OperatorManifestWorkName   = "multicluster-mesh-operator"
+	ManifestWorkNameCacerts    = "multicluster-mesh-cacerts"
+	ManifestWorkNameMsaSecrets = "multicluster-mesh-msa-secrets"
 
 	CacertsSecretName = "cacerts"
 
@@ -196,30 +192,20 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		}
 	}
 
-	if err := r.cleanupOperatorManifestWorks(ctx); err != nil {
-		klog.Errorf("Failed to cleanup operator ManifestWorks: %v", err)
+	// Create ManagedServiceAccount resources for each cluster
+	if err := r.createManagedServiceAccounts(ctx, mesh, clusters); err != nil {
+		klog.Errorf("Failed to create ManagedServiceAccount resources: %v", err)
 		return reconcile.Result{}, err
 	}
 
-	// Create ManagedServiceAccount resources for each managed cluster
-	msaList := &unstructured.UnstructuredList{}
-	msaList.SetGroupVersionKind(schema.GroupVersionKind{
-		Group:   "authentication.open-cluster-management.io",
-		Kind:    "ManagedServiceAccount",
-		Version: "v1beta1",
-	})
+	if err := r.ensureMsaSecretsDistributed(ctx, mesh, clusters); err != nil {
+		klog.Errorf("Failed to distribute ManagedServiceAccount secrets: %v", err)
+		return reconcile.Result{}, err
+	}
 
-	for _, cluster := range clusters {
-		existing := &msav1beta1.ManagedServiceAccount{}
-		msaName := fmt.Sprintf("%s-%s-istio-reader", cluster.Name, mesh.Name)
-    if err := r.Get(ctx, types.NamespacedName{Name: msaName, Namespace: cluster.Name}, existing); err == nil {
-			klog.Infof("Cluster %s has an existing ManagedServiceAccount resource %s, skipping createManagedServiceAccount", cluster.Name, msaName)
-		} else {
-			if err := r.createManagedServiceAccount(ctx, cluster, mesh); err != nil {
-				klog.Errorf("Failed to create a ManagedServiceAccount for cluster %s: %v", cluster.Name, err)
-				return reconcile.Result{}, err
-			}
-		}
+	if err := r.cleanupOperatorManifestWorks(ctx); err != nil {
+		klog.Errorf("Failed to cleanup operator ManifestWorks: %v", err)
+		return reconcile.Result{}, err
 	}
 
 	klog.Infof("Successfully reconciled MultiClusterMesh %s/%s", mesh.Namespace, mesh.Name)
@@ -298,6 +284,11 @@ func (r *Reconciler) handleDeletion(ctx context.Context, mesh *meshv1alpha1.Mult
 	klog.Infof("Handling deletion for MultiClusterMesh %s/%s", mesh.Namespace, mesh.Name)
 	if err := r.cleanupOperatorManifestWorks(ctx); err != nil {
 		return reconcile.Result{}, fmt.Errorf("failed to cleanup operator ManifestWorks: %w", err)
+	}
+
+	klog.Infof("Handling deletion for ManagedServiceAccount resources managed mesh %s/%s", mesh.Namespace, mesh.Name)
+	if err := r.deleteManagedServiceAccounts(ctx); err != nil {
+		return reconcile.Result{}, fmt.Errorf("failed to cleanup ManagedServiceAccount resources: %w", err)
 	}
 
 	klog.Infof("Removing finalizer from MultiClusterMesh %s/%s", mesh.Namespace, mesh.Name)
@@ -656,111 +647,11 @@ func (r *Reconciler) ensureCertificateForCluster(ctx context.Context, mesh *mesh
 // ensureCacertsDistributed creates ManifestWorks to distribute cacerts secrets to clusters
 func (r *Reconciler) ensureCacertsDistributed(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, clusters []clusterv1.ManagedCluster) error {
 	for _, cluster := range clusters {
-		if err := r.ensureCacertsManifestWork(ctx, mesh, &cluster); err != nil {
+		secretName := getCacertsName(cluster.Name)
+		if err := r.ensureSecretManifestWork(ctx, secretName, mesh, &cluster); err != nil {
 			return fmt.Errorf("failed to ensure cacerts ManifestWork for cluster %s: %w", cluster.Name, err)
 		}
 	}
-	return nil
-}
-
-// ensureCacertsManifestWork creates a ManifestWork to distribute the cacerts secret to a cluster
-func (r *Reconciler) ensureCacertsManifestWork(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, cluster *clusterv1.ManagedCluster) error {
-	secretName := getCacertsName(cluster.Name)
-	secret := &corev1.Secret{}
-	err := r.Get(ctx, types.NamespacedName{
-		Name:      secretName,
-		Namespace: mesh.Namespace,
-	}, secret)
-
-	if err != nil {
-		if errors.IsNotFound(err) {
-			klog.V(4).Infof("Secret %s/%s not found yet, waiting for cert-manager to create it", mesh.Namespace, secretName)
-			return nil
-		}
-		return fmt.Errorf("failed to get secret: %w", err)
-	}
-
-	existingWork := &workv1.ManifestWork{}
-	err = r.Get(ctx, types.NamespacedName{
-		Name:      ManifestWorkNameCacerts,
-		Namespace: cluster.Name,
-	}, existingWork)
-
-	if err == nil {
-		klog.V(4).Infof("ManifestWork %s/%s already exists, checking if update is needed", cluster.Name, ManifestWorkNameCacerts)
-		return r.updateCacertsManifestWorkIfNeeded(ctx, mesh, existingWork, secret)
-	}
-
-	if !errors.IsNotFound(err) {
-		return fmt.Errorf("failed to get ManifestWork: %w", err)
-	}
-
-	klog.Infof("Creating ManifestWork %s/%s to distribute cacerts secret", cluster.Name, ManifestWorkNameCacerts)
-
-	work := r.buildCacertsManifestWork(mesh, cluster.Name, secret)
-
-	if err := r.Create(ctx, work); err != nil {
-		return fmt.Errorf("failed to create ManifestWork: %w", err)
-	}
-
-	klog.Infof("Successfully created ManifestWork %s/%s", cluster.Name, ManifestWorkNameCacerts)
-	return nil
-}
-
-// buildCacertsManifestWork builds a ManifestWork for distributing the cacerts secret
-func (r *Reconciler) buildCacertsManifestWork(mesh *meshv1alpha1.MultiClusterMesh, clusterName string, secret *corev1.Secret) *workv1.ManifestWork {
-	cacertsSecret := &corev1.Secret{
-		TypeMeta: metav1.TypeMeta{
-			APIVersion: "v1",
-			Kind:       "Secret",
-		},
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      CacertsSecretName,
-			Namespace: mesh.GetControlPlaneNamespace(),
-		},
-		Type: corev1.SecretTypeTLS,
-		Data: secret.Data,
-	}
-
-	return &workv1.ManifestWork{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      ManifestWorkNameCacerts,
-			Namespace: clusterName,
-			Labels:    meshOwnedLabels(mesh, clusterName),
-		},
-		Spec: workv1.ManifestWorkSpec{
-			Workload: workv1.ManifestsTemplate{
-				Manifests: []workv1.Manifest{{
-					RawExtension: runtime.RawExtension{Object: cacertsSecret},
-				}},
-			},
-		},
-	}
-}
-
-// updateCacertsManifestWorkIfNeeded updates the ManifestWork if the secret data has changed
-func (r *Reconciler) updateCacertsManifestWorkIfNeeded(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, work *workv1.ManifestWork, secret *corev1.Secret) error {
-	existingSecret := &corev1.Secret{}
-	if err := util.UnmarshalManifest(work.Spec.Workload.Manifests[0], existingSecret); err != nil {
-		return fmt.Errorf("failed to unmarshal existing manifest: %w", err)
-	}
-
-	if reflect.DeepEqual(existingSecret.Data, secret.Data) {
-		klog.V(4).Infof("ManifestWork %s/%s is up to date, no changes needed", work.Namespace, work.Name)
-		return nil
-	}
-
-	newWork := r.buildCacertsManifestWork(mesh, work.Namespace, secret)
-
-	work.Spec = newWork.Spec
-	// TODO: handle label reconciliation
-	work.Labels = newWork.Labels
-
-	if err := r.Update(ctx, work); err != nil {
-		return fmt.Errorf("failed to update ManifestWork: %w", err)
-	}
-
-	klog.V(4).Infof("Updated ManifestWork %s/%s", work.Namespace, work.Name)
 	return nil
 }
 
@@ -772,30 +663,3 @@ func meshOwnedLabels(mesh *meshv1alpha1.MultiClusterMesh, clusterName string) ma
 		ClusterNameLabel:   clusterName,
 	}
 }
-
-// createManagedServiceAccount creates a ManagedServiceAccount resource for a cluster in the ClusterSet
-func (r *Reconciler) createManagedServiceAccount(ctx context.Context, cluster clusterv1.ManagedCluster, mesh *meshv1alpha1.MultiClusterMesh) error {
-	klog.Infof("Creating a ManagedServiceAccount for a managed cluster: %s", cluster.Name)
-
-	msa := &msav1beta1.ManagedServiceAccount{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      fmt.Sprintf("%s-%s-istio-reader", cluster.Name, mesh.Name), // Naming convention: <cluster-name>-<mesh-name>-istio-reader
-			Namespace: cluster.Name,
-			Labels:    map[string]string{ManagedByLabel: ManagedByValue},
-		},
-		Spec: msav1beta1.ManagedServiceAccountSpec{
-			Rotation: msav1beta1.ManagedServiceAccountRotation{
-				Enabled: true, // the ServiceAccount token will be rotated before it expires
-				Validity: mesh.Spec.Security.Discovery.TokenValidity,
-			},
-		},
-	}
-
-	if err := r.Create(ctx, msa); err != nil {
-		return fmt.Errorf("failed to create a ManagedServiceAccount: %w", err)
-	}
-	klog.Infof("Successfully created a ManagedServiceAccount %s in namespace: %s", msa.ObjectMeta.Name, msa.ObjectMeta.Namespace)
-	return nil
-}
-
-// TODO: Implement DeleteManagedServiceAccount and UpdateManagedServiceAccount methods

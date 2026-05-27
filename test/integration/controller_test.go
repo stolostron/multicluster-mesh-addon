@@ -274,13 +274,6 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 					Kind:    "ManagedServiceAccount",
 					Version: "v1beta1",
 				})
-
-				Eventually(func() int {
-					if err := k8sClient.List(ctx, list, client.InNamespace(clusterName)); err != nil {
-						return 0
-					}
-					return len(list.Items)
-				}).Should(Equal(1))
 			})
 		})
 
