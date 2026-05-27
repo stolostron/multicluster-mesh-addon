@@ -276,7 +276,7 @@ func (r *Reconciler) findMeshesForClusterSet(ctx context.Context, obj client.Obj
 func (r *Reconciler) findMeshesForManifestWork(ctx context.Context, obj client.Object) []reconcile.Request {
 	cluster := &clusterv1.ManagedCluster{}
 	if err := r.Get(ctx, types.NamespacedName{Name: obj.GetNamespace()}, cluster); err != nil {
-		if !errors.IsNotFound(err) {
+		if !apierrors.IsNotFound(err) {
 			klog.Errorf("Failed to get ManagedCluster %s for ManifestWork %s: %v", obj.GetNamespace(), obj.GetName(), err)
 		}
 		return nil
