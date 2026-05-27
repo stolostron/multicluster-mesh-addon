@@ -15,6 +15,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	clusterv1 "open-cluster-management.io/api/cluster/v1"
 	clusterv1beta2 "open-cluster-management.io/api/cluster/v1beta2"
@@ -228,10 +229,69 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 		})
 
 		When("referencing a set with a cluster", func() {
+			var work *workv1.ManifestWork
+
 			BeforeEach(func() {
 				util.CreateK8sManagedCluster(ctx, k8sClient, clusterName, testClusterSet)
 				util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet, meshv1alpha1.OperatorConfig{})
-				expectOperatorManifestWork(clusterName)
+				work = expectOperatorManifestWork(clusterName)
+			})
+
+			It("should not update ManifestWork when nothing changed", func() {
+				originalVersion := work.ResourceVersion
+
+				mesh := &meshv1alpha1.MultiClusterMesh{}
+				Expect(k8sClient.Get(ctx, types.NamespacedName{Name: meshName, Namespace: testNs}, mesh)).To(Succeed())
+				Expect(k8sClient.Update(ctx, mesh)).To(Succeed())
+				awaitReconcileFinished()
+
+				work = expectOperatorManifestWork(clusterName)
+				Expect(work.ResourceVersion).To(Equal(originalVersion))
+			})
+
+			It("should update ManifestWork when operator config changes", func() {
+				mesh := &meshv1alpha1.MultiClusterMesh{}
+				Expect(k8sClient.Get(ctx, types.NamespacedName{Name: meshName, Namespace: testNs}, mesh)).To(Succeed())
+				mesh.Spec.Operator.Channel = "tech-preview"
+				Expect(k8sClient.Update(ctx, mesh)).To(Succeed())
+
+				Eventually(func() string {
+					work := expectOperatorManifestWork(clusterName)
+					sub := &operatorsv1alpha1.Subscription{}
+					Expect(unmarshalManifest(work.Spec.Workload.Manifests[2], sub)).To(Succeed())
+					return sub.Spec.Channel
+				}).Should(Equal("tech-preview"))
+			})
+
+			It("should restore ManifestWork spec when externally modified", func() {
+				sub := &operatorsv1alpha1.Subscription{}
+				Expect(unmarshalManifest(work.Spec.Workload.Manifests[2], sub)).To(Succeed())
+				originalChannel := sub.Spec.Channel
+
+				sub.Spec.Channel = "tampered"
+				work.Spec.Workload.Manifests[2] = workv1.Manifest{
+					RawExtension: runtime.RawExtension{Object: sub},
+				}
+				Expect(k8sClient.Update(ctx, work)).To(Succeed())
+
+				Eventually(func() string {
+					work := expectOperatorManifestWork(clusterName)
+					sub := &operatorsv1alpha1.Subscription{}
+					Expect(unmarshalManifest(work.Spec.Workload.Manifests[2], sub)).To(Succeed())
+					return sub.Spec.Channel
+				}).Should(Equal(originalChannel))
+			})
+
+			// TODO(mkolesnik): Enable once sdk-go WorkApplier cache fix is released
+			// https://github.com/open-cluster-management-io/sdk-go/issues/223
+			PIt("should restore ManifestWork labels when externally modified", func() {
+				work.Labels[meshcontroller.ManagedByLabel] = "someone-else"
+				Expect(k8sClient.Update(ctx, work)).To(Succeed())
+
+				Eventually(func() string {
+					work := expectOperatorManifestWork(clusterName)
+					return work.Labels[meshcontroller.ManagedByLabel]
+				}).Should(Equal(meshcontroller.ManagedByValue))
 			})
 
 			It("should cleanup ManifestWork when the cluster is removed from ClusterSet", func() {
