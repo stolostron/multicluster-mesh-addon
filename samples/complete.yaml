@@ -1,0 +1,53 @@
+apiVersion: mesh.open-cluster-management.io/v1alpha1
+kind: MultiClusterMesh
+metadata:
+  name: complete-mesh
+  namespace: mesh-system
+spec:
+  # Reference to the ManagedClusterSet that defines which clusters participate in the mesh
+  # NOTE: Update this to match your ManagedClusterSet name
+  clusterSet: default
+
+  # Control plane configuration
+  controlPlane:
+    # Namespace where Istio will be installed on each cluster
+    namespace: istio-system
+
+  # Sail Operator installation configuration
+  operator:
+    # Namespace where the Sail Operator will be installed
+    # Defaults to "openshift-operators" on OpenShift, "sail-operator" on vanilla Kubernetes
+    namespace: sail-operator
+
+    # OLM subscription channel
+    channel: stable
+
+    # CatalogSource name
+    # Defaults to "redhat-operators" on OpenShift, "operatorhubio-catalog" on vanilla Kubernetes
+    source: operatorhubio-catalog
+
+    # CatalogSource namespace
+    # Defaults to "openshift-marketplace" on OpenShift, "olm" on vanilla Kubernetes
+    sourceNamespace: olm
+
+    # Specific operator version (optional - pins to a specific CSV)
+    # startingCSV: sail-operator.v1.23.0
+
+    # Install plan approval strategy
+    installPlanApproval: Automatic
+
+  # Security configuration for trust and discovery
+  security:
+    # mTLS trust configuration using cert-manager
+    trust:
+      certManager:
+        issuerRef:
+          # Name of the cert-manager Issuer to use as Root CA
+          # This Issuer must exist in the same namespace as the MultiClusterMesh
+          name: mesh-root-ca
+
+    # Endpoint discovery token configuration
+    discovery:
+      # How long discovery tokens remain valid
+      # Supports: hours (h), days (d), weeks (w), months (m)
+      tokenValidity: 1m
