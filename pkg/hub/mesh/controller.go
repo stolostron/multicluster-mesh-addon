@@ -265,8 +265,8 @@ func (r *Reconciler) doReconcile(ctx context.Context, mesh *meshv1alpha1.MultiCl
 		}
 	}
 
-	if err := r.cleanupOperatorManifestWorks(ctx); err != nil {
-		return reconcile.Result{}, fmt.Errorf("failed to cleanup operator ManifestWorks: %w", err)
+	if err := r.cleanupManifestWorks(ctx); err != nil {
+		return reconcile.Result{}, fmt.Errorf("failed to cleanup ManifestWorks: %w", err)
 	}
 
 	return reconcile.Result{}, nil
@@ -342,8 +342,8 @@ func (r *Reconciler) handleDeletion(ctx context.Context, mesh *meshv1alpha1.Mult
 	}
 
 	klog.Infof("Handling deletion for MultiClusterMesh %s/%s", mesh.Namespace, mesh.Name)
-	if err := r.cleanupOperatorManifestWorks(ctx); err != nil {
-		return reconcile.Result{}, fmt.Errorf("failed to cleanup operator ManifestWorks: %w", err)
+	if err := r.cleanupManifestWorks(ctx); err != nil {
+		return reconcile.Result{}, fmt.Errorf("failed to cleanup ManifestWorks: %w", err)
 	}
 
 	// Trigger reconciliation for other meshes targeting the same cluster set.
@@ -392,8 +392,8 @@ func (r *Reconciler) ensureOperatorInstalled(ctx context.Context, mesh *meshv1al
 	return reconcile.Result{}, nil
 }
 
-// cleanupOperatorManifestWorks deletes operator ManifestWorks on clusters that no mesh needs anymore.
-func (r *Reconciler) cleanupOperatorManifestWorks(ctx context.Context) error {
+// cleanupManifestWorks deletes ManifestWorks on clusters that no mesh needs anymore.
+func (r *Reconciler) cleanupManifestWorks(ctx context.Context) error {
 	neededClusters, err := r.getClustersNeededByAnyMesh(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to determine needed clusters: %w", err)
@@ -401,7 +401,7 @@ func (r *Reconciler) cleanupOperatorManifestWorks(ctx context.Context) error {
 
 	workList := &workv1.ManifestWorkList{}
 	if err := r.List(ctx, workList, client.MatchingLabels{ManagedByLabel: ManagedByValue}); err != nil {
-		return fmt.Errorf("failed to list operator ManifestWorks: %w", err)
+		return fmt.Errorf("failed to list ManifestWorks: %w", err)
 	}
 
 	for _, work := range workList.Items {
@@ -409,9 +409,9 @@ func (r *Reconciler) cleanupOperatorManifestWorks(ctx context.Context) error {
 			continue
 		}
 
-		klog.Infof("Deleting operator ManifestWork %s/%s (no mesh targets this cluster)", work.Namespace, work.Name)
+		klog.Infof("Deleting ManifestWork %s/%s (no mesh targets this cluster)", work.Namespace, work.Name)
 		if err := r.Delete(ctx, &work); err != nil && !apierrors.IsNotFound(err) {
-			return fmt.Errorf("failed to delete operator ManifestWork %s/%s: %w", work.Namespace, work.Name, err)
+			return fmt.Errorf("failed to delete ManifestWork %s/%s: %w", work.Namespace, work.Name, err)
 		}
 	}
 
