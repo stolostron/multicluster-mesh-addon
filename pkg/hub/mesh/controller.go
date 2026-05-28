@@ -2,7 +2,9 @@ package mesh
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"reflect"
 	"slices"
 	"strings"
 	"time"
@@ -12,7 +14,8 @@ import (
 	operatorsv1 "github.com/operator-framework/api/pkg/operators/v1"
 	operatorsv1alpha1 "github.com/operator-framework/api/pkg/operators/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -148,7 +151,7 @@ func RegisterController(mgr manager.Manager) error {
 //+kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
 
 // Reconcile implements the reconcile loop for MultiClusterMesh resources
-func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
+func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (result reconcile.Result, reconcileErr error) {
 	klog.Infof("Reconciling MultiClusterMesh: %s/%s", req.Namespace, req.Name)
 
 	// Fetch the MultiClusterMesh resource
@@ -169,20 +172,92 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		if err := r.Update(ctx, mesh); err != nil {
 			return reconcile.Result{}, fmt.Errorf("failed to add finalizer: %w", err)
 		}
-		return reconcile.Result{}, nil
+		return
 	}
 
-	klog.Infof("MultiClusterMesh reconciling: %s/%s, ClusterSet: %s",
-		req.Namespace, req.Name, mesh.Spec.ClusterSet)
-	clusters, err := r.getClustersFromSet(ctx, mesh.Spec.ClusterSet)
-	if err != nil {
-		klog.Errorf("Failed to get clusters from set %s: %v", mesh.Spec.ClusterSet, err)
-		return reconcile.Result{}, err
+	// Copy the status so we can avoid updating it in case nothing changed.
+	oldStatus := mesh.Status.DeepCopy()
+
+	var invalidCondition *metav1.Condition
+	if invalidCondition, reconcileErr = r.validate(ctx, mesh); reconcileErr != nil {
+		r.setErrorStatus(mesh, reconcileErr)
+	} else if invalidCondition != nil {
+		meta.SetStatusCondition(&mesh.Status.Conditions, *invalidCondition)
+	} else {
+		clusters, err := r.getClustersFromSet(ctx, mesh.Spec.ClusterSet)
+		if err != nil {
+			reconcileErr = fmt.Errorf("failed to get clusters from set %s: %w", mesh.Spec.ClusterSet, err)
+		} else {
+			result, reconcileErr = r.doReconcile(ctx, mesh, clusters)
+		}
+
+		if reconcileErr == nil {
+			klog.Infof("Successfully reconciled MultiClusterMesh %s/%s", mesh.Namespace, mesh.Name)
+			reconcileErr = r.determineStatus(ctx, mesh, clusters)
+		}
+
+		if reconcileErr != nil {
+			klog.Errorf("Encountered an error while reconciling MultiClusterMesh %s/%s: %v", mesh.Namespace, mesh.Name, reconcileErr)
+			r.setErrorStatus(mesh, reconcileErr)
+		}
 	}
 
-	klog.Infof("Found %d clusters in set %s", len(clusters), mesh.Spec.ClusterSet)
+	// Update status only if something changed, to avoid unnecessary reconciliations
+	var statusErr error
+	if !reflect.DeepEqual(oldStatus, &mesh.Status) {
+		statusErr = r.Status().Update(ctx, mesh)
+	}
 
+	return result, errors.Join(reconcileErr, statusErr)
+}
+
+// validate checks for conflicts that prevent reconciliation.
+// Returns a condition to set on the mesh if validation fails, or nil if ok.
+func (r *Reconciler) validate(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh) (*metav1.Condition, error) {
+	meshList := &meshv1alpha1.MultiClusterMeshList{}
+	if err := r.List(ctx, meshList, client.MatchingFields{"spec.clusterSet": mesh.Spec.ClusterSet}); err != nil {
+		return nil, fmt.Errorf("failed to validate: %w", err)
+	}
+
+	for _, other := range meshList.Items {
+		if other.UID == mesh.UID {
+			continue
+		}
+		if !other.DeletionTimestamp.IsZero() {
+			continue
+		}
+		if isOlderMesh(&other, mesh) && r.operatorConfigConflicts(mesh.Spec.Operator, other.Spec.Operator) {
+			return &metav1.Condition{
+				Type:   meshv1alpha1.ConditionReady,
+				Status: metav1.ConditionFalse,
+				Reason: meshv1alpha1.ReasonOperatorConfigConflict,
+				Message: fmt.Sprintf("operator config conflicts with older mesh %s/%s targeting the same ClusterSet %s",
+					other.Namespace, other.Name, mesh.Spec.ClusterSet),
+			}, nil
+		}
+	}
+
+	return nil, nil
+}
+
+// isOlderMesh returns true if a is older than b, using namespace/name as tiebreaker for equal timestamps.
+func isOlderMesh(a, b *meshv1alpha1.MultiClusterMesh) bool {
+	return a.CreationTimestamp.Before(&b.CreationTimestamp) ||
+		(a.CreationTimestamp.Equal(&b.CreationTimestamp) &&
+			client.ObjectKeyFromObject(a).String() < client.ObjectKeyFromObject(b).String())
+}
+
+// operatorConfigConflicts compares two operator configs after applying defaults to detect real conflicts.
+// This avoids false positives when one mesh explicitly sets a value that matches the other's default.
+func (r *Reconciler) operatorConfigConflicts(a, b meshv1alpha1.OperatorConfig) bool {
+	return r.applyOperatorDefaults(a, false) != r.applyOperatorDefaults(b, false) ||
+		r.applyOperatorDefaults(a, true) != r.applyOperatorDefaults(b, true)
+}
+
+func (r *Reconciler) doReconcile(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, clusters []clusterv1.ManagedCluster) (reconcile.Result, error) {
 	for _, cluster := range clusters {
+		klog.V(4).Infof("Reconciling cluster %s", cluster.Name)
+
 		if getProductClaim(&cluster) == "" {
 			klog.V(4).Infof("Cluster %s missing product claim (needed for platform detection), skipping", cluster.Name)
 			continue
@@ -190,10 +265,8 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 
 		result, err := r.ensureOperatorInstalled(ctx, mesh, &cluster)
 		if err != nil {
-			klog.Errorf("Failed to ensure mesh operator on cluster %s: %v", cluster.Name, err)
-			return reconcile.Result{}, err
-		}
-		if result.RequeueAfter > 0 {
+			return reconcile.Result{}, fmt.Errorf("failed to ensure mesh operator on cluster %s: %w", cluster.Name, err)
+		} else if result.RequeueAfter > 0 {
 			return result, nil
 		}
 	}
@@ -212,11 +285,9 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	}
 
 	if err := r.cleanupOperatorManifestWorks(ctx); err != nil {
-		klog.Errorf("Failed to cleanup operator ManifestWorks: %v", err)
-		return reconcile.Result{}, err
+		return reconcile.Result{}, fmt.Errorf("failed to cleanup operator ManifestWorks: %w", err)
 	}
 
-	klog.Infof("Successfully reconciled MultiClusterMesh %s/%s", mesh.Namespace, mesh.Name)
 	return reconcile.Result{}, nil
 }
 
@@ -273,7 +344,7 @@ func (r *Reconciler) findMeshesForClusterSet(ctx context.Context, obj client.Obj
 func (r *Reconciler) findMeshesForManifestWork(ctx context.Context, obj client.Object) []reconcile.Request {
 	cluster := &clusterv1.ManagedCluster{}
 	if err := r.Get(ctx, types.NamespacedName{Name: obj.GetNamespace()}, cluster); err != nil {
-		if !errors.IsNotFound(err) {
+		if !apierrors.IsNotFound(err) {
 			klog.Errorf("Failed to get ManagedCluster %s for ManifestWork %s: %v", obj.GetNamespace(), obj.GetName(), err)
 		}
 		return nil
@@ -293,6 +364,10 @@ func (r *Reconciler) handleDeletion(ctx context.Context, mesh *meshv1alpha1.Mult
 	if err := r.cleanupOperatorManifestWorks(ctx); err != nil {
 		return reconcile.Result{}, fmt.Errorf("failed to cleanup operator ManifestWorks: %w", err)
 	}
+
+	// Trigger reconciliation for other meshes targeting the same cluster set.
+	// If this fails, we don't want to block the mesh deletion. The other meshes will eventually reconcile.
+	r.triggerReconcileForBlockedMeshes(ctx, mesh)
 
 	klog.Infof("Removing finalizer from MultiClusterMesh %s/%s", mesh.Namespace, mesh.Name)
 	controllerutil.RemoveFinalizer(mesh, FinalizerName)
@@ -341,6 +416,101 @@ func (r *Reconciler) cleanupOperatorManifestWorks(ctx context.Context) error {
 	return nil
 }
 
+// triggerReconcileForBlockedMeshes triggers reconciliation for blocked meshes targeting the same ClusterSet.
+// The other meshes need to be re-reconciled to detect the conflict is gone.
+func (r *Reconciler) triggerReconcileForBlockedMeshes(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh) {
+	meshList := &meshv1alpha1.MultiClusterMeshList{}
+	if err := r.List(ctx, meshList, client.MatchingFields{"spec.clusterSet": mesh.Spec.ClusterSet}); err != nil {
+		klog.Errorf("Failed to list peer meshes for ClusterSet %s: %v", mesh.Spec.ClusterSet, err)
+		return
+	}
+
+	for _, other := range meshList.Items {
+		if other.UID == mesh.UID {
+			continue
+		}
+		readyCondition := meta.FindStatusCondition(other.Status.Conditions, meshv1alpha1.ConditionReady)
+		if readyCondition == nil || readyCondition.Reason != meshv1alpha1.ReasonOperatorConfigConflict {
+			continue
+		}
+
+		patch := client.MergeFrom(other.DeepCopy())
+		metav1.SetMetaDataAnnotation(&other.ObjectMeta, "mesh.open-cluster-management.io/reconcile-trigger", time.Now().Format(time.RFC3339Nano))
+		if err := r.Patch(ctx, &other, patch); err != nil {
+			klog.Errorf("Failed to trigger reconcile for peer mesh %s/%s: %v", other.Namespace, other.Name, err)
+		}
+	}
+}
+
+func (r *Reconciler) determineStatus(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, clusters []clusterv1.ManagedCluster) error {
+	var clusterStatuses []meshv1alpha1.ClusterMeshStatus
+	allReady := len(clusters) > 0
+
+	for _, cluster := range clusters {
+		status := meshv1alpha1.ClusterMeshStatus{
+			ClusterName: cluster.Name,
+		}
+
+		if getProductClaim(&cluster) == "" {
+			allReady = false
+			meta.SetStatusCondition(&status.Conditions, metav1.Condition{
+				Type:    meshv1alpha1.ConditionOperatorInstalled,
+				Status:  metav1.ConditionFalse,
+				Reason:  meshv1alpha1.ReasonMissingProductClaim,
+				Message: "Cluster is missing product claim, cannot determine platform",
+			})
+			clusterStatuses = append(clusterStatuses, status)
+			continue
+		}
+
+		work := &workv1.ManifestWork{}
+		err := r.Get(ctx, types.NamespacedName{
+			Name:      OperatorManifestWorkName,
+			Namespace: cluster.Name,
+		}, work)
+
+		if err == nil {
+			// TODO: Set to actual status when operator installation is confirmed via ManifestWork status feedback
+			allReady = false
+			meta.SetStatusCondition(&status.Conditions, metav1.Condition{
+				Type:    meshv1alpha1.ConditionOperatorInstalled,
+				Status:  metav1.ConditionFalse,
+				Reason:  meshv1alpha1.ReasonManifestWorkCreated,
+				Message: "Operator ManifestWork has been created, awaiting installation confirmation",
+			})
+		} else {
+			return fmt.Errorf("failed to get operator ManifestWork for cluster %s: %w", cluster.Name, err)
+		}
+
+		clusterStatuses = append(clusterStatuses, status)
+	}
+
+	mesh.Status.ClusterStatus = clusterStatuses
+
+	readyCondition := metav1.Condition{Type: meshv1alpha1.ConditionReady}
+	if allReady {
+		readyCondition.Status = metav1.ConditionTrue
+		readyCondition.Reason = meshv1alpha1.ReasonAllClustersReady
+		readyCondition.Message = "All clusters are ready"
+	} else {
+		readyCondition.Status = metav1.ConditionFalse
+		readyCondition.Reason = meshv1alpha1.ReasonClustersNotReady
+		readyCondition.Message = "Not all clusters are ready, check individual cluster statuses for details"
+	}
+	meta.SetStatusCondition(&mesh.Status.Conditions, readyCondition)
+
+	return nil
+}
+
+func (r *Reconciler) setErrorStatus(mesh *meshv1alpha1.MultiClusterMesh, reconcileErr error) {
+	meta.SetStatusCondition(&mesh.Status.Conditions, metav1.Condition{
+		Type:    meshv1alpha1.ConditionReady,
+		Status:  metav1.ConditionFalse,
+		Reason:  meshv1alpha1.ReasonReconcileError,
+		Message: reconcileErr.Error(),
+	})
+}
+
 // getClustersNeededByAnyMesh returns a set of cluster names that are targeted by at least one active mesh.
 func (r *Reconciler) getClustersNeededByAnyMesh(ctx context.Context) (map[string]bool, error) {
 	needed := make(map[string]bool)
@@ -383,7 +553,7 @@ func getProductClaim(cluster *clusterv1.ManagedCluster) string {
 func (r *Reconciler) getClustersFromSet(ctx context.Context, clusterSetName string) ([]clusterv1.ManagedCluster, error) {
 	clusterSet := &clusterv1beta2.ManagedClusterSet{}
 	if err := r.Get(ctx, types.NamespacedName{Name: clusterSetName}, clusterSet); err != nil {
-		if errors.IsNotFound(err) {
+		if apierrors.IsNotFound(err) {
 			klog.V(4).Infof("ManagedClusterSet %s not found", clusterSetName)
 			return []clusterv1.ManagedCluster{}, nil
 		}
@@ -584,7 +754,7 @@ func (r *Reconciler) ensureCertificateForCluster(ctx context.Context, mesh *mesh
 		return nil
 	}
 
-	if !errors.IsNotFound(err) {
+	if !apierrors.IsNotFound(err) {
 		return fmt.Errorf("failed to get Certificate: %w", err)
 	}
 
@@ -646,7 +816,7 @@ func (r *Reconciler) ensureCacertsManifestWork(ctx context.Context, mesh *meshv1
 	}, secret)
 
 	if err != nil {
-		if errors.IsNotFound(err) {
+		if apierrors.IsNotFound(err) {
 			klog.V(4).Infof("Secret %s/%s not found yet, waiting for cert-manager to create it", mesh.Namespace, secretName)
 			return nil
 		}
