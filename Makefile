@@ -192,10 +192,6 @@ ARCH := $(shell go env GOARCH)
 DEV_KUBE_DIR := $(CURDIR)/.kube
 HUB_KUBECONFIG := $(DEV_KUBE_DIR)/hub.config
 
-HUB_NAME := hub
-CLUSTER1_NAME := cluster1
-CLUSTER2_NAME := cluster2
-
 KIND := $(BIN_DIR)/kind
 CLUSTERADM := $(BIN_DIR)/clusteradm
 
@@ -209,8 +205,7 @@ $(KIND): | $(BIN_DIR)
 	fi
 
 $(CLUSTERADM): | $(BIN_DIR)
-	@ver="$$($(CLUSTERADM) version 2>/dev/null || true)"; \
-	if test -x $(CLUSTERADM) && echo "$$ver" | grep -q $(CLUSTERADM_VERSION); then \
+	@if test -x $(CLUSTERADM) && $(CLUSTERADM) version 2>/dev/null | grep -q $(CLUSTERADM_VERSION); then \
 		echo "clusteradm $(CLUSTERADM_VERSION) already installed"; \
 	else \
 		echo "Installing clusteradm $(CLUSTERADM_VERSION)..."; \
@@ -226,7 +221,6 @@ DEV_ENV_SCRIPT := $(CURDIR)/hack/dev-env.sh
 
 export DEV_KUBE_DIR K8S_VERSION OLM_VERSION
 export KIND CLUSTERADM
-export HUB_NAME CLUSTER1_NAME CLUSTER2_NAME
 
 .PHONY: dev-env
 dev-env: create-clusters install-olm init-ocm join-clusters deploy-addon ## Provision full dev environment (Kind + OCM + addon)
@@ -260,6 +254,7 @@ deploy-addon: $(KIND) gen images $(KUSTOMIZE) ## Build and deploy addon to the h
 		kubectl --kubeconfig=$(HUB_KUBECONFIG) apply -f -
 	kubectl --kubeconfig=$(HUB_KUBECONFIG) rollout status deployment/multicluster-mesh-controller \
 		-n multicluster-mesh-system --timeout=180s
+	@echo "==> Addon controller deployed successfully. Use KUBECONFIG=$(HUB_KUBECONFIG) to interact with the hub."
 
 .PHONY: dev-clean
 dev-clean: ## Destroy dev clusters and remove .kube/ folder

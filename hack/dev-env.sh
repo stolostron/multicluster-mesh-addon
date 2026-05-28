@@ -7,6 +7,12 @@
 
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+HUB="hub"
+CLUSTER1="cluster1"
+CLUSTER2="cluster2"
+
 log() { echo "==> $*"; }
 err() { echo "ERROR: $*" >&2; exit 1; }
 
@@ -20,7 +26,7 @@ create_clusters() {
     local existing_clusters
     existing_clusters="$(${KIND} get clusters 2>/dev/null || true)"
     local found=()
-    for cluster in "${HUB_NAME}" "${CLUSTER1_NAME}" "${CLUSTER2_NAME}"; do
+    for cluster in "${HUB}" "${CLUSTER1}" "${CLUSTER2}"; do
         if echo "${existing_clusters}" | grep -qx "${cluster}"; then
             found+=("${cluster}")
         fi
@@ -32,18 +38,18 @@ create_clusters() {
 
     local kind_node_image="kindest/node:${K8S_VERSION}"
 
-    for cluster_name in "${HUB_NAME}" "${CLUSTER1_NAME}" "${CLUSTER2_NAME}"; do
+    for cluster in "${HUB}" "${CLUSTER1}" "${CLUSTER2}"; do
         local kubeconfig
-        kubeconfig="$(kubeconfig_for "${cluster_name}")"
+        kubeconfig="$(kubeconfig_for "${cluster}")"
 
-        log "Creating Kind cluster: ${cluster_name}"
+        log "Creating Kind cluster: ${cluster}"
         ${KIND} create cluster \
-            --name "${cluster_name}" \
+            --name "${cluster}" \
             --kubeconfig "${kubeconfig}" \
             --image "${kind_node_image}" \
             --wait 120s
 
-        log "Waiting for cluster ${cluster_name} API to be ready..."
+        log "Waiting for cluster ${cluster} API to be ready..."
         kubectl --kubeconfig="${kubeconfig}" wait --for=condition=Ready nodes --all --timeout=120s
     done
 
@@ -54,21 +60,21 @@ create_clusters() {
 install_olm() {
     local olm_base_url="https://github.com/operator-framework/operator-lifecycle-manager/releases/download/${OLM_VERSION}"
 
-    for cluster_name in "${CLUSTER1_NAME}" "${CLUSTER2_NAME}"; do
+    for cluster in "${CLUSTER1}" "${CLUSTER2}"; do
         local kubeconfig
-        kubeconfig="$(kubeconfig_for "${cluster_name}")"
+        kubeconfig="$(kubeconfig_for "${cluster}")"
 
         if [[ ! -f "${kubeconfig}" ]]; then
-            err "Kubeconfig not found for ${cluster_name} at ${kubeconfig}. Run 'make create-clusters' first."
+            err "Kubeconfig not found for ${cluster} at ${kubeconfig}. Run 'make create-clusters' first."
         fi
 
         # Check if OLM is already installed
         if kubectl --kubeconfig="${kubeconfig}" get deployment olm-operator -n olm &>/dev/null; then
-            log "OLM already installed on ${cluster_name}, skipping"
+            log "OLM already installed on ${cluster}, skipping"
             continue
         fi
 
-        log "Installing OLM ${OLM_VERSION} on ${cluster_name}..."
+        log "Installing OLM ${OLM_VERSION} on ${cluster}..."
 
         kubectl --kubeconfig="${kubeconfig}" apply --server-side -f "${olm_base_url}/crds.yaml"
         kubectl --kubeconfig="${kubeconfig}" wait --for=condition=Established \
@@ -76,37 +82,32 @@ install_olm() {
             crd/subscriptions.operators.coreos.com \
             --timeout=60s
 
-        log "Applying OLM components on ${cluster_name}..."
+        log "Applying OLM components on ${cluster}..."
         kubectl --kubeconfig="${kubeconfig}" apply -f "${olm_base_url}/olm.yaml"
 
-        log "Waiting for OLM components to be ready on ${cluster_name}..."
+        log "Waiting for OLM components to be ready on ${cluster}..."
         kubectl --kubeconfig="${kubeconfig}" rollout status deployment/olm-operator -n olm --timeout=180s
         kubectl --kubeconfig="${kubeconfig}" rollout status deployment/catalog-operator -n olm --timeout=180s
 
-        log "OLM ${OLM_VERSION} installed on ${cluster_name}"
+        log "OLM ${OLM_VERSION} installed on ${cluster}"
     done
 
     # Grant the OCM work agent (klusterlet-work-sa) permission to manage OLM resources.
-    local script_dir
-    script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-    for cluster_name in "${CLUSTER1_NAME}" "${CLUSTER2_NAME}"; do
-        local kubeconfig
-        kubeconfig="$(kubeconfig_for "${cluster_name}")"
-
-        log "Granting klusterlet-work-sa OLM permissions on ${cluster_name}"
-        kubectl --kubeconfig="${kubeconfig}" apply -f "${script_dir}/config/deploy/overlays/kind/klusterlet-work-olm.yaml"
+    for cluster in "${CLUSTER1}" "${CLUSTER2}"; do
+        log "Granting klusterlet-work-sa OLM permissions on ${cluster}"
+        kubectl --kubeconfig="$(kubeconfig_for "${cluster}")" apply -f "${SCRIPT_DIR}/config/deploy/overlays/kind/klusterlet-work-olm.yaml"
     done
 }
 
 init_ocm() {
     local hub_kubeconfig
-    hub_kubeconfig="$(kubeconfig_for "${HUB_NAME}")"
+    hub_kubeconfig="$(kubeconfig_for "${HUB}")"
 
     if [[ ! -f "${hub_kubeconfig}" ]]; then
         err "Hub kubeconfig not found at ${hub_kubeconfig}. Run 'make create-clusters' first."
     fi
 
-    log "Initializing OCM hub on cluster: ${HUB_NAME}"
+    log "Initializing OCM hub on cluster: ${HUB}"
     ${CLUSTERADM} init --wait --kubeconfig="${hub_kubeconfig}"
 
     log "Waiting for OCM hub components to be ready..."
@@ -116,42 +117,40 @@ init_ocm() {
 
 join_clusters() {
     local hub_kubeconfig
-    hub_kubeconfig="$(kubeconfig_for "${HUB_NAME}")"
+    hub_kubeconfig="$(kubeconfig_for "${HUB}")"
 
     if [[ ! -f "${hub_kubeconfig}" ]]; then
         err "Hub kubeconfig not found at ${hub_kubeconfig}. Run 'make init-ocm' first."
     fi
 
     log "Retrieving hub token..."
-    local token_output
-    token_output="$(${CLUSTERADM} get token --kubeconfig="${hub_kubeconfig}" 2>/dev/null)"
-
-    local hub_token hub_apiserver
-    hub_token="$(echo "${token_output}" | grep -oP '(?<=--hub-token )\S+')"
-    hub_apiserver="$(echo "${token_output}" | grep -oP '(?<=--hub-apiserver )\S+')"
+    local token_json hub_token hub_apiserver
+    token_json="$(${CLUSTERADM} get token --kubeconfig="${hub_kubeconfig}" -o json)"
+    hub_token="$(echo "${token_json}" | jq -r '.["hub-token"]')"
+    hub_apiserver="$(echo "${token_json}" | jq -r '.["hub-apiserver"]')"
 
     if [[ -z "${hub_token}" || -z "${hub_apiserver}" ]]; then
         err "Failed to extract hub token/apiserver from 'clusteradm get token'"
     fi
 
-    for cluster_name in "${CLUSTER1_NAME}" "${CLUSTER2_NAME}"; do
+    for cluster in "${CLUSTER1}" "${CLUSTER2}"; do
         local kubeconfig
-        kubeconfig="$(kubeconfig_for "${cluster_name}")"
+        kubeconfig="$(kubeconfig_for "${cluster}")"
 
         if [[ ! -f "${kubeconfig}" ]]; then
-            err "Kubeconfig not found for ${cluster_name} at ${kubeconfig}"
+            err "Kubeconfig not found for ${cluster} at ${kubeconfig}"
         fi
 
-        if kubectl --kubeconfig="${hub_kubeconfig}" get managedcluster "${cluster_name}" &>/dev/null; then
-            log "ManagedCluster ${cluster_name} already exists on hub, skipping join"
+        if kubectl --kubeconfig="${hub_kubeconfig}" get managedcluster "${cluster}" &>/dev/null; then
+            log "ManagedCluster ${cluster} already exists on hub, skipping join"
             continue
         fi
 
-        log "Joining ${cluster_name} to hub..."
+        log "Joining ${cluster} to hub..."
         ${CLUSTERADM} join \
             --hub-token "${hub_token}" \
             --hub-apiserver "${hub_apiserver}" \
-            --cluster-name "${cluster_name}" \
+            --cluster-name "${cluster}" \
             --force-internal-endpoint-lookup \
             --wait \
             --kubeconfig="${kubeconfig}"
@@ -159,80 +158,44 @@ join_clusters() {
 
     log "Accepting managed clusters on hub..."
     ${CLUSTERADM} accept \
-        --clusters="${CLUSTER1_NAME},${CLUSTER2_NAME}" \
+        --clusters="${CLUSTER1},${CLUSTER2}" \
         --skip-approve-check \
         --wait \
         --kubeconfig="${hub_kubeconfig}"
 
     log "Waiting for ManagedCluster conditions..."
-    for cluster_name in "${CLUSTER1_NAME}" "${CLUSTER2_NAME}"; do
-        kubectl --kubeconfig="${hub_kubeconfig}" wait managedcluster/"${cluster_name}" \
+    for cluster in "${CLUSTER1}" "${CLUSTER2}"; do
+        kubectl --kubeconfig="${hub_kubeconfig}" wait managedcluster/"${cluster}" \
             --for=condition=HubAcceptedManagedCluster=True \
             --timeout=120s
-        kubectl --kubeconfig="${hub_kubeconfig}" wait managedcluster/"${cluster_name}" \
+        kubectl --kubeconfig="${hub_kubeconfig}" wait managedcluster/"${cluster}" \
             --for=condition=ManagedClusterJoined=True \
             --timeout=300s
-        kubectl --kubeconfig="${hub_kubeconfig}" wait managedcluster/"${cluster_name}" \
+        kubectl --kubeconfig="${hub_kubeconfig}" wait managedcluster/"${cluster}" \
             --for=condition=ManagedClusterConditionAvailable=True \
             --timeout=300s
-        log "Cluster ${cluster_name} joined, accepted, and available"
+        log "Cluster ${cluster} joined, accepted, and available"
     done
 
     log "Creating ManagedClusterSet: mesh-cluster-set"
-    kubectl --kubeconfig="${hub_kubeconfig}" apply -f - <<'EOF'
-apiVersion: cluster.open-cluster-management.io/v1beta2
-kind: ManagedClusterSet
-metadata:
-  name: mesh-cluster-set
-spec:
-  clusterSelector:
-    selectorType: ExclusiveClusterSetLabel
-EOF
-
-    for cluster_name in "${CLUSTER1_NAME}" "${CLUSTER2_NAME}"; do
-        log "Labeling ${cluster_name} with clusterset=mesh-cluster-set"
-        kubectl --kubeconfig="${hub_kubeconfig}" label managedcluster "${cluster_name}" \
-            cluster.open-cluster-management.io/clusterset=mesh-cluster-set \
-            --overwrite
-    done
+    ${CLUSTERADM} --kubeconfig="${hub_kubeconfig}" create clusterset mesh-cluster-set
+    ${CLUSTERADM} --kubeconfig="${hub_kubeconfig}" clusterset set mesh-cluster-set --clusters "${CLUSTER1},${CLUSTER2}"
 
     # On OpenShift, the product ClusterClaim is created automatically by the
     # klusterlet agent. On vanilla Kind clusters there is no such agent,
     # so we create it manually. The OCM registration agent syncs it to
     # ManagedCluster.status.clusterClaims on the hub, which the addon controller
     # uses for platform detection.
-    for cluster_name in "${CLUSTER1_NAME}" "${CLUSTER2_NAME}"; do
-        local kubeconfig
-        kubeconfig="$(kubeconfig_for "${cluster_name}")"
-
-        log "Creating product ClusterClaim on ${cluster_name}"
-        kubectl --kubeconfig="${kubeconfig}" apply -f - <<EOF
-apiVersion: cluster.open-cluster-management.io/v1alpha1
-kind: ClusterClaim
-metadata:
-  name: product.open-cluster-management.io
-spec:
-  value: Kind
-EOF
+    for cluster in "${CLUSTER1}" "${CLUSTER2}"; do
+        log "Creating product ClusterClaim on ${cluster}"
+        kubectl --kubeconfig="$(kubeconfig_for "${cluster}")" apply -f "${SCRIPT_DIR}/config/deploy/overlays/kind/product-clusterclaim.yaml"
     done
 
-    log "Waiting for product claims to propagate to hub..."
-    for cluster_name in "${CLUSTER1_NAME}" "${CLUSTER2_NAME}"; do
-        local retries=0
-        while [[ ${retries} -lt 30 ]]; do
-            local claims
-            claims="$(kubectl --kubeconfig="${hub_kubeconfig}" get managedcluster "${cluster_name}" \
-                -o jsonpath='{.status.clusterClaims[?(@.name=="product.open-cluster-management.io")].value}' 2>/dev/null || true)"
-            if [[ -n "${claims}" ]]; then
-                log "Cluster ${cluster_name} product claim synced: ${claims}"
-                break
-            fi
-            retries=$((retries + 1))
-            sleep 2
-        done
-        if [[ ${retries} -ge 30 ]]; then
-            err "Timed out waiting for product claim on ${cluster_name} to propagate to hub"
-        fi
+    for cluster in "${CLUSTER1}" "${CLUSTER2}"; do
+        log "Waiting for product claim on ${cluster} to propagate to the hub..."
+        kubectl --kubeconfig="${hub_kubeconfig}" wait managedcluster/"${cluster}" \
+            --for='jsonpath={.status.clusterClaims[?(@.name=="product.open-cluster-management.io")].value}=Kind' \
+            --timeout=60s
     done
 
     log "OCM topology ready"
@@ -242,10 +205,10 @@ EOF
 
 clean() {
     log "Deleting Kind clusters..."
-    for cluster_name in "${HUB_NAME}" "${CLUSTER1_NAME}" "${CLUSTER2_NAME}"; do
-        if ${KIND} get clusters 2>/dev/null | grep -qx "${cluster_name}"; then
-            log "Deleting cluster: ${cluster_name}"
-            ${KIND} delete cluster --name "${cluster_name}" || true
+    for cluster in "${HUB}" "${CLUSTER1}" "${CLUSTER2}"; do
+        if ${KIND} get clusters 2>/dev/null | grep -qx "${cluster}"; then
+            log "Deleting cluster: ${cluster}"
+            ${KIND} delete cluster --name "${cluster}" || true
         fi
     done
 
