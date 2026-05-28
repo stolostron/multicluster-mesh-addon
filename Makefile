@@ -260,7 +260,6 @@ deploy-addon: $(KIND) gen images $(KUSTOMIZE) ## Build and deploy addon to the h
 		kubectl --kubeconfig=$(HUB_KUBECONFIG) apply -f -
 	kubectl --kubeconfig=$(HUB_KUBECONFIG) rollout status deployment/multicluster-mesh-controller \
 		-n multicluster-mesh-system --timeout=180s
-	kubectl --kubeconfig=$(HUB_KUBECONFIG) apply -f samples/kind-dev.yaml
 
 .PHONY: dev-clean
 dev-clean: ## Destroy dev clusters and remove .kube/ folder
