@@ -88,6 +88,7 @@ var _ = BeforeSuite(func() {
 		},
 	})
 	Expect(err).NotTo(HaveOccurred())
+
 	Expect(meshcontroller.RegisterController(mgr)).NotTo(HaveOccurred())
 
 	go func() {

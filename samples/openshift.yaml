@@ -1,0 +1,36 @@
+apiVersion: mesh.open-cluster-management.io/v1alpha1
+kind: MultiClusterMesh
+metadata:
+  name: openshift-mesh
+  namespace: mesh-system
+spec:
+  # Reference to the ManagedClusterSet that defines which clusters participate in the mesh
+  # NOTE: Update this to match your ManagedClusterSet name
+  clusterSet: default
+
+  # Control plane configuration
+  controlPlane:
+    namespace: istio-system
+
+  # OpenShift-specific operator configuration
+  operator:
+    # On OpenShift, the operator is typically installed in openshift-operators
+    namespace: openshift-operators
+
+    # Use Red Hat's operator catalog
+    channel: stable
+    source: redhat-operators
+    sourceNamespace: openshift-marketplace
+
+    # Automatic approval for production environments
+    installPlanApproval: Automatic
+
+  # Security configuration
+  security:
+    trust:
+      certManager:
+        issuerRef:
+          name: mesh-root-ca
+    discovery:
+      # Weekly token rotation for enhanced security
+      tokenValidity: 1w
