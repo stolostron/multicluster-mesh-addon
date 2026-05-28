@@ -20,9 +20,9 @@ create_clusters() {
     local existing_clusters
     existing_clusters="$(${KIND} get clusters 2>/dev/null || true)"
     local found=()
-    for name in "${HUB_NAME}" "${CLUSTER1_NAME}" "${CLUSTER2_NAME}"; do
-        if echo "${existing_clusters}" | grep -qx "${name}"; then
-            found+=("${name}")
+    for cluster in "${HUB_NAME}" "${CLUSTER1_NAME}" "${CLUSTER2_NAME}"; do
+        if echo "${existing_clusters}" | grep -qx "${cluster}"; then
+            found+=("${cluster}")
         fi
     done
 
@@ -70,7 +70,6 @@ install_olm() {
 
         log "Installing OLM ${OLM_VERSION} on ${cluster_name}..."
 
-        log "Applying OLM CRDs on ${cluster_name}..."
         kubectl --kubeconfig="${kubeconfig}" apply --server-side -f "${olm_base_url}/crds.yaml"
         kubectl --kubeconfig="${kubeconfig}" wait --for=condition=Established \
             crd/catalogsources.operators.coreos.com \

@@ -131,7 +131,7 @@ make dev-env K8S_VERSION=v1.31.0 OLM_VERSION=v0.42.0
 
 ##### Known Issues
 
-**"Too many open files" on Fedora/Linux:**
+**"Too many open files" on Linux:**
 Kind clusters may fail to start or pods may crash with `too many open files` errors due to low inotify limits. Increase them on the host:
 
 ```bash

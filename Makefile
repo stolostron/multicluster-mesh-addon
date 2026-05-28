@@ -182,12 +182,12 @@ help: ## Display this help
 
 # Dev Environment (local Kind + OCM clusters)
 KIND_VERSION ?= v0.31.0
-CLUSTERADM_VERSION ?= v1.2.0
-K8S_VERSION ?= v1.30.0
-OLM_VERSION ?= v0.42.0
+CLUSTERADM_VERSION ?= v1.3.1
+K8S_VERSION ?= v1.35.0
+OLM_VERSION ?= v0.43.0
 
-OS := $(shell uname | tr '[:upper:]' '[:lower:]')
-ARCH := $(shell uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
+OS := $(shell go env GOOS)
+ARCH := $(shell go env GOARCH)
 
 DEV_KUBE_DIR := $(CURDIR)/.kube
 HUB_KUBECONFIG := $(DEV_KUBE_DIR)/hub.config
@@ -229,7 +229,7 @@ export KIND CLUSTERADM
 export HUB_NAME CLUSTER1_NAME CLUSTER2_NAME
 
 .PHONY: dev-env
-dev-env: $(KIND) $(CLUSTERADM) create-clusters install-olm init-ocm join-clusters deploy-addon ## Provision full dev environment (Kind + OCM + addon)
+dev-env: create-clusters install-olm init-ocm join-clusters deploy-addon ## Provision full dev environment (Kind + OCM + addon)
 
 .PHONY: create-clusters
 create-clusters: $(KIND) ## Create 3 Kind clusters (hub, cluster1, cluster2)
@@ -248,7 +248,7 @@ join-clusters: $(CLUSTERADM) ## Register managed clusters and create ManagedClus
 	$(DEV_ENV_SCRIPT) join-clusters
 
 .PHONY: deploy-addon
-deploy-addon: $(KIND) images gen $(KUSTOMIZE) ## Build and deploy addon to the hub Kind cluster
+deploy-addon: $(KIND) gen images $(KUSTOMIZE) ## Build and deploy addon to the hub Kind cluster
 	# We use image-archive instead of docker-image because the latter is Docker-specific
 	# and fails when images are built with Podman (separate image stores).
 	$(CONTAINER_ENGINE) save $(IMG) -o $(DEV_KUBE_DIR)/.addon-image.tar
