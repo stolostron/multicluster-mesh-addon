@@ -330,6 +330,44 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 
 	})
 
+	Context("Validation", func() {
+		var otherMesh string
+
+		BeforeEach(func() {
+			otherMesh = meshName + "-2"
+
+			util.CreateK8sManagedCluster(ctx, k8sClient, clusterName, testClusterSet)
+			util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet, meshv1alpha1.OperatorConfig{})
+			expectOperatorManifestWork(clusterName)
+		})
+
+		It("should allow two meshes with the same operator config", func() {
+			util.CreateMultiClusterMesh(ctx, k8sClient, otherMesh, testNs, testClusterSet, meshv1alpha1.OperatorConfig{})
+
+			expectMeshNotReady(otherMesh, testNs)
+			expectClusterOperatorConditionReason(otherMesh, testNs, clusterName, meshv1alpha1.ReasonManifestWorkCreated)
+		})
+
+		When("a newer mesh has a conflicting operator config", func() {
+			BeforeEach(func() {
+				util.CreateMultiClusterMesh(ctx, k8sClient, otherMesh, testNs, testClusterSet, meshv1alpha1.OperatorConfig{
+					Channel: "different-channel",
+				})
+			})
+
+			It("should block the newer mesh", func() {
+				expectMeshConditionReason(otherMesh, testNs, meshv1alpha1.ConditionReady, meshv1alpha1.ReasonOperatorConfigConflict)
+			})
+
+			It("should unblock the newer mesh when the older mesh is deleted", func() {
+				expectMeshConditionReason(otherMesh, testNs, meshv1alpha1.ConditionReady, meshv1alpha1.ReasonOperatorConfigConflict)
+
+				util.DeleteResource(ctx, k8sClient, &meshv1alpha1.MultiClusterMesh{}, meshName, testNs)
+				expectClusterOperatorConditionReason(otherMesh, testNs, clusterName, meshv1alpha1.ReasonManifestWorkCreated)
+			})
+		})
+	})
+
 	Context("Deleting MultiClusterMesh", func() {
 		It("should delete related ManifestWorks", func() {
 			cluster2 := util.UniqueName("cluster2")
@@ -695,4 +733,19 @@ func expectNoClusterStatus(meshName, namespace, clusterName string) {
 		}
 		return true
 	}).Should(BeTrue())
+}
+
+func expectMeshConditionReason(meshName, namespace, conditionType, reason string) {
+	Eventually(func() string {
+		mesh := &meshv1alpha1.MultiClusterMesh{}
+		if err := k8sClient.Get(ctx, types.NamespacedName{Name: meshName, Namespace: namespace}, mesh); err != nil {
+			return ""
+		}
+		for _, c := range mesh.Status.Conditions {
+			if c.Type == conditionType {
+				return c.Reason
+			}
+		}
+		return ""
+	}).Should(Equal(reason))
 }

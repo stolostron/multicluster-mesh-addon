@@ -159,22 +159,28 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (resu
 	// Copy the status so we can avoid updating it in case nothing changed.
 	oldStatus := mesh.Status.DeepCopy()
 
-	clusters, err := r.getClustersFromSet(ctx, mesh.Spec.ClusterSet)
-	if err != nil {
-		reconcileErr = fmt.Errorf("failed to get clusters from set %s: %w", mesh.Spec.ClusterSet, err)
-	} else {
-		result, reconcileErr = r.doReconcile(ctx, mesh, clusters)
-	}
-
-	// Determine status in case all's OK, and catch any possible error so that we can report it
-	if reconcileErr == nil {
-		klog.Infof("Successfully reconciled MultiClusterMesh %s/%s", mesh.Namespace, mesh.Name)
-		reconcileErr = r.determineStatus(ctx, mesh, clusters)
-	}
-
-	if reconcileErr != nil {
-		klog.Errorf("Encountered an error while reconciling MultiClusterMesh %s/%s: %v", mesh.Namespace, mesh.Name, reconcileErr)
+	var invalidCondition *metav1.Condition
+	if invalidCondition, reconcileErr = r.validate(ctx, mesh); reconcileErr != nil {
 		r.setErrorStatus(mesh, reconcileErr)
+	} else if invalidCondition != nil {
+		meta.SetStatusCondition(&mesh.Status.Conditions, *invalidCondition)
+	} else {
+		clusters, err := r.getClustersFromSet(ctx, mesh.Spec.ClusterSet)
+		if err != nil {
+			reconcileErr = fmt.Errorf("failed to get clusters from set %s: %w", mesh.Spec.ClusterSet, err)
+		} else {
+			result, reconcileErr = r.doReconcile(ctx, mesh, clusters)
+		}
+
+		if reconcileErr == nil {
+			klog.Infof("Successfully reconciled MultiClusterMesh %s/%s", mesh.Namespace, mesh.Name)
+			reconcileErr = r.determineStatus(ctx, mesh, clusters)
+		}
+
+		if reconcileErr != nil {
+			klog.Errorf("Encountered an error while reconciling MultiClusterMesh %s/%s: %v", mesh.Namespace, mesh.Name, reconcileErr)
+			r.setErrorStatus(mesh, reconcileErr)
+		}
 	}
 
 	// Update status only if something changed, to avoid unnecessary reconciliations
@@ -184,6 +190,49 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (resu
 	}
 
 	return result, errors.Join(reconcileErr, statusErr)
+}
+
+// validate checks for conflicts that prevent reconciliation.
+// Returns a condition to set on the mesh if validation fails, or nil if ok.
+func (r *Reconciler) validate(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh) (*metav1.Condition, error) {
+	meshList := &meshv1alpha1.MultiClusterMeshList{}
+	if err := r.List(ctx, meshList, client.MatchingFields{"spec.clusterSet": mesh.Spec.ClusterSet}); err != nil {
+		return nil, fmt.Errorf("failed to validate: %w", err)
+	}
+
+	for _, other := range meshList.Items {
+		if other.UID == mesh.UID {
+			continue
+		}
+		if !other.DeletionTimestamp.IsZero() {
+			continue
+		}
+		if isOlderMesh(&other, mesh) && r.operatorConfigConflicts(mesh.Spec.Operator, other.Spec.Operator) {
+			return &metav1.Condition{
+				Type:   meshv1alpha1.ConditionReady,
+				Status: metav1.ConditionFalse,
+				Reason: meshv1alpha1.ReasonOperatorConfigConflict,
+				Message: fmt.Sprintf("operator config conflicts with older mesh %s/%s targeting the same ClusterSet %s",
+					other.Namespace, other.Name, mesh.Spec.ClusterSet),
+			}, nil
+		}
+	}
+
+	return nil, nil
+}
+
+// isOlderMesh returns true if a is older than b, using namespace/name as tiebreaker for equal timestamps.
+func isOlderMesh(a, b *meshv1alpha1.MultiClusterMesh) bool {
+	return a.CreationTimestamp.Before(&b.CreationTimestamp) ||
+		(a.CreationTimestamp.Equal(&b.CreationTimestamp) &&
+			client.ObjectKeyFromObject(a).String() < client.ObjectKeyFromObject(b).String())
+}
+
+// operatorConfigConflicts compares two operator configs after applying defaults to detect real conflicts.
+// This avoids false positives when one mesh explicitly sets a value that matches the other's default.
+func (r *Reconciler) operatorConfigConflicts(a, b meshv1alpha1.OperatorConfig) bool {
+	return r.applyOperatorDefaults(a, false) != r.applyOperatorDefaults(b, false) ||
+		r.applyOperatorDefaults(a, true) != r.applyOperatorDefaults(b, true)
 }
 
 func (r *Reconciler) doReconcile(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, clusters []clusterv1.ManagedCluster) (reconcile.Result, error) {
@@ -297,6 +346,10 @@ func (r *Reconciler) handleDeletion(ctx context.Context, mesh *meshv1alpha1.Mult
 		return reconcile.Result{}, fmt.Errorf("failed to cleanup operator ManifestWorks: %w", err)
 	}
 
+	// Trigger reconciliation for other meshes targeting the same cluster set.
+	// If this fails, we don't want to block the mesh deletion. The other meshes will eventually reconcile.
+	r.triggerReconcileForBlockedMeshes(ctx, mesh)
+
 	klog.Infof("Removing finalizer from MultiClusterMesh %s/%s", mesh.Namespace, mesh.Name)
 	controllerutil.RemoveFinalizer(mesh, FinalizerName)
 	if err := r.Update(ctx, mesh); err != nil {
@@ -363,6 +416,32 @@ func (r *Reconciler) cleanupOperatorManifestWorks(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+// triggerReconcileForBlockedMeshes triggers reconciliation for blocked meshes targeting the same ClusterSet.
+// The other meshes need to be re-reconciled to detect the conflict is gone.
+func (r *Reconciler) triggerReconcileForBlockedMeshes(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh) {
+	meshList := &meshv1alpha1.MultiClusterMeshList{}
+	if err := r.List(ctx, meshList, client.MatchingFields{"spec.clusterSet": mesh.Spec.ClusterSet}); err != nil {
+		klog.Errorf("Failed to list peer meshes for ClusterSet %s: %v", mesh.Spec.ClusterSet, err)
+		return
+	}
+
+	for _, other := range meshList.Items {
+		if other.UID == mesh.UID {
+			continue
+		}
+		readyCondition := meta.FindStatusCondition(other.Status.Conditions, meshv1alpha1.ConditionReady)
+		if readyCondition == nil || readyCondition.Reason != meshv1alpha1.ReasonOperatorConfigConflict {
+			continue
+		}
+
+		patch := client.MergeFrom(other.DeepCopy())
+		metav1.SetMetaDataAnnotation(&other.ObjectMeta, "mesh.open-cluster-management.io/reconcile-trigger", time.Now().Format(time.RFC3339Nano))
+		if err := r.Patch(ctx, &other, patch); err != nil {
+			klog.Errorf("Failed to trigger reconcile for peer mesh %s/%s: %v", other.Namespace, other.Name, err)
+		}
+	}
 }
 
 func (r *Reconciler) determineStatus(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, clusters []clusterv1.ManagedCluster) error {
