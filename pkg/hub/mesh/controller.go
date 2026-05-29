@@ -282,7 +282,7 @@ func (r *Reconciler) doReconcile(ctx context.Context, mesh *meshv1alpha1.MultiCl
 		klog.Errorf("Failed to distribute ManagedServiceAccount secrets: %v", err)
 		return reconcile.Result{}, err
 	}
-	
+
 	if err := r.cleanupManifestWorks(ctx); err != nil {
 		return reconcile.Result{}, fmt.Errorf("failed to cleanup ManifestWorks: %w", err)
 	}
@@ -832,39 +832,55 @@ func (r *Reconciler) ensureCacertsDistributed(ctx context.Context, mesh *meshv1a
 	return nil
 }
 
-// ensureCacertsManifestWork creates a ManifestWork to distribute the cacerts secret to a cluster
-func (r *Reconciler) ensureCacertsManifestWork(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, cluster *clusterv1.ManagedCluster) error {
-	secretName := getCacertsName(cluster.Name)
+// ensureSecretManifestWork creates a ManifestWork to distribute the secret to a cluster
+func (r *Reconciler) ensureSecretManifestWork(ctx context.Context, secretName string, mesh *meshv1alpha1.MultiClusterMesh, cluster *clusterv1.ManagedCluster) error {
 	secret := &corev1.Secret{}
 	err := r.Get(ctx, types.NamespacedName{
 		Name:      secretName,
 		Namespace: mesh.Namespace,
 	}, secret)
-
 	if err != nil {
 		if apierrors.IsNotFound(err) {
-			klog.V(4).Infof("Secret %s/%s not found yet, waiting for cert-manager to create it", mesh.Namespace, secretName)
+			if strings.HasPrefix(secretName, "cacerts-") {
+				klog.V(4).Infof("Secret %s/%s not found yet, waiting for cert-manager to create it", mesh.Namespace, secretName)
+			}
+			if strings.HasSuffix(secretName, "-istio-reader") {
+				klog.V(4).Infof("Secret %s/%s not found yet, waiting for ManagedServiceAccount to create it", mesh.Namespace, secretName)
+			}
 			return nil
 		}
 		return fmt.Errorf("failed to get secret: %w", err)
 	}
 
+	var manifestWorkName string
+	if strings.HasPrefix(secret.Name, "cacerts-") {
+		manifestWorkName = ManifestWorkNameCacerts
+	}
+	if strings.HasSuffix(secret.Name, "-istio-reader") {
+		manifestWorkName = ManifestWorkNameMsaSecrets
+	}
+
 	existingWork := &workv1.ManifestWork{}
 	err = r.Get(ctx, types.NamespacedName{
-		Name:      ManifestWorkNameCacerts,
+		Name:      manifestWorkName,
 		Namespace: cluster.Name,
 	}, existingWork)
 
 	if err == nil {
 		klog.V(4).Infof("ManifestWork %s/%s already exists, checking if update is needed", cluster.Name, ManifestWorkNameCacerts)
-		return r.updateCacertsManifestWorkIfNeeded(ctx, mesh, existingWork, secret)
+		return r.updateSecretManifestWorkIfNeeded(ctx, mesh, existingWork, secret)
 	}
 
 	if !apierrors.IsNotFound(err) {
 		return fmt.Errorf("failed to get ManifestWork: %w", err)
 	}
 
-	klog.Infof("Creating ManifestWork %s/%s to distribute cacerts secret", cluster.Name, ManifestWorkNameCacerts)
+	if strings.HasPrefix(secretName, "cacerts-") {
+		klog.Infof("Creating ManifestWork %s/%s to distribute cacerts secret", cluster.Name, manifestWorkName)
+	}
+	if strings.HasSuffix(secretName, "-istio-reader") {
+		klog.Infof("Creating ManifestWork %s/%s to distribute ManagedServiceAccount secret", cluster.Name, manifestWorkName)
+	}
 
 	work := r.buildCacertsManifestWork(mesh, cluster.Name, secret)
 
@@ -907,8 +923,8 @@ func (r *Reconciler) buildCacertsManifestWork(mesh *meshv1alpha1.MultiClusterMes
 	}
 }
 
-// updateCacertsManifestWorkIfNeeded updates the ManifestWork if the secret data has changed
-func (r *Reconciler) updateCacertsManifestWorkIfNeeded(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, work *workv1.ManifestWork, secret *corev1.Secret) error {
+// updateSecretManifestWorkIfNeeded updates the ManifestWork if the secret data has changed
+func (r *Reconciler) updateSecretManifestWorkIfNeeded(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, work *workv1.ManifestWork, secret *corev1.Secret) error {
 	existingSecret := &corev1.Secret{}
 	if err := util.UnmarshalManifest(work.Spec.Workload.Manifests[0], existingSecret); err != nil {
 		return fmt.Errorf("failed to unmarshal existing manifest: %w", err)

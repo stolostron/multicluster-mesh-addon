@@ -251,19 +251,16 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 			util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet, meshv1alpha1.OperatorConfig{})
 			awaitReconcileFinished()
 
-			msa2 := expectManagedServiceAccount(fmt.Sprintf("%s-%s-istio-reader", cluster2, meshName), cluster2)
-			msa3 := expectManagedServiceAccount(fmt.Sprintf("%s-%s-istio-reader", cluster3, meshName), cluster3)
-			expectMsaSecret(msa2)
-			expectMsaSecret(msa3)
+			expectManagedServiceAccount(fmt.Sprintf("%s-%s-istio-reader", cluster2, meshName), cluster2)
+			expectManagedServiceAccount(fmt.Sprintf("%s-%s-istio-reader", cluster3, meshName), cluster3)
 		})
 
-		It("should create a ManagedServiceAccount resource with token validity field", func() {
+		It("should create a ManagedServiceAccount resource with the token validity field", func() {
 			cluster1 := util.UniqueName("cluster1")
 			util.CreateOCPManagedCluster(ctx, k8sClient, cluster1, testClusterSet, meshcontroller.ProductOCP)
 			util.CreateManagedServiceAccount(ctx, k8sClient,
 				fmt.Sprintf("%s-%s-istio-reader", cluster1, meshName), cluster1, metav1.Duration{Duration: 10 * time.Minute})
-			msa1 := expectManagedServiceAccount(fmt.Sprintf("%s-%s-istio-reader", cluster1, meshName), cluster1)
-			expectMsaSecret(msa1)
+			expectManagedServiceAccount(fmt.Sprintf("%s-%s-istio-reader", cluster1, meshName), cluster1)
 		})
 
 		When("referencing a set with a cluster", func() {
@@ -649,14 +646,19 @@ func expectManagedServiceAccount(name, namespace string) *msav1beta1.ManagedServ
 			Namespace: namespace,
 		}, msa)
 	}).Should(Succeed())
+	Expect(msa.ObjectMeta.Labels).To(HaveKeyWithValue(meshcontroller.ManagedByLabel, meshcontroller.ManagedByValue))
 
-	fmt.Printf("status: %v", msa.Status)
-	return msa
+	// TODO: Run additional controller(s) from
+	// https://github.com/open-cluster-management-io/managed-serviceaccount/tree/main/pkg/controllers/event
+	// Test the following msa.Status fields after running additional controller(s)
 	// Expect(msa.Status.TokenSecretRef.Name).To(Equal(msa.Name))
 	// expire := msa.Status.TokenSecretRef.LastRefreshTimestamp.Add(msa.Spec.Rotation.Validity.Duration)
 	// Expect(msa.Status.ExpirationTimestamp.Time).To(Equal(expire))
+	return msa
 }
 
+// TODO: Run additional controller(s) from
+// https://github.com/open-cluster-management-io/managed-serviceaccount/tree/main/pkg/controllers/event
 func expectMsaSecret(msa *msav1beta1.ManagedServiceAccount) {
 	secret := &corev1.Secret{}
 	Eventually(func() error {

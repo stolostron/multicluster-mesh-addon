@@ -90,14 +90,6 @@ var _ = BeforeSuite(func() {
 		Metrics: metricsserver.Options{
 			BindAddress: "0", // Disable metrics in tests
 		},
-		// Disable caching for checking ManagedServiceAccount latest status
-		Client: client.Options{
-			Cache: &client.CacheOptions{
-				DisableFor: []client.Object{
-					&msav1beta1.ManagedServiceAccount{},
-				},
-			},
-		},
 	})
 	Expect(err).NotTo(HaveOccurred())
 	Expect(meshcontroller.RegisterController(mgr)).NotTo(HaveOccurred())

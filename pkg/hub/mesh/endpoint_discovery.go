@@ -66,6 +66,7 @@ func (r *Reconciler) createManagedServiceAccounts(ctx context.Context, mesh *mes
 			continue
 		} else {
 			duration := mesh.Spec.Security.Discovery.TokenValidity
+			// A duration less than 10 minutes causes an error when applying a ManagedServiceAccount CR
 			if duration.Minutes() < 10.0 {
 				klog.Info("Setting ManagedServiceAccount Validity with minimum value 10 minutes")
 				duration = metav1.Duration{Duration: 10 * time.Minute}
@@ -117,9 +118,13 @@ func (r *Reconciler) deleteManagedServiceAccounts(ctx context.Context) error {
 	return nil
 }
 
+// TODO: validate a secondary resource corev1.Secret has the expected ownerReferences
+// TODO: build a remote secret "istio-remote-secret-<cluster-name>" using the above secondary resource Secret token and label "istio/multiCluster: "true""
+
 // ensureMsaSecretsDistributed creates ManifestWorks to distribute ManagedServiceAccount secrets to clusters
 func (r *Reconciler) ensureMsaSecretsDistributed(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, clusters []clusterv1.ManagedCluster) error {
 	for _, cluster := range clusters {
+		// TODO: replace this "%s-%s-istio-reader" Secret with a remote secret "istio-remote-secret-<cluster-name>"
 		secretName := fmt.Sprintf("%s-%s-istio-reader", cluster.Name, mesh.Name)
 		if err := r.ensureSecretManifestWork(ctx, secretName, mesh, &cluster); err != nil {
 			return fmt.Errorf("failed to ensure ManagedServiceAccount secrets ManifestWork for cluster %s: %w", cluster.Name, err)
