@@ -3,7 +3,6 @@
 package integration
 
 import (
-	"context"
 	"fmt"
 	"time"
 
@@ -15,18 +14,16 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	clusterv1 "open-cluster-management.io/api/cluster/v1"
 	clusterv1beta2 "open-cluster-management.io/api/cluster/v1beta2"
 	workv1 "open-cluster-management.io/api/work/v1"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	meshv1alpha1 "github.com/stolostron/multicluster-mesh-addon/pkg/apis/mesh/v1alpha1"
 	meshcontroller "github.com/stolostron/multicluster-mesh-addon/pkg/hub/mesh"
 	pkgutil "github.com/stolostron/multicluster-mesh-addon/pkg/util"
 	"github.com/stolostron/multicluster-mesh-addon/test/util"
+	msav1beta1 "open-cluster-management.io/managed-serviceaccount/apis/authentication/v1beta1"
 )
 
 var _ = Describe("MultiClusterMesh Controller", func() {
@@ -231,50 +228,28 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 			expectFinalizer(meshName, testNs)
 		})
 
-		It("should create ManagedServiceAccount resources for each cluster in the ClusterSet", func() {
-			cluster1 := util.UniqueName("cluster")
-			cluster2 := util.UniqueName("cluster")
+		It("should create ManagedServiceAccount resources for each OCP ManagedCluster in the ClusterSet", func() {
+			cluster2 := util.UniqueName("cluster2")
+			cluster3 := util.UniqueName("cluster3")
+			util.CreateOCPManagedCluster(ctx, k8sClient, cluster2, testClusterSet, meshcontroller.ProductOCP)
+			util.CreateOCPManagedCluster(ctx, k8sClient, cluster3, testClusterSet, meshcontroller.ProductOCP)
 
-			util.CreateK8sManagedCluster(ctx, k8sClient, cluster1, testClusterSet)
-			util.CreateK8sManagedCluster(ctx, k8sClient, cluster2, testClusterSet)
 			util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet, meshv1alpha1.OperatorConfig{})
 			awaitReconcileFinished()
 
-			list := &unstructured.UnstructuredList{}
-			list.SetGroupVersionKind(schema.GroupVersionKind{
-				Group:   "authentication.open-cluster-management.io",
-				Kind:    "ManagedServiceAccount",
-				Version: "v1beta1",
-			})
-
-			specData := map[string]interface{}{
-				"rotation": map[string]interface{}{
-					"validity": "24h0m",
-				},
-			}
-			unstructured.SetNestedField(list.Object, specData, "spec")
-
-			Expect(k8sClient.List(context.Background(), list, client.InNamespace(cluster1))).To(Succeed())
-			Expect(k8sClient.List(context.Background(), list, client.InNamespace(cluster2))).To(Succeed())
+			msa2 := expectManagedServiceAccount(fmt.Sprintf("%s-%s-istio-reader", cluster2, meshName), cluster2)
+			msa3 := expectManagedServiceAccount(fmt.Sprintf("%s-%s-istio-reader", cluster3, meshName), cluster3)
+			expectMsaSecret(msa2)
+			expectMsaSecret(msa3)
 		})
 
-		When("the ManagedServiceAccount resource exists", func() {
-			BeforeEach(func() {
-				util.CreateK8sManagedCluster(ctx, k8sClient, clusterName, testClusterSet)
-				util.CreateManagedServiceAccount(ctx, k8sClient, fmt.Sprintf("%s-%s", clusterName, meshName), clusterName)
-			})
-
-			It("should reconcile successfully", func() {
-				util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet, meshv1alpha1.OperatorConfig{})
-				awaitReconcileFinished()
-
-				list := &unstructured.UnstructuredList{}
-				list.SetGroupVersionKind(schema.GroupVersionKind{
-					Group:   "authentication.open-cluster-management.io",
-					Kind:    "ManagedServiceAccount",
-					Version: "v1beta1",
-				})
-			})
+		It("should create a ManagedServiceAccount resource with token validity field", func() {
+			cluster1 := util.UniqueName("cluster1")
+			util.CreateOCPManagedCluster(ctx, k8sClient, cluster1, testClusterSet, meshcontroller.ProductOCP)
+			util.CreateManagedServiceAccount(ctx, k8sClient,
+				fmt.Sprintf("%s-%s-istio-reader", cluster1, meshName), cluster1, metav1.Duration{Duration: 10 * time.Minute})
+			msa1 := expectManagedServiceAccount(fmt.Sprintf("%s-%s-istio-reader", cluster1, meshName), cluster1)
+			expectMsaSecret(msa1)
 		})
 
 		When("referencing a set with a cluster", func() {
@@ -379,6 +354,19 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 			expectFinalizer(meshName, testNs)
 
 			util.DeleteResource(ctx, k8sClient, &meshv1alpha1.MultiClusterMesh{}, meshName, testNs)
+		})
+
+		It("should cleanup related ManagedServiceAccount resources", func() {
+			cluster3 := util.UniqueName("cluster3")
+			util.CreateK8sManagedCluster(ctx, k8sClient, clusterName, testClusterSet)
+			util.CreateOCPManagedCluster(ctx, k8sClient, cluster3, testClusterSet, meshcontroller.ProductOCP)
+			util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet, meshv1alpha1.OperatorConfig{})
+			expectFinalizer(meshName, testNs)
+			expectOperatorManifestWork(clusterName)
+			expectOperatorManifestWork(cluster3)
+
+			util.DeleteResource(ctx, k8sClient, &meshv1alpha1.MultiClusterMesh{}, meshName, testNs)
+			expectAllManagedServiceAccountDeleted()
 		})
 	})
 
@@ -593,6 +581,44 @@ func expectCacertsSecret(work *workv1.ManifestWork) {
 	Expect(secret.Data).To(HaveKey("tls.crt"))
 	Expect(secret.Data).To(HaveKey("tls.key"))
 	Expect(secret.Data).To(HaveKey("ca.crt"))
+}
+
+func expectManagedServiceAccount(name, namespace string) *msav1beta1.ManagedServiceAccount {
+	msa := &msav1beta1.ManagedServiceAccount{}
+	Eventually(func() error {
+		return k8sClient.Get(ctx, types.NamespacedName{
+			Name:      name,
+			Namespace: namespace,
+		}, msa)
+	}).Should(Succeed())
+
+	fmt.Printf("status: %v", msa.Status)
+	return msa
+	// Expect(msa.Status.TokenSecretRef.Name).To(Equal(msa.Name))
+	// expire := msa.Status.TokenSecretRef.LastRefreshTimestamp.Add(msa.Spec.Rotation.Validity.Duration)
+	// Expect(msa.Status.ExpirationTimestamp.Time).To(Equal(expire))
+}
+
+func expectMsaSecret(msa *msav1beta1.ManagedServiceAccount) {
+	secret := &corev1.Secret{}
+	Eventually(func() error {
+		return k8sClient.Get(ctx, types.NamespacedName{
+			Name:      msa.Name,
+			Namespace: msa.Namespace,
+		}, secret)
+	}).Should(Succeed())
+
+	Expect(secret.Type).To(Equal(corev1.SecretTypeOpaque))
+	Expect(secret.Data).To(HaveKey("token"))
+	Expect(secret.Data).To(HaveKey("ca.crt"))
+}
+
+func expectAllManagedServiceAccountDeleted() {
+	Eventually(func() []msav1beta1.ManagedServiceAccount {
+		msaList := &msav1beta1.ManagedServiceAccountList{}
+		Expect(k8sClient.List(ctx, msaList)).To(Succeed())
+		return msaList.Items
+	}).Should(BeEmpty())
 }
 
 // unmarshalManifest extracts a manifest from ManifestWork's RawExtension.
