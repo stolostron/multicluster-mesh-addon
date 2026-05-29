@@ -75,7 +75,7 @@ var _ = BeforeSuite(func() {
 	mustAddToScheme(workv1.Install, scheme.Scheme)
 	mustAddToScheme(operatorsv1.AddToScheme, scheme.Scheme)
 	mustAddToScheme(operatorsv1alpha1.AddToScheme, scheme.Scheme)
-	mustAddToScheme(addonv1beta1.AddToScheme, scheme.Scheme)
+	mustAddToScheme(addonv1beta1.Install, scheme.Scheme)
 	mustAddToScheme(msav1beta1.AddToScheme, scheme.Scheme)
 	mustAddToScheme(certmanagerv1.AddToScheme, scheme.Scheme)
 

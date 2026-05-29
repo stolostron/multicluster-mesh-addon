@@ -47,7 +47,7 @@ func init() {
 	utilruntime.Must(operatorsv1alpha1.AddToScheme(runtimeScheme))
 	utilruntime.Must(certmanagerv1.AddToScheme(runtimeScheme))
 	utilruntime.Must(msav1beta1.AddToScheme(runtimeScheme))
-	utilruntime.Must(addonv1beta1.AddToScheme(runtimeScheme))
+	utilruntime.Must(addonv1beta1.Install(runtimeScheme))
 }
 
 func main() {
