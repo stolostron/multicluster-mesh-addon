@@ -182,8 +182,6 @@ deploy: gen push $(KUSTOMIZE) ## Deploy the controller to the cluster (PLATFORM=
 	# kustomize edit set image writes the resolved image tag into kustomization.yaml on disk. Lets restore it to original file.
 	git checkout -- config/deploy/overlays/$(PLATFORM)/kustomization.yaml
 
-# TODO: Add deploy-local target for local development (kind/minikube) without pushing to registry
-
 .PHONY: undeploy
 undeploy: gen ## Remove the controller from the cluster (PLATFORM=openshift|kind)
 	kubectl delete multiclustermeshes.mesh.open-cluster-management.io --all --all-namespaces --ignore-not-found=true || true
@@ -193,3 +191,83 @@ undeploy: gen ## Remove the controller from the cluster (PLATFORM=openshift|kind
 .PHONY: help
 help: ## Display this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
+
+# Dev Environment (local Kind + OCM clusters)
+KIND_VERSION ?= v0.31.0
+CLUSTERADM_VERSION ?= v1.3.1
+K8S_VERSION ?= v1.35.0
+OLM_VERSION ?= v0.43.0
+
+OS := $(shell go env GOOS)
+ARCH := $(shell go env GOARCH)
+
+DEV_KUBE_DIR := $(CURDIR)/.kube
+HUB_KUBECONFIG := $(DEV_KUBE_DIR)/hub.config
+
+KIND := $(BIN_DIR)/kind
+CLUSTERADM := $(BIN_DIR)/clusteradm
+
+$(KIND): | $(BIN_DIR)
+	@if test -x $(KIND) && $(KIND) version 2>/dev/null | grep -q $(KIND_VERSION); then \
+		echo "kind $(KIND_VERSION) already installed"; \
+	else \
+		echo "Installing kind $(KIND_VERSION)..."; \
+		curl -sSL https://github.com/kubernetes-sigs/kind/releases/download/$(KIND_VERSION)/kind-$(OS)-$(ARCH) -o $(KIND); \
+		chmod +x $(KIND); \
+	fi
+
+$(CLUSTERADM): | $(BIN_DIR)
+	@if test -x $(CLUSTERADM) && $(CLUSTERADM) version 2>/dev/null | grep -q $(CLUSTERADM_VERSION); then \
+		echo "clusteradm $(CLUSTERADM_VERSION) already installed"; \
+	else \
+		echo "Installing clusteradm $(CLUSTERADM_VERSION)..."; \
+		tmp_dir=$$(mktemp -d); \
+		curl -sSL https://github.com/open-cluster-management-io/clusteradm/releases/download/$(CLUSTERADM_VERSION)/clusteradm_$(OS)_$(ARCH).tar.gz -o $$tmp_dir/clusteradm.tar.gz; \
+		tar xzf $$tmp_dir/clusteradm.tar.gz -C $$tmp_dir; \
+		mv $$tmp_dir/clusteradm $(CLUSTERADM); \
+		chmod +x $(CLUSTERADM); \
+		rm -rf $$tmp_dir; \
+	fi
+
+DEV_ENV_SCRIPT := $(CURDIR)/hack/dev-env.sh
+
+export DEV_KUBE_DIR K8S_VERSION OLM_VERSION
+export KIND CLUSTERADM
+
+.PHONY: dev-env
+dev-env: create-clusters install-olm init-ocm join-clusters deploy-addon ## Provision full dev environment (Kind + OCM + addon)
+
+.PHONY: create-clusters
+create-clusters: $(KIND) ## Create 3 Kind clusters (hub, cluster1, cluster2)
+	$(DEV_ENV_SCRIPT) create-clusters
+
+.PHONY: install-olm
+install-olm: ## Install OLM on managed clusters (cluster1, cluster2)
+	$(DEV_ENV_SCRIPT) install-olm
+
+.PHONY: init-ocm
+init-ocm: $(CLUSTERADM) ## Initialize hub as OCM control plane
+	$(DEV_ENV_SCRIPT) init-ocm
+
+.PHONY: join-clusters
+join-clusters: $(CLUSTERADM) ## Register managed clusters and create ManagedClusterSet
+	$(DEV_ENV_SCRIPT) join-clusters
+
+.PHONY: deploy-addon
+deploy-addon: $(KIND) gen images $(KUSTOMIZE) ## Build and deploy addon to the hub Kind cluster
+	# We use image-archive instead of docker-image because the latter is Docker-specific
+	# and fails when images are built with Podman (separate image stores).
+	$(CONTAINER_ENGINE) save $(IMG) -o $(DEV_KUBE_DIR)/.addon-image.tar
+	$(KIND) load image-archive $(DEV_KUBE_DIR)/.addon-image.tar --name hub
+	rm -f $(DEV_KUBE_DIR)/.addon-image.tar
+	kubectl --kubeconfig=$(HUB_KUBECONFIG) apply -f config/crd/
+	$(KUSTOMIZE) build config/deploy/overlays/kind | \
+		sed 's|image: quay.io/sail-dev/multicluster-mesh-addon:.*|image: $(IMG)|' | \
+		kubectl --kubeconfig=$(HUB_KUBECONFIG) apply -f -
+	kubectl --kubeconfig=$(HUB_KUBECONFIG) rollout status deployment/multicluster-mesh-controller \
+		-n multicluster-mesh-system --timeout=180s
+	@echo "==> Addon controller deployed successfully. Use KUBECONFIG=$(HUB_KUBECONFIG) to interact with the hub."
+
+.PHONY: dev-clean
+dev-clean: ## Destroy dev clusters and remove .kube/ folder
+	$(DEV_ENV_SCRIPT) clean

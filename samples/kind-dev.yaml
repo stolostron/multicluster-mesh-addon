@@ -1,0 +1,8 @@
+---
+apiVersion: mesh.open-cluster-management.io/v1alpha1
+kind: MultiClusterMesh
+metadata:
+  name: my-mesh
+  namespace: multicluster-mesh-system
+spec:
+  clusterSet: mesh-cluster-set

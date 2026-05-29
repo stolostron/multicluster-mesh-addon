@@ -129,6 +129,32 @@ type DiscoveryConfig struct {
 	TokenValidity metav1.Duration `json:"tokenValidity,omitempty"`
 }
 
+const (
+	// ConditionReady indicates whether the mesh is fully operational
+	ConditionReady = "Ready"
+
+	// ConditionOperatorInstalled indicates whether the operator is installed on a cluster
+	ConditionOperatorInstalled = "OperatorInstalled"
+
+	// ReasonAllClustersReady indicates all clusters have confirmed operator installation
+	ReasonAllClustersReady = "AllClustersReady"
+
+	// ReasonClustersNotReady indicates that not all clusters have confirmed operator installation
+	ReasonClustersNotReady = "ClustersNotReady"
+
+	// ReasonManifestWorkCreated indicates the operator ManifestWork has been created
+	ReasonManifestWorkCreated = "ManifestWorkCreated"
+
+	// ReasonMissingProductClaim indicates the cluster is missing its product claim
+	ReasonMissingProductClaim = "MissingProductClaim"
+
+	// ReasonReconcileError indicates an error occurred during reconciliation
+	ReasonReconcileError = "ReconcileError"
+
+	// ReasonOperatorConfigConflict indicates a conflict with an older mesh's operator config
+	ReasonOperatorConfigConflict = "OperatorConfigConflict"
+)
+
 // MultiClusterMeshStatus defines the observed state of MultiClusterMesh
 type MultiClusterMeshStatus struct {
 	// Conditions represent the latest available observations of the mesh state
@@ -145,16 +171,7 @@ type ClusterMeshStatus struct {
 	// ClusterName is the name of the managed cluster
 	ClusterName string `json:"clusterName"`
 
-	// OperatorReady indicates if the Sail Operator is installed and ready
-	OperatorReady bool `json:"operatorReady"`
-
-	// TrustEstablished indicates if certificates have been distributed
-	TrustEstablished bool `json:"trustEstablished"`
-
-	// DiscoveryConfigured indicates if discovery secrets are in place
-	DiscoveryConfigured bool `json:"discoveryConfigured"`
-
-	// Conditions specific to this cluster
+	// Conditions represent the latest available observations of this cluster's state
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 }

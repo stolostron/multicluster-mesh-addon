@@ -3,6 +3,7 @@ package mesh
 import (
 	"context"
 	"testing"
+	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -50,5 +51,71 @@ func TestGetClustersFromSetReturnsSortedClusters(t *testing.T) {
 		if result[i].Name != name {
 			t.Errorf("expected cluster[%d] = %s, got %s", i, name, result[i].Name)
 		}
+	}
+}
+
+func TestIsOlderMesh(t *testing.T) {
+	now := metav1.Now()
+	later := metav1.NewTime(now.Add(time.Second))
+
+	tests := []struct {
+		name     string
+		a, b     *meshv1alpha1.MultiClusterMesh
+		expected bool
+	}{
+		{
+			name:     "a is older by timestamp",
+			a:        meshWith("ns", "mesh-a", now),
+			b:        meshWith("ns", "mesh-b", later),
+			expected: true,
+		},
+		{
+			name:     "b is older by timestamp",
+			a:        meshWith("ns", "mesh-a", later),
+			b:        meshWith("ns", "mesh-b", now),
+			expected: false,
+		},
+		{
+			name:     "same timestamp, a sorts first by name",
+			a:        meshWith("ns", "mesh-a", now),
+			b:        meshWith("ns", "mesh-b", now),
+			expected: true,
+		},
+		{
+			name:     "same timestamp, b sorts first by name",
+			a:        meshWith("ns", "mesh-b", now),
+			b:        meshWith("ns", "mesh-a", now),
+			expected: false,
+		},
+		{
+			name:     "same timestamp, a sorts first by namespace",
+			a:        meshWith("aaa", "mesh", now),
+			b:        meshWith("zzz", "mesh", now),
+			expected: true,
+		},
+		{
+			name:     "same timestamp and key",
+			a:        meshWith("ns", "mesh", now),
+			b:        meshWith("ns", "mesh", now),
+			expected: false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := isOlderMesh(tc.a, tc.b); got != tc.expected {
+				t.Errorf("isOlderMesh() = %v, want %v", got, tc.expected)
+			}
+		})
+	}
+}
+
+func meshWith(namespace, name string, ts metav1.Time) *meshv1alpha1.MultiClusterMesh {
+	return &meshv1alpha1.MultiClusterMesh{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:              name,
+			Namespace:         namespace,
+			CreationTimestamp: ts,
+		},
 	}
 }

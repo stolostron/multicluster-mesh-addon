@@ -19,3 +19,6 @@ bin/
 # Generated files
 config/crd
 test/integration/crds/
+
+# Dev environment (make dev-env)
+.kube/
