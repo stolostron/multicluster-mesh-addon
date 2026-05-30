@@ -16,7 +16,6 @@ import (
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/client-go/kubernetes/scheme"
 	utilflag "k8s.io/component-base/cli/flag"
-	logs "k8s.io/component-base/logs/api/v1"
 	"k8s.io/klog/v2"
 	"k8s.io/utils/clock"
 	clusterv1 "open-cluster-management.io/api/cluster/v1"
@@ -49,10 +48,9 @@ func init() {
 }
 
 func main() {
+	klog.InitFlags(nil)
 	pflag.CommandLine.SetNormalizeFunc(utilflag.WordSepNormalizeFunc)
 	pflag.CommandLine.AddGoFlagSet(goflag.CommandLine)
-
-	logs.AddFlags(logs.NewLoggingConfiguration(), pflag.CommandLine)
 
 	command := newCommand()
 	if err := command.Execute(); err != nil {
