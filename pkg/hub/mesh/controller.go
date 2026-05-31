@@ -103,6 +103,8 @@ func RegisterController(mgr manager.Manager) error {
 
 	if err := mgr.Add(manager.RunnableFunc(func(ctx context.Context) error {
 		workInformerFactory.Start(ctx.Done())
+		workInformerFactory.WaitForCacheSync(ctx.Done())
+		<-ctx.Done()
 		return nil
 	})); err != nil {
 		return fmt.Errorf("failed to add work informer factory: %w", err)
