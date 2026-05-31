@@ -350,17 +350,20 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 					expectNoClusterStatus(meshName, testNs, clusterName)
 				})
 
-				It("should keep ManifestWork when another mesh targets the new set", func() {
+				It("should recreate ManifestWork for the new mesh when cluster moves to a new set", func() {
+					originalUID := work.UID
+
 					otherMesh := util.UniqueName("other-mesh")
 					util.CreateMultiClusterMesh(ctx, k8sClient, otherMesh, testNs, otherClusterSet, meshv1alpha1.OperatorConfig{})
 					awaitReconcileFinished()
 
 					updateClusterSetLabel(clusterName, otherClusterSet)
-					awaitReconcileFinished()
 
-					expectOperatorManifestWork(clusterName)
-					expectNoClusterStatus(meshName, testNs, clusterName)
-					expectClusterOperatorConditionReason(otherMesh, testNs, clusterName, meshv1alpha1.ReasonManifestWorkCreated)
+					Eventually(func(g Gomega) {
+						w := expectOperatorManifestWork(clusterName)
+						g.Expect(w.Labels[meshcontroller.ClusterSetLabel]).To(Equal(otherClusterSet))
+						g.Expect(w.UID).NotTo(Equal(originalUID))
+					}).Should(Succeed())
 				})
 			})
 
