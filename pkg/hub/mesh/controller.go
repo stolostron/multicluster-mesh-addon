@@ -20,9 +20,12 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/klog/v2"
+	workclient "open-cluster-management.io/api/client/work/clientset/versioned"
+	workinformers "open-cluster-management.io/api/client/work/informers/externalversions"
 	clusterv1 "open-cluster-management.io/api/cluster/v1"
 	clusterv1beta2 "open-cluster-management.io/api/cluster/v1beta2"
 	workv1 "open-cluster-management.io/api/work/v1"
+	"open-cluster-management.io/sdk-go/pkg/apis/work/v1/applier"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -33,7 +36,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	meshv1alpha1 "github.com/stolostron/multicluster-mesh-addon/pkg/apis/mesh/v1alpha1"
-	"github.com/stolostron/multicluster-mesh-addon/pkg/util"
 )
 
 const (
@@ -80,7 +82,8 @@ const (
 // Reconciler reconciles MultiClusterMesh resources
 type Reconciler struct {
 	client.Client
-	Scheme *runtime.Scheme
+	Scheme      *runtime.Scheme
+	workApplier *applier.WorkApplier
 }
 
 // RegisterController registers the MultiClusterMesh controller with the manager
@@ -91,9 +94,31 @@ func RegisterController(mgr manager.Manager) error {
 		return fmt.Errorf("failed to create field index: %w", err)
 	}
 
+	workClient, err := workclient.NewForConfig(mgr.GetConfig())
+	if err != nil {
+		return fmt.Errorf("failed to create work client: %w", err)
+	}
+
+	workInformerFactory := workinformers.NewSharedInformerFactory(workClient, 0)
+	workLister := workInformerFactory.Work().V1().ManifestWorks().Lister()
+
+	if err := mgr.Add(manager.RunnableFunc(func(ctx context.Context) error {
+		workInformerFactory.Start(ctx.Done())
+		for t, synced := range workInformerFactory.WaitForCacheSync(ctx.Done()) {
+			if !synced {
+				return fmt.Errorf("failed to sync work informer cache for %v", t)
+			}
+		}
+		<-ctx.Done()
+		return nil
+	})); err != nil {
+		return fmt.Errorf("failed to add work informer factory: %w", err)
+	}
+
 	reconciler := &Reconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
+		Client:      mgr.GetClient(),
+		Scheme:      mgr.GetScheme(),
+		workApplier: applier.NewWorkApplierWithTypedClient(workClient, workLister),
 	}
 
 	return ctrl.NewControllerManagedBy(mgr).
@@ -283,7 +308,7 @@ func (r *Reconciler) doReconcile(ctx context.Context, mesh *meshv1alpha1.MultiCl
 		return reconcile.Result{}, err
 	}
 
-	if err := r.cleanupManifestWorks(ctx); err != nil {
+	if err := r.cleanupManifestWorks(ctx, mesh.Spec.ClusterSet); err != nil {
 		return reconcile.Result{}, fmt.Errorf("failed to cleanup ManifestWorks: %w", err)
 	}
 
@@ -360,7 +385,7 @@ func (r *Reconciler) handleDeletion(ctx context.Context, mesh *meshv1alpha1.Mult
 	}
 
 	klog.Infof("Handling deletion for MultiClusterMesh %s/%s", mesh.Namespace, mesh.Name)
-	if err := r.cleanupManifestWorks(ctx); err != nil {
+	if err := r.cleanupManifestWorks(ctx, mesh.Spec.ClusterSet); err != nil {
 		return reconcile.Result{}, fmt.Errorf("failed to cleanup ManifestWorks: %w", err)
 	}
 
@@ -385,46 +410,25 @@ func (r *Reconciler) handleDeletion(ctx context.Context, mesh *meshv1alpha1.Mult
 func (r *Reconciler) ensureOperatorInstalled(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, cluster *clusterv1.ManagedCluster) (reconcile.Result, error) {
 	klog.V(4).Infof("Ensuring mesh operator on cluster %s for mesh %s", cluster.Name, mesh.Name)
 
-	existingWork := &workv1.ManifestWork{}
-	err := r.Get(ctx, types.NamespacedName{
-		Name:      OperatorManifestWorkName,
-		Namespace: cluster.Name,
-	}, existingWork)
-
-	if err == nil {
-		if !existingWork.DeletionTimestamp.IsZero() {
-			klog.V(4).Infof("ManifestWork %s/%s is terminating, requeueing", cluster.Name, OperatorManifestWorkName)
-			return reconcile.Result{RequeueAfter: 5 * time.Second}, nil
-		}
-
-		klog.V(4).Infof("ManifestWork %s/%s already exists", cluster.Name, OperatorManifestWorkName)
-		// TODO: Add logic to check if the work needs updating (e.g., channel change)
-		return reconcile.Result{}, nil
+	work, err := r.workApplier.Apply(ctx, r.buildOperatorManifestWork(mesh, cluster))
+	if err != nil {
+		return reconcile.Result{}, fmt.Errorf("failed to apply operator ManifestWork on cluster %s: %w", cluster.Name, err)
 	}
 
-	if !apierrors.IsNotFound(err) {
-		return reconcile.Result{}, fmt.Errorf("failed to get ManifestWork: %w", err)
-	}
-
-	klog.Infof("Creating ManifestWork to install operator on cluster %s", cluster.Name)
-	if err := r.Create(ctx, r.buildOperatorManifestWork(mesh, cluster)); err != nil {
-		return reconcile.Result{}, fmt.Errorf("failed to create ManifestWork: %w", err)
-	}
-
-	klog.Infof("Successfully created ManifestWork %s/%s for operator installation", cluster.Name, OperatorManifestWorkName)
+	klog.Infof("Successfully applied operator ManifestWork %s/%s", work.Namespace, work.Name)
 	return reconcile.Result{}, nil
 }
 
-// cleanupManifestWorks deletes ManifestWorks on clusters that no mesh needs anymore.
-func (r *Reconciler) cleanupManifestWorks(ctx context.Context) error {
-	neededClusters, err := r.getClustersNeededByAnyMesh(ctx)
+// cleanupManifestWorks deletes ManifestWorks on clusters that no mesh in the given ClusterSet needs anymore.
+func (r *Reconciler) cleanupManifestWorks(ctx context.Context, clusterSet string) error {
+	neededClusters, err := r.getClustersNeededInClusterSet(ctx, clusterSet)
 	if err != nil {
 		return fmt.Errorf("failed to determine needed clusters: %w", err)
 	}
 
 	workList := &workv1.ManifestWorkList{}
-	if err := r.List(ctx, workList, client.MatchingLabels{ManagedByLabel: ManagedByValue}); err != nil {
-		return fmt.Errorf("failed to list ManifestWorks: %w", err)
+	if err := r.List(ctx, workList, client.MatchingLabels{ManagedByLabel: ManagedByValue, ClusterSetLabel: clusterSet}); err != nil {
+		return fmt.Errorf("failed to list ManifestWorks for ClusterSet %s: %w", clusterSet, err)
 	}
 
 	for _, work := range workList.Items {
@@ -433,7 +437,7 @@ func (r *Reconciler) cleanupManifestWorks(ctx context.Context) error {
 		}
 
 		klog.Infof("Deleting ManifestWork %s/%s (no mesh targets this cluster)", work.Namespace, work.Name)
-		if err := r.Delete(ctx, &work); err != nil && !apierrors.IsNotFound(err) {
+		if err := r.workApplier.Delete(ctx, work.Namespace, work.Name); err != nil {
 			return fmt.Errorf("failed to delete ManifestWork %s/%s: %w", work.Namespace, work.Name, err)
 		}
 	}
@@ -536,30 +540,34 @@ func (r *Reconciler) setErrorStatus(mesh *meshv1alpha1.MultiClusterMesh, reconci
 	})
 }
 
-// getClustersNeededByAnyMesh returns a set of cluster names that are targeted by at least one active mesh.
-func (r *Reconciler) getClustersNeededByAnyMesh(ctx context.Context) (map[string]bool, error) {
+// getClustersNeededInClusterSet returns a set of cluster names that are targeted by at least one active mesh in the given ClusterSet.
+func (r *Reconciler) getClustersNeededInClusterSet(ctx context.Context, clusterSet string) (map[string]bool, error) {
 	needed := make(map[string]bool)
-	checkedSets := make(map[string]bool)
 
 	meshList := &meshv1alpha1.MultiClusterMeshList{}
-	if err := r.List(ctx, meshList); err != nil {
-		return nil, fmt.Errorf("failed to list meshes: %w", err)
+	if err := r.List(ctx, meshList, client.MatchingFields{"spec.clusterSet": clusterSet}); err != nil {
+		return nil, fmt.Errorf("failed to list meshes for ClusterSet %s: %w", clusterSet, err)
 	}
 
-	for _, mesh := range meshList.Items {
-		if !mesh.DeletionTimestamp.IsZero() || checkedSets[mesh.Spec.ClusterSet] {
-			continue
+	hasActiveMesh := false
+	for i := range meshList.Items {
+		if meshList.Items[i].DeletionTimestamp.IsZero() {
+			hasActiveMesh = true
+			break
 		}
+	}
 
-		checkedSets[mesh.Spec.ClusterSet] = true
-		clusters, err := r.getClustersFromSet(ctx, mesh.Spec.ClusterSet)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get clusters from set %s: %w", mesh.Spec.ClusterSet, err)
-		}
+	if !hasActiveMesh {
+		return needed, nil
+	}
 
-		for _, cluster := range clusters {
-			needed[cluster.Name] = true
-		}
+	clusters, err := r.getClustersFromSet(ctx, clusterSet)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get clusters from set %s: %w", clusterSet, err)
+	}
+
+	for _, cluster := range clusters {
+		needed[cluster.Name] = true
 	}
 
 	return needed, nil
@@ -681,7 +689,8 @@ func (r *Reconciler) buildOperatorManifestWork(mesh *meshv1alpha1.MultiClusterMe
 			Name:      OperatorManifestWorkName,
 			Namespace: cluster.Name,
 			Labels: map[string]string{
-				ManagedByLabel: ManagedByValue,
+				ManagedByLabel:  ManagedByValue,
+				ClusterSetLabel: mesh.Spec.ClusterSet,
 			},
 		},
 		Spec: workv1.ManifestWorkSpec{
@@ -852,43 +861,12 @@ func (r *Reconciler) ensureSecretManifestWork(ctx context.Context, secretName st
 		return fmt.Errorf("failed to get secret: %w", err)
 	}
 
-	var manifestWorkName string
-	if strings.HasPrefix(secret.Name, "cacerts-") {
-		manifestWorkName = ManifestWorkNameCacerts
-	}
-	if strings.HasSuffix(secret.Name, "-istio-reader") {
-		manifestWorkName = ManifestWorkNameMsaSecrets
+	work, err := r.workApplier.Apply(ctx, r.buildCacertsManifestWork(mesh, cluster.Name, secret))
+	if err != nil {
+		return fmt.Errorf("failed to apply cacerts ManifestWork on cluster %s: %w", cluster.Name, err)
 	}
 
-	existingWork := &workv1.ManifestWork{}
-	err = r.Get(ctx, types.NamespacedName{
-		Name:      manifestWorkName,
-		Namespace: cluster.Name,
-	}, existingWork)
-
-	if err == nil {
-		klog.V(4).Infof("ManifestWork %s/%s already exists, checking if update is needed", cluster.Name, ManifestWorkNameCacerts)
-		return r.updateSecretManifestWorkIfNeeded(ctx, mesh, existingWork, secret)
-	}
-
-	if !apierrors.IsNotFound(err) {
-		return fmt.Errorf("failed to get ManifestWork: %w", err)
-	}
-
-	if strings.HasPrefix(secretName, "cacerts-") {
-		klog.Infof("Creating ManifestWork %s/%s to distribute cacerts secret", cluster.Name, manifestWorkName)
-	}
-	if strings.HasSuffix(secretName, "-istio-reader") {
-		klog.Infof("Creating ManifestWork %s/%s to distribute ManagedServiceAccount secret", cluster.Name, manifestWorkName)
-	}
-
-	work := r.buildCacertsManifestWork(mesh, cluster.Name, secret)
-
-	if err := r.Create(ctx, work); err != nil {
-		return fmt.Errorf("failed to create ManifestWork: %w", err)
-	}
-
-	klog.Infof("Successfully created ManifestWork %s/%s", cluster.Name, ManifestWorkNameCacerts)
+	klog.Infof("Successfully applied cacerts ManifestWork %s/%s", work.Namespace, work.Name)
 	return nil
 }
 
@@ -923,35 +901,10 @@ func (r *Reconciler) buildCacertsManifestWork(mesh *meshv1alpha1.MultiClusterMes
 	}
 }
 
-// updateSecretManifestWorkIfNeeded updates the ManifestWork if the secret data has changed
-func (r *Reconciler) updateSecretManifestWorkIfNeeded(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, work *workv1.ManifestWork, secret *corev1.Secret) error {
-	existingSecret := &corev1.Secret{}
-	if err := util.UnmarshalManifest(work.Spec.Workload.Manifests[0], existingSecret); err != nil {
-		return fmt.Errorf("failed to unmarshal existing manifest: %w", err)
-	}
-
-	if reflect.DeepEqual(existingSecret.Data, secret.Data) {
-		klog.V(4).Infof("ManifestWork %s/%s is up to date, no changes needed", work.Namespace, work.Name)
-		return nil
-	}
-
-	newWork := r.buildCacertsManifestWork(mesh, work.Namespace, secret)
-
-	work.Spec = newWork.Spec
-	// TODO: handle label reconciliation
-	work.Labels = newWork.Labels
-
-	if err := r.Update(ctx, work); err != nil {
-		return fmt.Errorf("failed to update ManifestWork: %w", err)
-	}
-
-	klog.V(4).Infof("Updated ManifestWork %s/%s", work.Namespace, work.Name)
-	return nil
-}
-
 func meshOwnedLabels(mesh *meshv1alpha1.MultiClusterMesh, clusterName string) map[string]string {
 	return map[string]string{
 		ManagedByLabel:     ManagedByValue,
+		ClusterSetLabel:    mesh.Spec.ClusterSet,
 		MeshNameLabel:      mesh.Name,
 		MeshNamespaceLabel: mesh.Namespace,
 		ClusterNameLabel:   clusterName,
