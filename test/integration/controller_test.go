@@ -84,7 +84,7 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 
 			util.CreateK8sManagedCluster(ctx, k8sClient, cluster1, testClusterSet)
 			util.CreateOCPManagedCluster(ctx, k8sClient, cluster2, testClusterSet, meshcontroller.ProductOCP)
-			util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet, meshv1alpha1.OperatorConfig{})
+			util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet)
 
 			Eventually(func() int {
 				workList := &workv1.ManifestWorkList{}
@@ -116,7 +116,7 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 			}
 
 			util.CreateK8sManagedCluster(ctx, k8sClient, clusterName, testClusterSet)
-			util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet, customConfig)
+			util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet, meshv1alpha1.MultiClusterMeshSpec{Operator: customConfig})
 
 			work := expectOperatorManifestWork(clusterName)
 
@@ -148,7 +148,7 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 			}
 
 			util.CreateOCPManagedCluster(ctx, k8sClient, clusterName, testClusterSet, meshcontroller.ProductOCP)
-			util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet, customConfig)
+			util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet, meshv1alpha1.MultiClusterMeshSpec{Operator: customConfig})
 
 			work := expectOperatorManifestWork(clusterName)
 
@@ -174,7 +174,7 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 
 			BeforeEach(func() {
 				otherClusterSet = util.UniqueName("late-set")
-				util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, otherClusterSet, meshv1alpha1.OperatorConfig{})
+				util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, otherClusterSet)
 				awaitReconcileFinished()
 			})
 
@@ -194,7 +194,7 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 
 		When("referencing an empty ClusterSet", func() {
 			BeforeEach(func() {
-				util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet, meshv1alpha1.OperatorConfig{})
+				util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet)
 				awaitReconcileFinished()
 			})
 
@@ -220,7 +220,7 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 		When("referencing a cluster with no product claim", func() {
 			BeforeEach(func() {
 				util.CreateManagedCluster(ctx, k8sClient, clusterName, testClusterSet)
-				util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet, meshv1alpha1.OperatorConfig{})
+				util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet)
 				awaitReconcileFinished()
 			})
 
@@ -238,7 +238,7 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 		})
 
 		It("should add finalizer on MultiClusterMesh creation", func() {
-			util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet, meshv1alpha1.OperatorConfig{})
+			util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet)
 			expectFinalizer(meshName, testNs)
 		})
 
@@ -247,7 +247,7 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 
 			BeforeEach(func() {
 				util.CreateK8sManagedCluster(ctx, k8sClient, clusterName, testClusterSet)
-				util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet, meshv1alpha1.OperatorConfig{})
+				util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet)
 				work = expectOperatorManifestWork(clusterName)
 			})
 
@@ -354,7 +354,7 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 					originalUID := work.UID
 
 					otherMesh := util.UniqueName("other-mesh")
-					util.CreateMultiClusterMesh(ctx, k8sClient, otherMesh, testNs, otherClusterSet, meshv1alpha1.OperatorConfig{})
+					util.CreateMultiClusterMesh(ctx, k8sClient, otherMesh, testNs, otherClusterSet)
 					awaitReconcileFinished()
 
 					updateClusterSetLabel(clusterName, otherClusterSet)
@@ -374,7 +374,7 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 					otherNs = util.UniqueName("other-ns")
 					otherMesh = util.UniqueName("other-mesh")
 					util.CreateNamespace(ctx, k8sClient, otherNs)
-					util.CreateMultiClusterMesh(ctx, k8sClient, otherMesh, otherNs, testClusterSet, meshv1alpha1.OperatorConfig{})
+					util.CreateMultiClusterMesh(ctx, k8sClient, otherMesh, otherNs, testClusterSet)
 					awaitReconcileFinished()
 				})
 
@@ -400,12 +400,12 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 			otherMesh = meshName + "-2"
 
 			util.CreateK8sManagedCluster(ctx, k8sClient, clusterName, testClusterSet)
-			util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet, meshv1alpha1.OperatorConfig{})
+			util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet)
 			expectOperatorManifestWork(clusterName)
 		})
 
 		It("should allow two meshes with the same operator config", func() {
-			util.CreateMultiClusterMesh(ctx, k8sClient, otherMesh, testNs, testClusterSet, meshv1alpha1.OperatorConfig{})
+			util.CreateMultiClusterMesh(ctx, k8sClient, otherMesh, testNs, testClusterSet)
 
 			expectMeshNotReady(otherMesh, testNs)
 			expectClusterOperatorConditionReason(otherMesh, testNs, clusterName, meshv1alpha1.ReasonManifestWorkCreated)
@@ -413,8 +413,8 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 
 		When("a newer mesh has a conflicting operator config", func() {
 			BeforeEach(func() {
-				util.CreateMultiClusterMesh(ctx, k8sClient, otherMesh, testNs, testClusterSet, meshv1alpha1.OperatorConfig{
-					Channel: "different-channel",
+				util.CreateMultiClusterMesh(ctx, k8sClient, otherMesh, testNs, testClusterSet, meshv1alpha1.MultiClusterMeshSpec{
+					Operator: meshv1alpha1.OperatorConfig{Channel: "different-channel"},
 				})
 			})
 
@@ -436,7 +436,7 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 			cluster2 := util.UniqueName("cluster2")
 			util.CreateK8sManagedCluster(ctx, k8sClient, clusterName, testClusterSet)
 			util.CreateOCPManagedCluster(ctx, k8sClient, cluster2, testClusterSet, meshcontroller.ProductOCP)
-			util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet, meshv1alpha1.OperatorConfig{})
+			util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet)
 			expectFinalizer(meshName, testNs)
 			expectOperatorManifestWork(clusterName)
 			expectOperatorManifestWork(cluster2)
@@ -447,7 +447,7 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 		})
 
 		It("should work when ClusterSet doesn't exist", func() {
-			util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, util.UniqueName("nonexistent-set"), meshv1alpha1.OperatorConfig{})
+			util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, util.UniqueName("nonexistent-set"))
 			expectFinalizer(meshName, testNs)
 
 			util.DeleteResource(ctx, k8sClient, &meshv1alpha1.MultiClusterMesh{}, meshName, testNs)
@@ -458,7 +458,7 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 		When("cert-manager issuer is configured", func() {
 			BeforeEach(func() {
 				util.CreateK8sManagedCluster(ctx, k8sClient, clusterName, testClusterSet)
-				util.CreateMultiClusterMeshWithCertManager(ctx, k8sClient, meshName, testNs, testClusterSet, "mesh-issuer")
+				util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet, util.CertManagerSpec("mesh-issuer"))
 			})
 
 			It("should create Certificate resource", func() {
@@ -510,7 +510,7 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 
 				util.CreateK8sManagedCluster(ctx, k8sClient, cluster1, testClusterSet)
 				util.CreateK8sManagedCluster(ctx, k8sClient, cluster2, testClusterSet)
-				util.CreateMultiClusterMeshWithCertManager(ctx, k8sClient, meshName, testNs, testClusterSet, "mesh-issuer")
+				util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet, util.CertManagerSpec("mesh-issuer"))
 
 				util.CreateCacertsSecret(ctx, k8sClient, testNs, cluster1, meshName, testNs)
 				util.CreateCacertsSecret(ctx, k8sClient, testNs, cluster2, meshName, testNs)
@@ -523,7 +523,7 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 		When("no issuer is configured", func() {
 			BeforeEach(func() {
 				util.CreateK8sManagedCluster(ctx, k8sClient, clusterName, testClusterSet)
-				util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet, meshv1alpha1.OperatorConfig{})
+				util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet)
 				awaitReconcileFinished()
 			})
 
@@ -537,7 +537,7 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 		DescribeTable("should detect OpenShift variants and use OSSM operator",
 			func(productClaim string) {
 				util.CreateOCPManagedCluster(ctx, k8sClient, clusterName, testClusterSet, productClaim)
-				util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet, meshv1alpha1.OperatorConfig{})
+				util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet)
 
 				work := expectOperatorManifestWork(clusterName)
 
@@ -555,7 +555,7 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 
 		It("should detect vanilla Kubernetes and use Sail operator", func() {
 			util.CreateK8sManagedCluster(ctx, k8sClient, clusterName, testClusterSet)
-			util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet, meshv1alpha1.OperatorConfig{})
+			util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet)
 
 			work := expectOperatorManifestWork(clusterName)
 
