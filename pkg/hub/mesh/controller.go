@@ -103,7 +103,11 @@ func RegisterController(mgr manager.Manager) error {
 
 	if err := mgr.Add(manager.RunnableFunc(func(ctx context.Context) error {
 		workInformerFactory.Start(ctx.Done())
-		workInformerFactory.WaitForCacheSync(ctx.Done())
+		for t, synced := range workInformerFactory.WaitForCacheSync(ctx.Done()) {
+			if !synced {
+				return fmt.Errorf("failed to sync work informer cache for %v", t)
+			}
+		}
 		<-ctx.Done()
 		return nil
 	})); err != nil {
