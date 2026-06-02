@@ -520,6 +520,19 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 			})
 		})
 
+		When("a cluster is removed from the ClusterSet", func() {
+			It("should cleanup Certificate for that cluster", func() {
+				util.CreateK8sManagedCluster(ctx, k8sClient, clusterName, testClusterSet)
+				util.CreateMultiClusterMeshWithCertManager(ctx, k8sClient, meshName, testNs, testClusterSet, "mesh-issuer")
+				expectCertificate(testNs, clusterName, "mesh-issuer")
+
+				updateClusterSetLabel(clusterName, "")
+
+				util.ExpectResourceDeleted(ctx, k8sClient, &certmanagerv1.Certificate{},
+					fmt.Sprintf("cacerts-%s", clusterName), testNs)
+			})
+		})
+
 		When("no issuer is configured", func() {
 			BeforeEach(func() {
 				util.CreateK8sManagedCluster(ctx, k8sClient, clusterName, testClusterSet)
