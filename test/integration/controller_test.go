@@ -404,8 +404,10 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 			expectOperatorManifestWork(clusterName)
 		})
 
-		It("should allow two meshes with the same operator config", func() {
-			util.CreateMultiClusterMesh(ctx, k8sClient, otherMesh, testNs, testClusterSet)
+		It("should allow two meshes with different control plane namespaces", func() {
+			util.CreateMultiClusterMesh(ctx, k8sClient, otherMesh, testNs, testClusterSet, meshv1alpha1.MultiClusterMeshSpec{
+				ControlPlane: meshv1alpha1.ControlPlaneConfig{Namespace: "istio-system-2"},
+			})
 
 			expectMeshNotReady(otherMesh, testNs)
 			expectClusterOperatorConditionReason(otherMesh, testNs, clusterName, meshv1alpha1.ReasonManifestWorkCreated)
@@ -414,7 +416,8 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 		When("a newer mesh has a conflicting operator config", func() {
 			BeforeEach(func() {
 				util.CreateMultiClusterMesh(ctx, k8sClient, otherMesh, testNs, testClusterSet, meshv1alpha1.MultiClusterMeshSpec{
-					Operator: meshv1alpha1.OperatorConfig{Channel: "different-channel"},
+					ControlPlane: meshv1alpha1.ControlPlaneConfig{Namespace: "istio-system-2"},
+					Operator:     meshv1alpha1.OperatorConfig{Channel: "different-channel"},
 				})
 			})
 
@@ -424,6 +427,32 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 
 			It("should unblock the newer mesh when the older mesh is deleted", func() {
 				expectMeshConditionReason(otherMesh, testNs, meshv1alpha1.ConditionReady, meshv1alpha1.ReasonOperatorConfigConflict)
+
+				util.DeleteResource(ctx, k8sClient, &meshv1alpha1.MultiClusterMesh{}, meshName, testNs)
+				expectClusterOperatorConditionReason(otherMesh, testNs, clusterName, meshv1alpha1.ReasonManifestWorkCreated)
+			})
+		})
+
+		When("a newer mesh has the same control plane namespace", func() {
+			BeforeEach(func() {
+				util.CreateMultiClusterMesh(ctx, k8sClient, otherMesh, testNs, testClusterSet)
+			})
+
+			It("should block the newer mesh", func() {
+				expectMeshConditionReason(otherMesh, testNs, meshv1alpha1.ConditionReady, meshv1alpha1.ReasonNamespaceConflict)
+			})
+
+			It("should detect conflict when one mesh uses the default namespace explicitly", func() {
+				thirdMesh := meshName + "-3"
+				util.CreateMultiClusterMesh(ctx, k8sClient, thirdMesh, testNs, testClusterSet, meshv1alpha1.MultiClusterMeshSpec{
+					ControlPlane: meshv1alpha1.ControlPlaneConfig{Namespace: "istio-system"},
+				})
+
+				expectMeshConditionReason(thirdMesh, testNs, meshv1alpha1.ConditionReady, meshv1alpha1.ReasonNamespaceConflict)
+			})
+
+			It("should unblock the newer mesh when the older mesh is deleted", func() {
+				expectMeshConditionReason(otherMesh, testNs, meshv1alpha1.ConditionReady, meshv1alpha1.ReasonNamespaceConflict)
 
 				util.DeleteResource(ctx, k8sClient, &meshv1alpha1.MultiClusterMesh{}, meshName, testNs)
 				expectClusterOperatorConditionReason(otherMesh, testNs, clusterName, meshv1alpha1.ReasonManifestWorkCreated)

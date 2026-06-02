@@ -153,6 +153,9 @@ const (
 
 	// ReasonOperatorConfigConflict indicates a conflict with an older mesh's operator config
 	ReasonOperatorConfigConflict = "OperatorConfigConflict"
+
+	// ReasonNamespaceConflict indicates a conflict with an older mesh's control plane namespace
+	ReasonNamespaceConflict = "NamespaceConflict"
 )
 
 // MultiClusterMeshStatus defines the observed state of MultiClusterMesh
