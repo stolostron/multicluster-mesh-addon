@@ -750,27 +750,15 @@ func (r *Reconciler) ensureCertificatesCreated(ctx context.Context, mesh *meshv1
 	return nil
 }
 
-// ensureCertificateForCluster creates a Certificate resource for a specific cluster
+// ensureCertificateForCluster applies the desired Certificate state for a specific cluster using server-side apply.
 func (r *Reconciler) ensureCertificateForCluster(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, cluster *clusterv1.ManagedCluster) error {
 	certName := getCacertsName(cluster.Name)
-	cert := &certmanagerv1.Certificate{}
-	err := r.Get(ctx, types.NamespacedName{
-		Name:      certName,
-		Namespace: mesh.Namespace,
-	}, cert)
 
-	if err == nil {
-		klog.V(4).Infof("Certificate %s/%s already exists", mesh.Namespace, certName)
-		return nil
-	}
-
-	if !apierrors.IsNotFound(err) {
-		return fmt.Errorf("failed to get Certificate: %w", err)
-	}
-
-	klog.Infof("Creating Certificate %s/%s for cluster %s", mesh.Namespace, certName, cluster.Name)
-
-	cert = &certmanagerv1.Certificate{
+	cert := &certmanagerv1.Certificate{
+		TypeMeta: metav1.TypeMeta{
+			APIVersion: "cert-manager.io/v1",
+			Kind:       "Certificate",
+		},
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      certName,
 			Namespace: mesh.Namespace,
@@ -802,11 +790,10 @@ func (r *Reconciler) ensureCertificateForCluster(ctx context.Context, mesh *mesh
 		return fmt.Errorf("failed to set controller reference on Certificate: %w", err)
 	}
 
-	if err := r.Create(ctx, cert); err != nil {
-		return fmt.Errorf("failed to create Certificate: %w", err)
+	if err := r.Patch(ctx, cert, client.Apply, client.FieldOwner(ManagedByValue), client.ForceOwnership); err != nil {
+		return fmt.Errorf("failed to apply Certificate %s/%s: %w", mesh.Namespace, certName, err)
 	}
 
-	klog.Infof("Successfully created Certificate %s/%s", mesh.Namespace, certName)
 	return nil
 }
 

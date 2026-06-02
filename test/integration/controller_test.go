@@ -465,6 +465,24 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 				expectCertificate(testNs, clusterName, "mesh-issuer")
 			})
 
+			It("should restore Certificate spec when externally modified", func() {
+				cert := expectCertificate(testNs, clusterName, "mesh-issuer")
+
+				cert.Spec.CommonName = "tampered"
+				Expect(k8sClient.Update(ctx, cert)).To(Succeed())
+
+				Eventually(func() string {
+					c := &certmanagerv1.Certificate{}
+					if err := k8sClient.Get(ctx, types.NamespacedName{
+						Name:      fmt.Sprintf("cacerts-%s", clusterName),
+						Namespace: testNs,
+					}, c); err != nil {
+						return ""
+					}
+					return c.Spec.CommonName
+				}).Should(Equal("Intermediate Istio CA"))
+			})
+
 			It("should create ManifestWork when cacerts secret is created", func() {
 				// simulate creating the cacerts secret by cert-manager
 				util.CreateCacertsSecret(ctx, k8sClient, testNs, clusterName, meshName, testNs)
