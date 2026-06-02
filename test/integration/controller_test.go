@@ -521,6 +521,19 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 		})
 
 		When("cert-manager issuer is configured and cluster exists", func() {
+			It("should recreate Certificate when it is externally deleted", func() {
+				util.CreateK8sManagedCluster(ctx, k8sClient, clusterName, testClusterSet)
+				util.CreateMultiClusterMeshWithCertManager(ctx, k8sClient, meshName, testNs, testClusterSet, "mesh-issuer")
+
+				cert := expectCertificate(testNs, clusterName, "mesh-issuer")
+				originalUID := cert.UID
+				Expect(k8sClient.Delete(ctx, cert)).To(Succeed())
+
+				Eventually(func() types.UID {
+					return expectCertificate(testNs, clusterName, "mesh-issuer").UID
+				}).ShouldNot(Equal(originalUID))
+			})
+
 			It("should set owner reference on Certificate", func() {
 				util.CreateK8sManagedCluster(ctx, k8sClient, clusterName, testClusterSet)
 				util.CreateMultiClusterMeshWithCertManager(ctx, k8sClient, meshName, testNs, testClusterSet, "mesh-issuer")
