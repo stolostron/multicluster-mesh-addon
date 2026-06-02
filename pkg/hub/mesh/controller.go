@@ -280,12 +280,10 @@ func (r *Reconciler) doReconcile(ctx context.Context, mesh *meshv1alpha1.MultiCl
 	// Create certificates for each cluster if cert-manager is configured
 	if mesh.Spec.Security.Trust.CertManager.IssuerRef.Name != "" {
 		if err := r.ensureCertificatesCreated(ctx, mesh, clusters); err != nil {
-			klog.Errorf("Failed to ensure certificates: %v", err)
 			return reconcile.Result{}, err
 		}
 
 		if err := r.ensureCacertsDistributed(ctx, mesh, clusters); err != nil {
-			klog.Errorf("Failed to distribute cacerts: %v", err)
 			return reconcile.Result{}, err
 		}
 	}
