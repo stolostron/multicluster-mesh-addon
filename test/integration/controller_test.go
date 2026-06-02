@@ -5,7 +5,6 @@ package integration
 import (
 	"encoding/json"
 	"fmt"
-	"time"
 
 	certmanagerv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
 	. "github.com/onsi/ginkgo/v2"
@@ -175,15 +174,15 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 			BeforeEach(func() {
 				otherClusterSet = util.UniqueName("late-set")
 				util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, otherClusterSet, meshv1alpha1.OperatorConfig{})
-				awaitReconcileFinished()
 			})
 
 			It("should not create ManifestWorks", func() {
-				expectNoManifestWorks()
 				expectMeshNotReady(meshName, testNs)
+				expectNoManifestWorks()
 			})
 
 			It("should reconcile when the ClusterSet is created", func() {
+				expectMeshNotReady(meshName, testNs)
 				util.CreateK8sManagedCluster(ctx, k8sClient, clusterName, otherClusterSet)
 				util.CreateManagedClusterSet(ctx, k8sClient, otherClusterSet)
 				expectOperatorManifestWork(clusterName)
@@ -195,18 +194,17 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 		When("referencing an empty ClusterSet", func() {
 			BeforeEach(func() {
 				util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet, meshv1alpha1.OperatorConfig{})
-				awaitReconcileFinished()
 			})
 
 			It("should not process it", func() {
-				expectNoManifestWorks()
 				expectMeshNotReady(meshName, testNs)
+				expectNoManifestWorks()
 			})
 
 			It("shouldn't process a cluster without clusterset label", func() {
 				util.CreateK8sManagedCluster(ctx, k8sClient, clusterName, "")
-				expectNoManifestWorks()
 				expectMeshNotReady(meshName, testNs)
+				expectNoManifestWorks()
 			})
 
 			It("should process a cluster when it's added", func() {
@@ -221,16 +219,16 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 			BeforeEach(func() {
 				util.CreateManagedCluster(ctx, k8sClient, clusterName, testClusterSet)
 				util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet, meshv1alpha1.OperatorConfig{})
-				awaitReconcileFinished()
 			})
 
 			It("should skip it and report missing product claim", func() {
-				expectNoManifestWorks()
 				expectMeshNotReady(meshName, testNs)
+				expectNoManifestWorks()
 				expectClusterOperatorConditionReason(meshName, testNs, clusterName, meshv1alpha1.ReasonMissingProductClaim)
 			})
 
 			It("should process it when a claim is set", func() {
+				expectMeshNotReady(meshName, testNs)
 				util.SetProductClaim(ctx, k8sClient, clusterName, "Other")
 				expectOperatorManifestWork(clusterName)
 				expectClusterOperatorConditionReason(meshName, testNs, clusterName, meshv1alpha1.ReasonManifestWorkCreated)
@@ -251,16 +249,17 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 				work = expectOperatorManifestWork(clusterName)
 			})
 
-			It("should not update ManifestWork when nothing changed", func() {
+			It("should not update operator ManifestWork when operator config hasn't changed", func() {
 				originalVersion := work.ResourceVersion
 
 				mesh := &meshv1alpha1.MultiClusterMesh{}
 				Expect(k8sClient.Get(ctx, types.NamespacedName{Name: meshName, Namespace: testNs}, mesh)).To(Succeed())
+				mesh.Spec.ControlPlane.Namespace = "different-ns"
 				Expect(k8sClient.Update(ctx, mesh)).To(Succeed())
-				awaitReconcileFinished()
 
-				work = expectOperatorManifestWork(clusterName)
-				Expect(work.ResourceVersion).To(Equal(originalVersion))
+				Consistently(func() string {
+					return expectOperatorManifestWork(clusterName).ResourceVersion
+				}).Should(Equal(originalVersion))
 			})
 
 			It("should update ManifestWork when operator config changes", func() {
@@ -341,7 +340,6 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 				BeforeEach(func() {
 					otherClusterSet = util.UniqueName("other-set")
 					util.CreateManagedClusterSet(ctx, k8sClient, otherClusterSet)
-					awaitReconcileFinished()
 				})
 
 				It("should cleanup ManifestWork when no mesh targets the new set", func() {
@@ -355,8 +353,7 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 
 					otherMesh := util.UniqueName("other-mesh")
 					util.CreateMultiClusterMesh(ctx, k8sClient, otherMesh, testNs, otherClusterSet, meshv1alpha1.OperatorConfig{})
-					awaitReconcileFinished()
-
+					expectMeshNotReady(otherMesh, testNs)
 					updateClusterSetLabel(clusterName, otherClusterSet)
 
 					Eventually(func(g Gomega) {
@@ -375,15 +372,16 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 					otherMesh = util.UniqueName("other-mesh")
 					util.CreateNamespace(ctx, k8sClient, otherNs)
 					util.CreateMultiClusterMesh(ctx, k8sClient, otherMesh, otherNs, testClusterSet, meshv1alpha1.OperatorConfig{})
-					awaitReconcileFinished()
 				})
 
 				It("should keep the ManifestWork when one mesh is deleted", func() {
+					expectMeshNotReady(otherMesh, otherNs)
 					util.DeleteResource(ctx, k8sClient, &meshv1alpha1.MultiClusterMesh{}, otherMesh, otherNs)
 					expectOperatorManifestWork(clusterName)
 				})
 
 				It("should delete the ManifestWork when both meshes are deleted", func() {
+					expectMeshNotReady(otherMesh, otherNs)
 					util.DeleteResource(ctx, k8sClient, &meshv1alpha1.MultiClusterMesh{}, meshName, testNs)
 					util.DeleteResource(ctx, k8sClient, &meshv1alpha1.MultiClusterMesh{}, otherMesh, otherNs)
 					expectAllManifestWorksDeleted()
@@ -524,10 +522,10 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 			BeforeEach(func() {
 				util.CreateK8sManagedCluster(ctx, k8sClient, clusterName, testClusterSet)
 				util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet, meshv1alpha1.OperatorConfig{})
-				awaitReconcileFinished()
 			})
 
 			It("should not create cacerts ManifestWork", func() {
+				expectMeshNotReady(meshName, testNs)
 				expectNoCacertsManifestWork(clusterName)
 			})
 		})
@@ -577,10 +575,6 @@ func expectFinalizer(name, namespace string) {
 		}
 		return mesh.Finalizers
 	}).Should(ContainElement(meshcontroller.FinalizerName))
-}
-
-func awaitReconcileFinished() {
-	time.Sleep(1 * time.Second)
 }
 
 func updateClusterSetLabel(clusterName, newClusterSet string) {
