@@ -797,6 +797,10 @@ func (r *Reconciler) ensureCertificateForCluster(ctx context.Context, mesh *mesh
 		},
 	}
 
+	if err := controllerutil.SetControllerReference(mesh, cert, r.Scheme); err != nil {
+		return fmt.Errorf("failed to set controller reference on Certificate: %w", err)
+	}
+
 	if err := r.Create(ctx, cert); err != nil {
 		return fmt.Errorf("failed to create Certificate: %w", err)
 	}
