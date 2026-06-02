@@ -273,28 +273,26 @@ func (r *Reconciler) operatorConfigConflicts(a, b meshv1alpha1.OperatorConfig) b
 
 func (r *Reconciler) doReconcile(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, clusters []clusterv1.ManagedCluster) (reconcile.Result, error) {
 	for _, cluster := range clusters {
-		klog.V(4).Infof("Reconciling cluster %s", cluster.Name)
-
 		if getProductClaim(&cluster) == "" {
 			klog.V(4).Infof("Cluster %s missing product claim (needed for platform detection), skipping", cluster.Name)
 			continue
 		}
+
+		klog.V(4).Infof("Reconciling cluster %s", cluster.Name)
 
 		work, err := r.workApplier.Apply(ctx, r.buildOperatorManifestWork(mesh, &cluster))
 		if err != nil {
 			return reconcile.Result{}, fmt.Errorf("failed to apply operator ManifestWork on cluster %s: %w", cluster.Name, err)
 		}
 		klog.V(4).Infof("Applied operator ManifestWork %s/%s", work.Namespace, work.Name)
-	}
 
-	// Create certificates for each cluster if cert-manager is configured
-	if mesh.Spec.Security.Trust.CertManager.IssuerRef.Name != "" {
-		if err := r.ensureCertificatesCreated(ctx, mesh, clusters); err != nil {
-			return reconcile.Result{}, err
-		}
-
-		if err := r.ensureCacertsDistributed(ctx, mesh, clusters); err != nil {
-			return reconcile.Result{}, err
+		if mesh.Spec.Security.Trust.CertManager.IssuerRef.Name != "" {
+			if err := r.ensureCertificateForCluster(ctx, mesh, &cluster); err != nil {
+				return reconcile.Result{}, fmt.Errorf("failed to ensure certificate for cluster %s: %w", cluster.Name, err)
+			}
+			if err := r.ensureCacertsManifestWork(ctx, mesh, &cluster); err != nil {
+				return reconcile.Result{}, fmt.Errorf("failed to ensure cacerts ManifestWork for cluster %s: %w", cluster.Name, err)
+			}
 		}
 	}
 
@@ -753,16 +751,6 @@ func getCacertsName(clusterName string) string {
 	return fmt.Sprintf("cacerts-%s", clusterName)
 }
 
-// ensureCertificatesCreated creates Certificate resources for each cluster in the mesh
-func (r *Reconciler) ensureCertificatesCreated(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, clusters []clusterv1.ManagedCluster) error {
-	for _, cluster := range clusters {
-		if err := r.ensureCertificateForCluster(ctx, mesh, &cluster); err != nil {
-			return fmt.Errorf("failed to ensure certificate for cluster %s: %w", cluster.Name, err)
-		}
-	}
-	return nil
-}
-
 // ensureCertificateForCluster applies the desired Certificate state for a specific cluster using server-side apply.
 func (r *Reconciler) ensureCertificateForCluster(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, cluster *clusterv1.ManagedCluster) error {
 	certName := getCacertsName(cluster.Name)
@@ -807,16 +795,6 @@ func (r *Reconciler) ensureCertificateForCluster(ctx context.Context, mesh *mesh
 	}
 
 	klog.Infof("Successfully applied Certificate %s/%s", mesh.Namespace, certName)
-	return nil
-}
-
-// ensureCacertsDistributed creates ManifestWorks to distribute cacerts secrets to clusters
-func (r *Reconciler) ensureCacertsDistributed(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, clusters []clusterv1.ManagedCluster) error {
-	for _, cluster := range clusters {
-		if err := r.ensureCacertsManifestWork(ctx, mesh, &cluster); err != nil {
-			return fmt.Errorf("failed to ensure cacerts ManifestWork for cluster %s: %w", cluster.Name, err)
-		}
-	}
 	return nil
 }
 

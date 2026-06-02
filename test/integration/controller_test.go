@@ -710,6 +710,26 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 				expectNoCacertsManifestWork(clusterName)
 			})
 		})
+
+		When("cluster has no product claim and issuer is configured", func() {
+			BeforeEach(func() {
+				util.CreateManagedCluster(ctx, k8sClient, clusterName, testClusterSet)
+				util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet, util.CertManagerSpec("mesh-issuer"))
+			})
+
+			It("should not create Certificate", func() {
+				expectMeshNotReady(meshName, testNs)
+				expectNoCertificate(testNs, clusterName)
+			})
+
+			It("should create Certificate when product claim is added", func() {
+				expectMeshNotReady(meshName, testNs)
+				expectNoCertificate(testNs, clusterName)
+
+				util.SetProductClaim(ctx, k8sClient, clusterName, "Other")
+				expectCertificate(testNs, clusterName, "mesh-issuer")
+			})
+		})
 	})
 
 	Context("Platform detection", func() {
@@ -824,6 +844,17 @@ func expectOperatorManifestWork(clusterNamespace string) *workv1.ManifestWork {
 
 func expectCacertsManifestWork(clusterNamespace string) *workv1.ManifestWork {
 	return expectManifestWork(meshcontroller.ManifestWorkNameCacerts, clusterNamespace)
+}
+
+func expectNoCertificate(namespace, clusterName string) {
+	Consistently(func() bool {
+		cert := &certmanagerv1.Certificate{}
+		err := k8sClient.Get(ctx, types.NamespacedName{
+			Name:      fmt.Sprintf("cacerts-%s", clusterName),
+			Namespace: namespace,
+		}, cert)
+		return errors.IsNotFound(err)
+	}).Should(BeTrue())
 }
 
 func expectNoCacertsManifestWork(clusterNamespace string) {
