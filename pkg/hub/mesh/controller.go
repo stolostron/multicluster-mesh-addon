@@ -219,31 +219,25 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (resu
 
 // validate checks for conflicts that prevent reconciliation.
 // Returns a condition to set on the mesh if validation fails, or nil if ok.
-func (r *Reconciler) validate(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh) (*metav1.Condition, error) {
-	meshList := &meshv1alpha1.MultiClusterMeshList{}
-	if err := r.List(ctx, meshList, client.MatchingFields{"spec.clusterSet": mesh.Spec.ClusterSet}); err != nil {
-		return nil, fmt.Errorf("failed to validate: %w", err)
-	}
-
-	for _, other := range meshList.Items {
-		if other.UID == mesh.UID {
-			continue
+func (r *Reconciler) validate(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh) (conflict *metav1.Condition, err error) {
+	if err = r.forEachMeshInClusterSet(ctx, mesh.Spec.ClusterSet, func(other *meshv1alpha1.MultiClusterMesh) {
+		if other.UID == mesh.UID || conflict != nil {
+			return
 		}
-		if !other.DeletionTimestamp.IsZero() {
-			continue
-		}
-		if isOlderMesh(&other, mesh) && r.operatorConfigConflicts(mesh.Spec.Operator, other.Spec.Operator) {
-			return &metav1.Condition{
+		if isOlderMesh(other, mesh) && r.operatorConfigConflicts(mesh.Spec.Operator, other.Spec.Operator) {
+			conflict = &metav1.Condition{
 				Type:   meshv1alpha1.ConditionReady,
 				Status: metav1.ConditionFalse,
 				Reason: meshv1alpha1.ReasonOperatorConfigConflict,
 				Message: fmt.Sprintf("operator config conflicts with older mesh %s/%s targeting the same ClusterSet %s",
 					other.Namespace, other.Name, mesh.Spec.ClusterSet),
-			}, nil
+			}
 		}
+	}); err != nil {
+		return nil, fmt.Errorf("failed to validate: %w", err)
 	}
 
-	return nil, nil
+	return conflict, nil
 }
 
 // isOlderMesh returns true if a is older than b, using namespace/name as tiebreaker for equal timestamps.
@@ -295,53 +289,52 @@ func (r *Reconciler) doReconcile(ctx context.Context, mesh *meshv1alpha1.MultiCl
 	return reconcile.Result{}, nil
 }
 
+// forEachMeshInClusterSet lists all non-deleting meshes targeting the given ClusterSet and calls fn for each.
+func (r *Reconciler) forEachMeshInClusterSet(ctx context.Context, clusterSet string, fn func(*meshv1alpha1.MultiClusterMesh)) error {
+	meshList := &meshv1alpha1.MultiClusterMeshList{}
+	if err := r.List(ctx, meshList, client.MatchingFields{"spec.clusterSet": clusterSet}); err != nil {
+		return fmt.Errorf("failed to list meshes for ClusterSet %s: %w", clusterSet, err)
+	}
+
+	for i := range meshList.Items {
+		if meshList.Items[i].DeletionTimestamp.IsZero() {
+			fn(&meshList.Items[i])
+		}
+	}
+
+	return nil
+}
+
+func (r *Reconciler) reconcileRequestsForClusterSet(ctx context.Context, clusterSet string) []reconcile.Request {
+	var requests []reconcile.Request
+	if err := r.forEachMeshInClusterSet(ctx, clusterSet, func(mesh *meshv1alpha1.MultiClusterMesh) {
+		requests = append(requests, reconcile.Request{
+			NamespacedName: types.NamespacedName{Name: mesh.Name, Namespace: mesh.Namespace},
+		})
+	}); err != nil {
+		klog.Errorf("Error when trying to reconcile meshes for ClusterSet %s: %v", clusterSet, err)
+	}
+	return requests
+}
+
 // findMeshesForCluster returns a list of all meshes to reconcile following a cluster change
-func (r *Reconciler) findMeshesForCluster(ctx context.Context, obj client.Object) (requests []reconcile.Request) {
+func (r *Reconciler) findMeshesForCluster(ctx context.Context, obj client.Object) []reconcile.Request {
 	cluster := obj.(*clusterv1.ManagedCluster)
 	clusterSetName := cluster.Labels[ClusterSetLabel]
 	if clusterSetName == "" {
 		klog.V(4).Infof("Cluster %s has no clusterset label, skipping", cluster.Name)
-		return
+		return nil
 	}
 
-	meshList := &meshv1alpha1.MultiClusterMeshList{}
-	if err := r.List(ctx, meshList, client.MatchingFields{"spec.clusterSet": clusterSetName}); err != nil {
-		klog.Errorf("Failed to list MultiClusterMeshes when handling cluster %s: %v", cluster.Name, err)
-		return
-	}
-
-	for _, mesh := range meshList.Items {
-		requests = append(requests, reconcile.Request{
-			NamespacedName: types.NamespacedName{
-				Name:      mesh.Name,
-				Namespace: mesh.Namespace,
-			},
-		})
-	}
-
-	return requests
+	klog.V(4).Infof("ManagedCluster %s changed, reconciling meshes using ClusterSet %s", cluster.Name, clusterSetName)
+	return r.reconcileRequestsForClusterSet(ctx, clusterSetName)
 }
 
 // findMeshesForClusterSet returns a list of all meshes to reconcile following a ClusterSet change
-func (r *Reconciler) findMeshesForClusterSet(ctx context.Context, obj client.Object) (requests []reconcile.Request) {
+func (r *Reconciler) findMeshesForClusterSet(ctx context.Context, obj client.Object) []reconcile.Request {
 	clusterSet := obj.(*clusterv1beta2.ManagedClusterSet)
-
-	meshList := &meshv1alpha1.MultiClusterMeshList{}
-	if err := r.List(ctx, meshList, client.MatchingFields{"spec.clusterSet": clusterSet.Name}); err != nil {
-		klog.Errorf("Failed to list MultiClusterMeshes when handling ClusterSet %s: %v", clusterSet.Name, err)
-		return
-	}
-
-	for _, mesh := range meshList.Items {
-		requests = append(requests, reconcile.Request{
-			NamespacedName: types.NamespacedName{
-				Name:      mesh.Name,
-				Namespace: mesh.Namespace,
-			},
-		})
-	}
-
-	return requests
+	klog.V(4).Infof("ManagedClusterSet %s changed, reconciling meshes using it", clusterSet.Name)
+	return r.reconcileRequestsForClusterSet(ctx, clusterSet.Name)
 }
 
 // findMeshesForManifestWork returns a list of all meshes to reconcile following a ManifestWork change
@@ -396,7 +389,7 @@ func (r *Reconciler) ensureOperatorInstalled(ctx context.Context, mesh *meshv1al
 
 // cleanupManifestWorks deletes ManifestWorks on clusters that no mesh in the given ClusterSet needs anymore.
 func (r *Reconciler) cleanupManifestWorks(ctx context.Context, clusterSet string) error {
-	neededClusters, err := r.getClustersNeededInClusterSet(ctx, clusterSet)
+	neededClusters, err := r.getMeshEnabledClusters(ctx, clusterSet)
 	if err != nil {
 		return fmt.Errorf("failed to determine needed clusters: %w", err)
 	}
@@ -423,26 +416,22 @@ func (r *Reconciler) cleanupManifestWorks(ctx context.Context, clusterSet string
 // triggerReconcileForBlockedMeshes triggers reconciliation for blocked meshes targeting the same ClusterSet.
 // The other meshes need to be re-reconciled to detect the conflict is gone.
 func (r *Reconciler) triggerReconcileForBlockedMeshes(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh) {
-	meshList := &meshv1alpha1.MultiClusterMeshList{}
-	if err := r.List(ctx, meshList, client.MatchingFields{"spec.clusterSet": mesh.Spec.ClusterSet}); err != nil {
-		klog.Errorf("Failed to list peer meshes for ClusterSet %s: %v", mesh.Spec.ClusterSet, err)
-		return
-	}
-
-	for _, other := range meshList.Items {
+	if err := r.forEachMeshInClusterSet(ctx, mesh.Spec.ClusterSet, func(other *meshv1alpha1.MultiClusterMesh) {
 		if other.UID == mesh.UID {
-			continue
+			return
 		}
 		readyCondition := meta.FindStatusCondition(other.Status.Conditions, meshv1alpha1.ConditionReady)
 		if readyCondition == nil || readyCondition.Reason != meshv1alpha1.ReasonOperatorConfigConflict {
-			continue
+			return
 		}
 
 		patch := client.MergeFrom(other.DeepCopy())
 		metav1.SetMetaDataAnnotation(&other.ObjectMeta, "mesh.open-cluster-management.io/reconcile-trigger", time.Now().Format(time.RFC3339Nano))
-		if err := r.Patch(ctx, &other, patch); err != nil {
+		if err := r.Patch(ctx, other, patch); err != nil {
 			klog.Errorf("Failed to trigger reconcile for peer mesh %s/%s: %v", other.Namespace, other.Name, err)
 		}
+	}); err != nil {
+		klog.Errorf("Failed to list peer meshes for ClusterSet %s: %v", mesh.Spec.ClusterSet, err)
 	}
 }
 
@@ -515,21 +504,15 @@ func (r *Reconciler) setErrorStatus(mesh *meshv1alpha1.MultiClusterMesh, reconci
 	})
 }
 
-// getClustersNeededInClusterSet returns a set of cluster names that are targeted by at least one active mesh in the given ClusterSet.
-func (r *Reconciler) getClustersNeededInClusterSet(ctx context.Context, clusterSet string) (map[string]bool, error) {
+// getMeshEnabledClusters returns all clusters in the given ClusterSet if any non-deleting mesh targets it, or an empty set otherwise.
+func (r *Reconciler) getMeshEnabledClusters(ctx context.Context, clusterSet string) (map[string]bool, error) {
 	needed := make(map[string]bool)
 
-	meshList := &meshv1alpha1.MultiClusterMeshList{}
-	if err := r.List(ctx, meshList, client.MatchingFields{"spec.clusterSet": clusterSet}); err != nil {
-		return nil, fmt.Errorf("failed to list meshes for ClusterSet %s: %w", clusterSet, err)
-	}
-
 	hasActiveMesh := false
-	for i := range meshList.Items {
-		if meshList.Items[i].DeletionTimestamp.IsZero() {
-			hasActiveMesh = true
-			break
-		}
+	if err := r.forEachMeshInClusterSet(ctx, clusterSet, func(_ *meshv1alpha1.MultiClusterMesh) {
+		hasActiveMesh = true
+	}); err != nil {
+		return nil, err
 	}
 
 	if !hasActiveMesh {
