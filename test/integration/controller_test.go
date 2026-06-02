@@ -495,6 +495,16 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 				}).Should(Equal("Intermediate Istio CA"))
 			})
 
+			It("should recreate Certificate when it is externally deleted", func() {
+				cert := expectCertificate(testNs, clusterName, "mesh-issuer")
+				originalUID := cert.UID
+				Expect(k8sClient.Delete(ctx, cert)).To(Succeed())
+
+				Eventually(func() types.UID {
+					return expectCertificate(testNs, clusterName, "mesh-issuer").UID
+				}).ShouldNot(Equal(originalUID))
+			})
+
 			It("should create ManifestWork when cacerts secret is created", func() {
 				// simulate creating the cacerts secret by cert-manager
 				util.CreateCacertsSecret(ctx, k8sClient, testNs, clusterName, meshName, testNs)
@@ -548,22 +558,6 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 				expectCacertsManifestWork(cluster1)
 				expectCacertsManifestWork(cluster2)
 			})
-		})
-
-		When("cert-manager issuer is configured and cluster exists", func() {
-			It("should recreate Certificate when it is externally deleted", func() {
-				util.CreateK8sManagedCluster(ctx, k8sClient, clusterName, testClusterSet)
-				util.CreateMultiClusterMeshWithCertManager(ctx, k8sClient, meshName, testNs, testClusterSet, "mesh-issuer")
-
-				cert := expectCertificate(testNs, clusterName, "mesh-issuer")
-				originalUID := cert.UID
-				Expect(k8sClient.Delete(ctx, cert)).To(Succeed())
-
-				Eventually(func() types.UID {
-					return expectCertificate(testNs, clusterName, "mesh-issuer").UID
-				}).ShouldNot(Equal(originalUID))
-			})
-
 		})
 
 		When("no issuer is configured", func() {
