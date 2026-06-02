@@ -274,12 +274,10 @@ func (r *Reconciler) doReconcile(ctx context.Context, mesh *meshv1alpha1.MultiCl
 	// Create certificates for each cluster if cert-manager is configured
 	if mesh.Spec.Security.Trust.CertManager.IssuerRef.Name != "" {
 		if err := r.ensureCertificatesCreated(ctx, mesh, clusters); err != nil {
-			klog.Errorf("Failed to ensure certificates: %v", err)
 			return reconcile.Result{}, err
 		}
 
 		if err := r.ensureCacertsDistributed(ctx, mesh, clusters); err != nil {
-			klog.Errorf("Failed to distribute cacerts: %v", err)
 			return reconcile.Result{}, err
 		}
 	}
@@ -391,7 +389,7 @@ func (r *Reconciler) ensureOperatorInstalled(ctx context.Context, mesh *meshv1al
 
 // cleanupManifestWorks deletes ManifestWorks on clusters that no mesh in the given ClusterSet needs anymore.
 func (r *Reconciler) cleanupManifestWorks(ctx context.Context, clusterSet string) error {
-	neededClusters, err := r.getClustersNeededInClusterSet(ctx, clusterSet)
+	neededClusters, err := r.getMeshEnabledClusters(ctx, clusterSet)
 	if err != nil {
 		return fmt.Errorf("failed to determine needed clusters: %w", err)
 	}
@@ -506,8 +504,8 @@ func (r *Reconciler) setErrorStatus(mesh *meshv1alpha1.MultiClusterMesh, reconci
 	})
 }
 
-// getClustersNeededInClusterSet returns a set of cluster names that are targeted by at least one active mesh in the given ClusterSet.
-func (r *Reconciler) getClustersNeededInClusterSet(ctx context.Context, clusterSet string) (map[string]bool, error) {
+// getMeshEnabledClusters returns all clusters in the given ClusterSet if any non-deleting mesh targets it, or an empty set otherwise.
+func (r *Reconciler) getMeshEnabledClusters(ctx context.Context, clusterSet string) (map[string]bool, error) {
 	needed := make(map[string]bool)
 
 	hasActiveMesh := false
