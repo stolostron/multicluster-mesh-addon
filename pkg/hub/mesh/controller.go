@@ -791,6 +791,7 @@ func (r *Reconciler) ensureCertificateForCluster(ctx context.Context, mesh *mesh
 		return fmt.Errorf("failed to apply Certificate %s/%s: %w", mesh.Namespace, certName, err)
 	}
 
+	klog.Infof("Successfully applied Certificate %s/%s", mesh.Namespace, certName)
 	return nil
 }
 
