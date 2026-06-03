@@ -10,7 +10,8 @@ import (
 	"time"
 
 	certmanagerv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
-	cmmeta "github.com/cert-manager/cert-manager/pkg/apis/meta/v1"
+	certmanagerapply "github.com/cert-manager/cert-manager/pkg/client/applyconfigurations/certmanager/v1"
+	cmmetaapply "github.com/cert-manager/cert-manager/pkg/client/applyconfigurations/meta/v1"
 	operatorsv1 "github.com/operator-framework/api/pkg/operators/v1"
 	operatorsv1alpha1 "github.com/operator-framework/api/pkg/operators/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
@@ -19,6 +20,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	applyconfigv1 "k8s.io/client-go/applyconfigurations/meta/v1"
 	"k8s.io/klog/v2"
 	workclient "open-cluster-management.io/api/client/work/clientset/versioned"
 	workinformers "open-cluster-management.io/api/client/work/informers/externalversions"
@@ -754,43 +756,38 @@ func (r *Reconciler) ensureCertificatesCreated(ctx context.Context, mesh *meshv1
 func (r *Reconciler) ensureCertificateForCluster(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, cluster *clusterv1.ManagedCluster) error {
 	certName := getCacertsName(cluster.Name)
 
-	cert := &certmanagerv1.Certificate{
-		TypeMeta: metav1.TypeMeta{
-			APIVersion: "cert-manager.io/v1",
-			Kind:       "Certificate",
-		},
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      certName,
-			Namespace: mesh.Namespace,
-			Labels:    meshOwnedLabels(mesh, cluster.Name),
-		},
-		Spec: certmanagerv1.CertificateSpec{
-			SecretName: certName,
-			SecretTemplate: &certmanagerv1.CertificateSecretTemplate{
-				Labels: meshOwnedLabels(mesh, cluster.Name),
-			},
-			Duration:    &metav1.Duration{Duration: 60 * Day},
-			RenewBefore: &metav1.Duration{Duration: 15 * Day},
-			CommonName:  "Intermediate Istio CA",
-			IsCA:        true,
-			Usages: []certmanagerv1.KeyUsage{
+	gvk, err := r.GroupVersionKindFor(mesh)
+	if err != nil {
+		return fmt.Errorf("failed to get GVK for MultiClusterMesh: %w", err)
+	}
+	cert := certmanagerapply.Certificate(certName, mesh.Namespace).
+		WithLabels(meshOwnedLabels(mesh, cluster.Name)).
+		WithOwnerReferences(applyconfigv1.OwnerReference().
+			WithAPIVersion(gvk.GroupVersion().String()).
+			WithKind(gvk.Kind).
+			WithName(mesh.Name).
+			WithUID(mesh.UID).
+			WithController(true).
+			WithBlockOwnerDeletion(true)).
+		WithSpec(certmanagerapply.CertificateSpec().
+			WithSecretName(certName).
+			WithSecretTemplate(certmanagerapply.CertificateSecretTemplate().
+				WithLabels(meshOwnedLabels(mesh, cluster.Name))).
+			WithDuration(metav1.Duration{Duration: 60 * Day}).
+			WithRenewBefore(metav1.Duration{Duration: 15 * Day}).
+			WithCommonName("Intermediate Istio CA").
+			WithIsCA(true).
+			WithUsages(
 				certmanagerv1.UsageDigitalSignature,
 				certmanagerv1.UsageKeyEncipherment,
 				certmanagerv1.UsageCertSign,
-			},
-			IssuerRef: cmmeta.IssuerReference{
-				Name:  mesh.Spec.Security.Trust.CertManager.IssuerRef.Name,
-				Kind:  "Issuer",
-				Group: "cert-manager.io",
-			},
-		},
-	}
+			).
+			WithIssuerRef(cmmetaapply.IssuerReference().
+				WithName(mesh.Spec.Security.Trust.CertManager.IssuerRef.Name).
+				WithKind("Issuer").
+				WithGroup("cert-manager.io")))
 
-	if err := controllerutil.SetControllerReference(mesh, cert, r.Scheme); err != nil {
-		return fmt.Errorf("failed to set controller reference on Certificate: %w", err)
-	}
-
-	if err := r.Patch(ctx, cert, client.Apply, client.FieldOwner(ManagedByValue), client.ForceOwnership); err != nil {
+	if err := r.Apply(ctx, cert, client.FieldOwner(ManagedByValue), client.ForceOwnership); err != nil {
 		return fmt.Errorf("failed to apply Certificate %s/%s: %w", mesh.Namespace, certName, err)
 	}
 
