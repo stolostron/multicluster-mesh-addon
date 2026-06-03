@@ -291,12 +291,6 @@ func (r *Reconciler) doReconcile(ctx context.Context, mesh *meshv1alpha1.MultiCl
 		}
 	}
 
-	// Deploy managed-serviceaccount addon for each cluster
-	if err := r.deployManagedServiceAccountAddon(ctx, clusters); err != nil {
-		klog.Errorf("Failed to deploy ManagedServiceAccount add-on: %v", err)
-		return reconcile.Result{}, err
-	}
-
 	// Create ManagedServiceAccount resources for each cluster
 	if err := r.createManagedServiceAccounts(ctx, mesh, clusters); err != nil {
 		klog.Errorf("Failed to create ManagedServiceAccount resources: %v", err)

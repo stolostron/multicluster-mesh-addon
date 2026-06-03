@@ -30,7 +30,6 @@ import (
 	meshv1alpha1 "github.com/stolostron/multicluster-mesh-addon/pkg/apis/mesh/v1alpha1"
 	meshcontroller "github.com/stolostron/multicluster-mesh-addon/pkg/hub/mesh"
 	"github.com/stolostron/multicluster-mesh-addon/pkg/version"
-	addonv1beta1 "open-cluster-management.io/api/addon/v1beta1"
 	msav1beta1 "open-cluster-management.io/managed-serviceaccount/apis/authentication/v1beta1"
 )
 
@@ -46,7 +45,6 @@ func init() {
 	utilruntime.Must(operatorsv1alpha1.AddToScheme(runtimeScheme))
 	utilruntime.Must(certmanagerv1.AddToScheme(runtimeScheme))
 	utilruntime.Must(msav1beta1.AddToScheme(runtimeScheme))
-	utilruntime.Must(addonv1beta1.Install(runtimeScheme))
 }
 
 func main() {
