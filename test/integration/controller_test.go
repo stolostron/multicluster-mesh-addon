@@ -287,6 +287,9 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 				}
 				Expect(k8sClient.Update(ctx, work)).To(Succeed())
 
+				// Ensure reconciliation after tamper (dual-cache race, #109).
+				triggerReconcile(meshName, testNs)
+
 				Eventually(func() string {
 					work := expectOperatorManifestWork(clusterName)
 					sub := &operatorsv1alpha1.Subscription{}
@@ -591,6 +594,21 @@ func expectNoManifestWorks() {
 		Expect(k8sClient.List(ctx, workList)).To(Succeed())
 		return workList.Items
 	}).Should(BeEmpty())
+}
+
+// triggerReconcile forces a reconciliation by touching the mesh CR's annotations.
+// Workaround for the dual-cache race (#109): the controller-runtime MW watch may
+// trigger a reconcile before the WorkApplier's work informer lister syncs the update,
+// causing safeToSkipApply to read stale generation and skip the patch.
+// TODO(mkolesnik): Remove once WorkApplier uses the CR cache (sdk-go#226).
+func triggerReconcile(meshName, namespace string) {
+	mesh := &meshv1alpha1.MultiClusterMesh{}
+	Expect(k8sClient.Get(ctx, types.NamespacedName{Name: meshName, Namespace: namespace}, mesh)).To(Succeed())
+	if mesh.Annotations == nil {
+		mesh.Annotations = map[string]string{}
+	}
+	mesh.Annotations["test.reconcile-trigger"] = mesh.ResourceVersion
+	Expect(k8sClient.Update(ctx, mesh)).To(Succeed())
 }
 
 // expectAllManifestWorksDeleted makes sure ManifestWorks are deleted and none remain
