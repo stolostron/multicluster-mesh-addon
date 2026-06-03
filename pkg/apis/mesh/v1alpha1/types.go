@@ -173,6 +173,7 @@ type MultiClusterMeshStatus struct {
 // ClusterMeshStatus tracks the mesh status for a specific cluster
 type ClusterMeshStatus struct {
 	// ClusterName is the name of the managed cluster
+	// +required
 	ClusterName string `json:"clusterName"`
 
 	// Conditions represent the latest available observations of this cluster's state
