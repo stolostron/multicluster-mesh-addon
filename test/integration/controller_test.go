@@ -462,8 +462,48 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 				util.CreateMultiClusterMeshWithCertManager(ctx, k8sClient, meshName, testNs, testClusterSet, "mesh-issuer")
 			})
 
-			It("should create Certificate resource", func() {
-				expectCertificate(testNs, clusterName, "mesh-issuer")
+			It("should create Certificate resource with owner reference", func() {
+				cert := expectCertificate(testNs, clusterName, "mesh-issuer")
+
+				mesh := &meshv1alpha1.MultiClusterMesh{}
+				Expect(k8sClient.Get(ctx, types.NamespacedName{Name: meshName, Namespace: testNs}, mesh)).To(Succeed())
+
+				Expect(cert.OwnerReferences).To(HaveLen(1))
+				ownerRef := cert.OwnerReferences[0]
+				Expect(ownerRef.APIVersion).To(Equal(meshv1alpha1.GroupVersion.String()))
+				Expect(ownerRef.Kind).To(Equal("MultiClusterMesh"))
+				Expect(ownerRef.Name).To(Equal(meshName))
+				Expect(ownerRef.UID).To(Equal(mesh.UID))
+				Expect(*ownerRef.Controller).To(BeTrue())
+				Expect(*ownerRef.BlockOwnerDeletion).To(BeTrue())
+			})
+
+			It("should restore Certificate spec when externally modified", func() {
+				cert := expectCertificate(testNs, clusterName, "mesh-issuer")
+
+				cert.Spec.CommonName = "tampered"
+				Expect(k8sClient.Update(ctx, cert)).To(Succeed())
+
+				Eventually(func() string {
+					c := &certmanagerv1.Certificate{}
+					if err := k8sClient.Get(ctx, types.NamespacedName{
+						Name:      fmt.Sprintf("cacerts-%s", clusterName),
+						Namespace: testNs,
+					}, c); err != nil {
+						return ""
+					}
+					return c.Spec.CommonName
+				}).Should(Equal("Intermediate Istio CA"))
+			})
+
+			It("should recreate Certificate when it is externally deleted", func() {
+				cert := expectCertificate(testNs, clusterName, "mesh-issuer")
+				originalUID := cert.UID
+				Expect(k8sClient.Delete(ctx, cert)).To(Succeed())
+
+				Eventually(func() types.UID {
+					return expectCertificate(testNs, clusterName, "mesh-issuer").UID
+				}).ShouldNot(Equal(originalUID))
 			})
 
 			It("should create ManifestWork when cacerts secret is created", func() {
