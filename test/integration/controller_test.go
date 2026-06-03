@@ -487,8 +487,8 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 				Eventually(func() string {
 					c := &certmanagerv1.Certificate{}
 					if err := k8sClient.Get(ctx, types.NamespacedName{
-						Name:      fmt.Sprintf("cacerts-%s", clusterName),
-						Namespace: testNs,
+						Name:      cert.Name,
+						Namespace: cert.Namespace,
 					}, c); err != nil {
 						return ""
 					}
