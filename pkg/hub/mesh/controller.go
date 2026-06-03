@@ -285,6 +285,11 @@ func (r *Reconciler) doReconcile(ctx context.Context, mesh *meshv1alpha1.MultiCl
 		}
 	}
 
+	forceCleanupAll := mesh.Spec.Security.Trust.CertManager.IssuerRef.Name == ""
+	if err := r.cleanupCertificates(ctx, mesh, clusters, forceCleanupAll); err != nil {
+		return reconcile.Result{}, fmt.Errorf("failed to cleanup Certificates: %w", err)
+	}
+
 	if err := r.cleanupManifestWorks(ctx, mesh.Spec.ClusterSet); err != nil {
 		return reconcile.Result{}, fmt.Errorf("failed to cleanup ManifestWorks: %w", err)
 	}
@@ -416,6 +421,35 @@ func (r *Reconciler) cleanupManifestWorks(ctx context.Context, clusterSet string
 	return nil
 }
 
+// cleanupCertificates deletes mesh-owned Certificates. When forceCleanupAll is true, all Certificates for the mesh
+// are removed (e.g. when the issuer is cleared). Otherwise, only Certificates for clusters no longer in the
+// ClusterSet are removed.
+func (r *Reconciler) cleanupCertificates(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, clusters []clusterv1.ManagedCluster, forceCleanupAll bool) error {
+	clusterNames := clusterNameSet(clusters)
+
+	certList := &certmanagerv1.CertificateList{}
+	if err := r.List(ctx, certList,
+		client.InNamespace(mesh.Namespace),
+		client.MatchingLabels{MeshNameLabel: mesh.Name, MeshNamespaceLabel: mesh.Namespace},
+	); err != nil {
+		return fmt.Errorf("failed to list Certificates: %w", err)
+	}
+
+	for _, cert := range certList.Items {
+		clusterName := cert.Labels[ClusterNameLabel]
+		if !forceCleanupAll && clusterNames[clusterName] {
+			continue
+		}
+
+		klog.Infof("Deleting Certificate %s/%s (cluster %s no longer in ClusterSet %s)", cert.Namespace, cert.Name, clusterName, mesh.Spec.ClusterSet)
+		if err := r.Delete(ctx, &cert); err != nil {
+			return fmt.Errorf("failed to delete Certificate %s/%s: %w", cert.Namespace, cert.Name, err)
+		}
+	}
+
+	return nil
+}
+
 // triggerReconcileForBlockedMeshes triggers reconciliation for blocked meshes targeting the same ClusterSet.
 // The other meshes need to be re-reconciled to detect the conflict is gone.
 func (r *Reconciler) triggerReconcileForBlockedMeshes(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh) {
@@ -527,11 +561,15 @@ func (r *Reconciler) getMeshEnabledClusters(ctx context.Context, clusterSet stri
 		return nil, fmt.Errorf("failed to get clusters from set %s: %w", clusterSet, err)
 	}
 
-	for _, cluster := range clusters {
-		needed[cluster.Name] = true
-	}
+	return clusterNameSet(clusters), nil
+}
 
-	return needed, nil
+func clusterNameSet(clusters []clusterv1.ManagedCluster) map[string]bool {
+	set := make(map[string]bool, len(clusters))
+	for _, c := range clusters {
+		set[c.Name] = true
+	}
+	return set
 }
 
 // getProductClaim returns the value for the cluster, or empty string if not found
