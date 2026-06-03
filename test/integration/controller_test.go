@@ -533,6 +533,22 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 			})
 		})
 
+		When("issuer is removed after initial configuration", func() {
+			It("should cleanup all Certificates", func() {
+				util.CreateK8sManagedCluster(ctx, k8sClient, clusterName, testClusterSet)
+				util.CreateMultiClusterMeshWithCertManager(ctx, k8sClient, meshName, testNs, testClusterSet, "mesh-issuer")
+				expectCertificate(testNs, clusterName, "mesh-issuer")
+
+				mesh := &meshv1alpha1.MultiClusterMesh{}
+				Expect(k8sClient.Get(ctx, types.NamespacedName{Name: meshName, Namespace: testNs}, mesh)).To(Succeed())
+				mesh.Spec.Security.Trust.CertManager.IssuerRef.Name = ""
+				Expect(k8sClient.Update(ctx, mesh)).To(Succeed())
+
+				util.ExpectResourceDeleted(ctx, k8sClient, &certmanagerv1.Certificate{},
+					fmt.Sprintf("cacerts-%s", clusterName), testNs)
+			})
+		})
+
 		When("no issuer is configured", func() {
 			BeforeEach(func() {
 				util.CreateK8sManagedCluster(ctx, k8sClient, clusterName, testClusterSet)

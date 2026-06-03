@@ -280,10 +280,11 @@ func (r *Reconciler) doReconcile(ctx context.Context, mesh *meshv1alpha1.MultiCl
 		if err := r.ensureCacertsDistributed(ctx, mesh, clusters); err != nil {
 			return reconcile.Result{}, err
 		}
+	}
 
-		if err := r.cleanupCertificates(ctx, mesh, clusters); err != nil {
-			return reconcile.Result{}, fmt.Errorf("failed to cleanup Certificates: %w", err)
-		}
+	forceCleanupAll := mesh.Spec.Security.Trust.CertManager.IssuerRef.Name == ""
+	if err := r.cleanupCertificates(ctx, mesh, clusters, forceCleanupAll); err != nil {
+		return reconcile.Result{}, fmt.Errorf("failed to cleanup Certificates: %w", err)
 	}
 
 	if err := r.cleanupManifestWorks(ctx, mesh.Spec.ClusterSet); err != nil {
@@ -417,8 +418,10 @@ func (r *Reconciler) cleanupManifestWorks(ctx context.Context, clusterSet string
 	return nil
 }
 
-// cleanupCertificates deletes Certificates for clusters that are no longer in the mesh's ClusterSet.
-func (r *Reconciler) cleanupCertificates(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, clusters []clusterv1.ManagedCluster) error {
+// cleanupCertificates deletes mesh-owned Certificates. When forceCleanupAll is true, all Certificates for the mesh
+// are removed (e.g. when the issuer is cleared). Otherwise, only Certificates for clusters no longer in the
+// ClusterSet are removed.
+func (r *Reconciler) cleanupCertificates(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, clusters []clusterv1.ManagedCluster, forceCleanupAll bool) error {
 	clusterNames := clusterNameSet(clusters)
 
 	certList := &certmanagerv1.CertificateList{}
@@ -431,7 +434,7 @@ func (r *Reconciler) cleanupCertificates(ctx context.Context, mesh *meshv1alpha1
 
 	for _, cert := range certList.Items {
 		clusterName := cert.Labels[ClusterNameLabel]
-		if clusterNames[clusterName] {
+		if !forceCleanupAll && clusterNames[clusterName] {
 			continue
 		}
 
