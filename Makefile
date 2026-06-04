@@ -196,6 +196,7 @@ KIND_VERSION ?= v0.31.0
 CLUSTERADM_VERSION ?= v1.3.1
 K8S_VERSION ?= v1.35.0
 OLM_VERSION ?= v0.43.0
+CERT_MANAGER_VERSION ?= v1.20.2
 
 OS := $(shell go env GOOS)
 ARCH := $(shell go env GOARCH)
@@ -230,11 +231,11 @@ $(CLUSTERADM): | $(BIN_DIR)
 
 DEV_ENV_SCRIPT := $(CURDIR)/hack/dev-env.sh
 
-export DEV_KUBE_DIR K8S_VERSION OLM_VERSION
+export DEV_KUBE_DIR K8S_VERSION OLM_VERSION CERT_MANAGER_VERSION
 export KIND CLUSTERADM
 
 .PHONY: dev-env
-dev-env: create-clusters install-olm init-ocm join-clusters deploy-addon ## Provision full dev environment (Kind + OCM + addon)
+dev-env: create-clusters install-olm install-cert-manager init-ocm join-clusters deploy-addon ## Provision full dev environment (Kind + OCM + addon)
 
 .PHONY: create-clusters
 create-clusters: $(KIND) ## Create 3 Kind clusters (hub, cluster1, cluster2)
@@ -243,6 +244,10 @@ create-clusters: $(KIND) ## Create 3 Kind clusters (hub, cluster1, cluster2)
 .PHONY: install-olm
 install-olm: ## Install OLM on managed clusters (cluster1, cluster2)
 	$(DEV_ENV_SCRIPT) install-olm
+
+.PHONY: install-cert-manager
+install-cert-manager: ## Install cert-manager on the hub cluster
+	$(DEV_ENV_SCRIPT) install-cert-manager
 
 .PHONY: init-ocm
 init-ocm: $(CLUSTERADM) ## Initialize hub as OCM control plane
