@@ -5,6 +5,7 @@ import (
 	goflag "flag"
 	"fmt"
 	"os"
+	"strings"
 
 	certmanagerv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
 	"github.com/openshift/library-go/pkg/controller/controllercmd"
@@ -118,7 +119,7 @@ func runController(ctx context.Context, controllerContext *controllercmd.Control
 	if controllerNamespace == "" {
 		// Fallback to reading from service account namespace file
 		if namespaceBytes, err := os.ReadFile("/var/run/secrets/kubernetes.io/serviceaccount/namespace"); err == nil {
-			controllerNamespace = string(namespaceBytes)
+			controllerNamespace = strings.TrimSpace(string(namespaceBytes))
 			klog.Info("POD_NAMESPACE not set, using namespace from service account: ", controllerNamespace)
 		} else {
 			// Final fallback to default namespace

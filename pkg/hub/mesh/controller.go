@@ -10,7 +10,8 @@ import (
 	"time"
 
 	certmanagerv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
-	cmmeta "github.com/cert-manager/cert-manager/pkg/apis/meta/v1"
+	certmanagerapply "github.com/cert-manager/cert-manager/pkg/client/applyconfigurations/certmanager/v1"
+	cmmetaapply "github.com/cert-manager/cert-manager/pkg/client/applyconfigurations/meta/v1"
 	operatorsv1 "github.com/operator-framework/api/pkg/operators/v1"
 	operatorsv1alpha1 "github.com/operator-framework/api/pkg/operators/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
@@ -19,6 +20,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	applyconfigv1 "k8s.io/client-go/applyconfigurations/meta/v1"
 	"k8s.io/klog/v2"
 	workclient "open-cluster-management.io/api/client/work/clientset/versioned"
 	workinformers "open-cluster-management.io/api/client/work/informers/externalversions"
@@ -123,6 +125,7 @@ func RegisterController(mgr manager.Manager) error {
 
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&meshv1alpha1.MultiClusterMesh{}).
+		Owns(&certmanagerv1.Certificate{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
 		Watches(
 			&clusterv1.ManagedCluster{},
 			handler.EnqueueRequestsFromMapFunc(reconciler.findMeshesForCluster),
@@ -220,31 +223,25 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (resu
 
 // validate checks for conflicts that prevent reconciliation.
 // Returns a condition to set on the mesh if validation fails, or nil if ok.
-func (r *Reconciler) validate(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh) (*metav1.Condition, error) {
-	meshList := &meshv1alpha1.MultiClusterMeshList{}
-	if err := r.List(ctx, meshList, client.MatchingFields{"spec.clusterSet": mesh.Spec.ClusterSet}); err != nil {
-		return nil, fmt.Errorf("failed to validate: %w", err)
-	}
-
-	for _, other := range meshList.Items {
-		if other.UID == mesh.UID {
-			continue
+func (r *Reconciler) validate(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh) (conflict *metav1.Condition, err error) {
+	if err = r.forEachMeshInClusterSet(ctx, mesh.Spec.ClusterSet, func(other *meshv1alpha1.MultiClusterMesh) {
+		if other.UID == mesh.UID || conflict != nil {
+			return
 		}
-		if !other.DeletionTimestamp.IsZero() {
-			continue
-		}
-		if isOlderMesh(&other, mesh) && r.operatorConfigConflicts(mesh.Spec.Operator, other.Spec.Operator) {
-			return &metav1.Condition{
+		if isOlderMesh(other, mesh) && r.operatorConfigConflicts(mesh.Spec.Operator, other.Spec.Operator) {
+			conflict = &metav1.Condition{
 				Type:   meshv1alpha1.ConditionReady,
 				Status: metav1.ConditionFalse,
 				Reason: meshv1alpha1.ReasonOperatorConfigConflict,
 				Message: fmt.Sprintf("operator config conflicts with older mesh %s/%s targeting the same ClusterSet %s",
 					other.Namespace, other.Name, mesh.Spec.ClusterSet),
-			}, nil
+			}
 		}
+	}); err != nil {
+		return nil, fmt.Errorf("failed to validate: %w", err)
 	}
 
-	return nil, nil
+	return conflict, nil
 }
 
 // isOlderMesh returns true if a is older than b, using namespace/name as tiebreaker for equal timestamps.
@@ -281,12 +278,10 @@ func (r *Reconciler) doReconcile(ctx context.Context, mesh *meshv1alpha1.MultiCl
 	// Create certificates for each cluster if cert-manager is configured
 	if mesh.Spec.Security.Trust.CertManager.IssuerRef.Name != "" {
 		if err := r.ensureCertificatesCreated(ctx, mesh, clusters); err != nil {
-			klog.Errorf("Failed to ensure certificates: %v", err)
 			return reconcile.Result{}, err
 		}
 
 		if err := r.ensureCacertsDistributed(ctx, mesh, clusters); err != nil {
-			klog.Errorf("Failed to distribute cacerts: %v", err)
 			return reconcile.Result{}, err
 		}
 	}
@@ -302,6 +297,11 @@ func (r *Reconciler) doReconcile(ctx context.Context, mesh *meshv1alpha1.MultiCl
 		return reconcile.Result{}, err
 	}
 
+	forceCleanupAll := mesh.Spec.Security.Trust.CertManager.IssuerRef.Name == ""
+	if err := r.cleanupCertificates(ctx, mesh, clusters, forceCleanupAll); err != nil {
+		return reconcile.Result{}, fmt.Errorf("failed to cleanup Certificates: %w", err)
+	}
+
 	if err := r.cleanupManifestWorks(ctx, mesh.Spec.ClusterSet); err != nil {
 		return reconcile.Result{}, fmt.Errorf("failed to cleanup ManifestWorks: %w", err)
 	}
@@ -309,53 +309,52 @@ func (r *Reconciler) doReconcile(ctx context.Context, mesh *meshv1alpha1.MultiCl
 	return reconcile.Result{}, nil
 }
 
+// forEachMeshInClusterSet lists all non-deleting meshes targeting the given ClusterSet and calls fn for each.
+func (r *Reconciler) forEachMeshInClusterSet(ctx context.Context, clusterSet string, fn func(*meshv1alpha1.MultiClusterMesh)) error {
+	meshList := &meshv1alpha1.MultiClusterMeshList{}
+	if err := r.List(ctx, meshList, client.MatchingFields{"spec.clusterSet": clusterSet}); err != nil {
+		return fmt.Errorf("failed to list meshes for ClusterSet %s: %w", clusterSet, err)
+	}
+
+	for i := range meshList.Items {
+		if meshList.Items[i].DeletionTimestamp.IsZero() {
+			fn(&meshList.Items[i])
+		}
+	}
+
+	return nil
+}
+
+func (r *Reconciler) reconcileRequestsForClusterSet(ctx context.Context, clusterSet string) []reconcile.Request {
+	var requests []reconcile.Request
+	if err := r.forEachMeshInClusterSet(ctx, clusterSet, func(mesh *meshv1alpha1.MultiClusterMesh) {
+		requests = append(requests, reconcile.Request{
+			NamespacedName: types.NamespacedName{Name: mesh.Name, Namespace: mesh.Namespace},
+		})
+	}); err != nil {
+		klog.Errorf("Error when trying to reconcile meshes for ClusterSet %s: %v", clusterSet, err)
+	}
+	return requests
+}
+
 // findMeshesForCluster returns a list of all meshes to reconcile following a cluster change
-func (r *Reconciler) findMeshesForCluster(ctx context.Context, obj client.Object) (requests []reconcile.Request) {
+func (r *Reconciler) findMeshesForCluster(ctx context.Context, obj client.Object) []reconcile.Request {
 	cluster := obj.(*clusterv1.ManagedCluster)
 	clusterSetName := cluster.Labels[ClusterSetLabel]
 	if clusterSetName == "" {
 		klog.V(4).Infof("Cluster %s has no clusterset label, skipping", cluster.Name)
-		return
+		return nil
 	}
 
-	meshList := &meshv1alpha1.MultiClusterMeshList{}
-	if err := r.List(ctx, meshList, client.MatchingFields{"spec.clusterSet": clusterSetName}); err != nil {
-		klog.Errorf("Failed to list MultiClusterMeshes when handling cluster %s: %v", cluster.Name, err)
-		return
-	}
-
-	for _, mesh := range meshList.Items {
-		requests = append(requests, reconcile.Request{
-			NamespacedName: types.NamespacedName{
-				Name:      mesh.Name,
-				Namespace: mesh.Namespace,
-			},
-		})
-	}
-
-	return requests
+	klog.V(4).Infof("ManagedCluster %s changed, reconciling meshes using ClusterSet %s", cluster.Name, clusterSetName)
+	return r.reconcileRequestsForClusterSet(ctx, clusterSetName)
 }
 
 // findMeshesForClusterSet returns a list of all meshes to reconcile following a ClusterSet change
-func (r *Reconciler) findMeshesForClusterSet(ctx context.Context, obj client.Object) (requests []reconcile.Request) {
+func (r *Reconciler) findMeshesForClusterSet(ctx context.Context, obj client.Object) []reconcile.Request {
 	clusterSet := obj.(*clusterv1beta2.ManagedClusterSet)
-
-	meshList := &meshv1alpha1.MultiClusterMeshList{}
-	if err := r.List(ctx, meshList, client.MatchingFields{"spec.clusterSet": clusterSet.Name}); err != nil {
-		klog.Errorf("Failed to list MultiClusterMeshes when handling ClusterSet %s: %v", clusterSet.Name, err)
-		return
-	}
-
-	for _, mesh := range meshList.Items {
-		requests = append(requests, reconcile.Request{
-			NamespacedName: types.NamespacedName{
-				Name:      mesh.Name,
-				Namespace: mesh.Namespace,
-			},
-		})
-	}
-
-	return requests
+	klog.V(4).Infof("ManagedClusterSet %s changed, reconciling meshes using it", clusterSet.Name)
+	return r.reconcileRequestsForClusterSet(ctx, clusterSet.Name)
 }
 
 // findMeshesForManifestWork returns a list of all meshes to reconcile following a ManifestWork change
@@ -415,7 +414,7 @@ func (r *Reconciler) ensureOperatorInstalled(ctx context.Context, mesh *meshv1al
 
 // cleanupManifestWorks deletes ManifestWorks on clusters that no mesh in the given ClusterSet needs anymore.
 func (r *Reconciler) cleanupManifestWorks(ctx context.Context, clusterSet string) error {
-	neededClusters, err := r.getClustersNeededInClusterSet(ctx, clusterSet)
+	neededClusters, err := r.getMeshEnabledClusters(ctx, clusterSet)
 	if err != nil {
 		return fmt.Errorf("failed to determine needed clusters: %w", err)
 	}
@@ -439,29 +438,54 @@ func (r *Reconciler) cleanupManifestWorks(ctx context.Context, clusterSet string
 	return nil
 }
 
+// cleanupCertificates deletes mesh-owned Certificates. When forceCleanupAll is true, all Certificates for the mesh
+// are removed (e.g. when the issuer is cleared). Otherwise, only Certificates for clusters no longer in the
+// ClusterSet are removed.
+func (r *Reconciler) cleanupCertificates(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, clusters []clusterv1.ManagedCluster, forceCleanupAll bool) error {
+	clusterNames := clusterNameSet(clusters)
+
+	certList := &certmanagerv1.CertificateList{}
+	if err := r.List(ctx, certList,
+		client.InNamespace(mesh.Namespace),
+		client.MatchingLabels{MeshNameLabel: mesh.Name, MeshNamespaceLabel: mesh.Namespace},
+	); err != nil {
+		return fmt.Errorf("failed to list Certificates: %w", err)
+	}
+
+	for _, cert := range certList.Items {
+		clusterName := cert.Labels[ClusterNameLabel]
+		if !forceCleanupAll && clusterNames[clusterName] {
+			continue
+		}
+
+		klog.Infof("Deleting Certificate %s/%s (cluster %s no longer in ClusterSet %s)", cert.Namespace, cert.Name, clusterName, mesh.Spec.ClusterSet)
+		if err := r.Delete(ctx, &cert); err != nil {
+			return fmt.Errorf("failed to delete Certificate %s/%s: %w", cert.Namespace, cert.Name, err)
+		}
+	}
+
+	return nil
+}
+
 // triggerReconcileForBlockedMeshes triggers reconciliation for blocked meshes targeting the same ClusterSet.
 // The other meshes need to be re-reconciled to detect the conflict is gone.
 func (r *Reconciler) triggerReconcileForBlockedMeshes(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh) {
-	meshList := &meshv1alpha1.MultiClusterMeshList{}
-	if err := r.List(ctx, meshList, client.MatchingFields{"spec.clusterSet": mesh.Spec.ClusterSet}); err != nil {
-		klog.Errorf("Failed to list peer meshes for ClusterSet %s: %v", mesh.Spec.ClusterSet, err)
-		return
-	}
-
-	for _, other := range meshList.Items {
+	if err := r.forEachMeshInClusterSet(ctx, mesh.Spec.ClusterSet, func(other *meshv1alpha1.MultiClusterMesh) {
 		if other.UID == mesh.UID {
-			continue
+			return
 		}
 		readyCondition := meta.FindStatusCondition(other.Status.Conditions, meshv1alpha1.ConditionReady)
 		if readyCondition == nil || readyCondition.Reason != meshv1alpha1.ReasonOperatorConfigConflict {
-			continue
+			return
 		}
 
 		patch := client.MergeFrom(other.DeepCopy())
 		metav1.SetMetaDataAnnotation(&other.ObjectMeta, "mesh.open-cluster-management.io/reconcile-trigger", time.Now().Format(time.RFC3339Nano))
-		if err := r.Patch(ctx, &other, patch); err != nil {
+		if err := r.Patch(ctx, other, patch); err != nil {
 			klog.Errorf("Failed to trigger reconcile for peer mesh %s/%s: %v", other.Namespace, other.Name, err)
 		}
+	}); err != nil {
+		klog.Errorf("Failed to list peer meshes for ClusterSet %s: %v", mesh.Spec.ClusterSet, err)
 	}
 }
 
@@ -534,21 +558,15 @@ func (r *Reconciler) setErrorStatus(mesh *meshv1alpha1.MultiClusterMesh, reconci
 	})
 }
 
-// getClustersNeededInClusterSet returns a set of cluster names that are targeted by at least one active mesh in the given ClusterSet.
-func (r *Reconciler) getClustersNeededInClusterSet(ctx context.Context, clusterSet string) (map[string]bool, error) {
+// getMeshEnabledClusters returns all clusters in the given ClusterSet if any non-deleting mesh targets it, or an empty set otherwise.
+func (r *Reconciler) getMeshEnabledClusters(ctx context.Context, clusterSet string) (map[string]bool, error) {
 	needed := make(map[string]bool)
 
-	meshList := &meshv1alpha1.MultiClusterMeshList{}
-	if err := r.List(ctx, meshList, client.MatchingFields{"spec.clusterSet": clusterSet}); err != nil {
-		return nil, fmt.Errorf("failed to list meshes for ClusterSet %s: %w", clusterSet, err)
-	}
-
 	hasActiveMesh := false
-	for i := range meshList.Items {
-		if meshList.Items[i].DeletionTimestamp.IsZero() {
-			hasActiveMesh = true
-			break
-		}
+	if err := r.forEachMeshInClusterSet(ctx, clusterSet, func(_ *meshv1alpha1.MultiClusterMesh) {
+		hasActiveMesh = true
+	}); err != nil {
+		return nil, err
 	}
 
 	if !hasActiveMesh {
@@ -560,11 +578,15 @@ func (r *Reconciler) getClustersNeededInClusterSet(ctx context.Context, clusterS
 		return nil, fmt.Errorf("failed to get clusters from set %s: %w", clusterSet, err)
 	}
 
-	for _, cluster := range clusters {
-		needed[cluster.Name] = true
-	}
+	return clusterNameSet(clusters), nil
+}
 
-	return needed, nil
+func clusterNameSet(clusters []clusterv1.ManagedCluster) map[string]bool {
+	set := make(map[string]bool, len(clusters))
+	for _, c := range clusters {
+		set[c.Name] = true
+	}
+	return set
 }
 
 // getProductClaim returns the value for the cluster, or empty string if not found
@@ -768,59 +790,46 @@ func (r *Reconciler) ensureCertificatesCreated(ctx context.Context, mesh *meshv1
 	return nil
 }
 
-// ensureCertificateForCluster creates a Certificate resource for a specific cluster
+// ensureCertificateForCluster applies the desired Certificate state for a specific cluster using server-side apply.
 func (r *Reconciler) ensureCertificateForCluster(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, cluster *clusterv1.ManagedCluster) error {
 	certName := getCacertsName(cluster.Name)
-	cert := &certmanagerv1.Certificate{}
-	err := r.Get(ctx, types.NamespacedName{
-		Name:      certName,
-		Namespace: mesh.Namespace,
-	}, cert)
 
-	if err == nil {
-		klog.V(4).Infof("Certificate %s/%s already exists", mesh.Namespace, certName)
-		return nil
+	gvk, err := r.GroupVersionKindFor(mesh)
+	if err != nil {
+		return fmt.Errorf("failed to get GVK for MultiClusterMesh: %w", err)
 	}
-
-	if !apierrors.IsNotFound(err) {
-		return fmt.Errorf("failed to get Certificate: %w", err)
-	}
-
-	klog.Infof("Creating Certificate %s/%s for cluster %s", mesh.Namespace, certName, cluster.Name)
-
-	cert = &certmanagerv1.Certificate{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      certName,
-			Namespace: mesh.Namespace,
-			Labels:    meshOwnedLabels(mesh, cluster.Name),
-		},
-		Spec: certmanagerv1.CertificateSpec{
-			SecretName: certName,
-			SecretTemplate: &certmanagerv1.CertificateSecretTemplate{
-				Labels: meshOwnedLabels(mesh, cluster.Name),
-			},
-			Duration:    &metav1.Duration{Duration: 60 * Day},
-			RenewBefore: &metav1.Duration{Duration: 15 * Day},
-			CommonName:  "Intermediate Istio CA",
-			IsCA:        true,
-			Usages: []certmanagerv1.KeyUsage{
+	cert := certmanagerapply.Certificate(certName, mesh.Namespace).
+		WithLabels(meshOwnedLabels(mesh, cluster.Name)).
+		WithOwnerReferences(applyconfigv1.OwnerReference().
+			WithAPIVersion(gvk.GroupVersion().String()).
+			WithKind(gvk.Kind).
+			WithName(mesh.Name).
+			WithUID(mesh.UID).
+			WithController(true).
+			WithBlockOwnerDeletion(true)).
+		WithSpec(certmanagerapply.CertificateSpec().
+			WithSecretName(certName).
+			WithSecretTemplate(certmanagerapply.CertificateSecretTemplate().
+				WithLabels(meshOwnedLabels(mesh, cluster.Name))).
+			WithDuration(metav1.Duration{Duration: 60 * Day}).
+			WithRenewBefore(metav1.Duration{Duration: 15 * Day}).
+			WithCommonName("Intermediate Istio CA").
+			WithIsCA(true).
+			WithUsages(
 				certmanagerv1.UsageDigitalSignature,
 				certmanagerv1.UsageKeyEncipherment,
 				certmanagerv1.UsageCertSign,
-			},
-			IssuerRef: cmmeta.IssuerReference{
-				Name:  mesh.Spec.Security.Trust.CertManager.IssuerRef.Name,
-				Kind:  "Issuer",
-				Group: "cert-manager.io",
-			},
-		},
+			).
+			WithIssuerRef(cmmetaapply.IssuerReference().
+				WithName(mesh.Spec.Security.Trust.CertManager.IssuerRef.Name).
+				WithKind("Issuer").
+				WithGroup("cert-manager.io")))
+
+	if err := r.Apply(ctx, cert, client.FieldOwner(ManagedByValue), client.ForceOwnership); err != nil {
+		return fmt.Errorf("failed to apply Certificate %s/%s: %w", mesh.Namespace, certName, err)
 	}
 
-	if err := r.Create(ctx, cert); err != nil {
-		return fmt.Errorf("failed to create Certificate: %w", err)
-	}
-
-	klog.Infof("Successfully created Certificate %s/%s", mesh.Namespace, certName)
+	klog.Infof("Successfully applied Certificate %s/%s", mesh.Namespace, certName)
 	return nil
 }
 
