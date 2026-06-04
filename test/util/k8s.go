@@ -8,12 +8,21 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/rand"
+	"k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	meshcontroller "github.com/stolostron/multicluster-mesh-addon/pkg/hub/mesh"
 )
+
+// MustAddToScheme registers types with the global scheme, failing the test on error.
+func MustAddToScheme(fns ...func(*runtime.Scheme) error) {
+	for _, fn := range fns {
+		Expect(fn(scheme.Scheme)).To(Succeed())
+	}
+}
 
 // UniqueName generates a unique name with the given prefix.
 func UniqueName(prefix string) string {
