@@ -140,7 +140,12 @@ test-integration: $(ENVTEST) gen-crds deps update-test-crds ## Run integration t
 	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) -p path)" \
 	go run github.com/onsi/ginkgo/v2/ginkgo -v --tags=integration ./test/integration/...
 
-# TODO: Add test-e2e target for end-to-end tests against real cluster
+.PHONY: test-e2e
+test-e2e: ## Run e2e tests against dev-env clusters (requires make dev-env)
+	HUB_KUBECONFIG=$(HUB_KUBECONFIG) \
+	CLUSTER1_KUBECONFIG=$(DEV_KUBE_DIR)/cluster1.config \
+	CLUSTER2_KUBECONFIG=$(DEV_KUBE_DIR)/cluster2.config \
+	go run github.com/onsi/ginkgo/v2/ginkgo -v --fail-fast --tags=e2e ./test/e2e/...
 
 .PHONY: build
 build: $(BIN_DIR) ## Build addon binary
@@ -260,6 +265,11 @@ deploy-addon: $(KIND) gen images $(KUSTOMIZE) ## Build and deploy addon to the h
 	kubectl --kubeconfig=$(HUB_KUBECONFIG) rollout status deployment/multicluster-mesh-controller \
 		-n multicluster-mesh-system --timeout=180s
 	@echo "==> Addon controller deployed successfully. Use KUBECONFIG=$(HUB_KUBECONFIG) to interact with the hub."
+
+.PHONY: dev-clean-meshes
+dev-clean-meshes: ## Delete all MultiClusterMesh CRs and addon ManifestWorks from dev-env
+	kubectl --kubeconfig=$(HUB_KUBECONFIG) delete multiclustermeshes -A --all --ignore-not-found=true
+	kubectl --kubeconfig=$(HUB_KUBECONFIG) delete manifestwork -A -l app.kubernetes.io/managed-by=multicluster-mesh-addon --ignore-not-found=true
 
 .PHONY: dev-clean
 dev-clean: ## Destroy dev clusters and remove .kube/ folder
