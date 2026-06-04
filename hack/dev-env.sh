@@ -3,7 +3,7 @@
 # This file is invoked by Makefile targets with an action argument.
 #
 # Usage: hack/dev-env.sh <action>
-# Actions: create-clusters, install-olm, init-ocm, join-clusters, clean
+# Actions: create-clusters, install-olm, install-cert-manager, init-ocm, join-clusters, clean
 
 set -euo pipefail
 
@@ -97,6 +97,30 @@ install_olm() {
         log "Granting klusterlet-work-sa OLM permissions on ${cluster}"
         kubectl --kubeconfig="$(kubeconfig_for "${cluster}")" apply -f "${SCRIPT_DIR}/config/deploy/overlays/kind/klusterlet-work-olm.yaml"
     done
+}
+
+install_cert_manager() {
+    local hub_kubeconfig
+    hub_kubeconfig="$(kubeconfig_for "${HUB}")"
+
+    if [[ ! -f "${hub_kubeconfig}" ]]; then
+        err "Hub kubeconfig not found at ${hub_kubeconfig}. Run 'make create-clusters' first."
+    fi
+
+    if kubectl --kubeconfig="${hub_kubeconfig}" get deployment cert-manager -n cert-manager &>/dev/null; then
+        log "cert-manager already installed on hub, skipping"
+        return
+    fi
+
+    log "Installing cert-manager ${CERT_MANAGER_VERSION} on hub..."
+    kubectl --kubeconfig="${hub_kubeconfig}" apply -f \
+        "https://github.com/cert-manager/cert-manager/releases/download/${CERT_MANAGER_VERSION}/cert-manager.yaml"
+
+    log "Waiting for cert-manager to be ready..."
+    kubectl --kubeconfig="${hub_kubeconfig}" rollout status deployment/cert-manager -n cert-manager --timeout=120s
+    kubectl --kubeconfig="${hub_kubeconfig}" rollout status deployment/cert-manager-webhook -n cert-manager --timeout=120s
+
+    log "cert-manager ${CERT_MANAGER_VERSION} installed on hub"
 }
 
 init_ocm() {
@@ -220,10 +244,12 @@ clean() {
 
 ACTION="${1:-}"
 case "${ACTION}" in
-    create-clusters) create_clusters ;;
-    install-olm)     install_olm ;;
-    init-ocm)        init_ocm ;;
-    join-clusters)   join_clusters ;;
-    clean)           clean ;;
-    *)               err "Unknown action: '${ACTION}'. Valid: create-clusters, install-olm, init-ocm, join-clusters, clean" ;;
+    create-clusters)       create_clusters ;;
+    install-olm)           install_olm ;;
+    install-cert-manager)  install_cert_manager ;;
+    init-ocm)              init_ocm ;;
+    join-clusters)         join_clusters ;;
+    clean)                 clean ;;
+    *)
+        err "Unknown action: '${ACTION}'. Valid: create-clusters, install-olm, install-cert-manager, init-ocm, join-clusters, clean" ;;
 esac
