@@ -24,8 +24,7 @@ func CreateManagedClusterSet(ctx context.Context, k8sClient client.Client, name 
 	})).To(Succeed())
 }
 
-// CreateManagedCluster creates a ManagedCluster without any product claim.
-// Also creates the cluster namespace (required for ManifestWorks).
+// CreateManagedCluster creates a ManagedCluster and its namespace (required for ManifestWorks).
 func CreateManagedCluster(ctx context.Context, k8sClient client.Client, name, clusterSet string) {
 	CreateNamespace(ctx, k8sClient, name)
 	Expect(k8sClient.Create(ctx, &clusterv1.ManagedCluster{
@@ -36,28 +35,6 @@ func CreateManagedCluster(ctx context.Context, k8sClient client.Client, name, cl
 			},
 		},
 	})).To(Succeed())
-}
-
-// SetProductClaim sets the claim on an existing ManagedCluster to the given claim.
-func SetProductClaim(ctx context.Context, k8sClient client.Client, clusterName, productClaim string) {
-	cluster := &clusterv1.ManagedCluster{}
-	Expect(k8sClient.Get(ctx, key.Of(clusterName), cluster)).To(Succeed())
-	cluster.Status.ClusterClaims = []clusterv1.ManagedClusterClaim{
-		{Name: "product.open-cluster-management.io", Value: productClaim},
-	}
-	Expect(k8sClient.Status().Update(ctx, cluster)).To(Succeed())
-}
-
-// CreateK8sManagedCluster creates a vanilla Kubernetes ManagedCluster with product claim "Other".
-func CreateK8sManagedCluster(ctx context.Context, k8sClient client.Client, name, clusterSet string) {
-	CreateManagedCluster(ctx, k8sClient, name, clusterSet)
-	SetProductClaim(ctx, k8sClient, name, "Other")
-}
-
-// CreateOCPManagedCluster creates an OpenShift ManagedCluster with the specified product claim.
-func CreateOCPManagedCluster(ctx context.Context, k8sClient client.Client, name, clusterSet, product string) {
-	CreateManagedCluster(ctx, k8sClient, name, clusterSet)
-	SetProductClaim(ctx, k8sClient, name, product)
 }
 
 // SetManifestWorkFeedback updates a ManifestWork's status to include a string feedback value,
