@@ -19,7 +19,6 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/types"
 	applyconfigv1 "k8s.io/client-go/applyconfigurations/meta/v1"
 	"k8s.io/klog/v2"
 	workclient "open-cluster-management.io/api/client/work/clientset/versioned"
@@ -38,6 +37,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	meshv1alpha1 "github.com/stolostron/multicluster-mesh-addon/pkg/apis/mesh/v1alpha1"
+	"github.com/stolostron/multicluster-mesh-addon/pkg/key"
 )
 
 const (
@@ -247,7 +247,7 @@ func (r *Reconciler) validate(ctx context.Context, mesh *meshv1alpha1.MultiClust
 func isOlderMesh(a, b *meshv1alpha1.MultiClusterMesh) bool {
 	return a.CreationTimestamp.Before(&b.CreationTimestamp) ||
 		(a.CreationTimestamp.Equal(&b.CreationTimestamp) &&
-			client.ObjectKeyFromObject(a).String() < client.ObjectKeyFromObject(b).String())
+			key.For(a).String() < key.For(b).String())
 }
 
 // operatorConfigConflicts compares two operator configs after applying defaults to detect real conflicts.
@@ -316,9 +316,7 @@ func (r *Reconciler) forEachMeshInClusterSet(ctx context.Context, clusterSet str
 func (r *Reconciler) reconcileRequestsForClusterSet(ctx context.Context, clusterSet string) []reconcile.Request {
 	var requests []reconcile.Request
 	if err := r.forEachMeshInClusterSet(ctx, clusterSet, func(mesh *meshv1alpha1.MultiClusterMesh) {
-		requests = append(requests, reconcile.Request{
-			NamespacedName: types.NamespacedName{Name: mesh.Name, Namespace: mesh.Namespace},
-		})
+		requests = append(requests, reconcile.Request{NamespacedName: key.For(mesh)})
 	}); err != nil {
 		klog.Errorf("Error when trying to reconcile meshes for ClusterSet %s: %v", clusterSet, err)
 	}
@@ -348,7 +346,7 @@ func (r *Reconciler) findMeshesForClusterSet(ctx context.Context, obj client.Obj
 // findMeshesForManifestWork returns a list of all meshes to reconcile following a ManifestWork change
 func (r *Reconciler) findMeshesForManifestWork(ctx context.Context, obj client.Object) []reconcile.Request {
 	cluster := &clusterv1.ManagedCluster{}
-	if err := r.Get(ctx, types.NamespacedName{Name: obj.GetNamespace()}, cluster); err != nil {
+	if err := r.Get(ctx, key.By(obj.GetNamespace()), cluster); err != nil {
 		if !apierrors.IsNotFound(err) {
 			klog.Errorf("Failed to get ManagedCluster %s for ManifestWork %s: %v", obj.GetNamespace(), obj.GetName(), err)
 		}
@@ -494,10 +492,7 @@ func (r *Reconciler) determineStatus(ctx context.Context, mesh *meshv1alpha1.Mul
 		}
 
 		work := &workv1.ManifestWork{}
-		err := r.Get(ctx, types.NamespacedName{
-			Name:      OperatorManifestWorkName,
-			Namespace: cluster.Name,
-		}, work)
+		err := r.Get(ctx, key.By(OperatorManifestWorkName, cluster.Name), work)
 
 		if err == nil {
 			// TODO: Set to actual status when operator installation is confirmed via ManifestWork status feedback
@@ -584,7 +579,7 @@ func getProductClaim(cluster *clusterv1.ManagedCluster) string {
 
 func (r *Reconciler) getClustersFromSet(ctx context.Context, clusterSetName string) ([]clusterv1.ManagedCluster, error) {
 	clusterSet := &clusterv1beta2.ManagedClusterSet{}
-	if err := r.Get(ctx, types.NamespacedName{Name: clusterSetName}, clusterSet); err != nil {
+	if err := r.Get(ctx, key.By(clusterSetName), clusterSet); err != nil {
 		if apierrors.IsNotFound(err) {
 			klog.V(4).Infof("ManagedClusterSet %s not found", clusterSetName)
 			return []clusterv1.ManagedCluster{}, nil
@@ -750,12 +745,7 @@ func (r *Reconciler) mapSecretToMesh(_ context.Context, obj client.Object) []rec
 	klog.V(4).Infof("Secret %s/%s triggered reconcile for mesh %s/%s",
 		secret.Namespace, secret.Name, meshNamespace, meshName)
 
-	return []reconcile.Request{{
-		NamespacedName: types.NamespacedName{
-			Name:      meshName,
-			Namespace: meshNamespace,
-		},
-	}}
+	return []reconcile.Request{{NamespacedName: key.By(meshName, meshNamespace)}}
 }
 
 // getCacertsName returns the name for the certificate and secret for a specific cluster
@@ -830,10 +820,7 @@ func (r *Reconciler) ensureCacertsDistributed(ctx context.Context, mesh *meshv1a
 func (r *Reconciler) ensureCacertsManifestWork(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, cluster *clusterv1.ManagedCluster) error {
 	secretName := getCacertsName(cluster.Name)
 	secret := &corev1.Secret{}
-	err := r.Get(ctx, types.NamespacedName{
-		Name:      secretName,
-		Namespace: mesh.Namespace,
-	}, secret)
+	err := r.Get(ctx, key.By(secretName, mesh.Namespace), secret)
 
 	if err != nil {
 		if apierrors.IsNotFound(err) {
