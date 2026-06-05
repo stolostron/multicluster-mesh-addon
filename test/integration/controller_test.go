@@ -603,6 +603,62 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 		})
 	})
 
+	Context("ObservedGeneration", func() {
+		It("should set ObservedGeneration on mesh-level and cluster-level conditions", func() {
+			util.CreateK8sManagedCluster(ctx, k8sClient, clusterName, testClusterSet)
+			util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet)
+
+			expectMeshNotReady(meshName, testNs)
+			expectConditionsObservedGeneration(meshName, testNs)
+		})
+
+		It("should update ObservedGeneration after a spec change", func() {
+			util.CreateK8sManagedCluster(ctx, k8sClient, clusterName, testClusterSet)
+			util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet)
+			expectMeshNotReady(meshName, testNs)
+
+			mesh := &meshv1alpha1.MultiClusterMesh{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: meshName, Namespace: testNs}, mesh)).To(Succeed())
+			mesh.Spec.Operator.Channel = "updated-channel"
+			Expect(k8sClient.Update(ctx, mesh)).To(Succeed())
+
+			Eventually(func() int64 {
+				m := &meshv1alpha1.MultiClusterMesh{}
+				if err := k8sClient.Get(ctx, types.NamespacedName{Name: meshName, Namespace: testNs}, m); err != nil {
+					return 0
+				}
+				for _, c := range m.Status.Conditions {
+					if c.Type == meshv1alpha1.ConditionReady {
+						return c.ObservedGeneration
+					}
+				}
+				return 0
+			}).Should(Equal(int64(2)))
+		})
+
+		It("should set ObservedGeneration on conflict conditions", func() {
+			otherMesh := meshName + "-conflict"
+			util.CreateK8sManagedCluster(ctx, k8sClient, clusterName, testClusterSet)
+			util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet)
+			expectOperatorManifestWork(clusterName)
+
+			util.CreateMultiClusterMesh(ctx, k8sClient, otherMesh, testNs, testClusterSet, meshv1alpha1.MultiClusterMeshSpec{
+				Operator: meshv1alpha1.OperatorConfig{Channel: "different-channel"},
+			})
+
+			expectMeshConditionReason(otherMesh, testNs, meshv1alpha1.ConditionReady, meshv1alpha1.ReasonOperatorConfigConflict)
+			expectConditionsObservedGeneration(otherMesh, testNs)
+		})
+
+		It("should set ObservedGeneration on missing product claim conditions", func() {
+			util.CreateManagedCluster(ctx, k8sClient, clusterName, testClusterSet)
+			util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet)
+
+			expectClusterOperatorConditionReason(meshName, testNs, clusterName, meshv1alpha1.ReasonMissingProductClaim)
+			expectConditionsObservedGeneration(meshName, testNs)
+		})
+	})
+
 	Context("Platform detection", func() {
 		DescribeTable("should detect OpenShift variants and use OSSM operator",
 			func(productClaim string) {
@@ -891,4 +947,24 @@ func expectMeshConditionReason(meshName, namespace, conditionType, reason string
 		}
 		return ""
 	}).Should(Equal(reason))
+}
+
+func expectConditionsObservedGeneration(meshName, namespace string) {
+	Eventually(func(g Gomega) {
+		mesh := &meshv1alpha1.MultiClusterMesh{}
+		g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: meshName, Namespace: namespace}, mesh)).To(Succeed())
+		g.Expect(mesh.Status.Conditions).NotTo(BeEmpty())
+
+		for _, c := range mesh.Status.Conditions {
+			g.Expect(c.ObservedGeneration).To(Equal(mesh.Generation),
+				"mesh-level condition %s should have ObservedGeneration=%d", c.Type, mesh.Generation)
+		}
+
+		for _, cs := range mesh.Status.ClusterStatus {
+			for _, c := range cs.Conditions {
+				g.Expect(c.ObservedGeneration).To(Equal(mesh.Generation),
+					"cluster %s condition %s should have ObservedGeneration=%d", cs.ClusterName, c.Type, mesh.Generation)
+			}
+		}
+	}).Should(Succeed())
 }

@@ -229,9 +229,10 @@ func (r *Reconciler) validate(ctx context.Context, mesh *meshv1alpha1.MultiClust
 		}
 		if isOlderMesh(other, mesh) && r.operatorConfigConflicts(mesh.Spec.Operator, other.Spec.Operator) {
 			conflict = &metav1.Condition{
-				Type:   meshv1alpha1.ConditionReady,
-				Status: metav1.ConditionFalse,
-				Reason: meshv1alpha1.ReasonOperatorConfigConflict,
+				Type:               meshv1alpha1.ConditionReady,
+				Status:             metav1.ConditionFalse,
+				Reason:             meshv1alpha1.ReasonOperatorConfigConflict,
+				ObservedGeneration: mesh.Generation,
 				Message: fmt.Sprintf("operator config conflicts with older mesh %s/%s targeting the same ClusterSet %s",
 					other.Namespace, other.Name, mesh.Spec.ClusterSet),
 			}
@@ -484,10 +485,11 @@ func (r *Reconciler) determineStatus(ctx context.Context, mesh *meshv1alpha1.Mul
 		if getProductClaim(&cluster) == "" {
 			allReady = false
 			meta.SetStatusCondition(&status.Conditions, metav1.Condition{
-				Type:    meshv1alpha1.ConditionOperatorInstalled,
-				Status:  metav1.ConditionFalse,
-				Reason:  meshv1alpha1.ReasonMissingProductClaim,
-				Message: "Cluster is missing product claim, cannot determine platform",
+				Type:               meshv1alpha1.ConditionOperatorInstalled,
+				Status:             metav1.ConditionFalse,
+				Reason:             meshv1alpha1.ReasonMissingProductClaim,
+				ObservedGeneration: mesh.Generation,
+				Message:            "Cluster is missing product claim, cannot determine platform",
 			})
 			clusterStatuses = append(clusterStatuses, status)
 			continue
@@ -503,10 +505,11 @@ func (r *Reconciler) determineStatus(ctx context.Context, mesh *meshv1alpha1.Mul
 			// TODO: Set to actual status when operator installation is confirmed via ManifestWork status feedback
 			allReady = false
 			meta.SetStatusCondition(&status.Conditions, metav1.Condition{
-				Type:    meshv1alpha1.ConditionOperatorInstalled,
-				Status:  metav1.ConditionFalse,
-				Reason:  meshv1alpha1.ReasonManifestWorkCreated,
-				Message: "Operator ManifestWork has been created, awaiting installation confirmation",
+				Type:               meshv1alpha1.ConditionOperatorInstalled,
+				Status:             metav1.ConditionFalse,
+				Reason:             meshv1alpha1.ReasonManifestWorkCreated,
+				ObservedGeneration: mesh.Generation,
+				Message:            "Operator ManifestWork has been created, awaiting installation confirmation",
 			})
 		} else {
 			return fmt.Errorf("failed to get operator ManifestWork for cluster %s: %w", cluster.Name, err)
@@ -517,7 +520,7 @@ func (r *Reconciler) determineStatus(ctx context.Context, mesh *meshv1alpha1.Mul
 
 	mesh.Status.ClusterStatus = clusterStatuses
 
-	readyCondition := metav1.Condition{Type: meshv1alpha1.ConditionReady}
+	readyCondition := metav1.Condition{Type: meshv1alpha1.ConditionReady, ObservedGeneration: mesh.Generation}
 	if allReady {
 		readyCondition.Status = metav1.ConditionTrue
 		readyCondition.Reason = meshv1alpha1.ReasonAllClustersReady
@@ -534,10 +537,11 @@ func (r *Reconciler) determineStatus(ctx context.Context, mesh *meshv1alpha1.Mul
 
 func (r *Reconciler) setErrorStatus(mesh *meshv1alpha1.MultiClusterMesh, reconcileErr error) {
 	meta.SetStatusCondition(&mesh.Status.Conditions, metav1.Condition{
-		Type:    meshv1alpha1.ConditionReady,
-		Status:  metav1.ConditionFalse,
-		Reason:  meshv1alpha1.ReasonReconcileError,
-		Message: reconcileErr.Error(),
+		Type:               meshv1alpha1.ConditionReady,
+		Status:             metav1.ConditionFalse,
+		Reason:             meshv1alpha1.ReasonReconcileError,
+		ObservedGeneration: mesh.Generation,
+		Message:            reconcileErr.Error(),
 	})
 }
 
