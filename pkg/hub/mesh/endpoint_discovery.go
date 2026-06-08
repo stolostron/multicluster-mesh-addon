@@ -7,7 +7,6 @@ import (
 	meshv1alpha1 "github.com/stolostron/multicluster-mesh-addon/pkg/apis/mesh/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -161,7 +160,7 @@ func (r *Reconciler) ensureMsaManifestWork(ctx context.Context, mesh *meshv1alph
 		Namespace: cluster.Name,
 	}, secret)
 	if err != nil {
-		if apierrors.IsNotFound(err) {
+		if errors.IsNotFound(err) {
 			klog.V(4).Infof("Secret %s/%s not found yet, waiting for ManagedServiceAccount to create it", cluster.Name, msaSecretName)
 			return nil
 		}
