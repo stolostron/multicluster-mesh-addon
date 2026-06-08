@@ -102,6 +102,7 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 			expectMeshNotReady(meshName, testNs)
 			expectClusterOperatorConditionReason(meshName, testNs, cluster1, meshv1alpha1.ReasonManifestWorkCreated)
 			expectClusterOperatorConditionReason(meshName, testNs, cluster2, meshv1alpha1.ReasonManifestWorkCreated)
+			expectConditionsObservedGeneration(meshName, testNs)
 		})
 
 		It("should use custom operator configuration on K8s when specified", func() {
@@ -225,6 +226,7 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 				expectMeshNotReady(meshName, testNs)
 				expectNoManifestWorks()
 				expectClusterOperatorConditionReason(meshName, testNs, clusterName, meshv1alpha1.ReasonMissingProductClaim)
+				expectConditionsObservedGeneration(meshName, testNs)
 			})
 
 			It("should process it when a claim is set", func() {
@@ -274,6 +276,7 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 					Expect(unmarshalManifest(work.Spec.Workload.Manifests[2], sub)).To(Succeed())
 					return sub.Spec.Channel
 				}).Should(Equal("tech-preview"))
+				expectConditionsObservedGeneration(meshName, testNs)
 			})
 
 			It("should restore ManifestWork spec when externally modified", func() {
@@ -421,6 +424,7 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 
 			It("should block the newer mesh", func() {
 				expectMeshConditionReason(otherMesh, testNs, meshv1alpha1.ConditionReady, meshv1alpha1.ReasonOperatorConfigConflict)
+				expectConditionsObservedGeneration(otherMesh, testNs)
 			})
 
 			It("should unblock the newer mesh when the older mesh is deleted", func() {
@@ -600,62 +604,6 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 				expectMeshNotReady(meshName, testNs)
 				expectNoCacertsManifestWork(clusterName)
 			})
-		})
-	})
-
-	Context("ObservedGeneration", func() {
-		It("should set ObservedGeneration on mesh-level and cluster-level conditions", func() {
-			util.CreateK8sManagedCluster(ctx, k8sClient, clusterName, testClusterSet)
-			util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet)
-
-			expectMeshNotReady(meshName, testNs)
-			expectConditionsObservedGeneration(meshName, testNs)
-		})
-
-		It("should update ObservedGeneration after a spec change", func() {
-			util.CreateK8sManagedCluster(ctx, k8sClient, clusterName, testClusterSet)
-			util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet)
-			expectMeshNotReady(meshName, testNs)
-
-			mesh := &meshv1alpha1.MultiClusterMesh{}
-			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: meshName, Namespace: testNs}, mesh)).To(Succeed())
-			mesh.Spec.Operator.Channel = "updated-channel"
-			Expect(k8sClient.Update(ctx, mesh)).To(Succeed())
-
-			Eventually(func() int64 {
-				m := &meshv1alpha1.MultiClusterMesh{}
-				if err := k8sClient.Get(ctx, types.NamespacedName{Name: meshName, Namespace: testNs}, m); err != nil {
-					return 0
-				}
-				for _, c := range m.Status.Conditions {
-					if c.Type == meshv1alpha1.ConditionReady {
-						return c.ObservedGeneration
-					}
-				}
-				return 0
-			}).Should(Equal(int64(2)))
-		})
-
-		It("should set ObservedGeneration on conflict conditions", func() {
-			otherMesh := meshName + "-conflict"
-			util.CreateK8sManagedCluster(ctx, k8sClient, clusterName, testClusterSet)
-			util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet)
-			expectOperatorManifestWork(clusterName)
-
-			util.CreateMultiClusterMesh(ctx, k8sClient, otherMesh, testNs, testClusterSet, meshv1alpha1.MultiClusterMeshSpec{
-				Operator: meshv1alpha1.OperatorConfig{Channel: "different-channel"},
-			})
-
-			expectMeshConditionReason(otherMesh, testNs, meshv1alpha1.ConditionReady, meshv1alpha1.ReasonOperatorConfigConflict)
-			expectConditionsObservedGeneration(otherMesh, testNs)
-		})
-
-		It("should set ObservedGeneration on missing product claim conditions", func() {
-			util.CreateManagedCluster(ctx, k8sClient, clusterName, testClusterSet)
-			util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet)
-
-			expectClusterOperatorConditionReason(meshName, testNs, clusterName, meshv1alpha1.ReasonMissingProductClaim)
-			expectConditionsObservedGeneration(meshName, testNs)
 		})
 	})
 
