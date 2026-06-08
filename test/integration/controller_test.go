@@ -628,8 +628,11 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 		})
 
 		It("should create ManagedServiceAccount resources with default validity for each ManagedCluster in the ClusterSet", func() {
-			expectManagedServiceAccount(fmt.Sprintf("%s-istio-reader", meshName), cluster1)
-			expectManagedServiceAccount(fmt.Sprintf("%s-istio-reader", meshName), cluster2)
+			msa1 := expectManagedServiceAccount(fmt.Sprintf("%s-istio-reader", meshName), cluster1)
+			msa2 := expectManagedServiceAccount(fmt.Sprintf("%s-istio-reader", meshName), cluster2)
+
+			Expect(msa1.Labels[meshcontroller.ManagedByLabel]).To(Equal(meshcontroller.ManagedByValue))
+			Expect(msa2.Spec.Rotation.Validity).To(Equal(metav1.Duration{Duration: 360 * time.Hour}))
 		})
 
 		It("should create ManifestWork when ManagedServiceAccount secret is created", func() {
@@ -650,7 +653,12 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 			})
 
 			It("should process a ManagedServiceAccount", func() {
-				expectManagedServiceAccount(fmt.Sprintf("%s-istio-reader", meshName), cluster3)
+				msa := &msav1beta1.ManagedServiceAccount{}
+				Eventually(func() error {
+					return k8sClient.Get(ctx, types.NamespacedName{
+						Name: fmt.Sprintf("%s-istio-reader", meshName), Namespace: cluster3,
+					}, msa)
+				}).Should(Succeed())
 			})
 
 			It("should create ManifestWork when ManagedServiceAccount secret is created", func() {
@@ -700,7 +708,8 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 			It("should keep the ManagedServiceAccount when one mesh is deleted", func() {
 				expectMeshNotReady(otherMesh, otherNs)
 				util.DeleteResource(ctx, k8sClient, &meshv1alpha1.MultiClusterMesh{}, otherMesh, otherNs)
-				expectManagedServiceAccount(fmt.Sprintf("%s-istio-reader", meshName), cluster1)
+				msa := &msav1beta1.ManagedServiceAccount{}
+				Expect(k8sClient.Get(ctx, types.NamespacedName{Name: fmt.Sprintf("%s-istio-reader", meshName), Namespace: cluster1}, msa)).Should(Succeed())
 			})
 
 			It("should delete the ManagedServiceAccount when both meshes are deleted", func() {
@@ -865,8 +874,6 @@ func expectManagedServiceAccount(msaName, namespace string) *msav1beta1.ManagedS
 			Namespace: namespace,
 		}, msa)
 	}).Should(Succeed())
-	Expect(msa.ObjectMeta.Labels).To(HaveKeyWithValue(meshcontroller.ManagedByLabel, meshcontroller.ManagedByValue))
-	Expect(msa.Spec.Rotation.Validity).To(Equal(metav1.Duration{Duration: 360 * time.Hour}))
 	return msa
 }
 
