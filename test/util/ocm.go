@@ -8,7 +8,6 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	clusterv1 "open-cluster-management.io/api/cluster/v1"
 	clusterv1beta2 "open-cluster-management.io/api/cluster/v1beta2"
-	msav1beta1 "open-cluster-management.io/managed-serviceaccount/apis/authentication/v1beta1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -36,24 +35,6 @@ func CreateManagedCluster(ctx context.Context, k8sClient client.Client, name, cl
 			},
 		},
 	})).To(Succeed())
-}
-
-// CreateManagedServiceAccount creates a ManagedServiceAccount resource.
-func CreateManagedServiceAccount(ctx context.Context, k8sClient client.Client, name, namespace string, duration metav1.Duration) {
-	msa := &msav1beta1.ManagedServiceAccount{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      name,
-			Namespace: namespace,
-			Labels:    map[string]string{"app.kubernetes.io/managed-by": "multicluster-mesh-addon"},
-		},
-		Spec: msav1beta1.ManagedServiceAccountSpec{
-			Rotation: msav1beta1.ManagedServiceAccountRotation{
-				Enabled:  true,
-				Validity: duration,
-			},
-		},
-	}
-	Expect(k8sClient.Create(ctx, msa)).To(Succeed())
 }
 
 // SetProductClaim sets the claim on an existing ManagedCluster to the given claim.

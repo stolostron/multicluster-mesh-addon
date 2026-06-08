@@ -27,7 +27,7 @@ const (
 // createManagedServiceAccounts creates ManagedServiceAccount resources for each cluster in the ClusterSet
 func (r *Reconciler) createManagedServiceAccounts(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, clusters []clusterv1.ManagedCluster) error {
 	if len(clusters) == 0 {
-		klog.Info("The ClusterSet has no managed cluster")
+		klog.V(4).Info("The ClusterSet has no managed cluster")
 		return nil
 	}
 
