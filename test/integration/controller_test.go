@@ -637,10 +637,10 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 			util.CreateMsaSecret(ctx, k8sClient, cluster1, meshName, testNs)
 			util.CreateMsaSecret(ctx, k8sClient, cluster2, meshName, testNs)
 
-			expectManifestWork(fmt.Sprintf("%s-%s", manifestWorkNameMsaPrefix, meshName), cluster1)
-			expectManifestWork(fmt.Sprintf("%s-%s", manifestWorkNameMsaPrefix, meshName), cluster2)
-			expectIstioRemoteSecret(testNs, cluster1)
-			expectIstioRemoteSecret(testNs, cluster2)
+			work1 := expectManifestWork(fmt.Sprintf("%s-%s", manifestWorkNameMsaPrefix, meshName), cluster1)
+			work2 := expectManifestWork(fmt.Sprintf("%s-%s", manifestWorkNameMsaPrefix, meshName), cluster2)
+			expectIstioRemoteSecret(work1, cluster1)
+			expectIstioRemoteSecret(work2, cluster2)
 		})
 
 		When("add a cluster to the ClusterSet", func() {
@@ -657,8 +657,8 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 				// simulate creating the cacerts secret by cert-manager
 				util.CreateMsaSecret(ctx, k8sClient, cluster3, meshName, testNs)
 
-				expectManifestWork(fmt.Sprintf("%s-%s", manifestWorkNameMsaPrefix, meshName), cluster3)
-				expectIstioRemoteSecret(testNs, cluster3)
+				work3 := expectManifestWork(fmt.Sprintf("%s-%s", manifestWorkNameMsaPrefix, meshName), cluster3)
+				expectIstioRemoteSecret(work3, cluster3)
 			})
 		})
 
@@ -870,10 +870,12 @@ func expectManagedServiceAccount(msaName, namespace string) *msav1beta1.ManagedS
 	return msa
 }
 
-func expectIstioRemoteSecret(meshNamespace, clusterName string) {
+func expectIstioRemoteSecret(work *workv1.ManifestWork, clusterName string) {
+	Expect(work.Spec.Workload.Manifests).To(HaveLen(1))
 	secret := &corev1.Secret{}
+	Expect(unmarshalManifest(work.Spec.Workload.Manifests[0], secret)).To(Succeed())
 	Expect(secret.Name).To(Equal(fmt.Sprintf("%s-%s", remoteSecretPrefix, clusterName)))
-	Expect(secret.Namespace).To(Equal(meshNamespace))
+	Expect(secret.Namespace).To(Equal("istio-system"))
 	Expect(secret.Type).To(Equal(corev1.SecretTypeOpaque))
 	Expect(secret.Labels).To(HaveKeyWithValue(multiClusterSecretLabel, "true"))
 	Expect(secret.Data).To(HaveKey("token"))

@@ -64,6 +64,9 @@ func CreateMsaSecret(ctx context.Context, k8sClient client.Client, clusterName, 
 				meshcontroller.MeshNamespaceLabel: meshNamespace,
 				meshcontroller.ClusterNameLabel:   clusterName,
 			},
+			Annotations: map[string]string{
+				"kubernetes.io/service-account.name": fmt.Sprintf("%s-istio-reader", meshName),
+			},
 		},
 		Type: corev1.SecretTypeServiceAccountToken,
 		Data: map[string][]byte{
