@@ -227,7 +227,20 @@ func (r *Reconciler) validate(ctx context.Context, mesh *meshv1alpha1.MultiClust
 		if other.UID == mesh.UID || conflict != nil {
 			return
 		}
-		if isOlderMesh(other, mesh) && r.operatorConfigConflicts(mesh.Spec.Operator, other.Spec.Operator) {
+		if isOlderMesh(mesh, other) {
+			return
+		}
+		if mesh.GetControlPlaneNamespace() == other.GetControlPlaneNamespace() {
+			conflict = &metav1.Condition{
+				Type:   meshv1alpha1.ConditionReady,
+				Status: metav1.ConditionFalse,
+				Reason: meshv1alpha1.ReasonNamespaceConflict,
+				Message: fmt.Sprintf("controlPlane.namespace %q conflicts with older mesh %s/%s targeting the same ClusterSet %s",
+					mesh.GetControlPlaneNamespace(), other.Namespace, other.Name, mesh.Spec.ClusterSet),
+			}
+			return
+		}
+		if r.operatorConfigConflicts(mesh.Spec.Operator, other.Spec.Operator) {
 			conflict = &metav1.Condition{
 				Type:   meshv1alpha1.ConditionReady,
 				Status: metav1.ConditionFalse,
@@ -372,7 +385,7 @@ func (r *Reconciler) handleDeletion(ctx context.Context, mesh *meshv1alpha1.Mult
 
 	// Trigger reconciliation for other meshes targeting the same cluster set.
 	// If this fails, we don't want to block the mesh deletion. The other meshes will eventually reconcile.
-	r.triggerReconcileForBlockedMeshes(ctx, mesh)
+	r.triggerReconcileForNotReadyMeshes(ctx, mesh)
 
 	klog.Infof("Removing finalizer from MultiClusterMesh %s/%s", mesh.Namespace, mesh.Name)
 	controllerutil.RemoveFinalizer(mesh, FinalizerName)
@@ -450,15 +463,13 @@ func (r *Reconciler) cleanupCertificates(ctx context.Context, mesh *meshv1alpha1
 	return nil
 }
 
-// triggerReconcileForBlockedMeshes triggers reconciliation for blocked meshes targeting the same ClusterSet.
-// The other meshes need to be re-reconciled to detect the conflict is gone.
-func (r *Reconciler) triggerReconcileForBlockedMeshes(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh) {
+// triggerReconcileForNotReadyMeshes triggers reconciliation for not-ready meshes targeting the same ClusterSet.
+func (r *Reconciler) triggerReconcileForNotReadyMeshes(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh) {
 	if err := r.forEachMeshInClusterSet(ctx, mesh.Spec.ClusterSet, func(other *meshv1alpha1.MultiClusterMesh) {
 		if other.UID == mesh.UID {
 			return
 		}
-		readyCondition := meta.FindStatusCondition(other.Status.Conditions, meshv1alpha1.ConditionReady)
-		if readyCondition == nil || readyCondition.Reason != meshv1alpha1.ReasonOperatorConfigConflict {
+		if meta.IsStatusConditionTrue(other.Status.Conditions, meshv1alpha1.ConditionReady) {
 			return
 		}
 
