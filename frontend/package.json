@@ -1,0 +1,29 @@
+{
+  "name": "ossm-acm-ui",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "build": "webpack --mode production",
+    "start": "webpack serve --mode development"
+  },
+  "dependencies": {
+    "@patternfly/react-core": "^6.4.3",
+    "@patternfly/react-icons": "^6.4.0",
+    "@patternfly/react-styles": "^6.4.0",
+    "@stolostron/multicluster-sdk": "^0.10.3",
+    "react": "^18.3.0",
+    "react-dom": "^18.3.0"
+  },
+  "devDependencies": {
+    "@openshift-console/dynamic-plugin-sdk": "^4.19.1",
+    "@openshift-console/dynamic-plugin-sdk-webpack": "^4.19.1",
+    "@types/react": "^18.3.0",
+    "@types/react-dom": "^18.3.0",
+    "ts-loader": "^9.5.1",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.8.3",
+    "webpack": "^5.97.0",
+    "webpack-cli": "^5.1.4",
+    "webpack-dev-server": "^5.2.0"
+  }
+}
