@@ -20,5 +20,8 @@ bin/
 config/crd
 test/integration/crds/
 
+# Go vendor directory
+vendor/
+
 # Dev environment (make dev-env)
 .kube/
