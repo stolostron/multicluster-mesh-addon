@@ -5,6 +5,7 @@ inheritance: true
 tone_instructions: Prefer concise responses (high information density, low fluff)
 reviews:
   high_level_summary: false
+  changed_files_summary: false
   review_status: false
   collapse_walkthrough: true
   path_instructions:
