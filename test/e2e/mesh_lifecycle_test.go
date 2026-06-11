@@ -13,12 +13,12 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/types"
 	workv1 "open-cluster-management.io/api/work/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	meshv1alpha1 "github.com/stolostron/multicluster-mesh-addon/pkg/apis/mesh/v1alpha1"
 	meshcontroller "github.com/stolostron/multicluster-mesh-addon/pkg/hub/mesh"
+	"github.com/stolostron/multicluster-mesh-addon/pkg/key"
 	"github.com/stolostron/multicluster-mesh-addon/test/util"
 )
 
@@ -32,7 +32,7 @@ var clusters = []string{"cluster1", "cluster2"}
 var _ = Describe("Controller health", func() {
 	It("should have the controller deployment available", func(ctx SpecContext) {
 		deploy := &appsv1.Deployment{}
-		err := hubClient.Get(ctx, types.NamespacedName{Name: controllerName, Namespace: controllerNamespace}, deploy)
+		err := hubClient.Get(ctx, key.Of(controllerName, controllerNamespace), deploy)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(deploy.Status.Conditions).To(ContainElement(And(
 			HaveField("Type", appsv1.DeploymentAvailable),
@@ -100,7 +100,7 @@ var _ = Describe("MultiClusterMesh lifecycle", Ordered, func() {
 			}).Should(Succeed())
 
 			Step("Verifying operator namespace exists on %s", cluster)
-			err := spokeClient.Get(ctx, types.NamespacedName{Name: meshcontroller.DefaultOperatorNs}, &corev1.Namespace{})
+			err := spokeClient.Get(ctx, key.Of(meshcontroller.DefaultOperatorNs), &corev1.Namespace{})
 			Expect(err).NotTo(HaveOccurred())
 
 			Step("Verifying OperatorGroup exists on %s", cluster)
@@ -150,23 +150,17 @@ var _ = Describe("MultiClusterMesh lifecycle", Ordered, func() {
 })
 
 func getMesh(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh) error {
-	return hubClient.Get(ctx, types.NamespacedName{Name: mesh.Name, Namespace: mesh.Namespace}, mesh)
+	return hubClient.Get(ctx, key.For(mesh), mesh)
 }
 
 func getOperatorMW(ctx context.Context, cluster string) (*workv1.ManifestWork, error) {
 	mw := &workv1.ManifestWork{}
-	err := hubClient.Get(ctx, types.NamespacedName{
-		Name:      meshcontroller.OperatorManifestWorkName,
-		Namespace: cluster,
-	}, mw)
+	err := hubClient.Get(ctx, key.Of(meshcontroller.OperatorManifestWorkName, cluster), mw)
 	return mw, err
 }
 
 func getSubscription(ctx context.Context, spokeClient client.Client) (*operatorsv1alpha1.Subscription, error) {
 	sub := &operatorsv1alpha1.Subscription{}
-	err := spokeClient.Get(ctx, types.NamespacedName{
-		Name:      meshcontroller.OperatorNameSail,
-		Namespace: meshcontroller.DefaultOperatorNs,
-	}, sub)
+	err := spokeClient.Get(ctx, key.Of(meshcontroller.OperatorNameSail, meshcontroller.DefaultOperatorNs), sub)
 	return sub, err
 }

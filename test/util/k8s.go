@@ -9,12 +9,12 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/rand"
 	"k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	meshcontroller "github.com/stolostron/multicluster-mesh-addon/pkg/hub/mesh"
+	"github.com/stolostron/multicluster-mesh-addon/pkg/key"
 )
 
 // MustAddToScheme registers types with the global scheme, failing the test on error.
@@ -63,7 +63,7 @@ func CreateCacertsSecret(ctx context.Context, k8sClient client.Client, namespace
 
 // DeleteResource deletes a Kubernetes resource and waits for it to be fully removed.
 func DeleteResource(ctx context.Context, k8sClient client.Client, obj client.Object, name, namespace string) {
-	Expect(k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: namespace}, obj)).To(Succeed())
+	Expect(k8sClient.Get(ctx, key.Of(name, namespace), obj)).To(Succeed())
 	Expect(k8sClient.Delete(ctx, obj)).To(Succeed())
 	ExpectResourceDeleted(ctx, k8sClient, obj, name, namespace)
 }
@@ -71,7 +71,7 @@ func DeleteResource(ctx context.Context, k8sClient client.Client, obj client.Obj
 // ExpectResourceDeleted waits for a resource to be fully removed (e.g. after a side-effect deletion by a controller).
 func ExpectResourceDeleted(ctx context.Context, k8sClient client.Client, obj client.Object, name, namespace string) {
 	Eventually(func() bool {
-		err := k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: namespace}, obj)
+		err := k8sClient.Get(ctx, key.Of(name, namespace), obj)
 		return errors.IsNotFound(err)
 	}).Should(BeTrue())
 }
