@@ -279,12 +279,11 @@ func (r *Reconciler) doReconcile(ctx context.Context, mesh *meshv1alpha1.MultiCl
 			continue
 		}
 
-		result, err := r.ensureOperatorInstalled(ctx, mesh, &cluster)
+		work, err := r.workApplier.Apply(ctx, r.buildOperatorManifestWork(mesh, &cluster))
 		if err != nil {
-			return reconcile.Result{}, fmt.Errorf("failed to ensure mesh operator on cluster %s: %w", cluster.Name, err)
-		} else if result.RequeueAfter > 0 {
-			return result, nil
+			return reconcile.Result{}, fmt.Errorf("failed to apply operator ManifestWork on cluster %s: %w", cluster.Name, err)
 		}
+		klog.V(4).Infof("Applied operator ManifestWork %s/%s", work.Namespace, work.Name)
 	}
 
 	// Create certificates for each cluster if cert-manager is configured
@@ -393,18 +392,6 @@ func (r *Reconciler) handleDeletion(ctx context.Context, mesh *meshv1alpha1.Mult
 		return reconcile.Result{}, fmt.Errorf("failed to remove finalizer: %w", err)
 	}
 
-	return reconcile.Result{}, nil
-}
-
-func (r *Reconciler) ensureOperatorInstalled(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, cluster *clusterv1.ManagedCluster) (reconcile.Result, error) {
-	klog.V(4).Infof("Ensuring mesh operator on cluster %s for mesh %s", cluster.Name, mesh.Name)
-
-	work, err := r.workApplier.Apply(ctx, r.buildOperatorManifestWork(mesh, cluster))
-	if err != nil {
-		return reconcile.Result{}, fmt.Errorf("failed to apply operator ManifestWork on cluster %s: %w", cluster.Name, err)
-	}
-
-	klog.Infof("Successfully applied operator ManifestWork %s/%s", work.Namespace, work.Name)
 	return reconcile.Result{}, nil
 }
 
