@@ -5,8 +5,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-// By returns a NamespacedName from a name and optional namespace.
-func By(name string, namespace ...string) types.NamespacedName {
+// Of returns a NamespacedName from a name and optional namespace.
+func Of(name string, namespace ...string) types.NamespacedName {
 	k := types.NamespacedName{Name: name}
 	if len(namespace) > 0 {
 		k.Namespace = namespace[0]

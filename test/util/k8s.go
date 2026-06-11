@@ -54,7 +54,7 @@ func CreateCacertsSecret(ctx context.Context, k8sClient client.Client, namespace
 
 // DeleteResource deletes a Kubernetes resource and waits for it to be fully removed.
 func DeleteResource(ctx context.Context, k8sClient client.Client, obj client.Object, name, namespace string) {
-	Expect(k8sClient.Get(ctx, key.By(name, namespace), obj)).To(Succeed())
+	Expect(k8sClient.Get(ctx, key.Of(name, namespace), obj)).To(Succeed())
 	Expect(k8sClient.Delete(ctx, obj)).To(Succeed())
 	ExpectResourceDeleted(ctx, k8sClient, obj, name, namespace)
 }
@@ -62,7 +62,7 @@ func DeleteResource(ctx context.Context, k8sClient client.Client, obj client.Obj
 // ExpectResourceDeleted waits for a resource to be fully removed (e.g. after a side-effect deletion by a controller).
 func ExpectResourceDeleted(ctx context.Context, k8sClient client.Client, obj client.Object, name, namespace string) {
 	Eventually(func() bool {
-		err := k8sClient.Get(ctx, key.By(name, namespace), obj)
+		err := k8sClient.Get(ctx, key.Of(name, namespace), obj)
 		return errors.IsNotFound(err)
 	}).Should(BeTrue())
 }

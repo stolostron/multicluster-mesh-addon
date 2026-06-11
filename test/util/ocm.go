@@ -40,7 +40,7 @@ func CreateManagedCluster(ctx context.Context, k8sClient client.Client, name, cl
 // SetProductClaim sets the claim on an existing ManagedCluster to the given claim.
 func SetProductClaim(ctx context.Context, k8sClient client.Client, clusterName, productClaim string) {
 	cluster := &clusterv1.ManagedCluster{}
-	Expect(k8sClient.Get(ctx, key.By(clusterName), cluster)).To(Succeed())
+	Expect(k8sClient.Get(ctx, key.Of(clusterName), cluster)).To(Succeed())
 	cluster.Status.ClusterClaims = []clusterv1.ManagedClusterClaim{
 		{Name: "product.open-cluster-management.io", Value: productClaim},
 	}
