@@ -17,6 +17,8 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	clusterv1 "open-cluster-management.io/api/cluster/v1"
+
+	"github.com/stolostron/multicluster-mesh-addon/pkg/key"
 	clusterv1beta2 "open-cluster-management.io/api/cluster/v1beta2"
 	workv1 "open-cluster-management.io/api/work/v1"
 
@@ -253,7 +255,7 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 				originalVersion := work.ResourceVersion
 
 				mesh := &meshv1alpha1.MultiClusterMesh{}
-				Expect(k8sClient.Get(ctx, types.NamespacedName{Name: meshName, Namespace: testNs}, mesh)).To(Succeed())
+				Expect(k8sClient.Get(ctx, key.Of(meshName, testNs), mesh)).To(Succeed())
 				mesh.Spec.ControlPlane.Namespace = "different-ns"
 				Expect(k8sClient.Update(ctx, mesh)).To(Succeed())
 
@@ -264,7 +266,7 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 
 			It("should update ManifestWork when operator config changes", func() {
 				mesh := &meshv1alpha1.MultiClusterMesh{}
-				Expect(k8sClient.Get(ctx, types.NamespacedName{Name: meshName, Namespace: testNs}, mesh)).To(Succeed())
+				Expect(k8sClient.Get(ctx, key.Of(meshName, testNs), mesh)).To(Succeed())
 				mesh.Spec.Operator.Channel = "tech-preview"
 				Expect(k8sClient.Update(ctx, mesh)).To(Succeed())
 
@@ -495,7 +497,7 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 				cert := expectCertificate(testNs, clusterName, "mesh-issuer")
 
 				mesh := &meshv1alpha1.MultiClusterMesh{}
-				Expect(k8sClient.Get(ctx, types.NamespacedName{Name: meshName, Namespace: testNs}, mesh)).To(Succeed())
+				Expect(k8sClient.Get(ctx, key.Of(meshName, testNs), mesh)).To(Succeed())
 
 				Expect(cert.OwnerReferences).To(HaveLen(1))
 				ownerRef := cert.OwnerReferences[0]
@@ -515,10 +517,7 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 
 				Eventually(func() string {
 					c := &certmanagerv1.Certificate{}
-					if err := k8sClient.Get(ctx, types.NamespacedName{
-						Name:      cert.Name,
-						Namespace: cert.Namespace,
-					}, c); err != nil {
+					if err := k8sClient.Get(ctx, key.For(cert), c); err != nil {
 						return ""
 					}
 					return c.Spec.CommonName
@@ -548,20 +547,14 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 				expectCacertsManifestWork(clusterName)
 
 				secret := &corev1.Secret{}
-				Expect(k8sClient.Get(ctx, types.NamespacedName{
-					Name:      fmt.Sprintf("cacerts-%s", clusterName),
-					Namespace: testNs,
-				}, secret)).To(Succeed())
+				Expect(k8sClient.Get(ctx, key.Of(fmt.Sprintf("cacerts-%s", clusterName), testNs), secret)).To(Succeed())
 
 				secret.Data["tls.crt"] = []byte("updated-cert-data")
 				Expect(k8sClient.Update(ctx, secret)).To(Succeed())
 
 				Eventually(func() string {
 					work := &workv1.ManifestWork{}
-					if err := k8sClient.Get(ctx, types.NamespacedName{
-						Name:      meshcontroller.ManifestWorkNameCacerts,
-						Namespace: clusterName,
-					}, work); err != nil {
+					if err := k8sClient.Get(ctx, key.Of(meshcontroller.ManifestWorkNameCacerts, clusterName), work); err != nil {
 						return ""
 					}
 					manifestSecret := &corev1.Secret{}
@@ -610,7 +603,7 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 				expectCertificate(testNs, clusterName, "mesh-issuer")
 
 				mesh := &meshv1alpha1.MultiClusterMesh{}
-				Expect(k8sClient.Get(ctx, types.NamespacedName{Name: meshName, Namespace: testNs}, mesh)).To(Succeed())
+				Expect(k8sClient.Get(ctx, key.Of(meshName, testNs), mesh)).To(Succeed())
 				mesh.Spec.Security.Trust.CertManager.IssuerRef.Name = ""
 				Expect(k8sClient.Update(ctx, mesh)).To(Succeed())
 
@@ -671,7 +664,7 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 func expectFinalizer(name, namespace string) {
 	Eventually(func() []string {
 		mesh := &meshv1alpha1.MultiClusterMesh{}
-		if err := k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: namespace}, mesh); err != nil {
+		if err := k8sClient.Get(ctx, key.Of(name, namespace), mesh); err != nil {
 			return nil
 		}
 		return mesh.Finalizers
@@ -680,7 +673,7 @@ func expectFinalizer(name, namespace string) {
 
 func updateClusterSetLabel(clusterName, newClusterSet string) {
 	cluster := &clusterv1.ManagedCluster{}
-	Expect(k8sClient.Get(ctx, types.NamespacedName{Name: clusterName}, cluster)).To(Succeed())
+	Expect(k8sClient.Get(ctx, key.Of(clusterName), cluster)).To(Succeed())
 	cluster.Labels[meshcontroller.ClusterSetLabel] = newClusterSet
 	Expect(k8sClient.Update(ctx, cluster)).To(Succeed())
 }
@@ -701,7 +694,7 @@ func expectNoManifestWorks() {
 // TODO(mkolesnik): Remove once WorkApplier uses the CR cache (sdk-go#226).
 func triggerReconcile(meshName, namespace string) {
 	mesh := &meshv1alpha1.MultiClusterMesh{}
-	Expect(k8sClient.Get(ctx, types.NamespacedName{Name: meshName, Namespace: namespace}, mesh)).To(Succeed())
+	Expect(k8sClient.Get(ctx, key.Of(meshName, namespace), mesh)).To(Succeed())
 	if mesh.Annotations == nil {
 		mesh.Annotations = map[string]string{}
 	}
@@ -721,10 +714,7 @@ func expectAllManifestWorksDeleted() {
 func expectManifestWork(name, namespace string) *workv1.ManifestWork {
 	work := &workv1.ManifestWork{}
 	Eventually(func() error {
-		return k8sClient.Get(ctx, types.NamespacedName{
-			Name:      name,
-			Namespace: namespace,
-		}, work)
+		return k8sClient.Get(ctx, key.Of(name, namespace), work)
 	}).Should(Succeed())
 	return work
 }
@@ -740,10 +730,7 @@ func expectCacertsManifestWork(clusterNamespace string) *workv1.ManifestWork {
 func expectNoCacertsManifestWork(clusterNamespace string) {
 	Consistently(func() bool {
 		work := &workv1.ManifestWork{}
-		err := k8sClient.Get(ctx, types.NamespacedName{
-			Name:      meshcontroller.ManifestWorkNameCacerts,
-			Namespace: clusterNamespace,
-		}, work)
+		err := k8sClient.Get(ctx, key.Of(meshcontroller.ManifestWorkNameCacerts, clusterNamespace), work)
 		return errors.IsNotFound(err)
 	}).Should(BeTrue())
 }
@@ -751,10 +738,7 @@ func expectNoCacertsManifestWork(clusterNamespace string) {
 func expectCertificate(namespace, clusterName, issuerName string) *certmanagerv1.Certificate {
 	cert := &certmanagerv1.Certificate{}
 	Eventually(func() error {
-		return k8sClient.Get(ctx, types.NamespacedName{
-			Name:      fmt.Sprintf("cacerts-%s", clusterName),
-			Namespace: namespace,
-		}, cert)
+		return k8sClient.Get(ctx, key.Of(fmt.Sprintf("cacerts-%s", clusterName), namespace), cert)
 	}).Should(Succeed())
 
 	Expect(cert.Labels[meshcontroller.ManagedByLabel]).To(Equal(meshcontroller.ManagedByValue))
@@ -861,7 +845,7 @@ func expectSubscription(work *workv1.ManifestWork, index int, isOCP bool, expect
 func expectMeshNotReady(meshName, namespace string) {
 	Eventually(func() metav1.ConditionStatus {
 		mesh := &meshv1alpha1.MultiClusterMesh{}
-		if err := k8sClient.Get(ctx, types.NamespacedName{Name: meshName, Namespace: namespace}, mesh); err != nil {
+		if err := k8sClient.Get(ctx, key.Of(meshName, namespace), mesh); err != nil {
 			return ""
 		}
 		for _, c := range mesh.Status.Conditions {
@@ -876,7 +860,7 @@ func expectMeshNotReady(meshName, namespace string) {
 func expectClusterOperatorConditionReason(meshName, namespace, clusterName, reason string) {
 	Eventually(func() string {
 		mesh := &meshv1alpha1.MultiClusterMesh{}
-		if err := k8sClient.Get(ctx, types.NamespacedName{Name: meshName, Namespace: namespace}, mesh); err != nil {
+		if err := k8sClient.Get(ctx, key.Of(meshName, namespace), mesh); err != nil {
 			return ""
 		}
 		for _, cs := range mesh.Status.ClusterStatus {
@@ -895,7 +879,7 @@ func expectClusterOperatorConditionReason(meshName, namespace, clusterName, reas
 func expectNoClusterStatus(meshName, namespace, clusterName string) {
 	Eventually(func() bool {
 		mesh := &meshv1alpha1.MultiClusterMesh{}
-		if err := k8sClient.Get(ctx, types.NamespacedName{Name: meshName, Namespace: namespace}, mesh); err != nil {
+		if err := k8sClient.Get(ctx, key.Of(meshName, namespace), mesh); err != nil {
 			return false
 		}
 		for _, cs := range mesh.Status.ClusterStatus {
@@ -910,7 +894,7 @@ func expectNoClusterStatus(meshName, namespace, clusterName string) {
 func expectMeshConditionReason(meshName, namespace, conditionType, reason string) {
 	Eventually(func() string {
 		mesh := &meshv1alpha1.MultiClusterMesh{}
-		if err := k8sClient.Get(ctx, types.NamespacedName{Name: meshName, Namespace: namespace}, mesh); err != nil {
+		if err := k8sClient.Get(ctx, key.Of(meshName, namespace), mesh); err != nil {
 			return ""
 		}
 		for _, c := range mesh.Status.Conditions {
