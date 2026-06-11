@@ -34,34 +34,47 @@ var _ = Describe("Controller health", func() {
 		deploy := &appsv1.Deployment{}
 		err := hubClient.Get(ctx, types.NamespacedName{Name: controllerName, Namespace: controllerNamespace}, deploy)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(deploy.Status.AvailableReplicas).To(Not(BeZero()))
+		Expect(deploy.Status.Conditions).To(ContainElement(And(
+			HaveField("Type", appsv1.DeploymentAvailable),
+			HaveField("Status", corev1.ConditionTrue),
+		)))
 	})
 })
 
-var _ = Describe("MultiClusterMesh lifecycle", func() {
+var _ = Describe("MultiClusterMesh lifecycle", Ordered, func() {
 	var (
 		mesh *meshv1alpha1.MultiClusterMesh
 		ns   string
 	)
 
-	BeforeEach(func(ctx SpecContext) {
-		Step("Creating test resources")
+	BeforeAll(func(ctx SpecContext) {
 		ns = util.UniqueName("test-ns")
 		util.CreateNamespace(ctx, hubClient, ns)
+	})
+
+	AfterAll(func(ctx SpecContext) {
+		Step("Deleting test namespace %s", ns)
+		err := client.IgnoreNotFound(hubClient.Delete(ctx, &corev1.Namespace{
+			ObjectMeta: metav1.ObjectMeta{Name: ns},
+		}))
+		Expect(err).NotTo(HaveOccurred())
+	})
+
+	BeforeEach(func(ctx SpecContext) {
+		Step("Creating test mesh")
 		mesh = util.CreateMultiClusterMesh(ctx, hubClient, util.UniqueName("test-mesh"), ns, "mesh-cluster-set")
 
 		Step("Waiting for controller to reconcile")
 		Eventually(func(g Gomega) {
-			g.Expect(refreshMesh(ctx, mesh)).To(Succeed())
+			g.Expect(getMesh(ctx, mesh)).To(Succeed())
+			// TODO(mkolesni): Once feedback rules are implemented (#89), check for Status=True instead of just existence.
 			g.Expect(meta.FindStatusCondition(mesh.Status.Conditions, meshv1alpha1.ConditionReady)).NotTo(BeNil())
 		}).Should(Succeed())
 	})
 
 	AfterEach(func(ctx SpecContext) {
-		Step("Deleting test namespace %s", ns)
-		err := client.IgnoreNotFound(hubClient.Delete(ctx, &corev1.Namespace{
-			ObjectMeta: metav1.ObjectMeta{Name: ns},
-		}))
+		Step("Deleting test mesh %s", mesh.Name)
+		err := client.IgnoreNotFound(hubClient.Delete(ctx, mesh))
 		Expect(err).NotTo(HaveOccurred())
 
 		Step("Waiting for ManifestWorks to be cleaned up")
@@ -96,14 +109,18 @@ var _ = Describe("MultiClusterMesh lifecycle", func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(ogList.Items).To(HaveLen(1))
 
-			Step("Verifying Subscription exists on %s", cluster)
-			Expect(getSubscription(ctx, spokeClient)).NotTo(BeNil())
+			Step("Verifying Subscription content on %s", cluster)
+			sub, err := getSubscription(ctx, spokeClient)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(sub.Spec.Package).To(Equal(meshcontroller.OperatorNameSail))
+			Expect(sub.Spec.Channel).To(Equal(meshcontroller.DefaultChannel))
+			Expect(sub.Spec.CatalogSource).To(Equal(meshcontroller.DefaultCatalogSource))
 		}
 	})
 
 	It("updates spoke resources when operator config changes", func(ctx SpecContext) {
 		Step("Updating mesh operator channel")
-		Expect(refreshMesh(ctx, mesh)).To(Succeed())
+		Expect(getMesh(ctx, mesh)).To(Succeed())
 		mesh.Spec.Operator.Channel = "candidate"
 		Expect(hubClient.Update(ctx, mesh)).To(Succeed())
 
@@ -132,7 +149,7 @@ var _ = Describe("MultiClusterMesh lifecycle", func() {
 	})
 })
 
-func refreshMesh(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh) error {
+func getMesh(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh) error {
 	return hubClient.Get(ctx, types.NamespacedName{Name: mesh.Name, Namespace: mesh.Namespace}, mesh)
 }
 
