@@ -267,7 +267,7 @@ deploy-addon: $(KIND) gen images $(KUSTOMIZE) ## Build and deploy addon to the h
 	@echo "==> Addon controller deployed successfully. Use KUBECONFIG=$(HUB_KUBECONFIG) to interact with the hub."
 
 .PHONY: dev-clean-meshes
-dev-clean-meshes: ## Delete all MultiClusterMesh CRs and addon ManifestWorks from dev-env
+dev-clean-meshes: ## Delete all addon resources from the dev-env whether user created, or "leaked" resources left by an aborted/failed test
 	kubectl --kubeconfig=$(HUB_KUBECONFIG) delete multiclustermeshes -A --all --ignore-not-found=true
 	kubectl --kubeconfig=$(HUB_KUBECONFIG) delete manifestwork -A -l app.kubernetes.io/managed-by=multicluster-mesh-addon --ignore-not-found=true
 
