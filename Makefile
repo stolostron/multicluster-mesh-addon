@@ -129,7 +129,6 @@ update-test-crds: ## Update test CRDs from OCM API and cert-manager dependencies
 		echo "Run: go mod download open-cluster-management.io/managed-serviceaccount"; \
 		exit 1; \
 	fi; \
-	mkdir -p $(TEST_CRD_DIR)/ocm; \
 	echo "Copying CRDs from $$OCM_MSA_PATH..."; \
 	cp -v $$OCM_MSA_PATH/charts/managed-serviceaccount/crds/*.yaml $(TEST_CRD_DIR)/ocm/ 2>/dev/null || true; \
 	echo "Test CRDs for MSA updated successfully in $(TEST_CRD_DIR)/ocm/"
