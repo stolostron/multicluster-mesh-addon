@@ -110,7 +110,7 @@ test: ## Run unit tests
 .PHONY: update-test-crds
 update-test-crds: ## Update test CRDs from OCM API and cert-manager dependencies
 	@echo "Updating test CRDs from open-cluster-management.io/api..."
-	@OCM_API_PATH=$$(go list -m -f '{{.Dir}}' open-cluster-management.io/api 2>/dev/null); \
+	@OCM_API_PATH=$$(go list -mod=mod -m -f '{{.Dir}}' open-cluster-management.io/api 2>/dev/null); \
 	if [ -z "$$OCM_API_PATH" ]; then \
 		echo "Error: open-cluster-management.io/api not found in go.mod"; \
 		echo "Run: go mod download open-cluster-management.io/api"; \
@@ -134,7 +134,7 @@ update-test-crds: ## Update test CRDs from OCM API and cert-manager dependencies
 	cp -v $$OCP_MSA_PATH/charts/managed-serviceaccount/crds/*.yaml $(TEST_CRD_DIR)/ocm/ 2>/dev/null || true; \
 	echo "Test CRDs for MSA updated successfully in $(TEST_CRD_DIR)/ocm/"
 	@echo "Updating test CRDs from cert-manager..."
-	@CERTMANAGER_PATH=$$(go list -m -f '{{.Dir}}' github.com/cert-manager/cert-manager 2>/dev/null); \
+	@CERTMANAGER_PATH=$$(go list -mod=mod -m -f '{{.Dir}}' github.com/cert-manager/cert-manager 2>/dev/null); \
 	if [ -z "$$CERTMANAGER_PATH" ]; then \
 		echo "Error: github.com/cert-manager/cert-manager not found in go.mod"; \
 		echo "Run: go mod download github.com/cert-manager/cert-manager"; \
@@ -151,7 +151,12 @@ test-integration: $(ENVTEST) gen-crds deps update-test-crds ## Run integration t
 	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) -p path)" \
 	go run github.com/onsi/ginkgo/v2/ginkgo -v --tags=integration ./test/integration/...
 
-# TODO: Add test-e2e target for end-to-end tests against real cluster
+.PHONY: test-e2e
+test-e2e: ## Run e2e tests against dev-env clusters (requires make dev-env)
+	HUB_KUBECONFIG=$(HUB_KUBECONFIG) \
+	CLUSTER1_KUBECONFIG=$(DEV_KUBE_DIR)/cluster1.config \
+	CLUSTER2_KUBECONFIG=$(DEV_KUBE_DIR)/cluster2.config \
+	go run github.com/onsi/ginkgo/v2/ginkgo -v --fail-fast --tags=e2e ./test/e2e/...
 
 .PHONY: build
 build: $(BIN_DIR) ## Build addon binary
@@ -271,6 +276,11 @@ deploy-addon: $(KIND) gen images $(KUSTOMIZE) ## Build and deploy addon to the h
 	kubectl --kubeconfig=$(HUB_KUBECONFIG) rollout status deployment/multicluster-mesh-controller \
 		-n multicluster-mesh-system --timeout=180s
 	@echo "==> Addon controller deployed successfully. Use KUBECONFIG=$(HUB_KUBECONFIG) to interact with the hub."
+
+.PHONY: dev-clean-meshes
+dev-clean-meshes: ## Delete all addon resources from the dev-env whether user created, or "leaked" resources left by an aborted/failed test
+	kubectl --kubeconfig=$(HUB_KUBECONFIG) delete multiclustermeshes -A --all --ignore-not-found=true
+	kubectl --kubeconfig=$(HUB_KUBECONFIG) delete manifestwork -A -l app.kubernetes.io/managed-by=multicluster-mesh-addon --ignore-not-found=true
 
 .PHONY: dev-clean
 dev-clean: ## Destroy dev clusters and remove .kube/ folder

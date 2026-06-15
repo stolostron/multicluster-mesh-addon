@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	meshv1alpha1 "github.com/stolostron/multicluster-mesh-addon/pkg/apis/mesh/v1alpha1"
+	"github.com/stolostron/multicluster-mesh-addon/pkg/key"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -155,10 +156,8 @@ func (r *Reconciler) ensureMsaSecretsDistributed(ctx context.Context, mesh *mesh
 func (r *Reconciler) ensureMsaManifestWork(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, cluster *clusterv1.ManagedCluster) error {
 	msaSecretName := fmt.Sprintf("%s-istio-reader", mesh.Name)
 	secret := &corev1.Secret{}
-	err := r.Get(ctx, types.NamespacedName{
-		Name:      msaSecretName,
-		Namespace: cluster.Name,
-	}, secret)
+	err := r.Get(ctx, key.Of(msaSecretName, cluster.Name), secret)
+
 	if err != nil {
 		if errors.IsNotFound(err) {
 			klog.V(4).Infof("Secret %s/%s not found yet, waiting for ManagedServiceAccount to create it", cluster.Name, msaSecretName)
