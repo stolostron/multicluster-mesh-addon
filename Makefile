@@ -108,7 +108,7 @@ test: ## Run unit tests
 	go test -short ./pkg/...
 
 .PHONY: update-test-crds
-update-test-crds: ## Update test CRDs from OCM API and cert-manager dependencies
+update-test-crds: ## Update test CRDs from OCM API, managed-serviceaccount and cert-manager dependencies
 	@echo "Updating test CRDs from open-cluster-management.io/api..."
 	@OCM_API_PATH=$$(go list -mod=mod -m -f '{{.Dir}}' open-cluster-management.io/api 2>/dev/null); \
 	if [ -z "$$OCM_API_PATH" ]; then \
@@ -130,7 +130,7 @@ update-test-crds: ## Update test CRDs from OCM API and cert-manager dependencies
 		exit 1; \
 	fi; \
 	echo "Copying CRDs from $$OCM_MSA_PATH..."; \
-	cp -v $$OCM_MSA_PATH/charts/managed-serviceaccount/crds/*.yaml $(TEST_CRD_DIR)/ocm/ 2>/dev/null || true; \
+	cp -v $$OCM_MSA_PATH/charts/managed-serviceaccount/crds/*.yaml $(TEST_CRD_DIR)/ocm/; \
 	echo "Test CRDs for MSA updated successfully in $(TEST_CRD_DIR)/ocm/"
 	@echo "Updating test CRDs from cert-manager..."
 	@CERTMANAGER_PATH=$$(go list -mod=mod -m -f '{{.Dir}}' github.com/cert-manager/cert-manager 2>/dev/null); \
