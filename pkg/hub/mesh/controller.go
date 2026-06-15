@@ -298,6 +298,17 @@ func (r *Reconciler) doReconcile(ctx context.Context, mesh *meshv1alpha1.MultiCl
 		}
 	}
 
+	// Create ManagedServiceAccount resources for each cluster
+	if err := r.createManagedServiceAccounts(ctx, mesh, clusters); err != nil {
+		klog.Errorf("Failed to create ManagedServiceAccount resources: %v", err)
+		return reconcile.Result{}, err
+	}
+
+	if err := r.ensureMsaSecretsDistributed(ctx, mesh, clusters); err != nil {
+		klog.Errorf("Failed to distribute ManagedServiceAccount secrets: %v", err)
+		return reconcile.Result{}, err
+	}
+
 	forceCleanupAll := mesh.Spec.Security.Trust.CertManager.IssuerRef.Name == ""
 	if err := r.cleanupCertificates(ctx, mesh, clusters, forceCleanupAll); err != nil {
 		return reconcile.Result{}, fmt.Errorf("failed to cleanup Certificates: %w", err)
@@ -305,6 +316,10 @@ func (r *Reconciler) doReconcile(ctx context.Context, mesh *meshv1alpha1.MultiCl
 
 	if err := r.cleanupManifestWorks(ctx, mesh.Spec.ClusterSet); err != nil {
 		return reconcile.Result{}, fmt.Errorf("failed to cleanup ManifestWorks: %w", err)
+	}
+
+	if err := r.cleanupManagedServiceAccounts(ctx, mesh, clusters); err != nil {
+		return reconcile.Result{}, fmt.Errorf("failed to cleanup ManagedServiceAccounts: %w", err)
 	}
 
 	return reconcile.Result{}, nil
@@ -379,6 +394,11 @@ func (r *Reconciler) handleDeletion(ctx context.Context, mesh *meshv1alpha1.Mult
 	klog.Infof("Handling deletion for MultiClusterMesh %s/%s", mesh.Namespace, mesh.Name)
 	if err := r.cleanupManifestWorks(ctx, mesh.Spec.ClusterSet); err != nil {
 		return reconcile.Result{}, fmt.Errorf("failed to cleanup ManifestWorks: %w", err)
+	}
+
+	klog.Infof("Handling deletion for ManagedServiceAccount resources managed by mesh %s/%s", mesh.Namespace, mesh.Name)
+	if err := r.deleteAllManagedServiceAccounts(ctx, mesh); err != nil {
+		return reconcile.Result{}, fmt.Errorf("failed to cleanup ManagedServiceAccount resources: %w", err)
 	}
 
 	// Trigger reconciliation for other meshes targeting the same cluster set.
