@@ -5,12 +5,15 @@ import (
 	"fmt"
 
 	meshv1alpha1 "github.com/stolostron/multicluster-mesh-addon/pkg/apis/mesh/v1alpha1"
+	"github.com/stolostron/multicluster-mesh-addon/pkg/key"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/klog/v2"
 	clusterv1 "open-cluster-management.io/api/cluster/v1"
+	workv1 "open-cluster-management.io/api/work/v1"
 	msav1beta1 "open-cluster-management.io/managed-serviceaccount/apis/authentication/v1beta1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -137,4 +140,84 @@ func (r *Reconciler) deleteAllManagedServiceAccounts(ctx context.Context, mesh *
 	}
 
 	return nil
+}
+
+// ensureMsaSecretsDistributed creates ManifestWorks to distribute ManagedServiceAccount secrets to clusters
+func (r *Reconciler) ensureMsaSecretsDistributed(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, clusters []clusterv1.ManagedCluster) error {
+	for _, cluster := range clusters {
+		if err := r.ensureMsaManifestWork(ctx, mesh, &cluster); err != nil {
+			return fmt.Errorf("failed to ensure ManagedServiceAccount secrets ManifestWork for cluster %s: %w", cluster.Name, err)
+		}
+	}
+	return nil
+}
+
+// ensureMsaManifestWork creates a ManifestWork to distribute the ManagedServiceAccount secret to a cluster
+func (r *Reconciler) ensureMsaManifestWork(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, cluster *clusterv1.ManagedCluster) error {
+	msaSecretName := fmt.Sprintf("%s-istio-reader", mesh.Name)
+	secret := &corev1.Secret{}
+	err := r.Get(ctx, key.Of(msaSecretName, cluster.Name), secret)
+
+	if err != nil {
+		if errors.IsNotFound(err) {
+			klog.V(4).Infof("Secret %s/%s not found yet, waiting for ManagedServiceAccount to create it", cluster.Name, msaSecretName)
+			return nil
+		}
+		return fmt.Errorf("failed to get secret: %w", err)
+	}
+
+	work, err := r.workApplier.Apply(ctx, r.buildMsaManifestWork(mesh, cluster.Name, secret))
+	if err != nil {
+		return fmt.Errorf("failed to apply ManagedServiceAccount ManifestWork on cluster %s: %w", cluster.Name, err)
+	}
+
+	klog.Infof("Successfully applied ManagedServiceAccount ManifestWork %s/%s", work.Namespace, work.Name)
+	return nil
+}
+
+// buildMsaManifestWork builds a ManifestWork for distributing the ManagedServiceAccount secret
+func (r *Reconciler) buildMsaManifestWork(mesh *meshv1alpha1.MultiClusterMesh, clusterName string, secret *corev1.Secret) *workv1.ManifestWork {
+	istioRemoteSecret := &corev1.Secret{
+		TypeMeta: metav1.TypeMeta{
+			APIVersion: "v1",
+			Kind:       "Secret",
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      fmt.Sprintf("%s-%s", remoteSecretPrefix, clusterName),
+			Namespace: mesh.GetControlPlaneNamespace(),
+			Labels: map[string]string{
+				multiClusterSecretLabel: "true",
+				ManagedByLabel:          ManagedByValue,
+				MeshNameLabel:           mesh.Name,
+				ClusterSetLabel:         mesh.Spec.ClusterSet,
+				ClusterNameLabel:        clusterName,
+			},
+			Annotations: map[string]string{
+				clusterNameAnnotationKey: clusterName,
+			},
+		},
+		Type: corev1.SecretTypeOpaque,
+		Data: secret.Data,
+	}
+
+	workName := fmt.Sprintf("%s-%s", manifestWorkNameMsaPrefix, mesh.Name)
+	return &workv1.ManifestWork{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      workName,
+			Namespace: clusterName,
+			Labels:    meshOwnedLabels(mesh, clusterName),
+		},
+		Spec: workv1.ManifestWorkSpec{
+			Workload: workv1.ManifestsTemplate{
+				Manifests: []workv1.Manifest{{
+					RawExtension: runtime.RawExtension{Object: istioRemoteSecret},
+				}},
+			},
+			ManifestConfigs: []workv1.ManifestConfigOption{{
+				UpdateStrategy: &workv1.UpdateStrategy{
+					Type: workv1.UpdateStrategyTypeServerSideApply,
+				},
+			}},
+		},
+	}
 }

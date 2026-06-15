@@ -304,6 +304,11 @@ func (r *Reconciler) doReconcile(ctx context.Context, mesh *meshv1alpha1.MultiCl
 		return reconcile.Result{}, err
 	}
 
+	if err := r.ensureMsaSecretsDistributed(ctx, mesh, clusters); err != nil {
+		klog.Errorf("Failed to distribute ManagedServiceAccount secrets: %v", err)
+		return reconcile.Result{}, err
+	}
+
 	forceCleanupAll := mesh.Spec.Security.Trust.CertManager.IssuerRef.Name == ""
 	if err := r.cleanupCertificates(ctx, mesh, clusters, forceCleanupAll); err != nil {
 		return reconcile.Result{}, fmt.Errorf("failed to cleanup Certificates: %w", err)

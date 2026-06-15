@@ -662,6 +662,17 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 			Expect(msa2.Spec.Rotation.Validity).To(Equal(metav1.Duration{Duration: 360 * time.Hour}))
 		})
 
+		It("should create ManifestWork when ManagedServiceAccount secret is created", func() {
+			// simulate creating the cacerts secret by cert-manager
+			util.CreateMsaSecret(ctx, k8sClient, cluster1, meshName, testNs)
+			util.CreateMsaSecret(ctx, k8sClient, cluster2, meshName, testNs)
+
+			work1 := expectManifestWork(fmt.Sprintf("%s-%s", manifestWorkNameMsaPrefix, meshName), cluster1)
+			work2 := expectManifestWork(fmt.Sprintf("%s-%s", manifestWorkNameMsaPrefix, meshName), cluster2)
+			expectIstioRemoteSecret(work1, cluster1)
+			expectIstioRemoteSecret(work2, cluster2)
+		})
+
 		When("add a cluster to the ClusterSet", func() {
 			BeforeEach(func() {
 				cluster3 = util.UniqueName("cluster3")
@@ -676,6 +687,14 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 					}, msa)
 				}).Should(Succeed())
 			})
+
+			It("should create ManifestWork when ManagedServiceAccount secret is created", func() {
+				// simulate creating the cacerts secret by cert-manager
+				util.CreateMsaSecret(ctx, k8sClient, cluster3, meshName, testNs)
+
+				work3 := expectManifestWork(fmt.Sprintf("%s-%s", manifestWorkNameMsaPrefix, meshName), cluster3)
+				expectIstioRemoteSecret(work3, cluster3)
+			})
 		})
 
 		When("remove a cluster from the ClusterSet", func() {
@@ -685,6 +704,10 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 
 			It("should cleanup the ManagedServiceAccount", func() {
 				expectNoManagedServiceAccount(meshName, cluster2)
+			})
+
+			It("should cleanup the istio remote secret", func() {
+				expectNoIstioRemoteSecret(testNs, cluster2)
 			})
 		})
 
