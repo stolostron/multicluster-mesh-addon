@@ -12,7 +12,7 @@ import (
 
 // CreateMultiClusterMesh creates a MultiClusterMesh resource.
 // An optional MeshSpec can be passed to override fields beyond clusterSet.
-func CreateMultiClusterMesh(ctx context.Context, k8sClient client.Client, name, namespace, clusterSet string, spec ...meshv1alpha1.MultiClusterMeshSpec) {
+func CreateMultiClusterMesh(ctx context.Context, k8sClient client.Client, name, namespace, clusterSet string, spec ...meshv1alpha1.MultiClusterMeshSpec) *meshv1alpha1.MultiClusterMesh {
 	var meshSpec meshv1alpha1.MultiClusterMeshSpec
 	if len(spec) > 0 {
 		meshSpec = spec[0]
@@ -27,6 +27,7 @@ func CreateMultiClusterMesh(ctx context.Context, k8sClient client.Client, name, 
 		Spec: meshSpec,
 	}
 	Expect(k8sClient.Create(ctx, mesh)).To(Succeed())
+	return mesh
 }
 
 // CertManagerSpec returns a MeshSpec with cert-manager issuer configuration.

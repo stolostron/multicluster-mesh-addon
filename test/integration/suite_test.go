@@ -13,7 +13,6 @@ import (
 	. "github.com/onsi/gomega"
 	operatorsv1 "github.com/operator-framework/api/pkg/operators/v1"
 	operatorsv1alpha1 "github.com/operator-framework/api/pkg/operators/v1alpha1"
-	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/scheme"
 	clusterv1 "open-cluster-management.io/api/cluster/v1"
 	clusterv1beta2 "open-cluster-management.io/api/cluster/v1beta2"
@@ -25,6 +24,7 @@ import (
 
 	meshv1alpha1 "github.com/stolostron/multicluster-mesh-addon/pkg/apis/mesh/v1alpha1"
 	meshcontroller "github.com/stolostron/multicluster-mesh-addon/pkg/hub/mesh"
+	"github.com/stolostron/multicluster-mesh-addon/test/util"
 )
 
 var (
@@ -37,11 +37,6 @@ var (
 func TestIntegration(t *testing.T) {
 	RegisterFailHandler(Fail)
 	RunSpecs(t, "Integration Test Suite")
-}
-
-// mustAddToScheme registers a scheme and fails the test if it errors
-func mustAddToScheme(fn func(*runtime.Scheme) error, s *runtime.Scheme) {
-	Expect(fn(s)).To(Succeed())
 }
 
 var _ = BeforeSuite(func() {
@@ -66,14 +61,15 @@ var _ = BeforeSuite(func() {
 	Expect(err).NotTo(HaveOccurred())
 	Expect(cfg).NotTo(BeNil())
 
-	// Register schemes
-	mustAddToScheme(meshv1alpha1.Install, scheme.Scheme)
-	mustAddToScheme(clusterv1.Install, scheme.Scheme)
-	mustAddToScheme(clusterv1beta2.Install, scheme.Scheme)
-	mustAddToScheme(workv1.Install, scheme.Scheme)
-	mustAddToScheme(operatorsv1.AddToScheme, scheme.Scheme)
-	mustAddToScheme(operatorsv1alpha1.AddToScheme, scheme.Scheme)
-	mustAddToScheme(certmanagerv1.AddToScheme, scheme.Scheme)
+	util.MustAddToScheme(
+		meshv1alpha1.Install,
+		clusterv1.Install,
+		clusterv1beta2.Install,
+		workv1.Install,
+		operatorsv1.AddToScheme,
+		operatorsv1alpha1.AddToScheme,
+		certmanagerv1.AddToScheme,
+	)
 
 	k8sClient, err = client.New(cfg, client.Options{Scheme: scheme.Scheme})
 	Expect(err).NotTo(HaveOccurred())
