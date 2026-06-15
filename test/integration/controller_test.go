@@ -104,6 +104,7 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 			expectMeshNotReady(meshName, testNs)
 			expectClusterOperatorConditionReason(meshName, testNs, cluster1, meshv1alpha1.ReasonManifestWorkCreated)
 			expectClusterOperatorConditionReason(meshName, testNs, cluster2, meshv1alpha1.ReasonManifestWorkCreated)
+			expectConditionsObservedGeneration(meshName, testNs)
 		})
 
 		It("should use custom operator configuration on K8s when specified", func() {
@@ -227,6 +228,7 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 				expectMeshNotReady(meshName, testNs)
 				expectNoManifestWorks()
 				expectClusterOperatorConditionReason(meshName, testNs, clusterName, meshv1alpha1.ReasonMissingProductClaim)
+				expectConditionsObservedGeneration(meshName, testNs)
 			})
 
 			It("should process it when a claim is set", func() {
@@ -276,6 +278,7 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 					Expect(unmarshalManifest(work.Spec.Workload.Manifests[2], sub)).To(Succeed())
 					return sub.Spec.Channel
 				}).Should(Equal("tech-preview"))
+				expectConditionsObservedGeneration(meshName, testNs)
 			})
 
 			It("should restore ManifestWork spec when externally modified", func() {
@@ -426,6 +429,7 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 
 			It("should block the newer mesh", func() {
 				expectMeshConditionReason(otherMesh, testNs, meshv1alpha1.ConditionReady, meshv1alpha1.ReasonOperatorConfigConflict)
+				expectConditionsObservedGeneration(otherMesh, testNs)
 			})
 
 			It("should unblock the newer mesh when the older mesh is deleted", func() {
@@ -904,4 +908,24 @@ func expectMeshConditionReason(meshName, namespace, conditionType, reason string
 		}
 		return ""
 	}).Should(Equal(reason))
+}
+
+func expectConditionsObservedGeneration(meshName, namespace string) {
+	Eventually(func(g Gomega) {
+		mesh := &meshv1alpha1.MultiClusterMesh{}
+		g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: meshName, Namespace: namespace}, mesh)).To(Succeed())
+		g.Expect(mesh.Status.Conditions).NotTo(BeEmpty())
+
+		for _, c := range mesh.Status.Conditions {
+			g.Expect(c.ObservedGeneration).To(Equal(mesh.Generation),
+				"mesh-level condition %s should have ObservedGeneration=%d", c.Type, mesh.Generation)
+		}
+
+		for _, cs := range mesh.Status.ClusterStatus {
+			for _, c := range cs.Conditions {
+				g.Expect(c.ObservedGeneration).To(Equal(mesh.Generation),
+					"cluster %s condition %s should have ObservedGeneration=%d", cs.ClusterName, c.Type, mesh.Generation)
+			}
+		}
+	}).Should(Succeed())
 }
