@@ -5,6 +5,7 @@ package integration
 import (
 	"encoding/json"
 	"fmt"
+	"time"
 
 	certmanagerv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
 	. "github.com/onsi/ginkgo/v2"
@@ -25,6 +26,13 @@ import (
 	meshv1alpha1 "github.com/stolostron/multicluster-mesh-addon/pkg/apis/mesh/v1alpha1"
 	meshcontroller "github.com/stolostron/multicluster-mesh-addon/pkg/hub/mesh"
 	"github.com/stolostron/multicluster-mesh-addon/test/util"
+	msav1beta1 "open-cluster-management.io/managed-serviceaccount/apis/authentication/v1beta1"
+)
+
+const (
+	multiClusterSecretLabel   = "istio/multiCluster"
+	manifestWorkNameMsaPrefix = "multicluster-mesh-msa-secrets"
+	remoteSecretPrefix        = "istio-remote-secret"
 )
 
 var _ = Describe("MultiClusterMesh Controller", func() {
@@ -58,6 +66,12 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 		_ = k8sClient.List(ctx, workList)
 		for i := range workList.Items {
 			_ = k8sClient.Delete(ctx, &workList.Items[i])
+		}
+
+		msaList := &msav1beta1.ManagedServiceAccountList{}
+		_ = k8sClient.List(ctx, msaList)
+		for i := range msaList.Items {
+			_ = k8sClient.Delete(ctx, &msaList.Items[i])
 		}
 
 		clusterList := &clusterv1.ManagedClusterList{}
@@ -629,6 +643,88 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 		})
 	})
 
+	Context("Endpoint discovery", func() {
+		var cluster1, cluster2, cluster3, cluster4 string
+
+		BeforeEach(func() {
+			cluster1 = util.UniqueName("cluster1")
+			cluster2 = util.UniqueName("cluster2")
+			util.CreateK8sManagedCluster(ctx, k8sClient, cluster1, testClusterSet)
+			util.CreateK8sManagedCluster(ctx, k8sClient, cluster2, testClusterSet)
+			util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet, meshv1alpha1.MultiClusterMeshSpec{})
+		})
+
+		It("should create ManagedServiceAccount resources with default validity for each ManagedCluster in the ClusterSet", func() {
+			msa1 := expectManagedServiceAccount(fmt.Sprintf("%s-istio-reader", meshName), cluster1)
+			msa2 := expectManagedServiceAccount(fmt.Sprintf("%s-istio-reader", meshName), cluster2)
+
+			Expect(msa1.Labels[meshcontroller.ManagedByLabel]).To(Equal(meshcontroller.ManagedByValue))
+			Expect(msa2.Spec.Rotation.Validity).To(Equal(metav1.Duration{Duration: 360 * time.Hour}))
+		})
+
+		When("add a cluster to the ClusterSet", func() {
+			BeforeEach(func() {
+				cluster3 = util.UniqueName("cluster3")
+				util.CreateK8sManagedCluster(ctx, k8sClient, cluster3, testClusterSet)
+			})
+
+			It("should process a ManagedServiceAccount", func() {
+				msa := &msav1beta1.ManagedServiceAccount{}
+				Eventually(func() error {
+					return k8sClient.Get(ctx, types.NamespacedName{
+						Name: fmt.Sprintf("%s-istio-reader", meshName), Namespace: cluster3,
+					}, msa)
+				}).Should(Succeed())
+			})
+		})
+
+		When("remove a cluster from the ClusterSet", func() {
+			BeforeEach(func() {
+				updateClusterSetLabel(cluster2, "")
+			})
+
+			It("should cleanup the ManagedServiceAccount", func() {
+				expectNoManagedServiceAccount(meshName, cluster2)
+			})
+		})
+
+		When("create a cluster without clusterset label", func() {
+			BeforeEach(func() {
+				cluster4 = util.UniqueName("cluster4")
+				util.CreateK8sManagedCluster(ctx, k8sClient, cluster4, "")
+			})
+
+			It("shouldn't process ManagedServiceAccount", func() {
+				expectNoManagedServiceAccount(meshName, cluster4)
+			})
+		})
+
+		When("two meshes target the same cluster", func() {
+			var otherNs, otherMesh string
+
+			BeforeEach(func() {
+				otherNs = util.UniqueName("other-ns")
+				otherMesh = util.UniqueName("other-mesh")
+				util.CreateNamespace(ctx, k8sClient, otherNs)
+				util.CreateMultiClusterMesh(ctx, k8sClient, otherMesh, otherNs, testClusterSet)
+			})
+
+			It("should keep the ManagedServiceAccount when one mesh is deleted", func() {
+				expectMeshNotReady(otherMesh, otherNs)
+				util.DeleteResource(ctx, k8sClient, &meshv1alpha1.MultiClusterMesh{}, otherMesh, otherNs)
+				msa := &msav1beta1.ManagedServiceAccount{}
+				Expect(k8sClient.Get(ctx, types.NamespacedName{Name: fmt.Sprintf("%s-istio-reader", meshName), Namespace: cluster1}, msa)).Should(Succeed())
+			})
+
+			It("should delete the ManagedServiceAccount when both meshes are deleted", func() {
+				expectMeshNotReady(otherMesh, otherNs)
+				util.DeleteResource(ctx, k8sClient, &meshv1alpha1.MultiClusterMesh{}, meshName, testNs)
+				util.DeleteResource(ctx, k8sClient, &meshv1alpha1.MultiClusterMesh{}, otherMesh, otherNs)
+				expectNoManagedServiceAccount(meshName, cluster1)
+			})
+		})
+	})
+
 	Context("Platform detection", func() {
 		DescribeTable("should detect OpenShift variants and use OSSM operator",
 			func(productClaim string) {
@@ -763,6 +859,53 @@ func expectCacertsSecret(work *workv1.ManifestWork) {
 	Expect(secret.Data).To(HaveKey("tls.crt"))
 	Expect(secret.Data).To(HaveKey("tls.key"))
 	Expect(secret.Data).To(HaveKey("ca.crt"))
+}
+
+func expectManagedServiceAccount(msaName, namespace string) *msav1beta1.ManagedServiceAccount {
+	msa := &msav1beta1.ManagedServiceAccount{}
+	Eventually(func() error {
+		return k8sClient.Get(ctx, types.NamespacedName{
+			Name:      msaName,
+			Namespace: namespace,
+		}, msa)
+	}).Should(Succeed())
+	return msa
+}
+
+func expectIstioRemoteSecret(work *workv1.ManifestWork, clusterName string) {
+	Expect(work.Spec.Workload.Manifests).To(HaveLen(1))
+	secret := &corev1.Secret{}
+	Expect(unmarshalManifest(work.Spec.Workload.Manifests[0], secret)).To(Succeed())
+	Expect(secret.Name).To(Equal(fmt.Sprintf("%s-%s", remoteSecretPrefix, clusterName)))
+	Expect(secret.Namespace).To(Equal("istio-system"))
+	Expect(secret.Type).To(Equal(corev1.SecretTypeOpaque))
+	Expect(secret.Labels).To(HaveKeyWithValue(multiClusterSecretLabel, "true"))
+	Expect(secret.Data).To(HaveKey("token"))
+	Expect(secret.Data).To(HaveKey("ca.crt"))
+}
+
+// expectNoManagedServiceAccount makes sure that no ManagedServiceAccount is created for a cluster, checking consistently
+func expectNoManagedServiceAccount(meshName, clusterName string) {
+	Consistently(func() bool {
+		msa := &msav1beta1.ManagedServiceAccount{}
+		err := k8sClient.Get(ctx, types.NamespacedName{
+			Name:      fmt.Sprintf("%s-istio-reader", meshName),
+			Namespace: clusterName,
+		}, msa)
+		return errors.IsNotFound(err)
+	}).Should(BeTrue())
+}
+
+// expectNoIstioRemoteSecret makes sure that no istio remote secret is created for a cluster, checking consistently
+func expectNoIstioRemoteSecret(meshNamespace, clusterName string) {
+	Consistently(func() bool {
+		sec := &corev1.Secret{}
+		err := k8sClient.Get(ctx, types.NamespacedName{
+			Name:      fmt.Sprintf("%s-%s", remoteSecretPrefix, clusterName),
+			Namespace: meshNamespace,
+		}, sec)
+		return errors.IsNotFound(err)
+	}).Should(BeTrue())
 }
 
 func unmarshalManifest(manifest workv1.Manifest, into interface{}) error {
