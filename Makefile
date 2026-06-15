@@ -123,15 +123,15 @@ update-test-crds: ## Update test CRDs from OCM API and cert-manager dependencies
 	cp -v $$OCM_API_PATH/work/v1/*.crd.yaml $(TEST_CRD_DIR)/ocm/ 2>/dev/null || true; \
 	echo "Test CRDs updated successfully in $(TEST_CRD_DIR)/ocm/"
 	@echo "Updating test CRDs from open-cluster-management.io/managed-serviceaccount..."
-	@OCP_MSA_PATH=$$(go list -m -f '{{.Dir}}' open-cluster-management.io/managed-serviceaccount 2>/dev/null); \
-	if [ -z "$$OCP_MSA_PATH" ]; then \
+	@OCM_MSA_PATH=$$(go list -mod=mod -m -f '{{.Dir}}' open-cluster-management.io/managed-serviceaccount 2>/dev/null); \
+	if [ -z "$$OCM_MSA_PATH" ]; then \
 		echo "Error: open-cluster-management.io/managed-serviceaccount not found in go.mod"; \
 		echo "Run: go mod download open-cluster-management.io/managed-serviceaccount"; \
 		exit 1; \
 	fi; \
 	mkdir -p $(TEST_CRD_DIR)/ocm; \
-	echo "Copying CRDs from $$OCP_MSA_PATH..."; \
-	cp -v $$OCP_MSA_PATH/charts/managed-serviceaccount/crds/*.yaml $(TEST_CRD_DIR)/ocm/ 2>/dev/null || true; \
+	echo "Copying CRDs from $$OCM_MSA_PATH..."; \
+	cp -v $$OCM_MSA_PATH/charts/managed-serviceaccount/crds/*.yaml $(TEST_CRD_DIR)/ocm/ 2>/dev/null || true; \
 	echo "Test CRDs for MSA updated successfully in $(TEST_CRD_DIR)/ocm/"
 	@echo "Updating test CRDs from cert-manager..."
 	@CERTMANAGER_PATH=$$(go list -mod=mod -m -f '{{.Dir}}' github.com/cert-manager/cert-manager 2>/dev/null); \
