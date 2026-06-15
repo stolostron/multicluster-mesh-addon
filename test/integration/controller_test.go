@@ -134,7 +134,6 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 
 				expectClusterOperatorConditionReason(meshName, testNs, clusterName, meshv1alpha1.ReasonOperatorInstalled)
 				expectClusterOperatorConditionReason(meshName, testNs, cluster2Name, meshv1alpha1.ReasonOperatorInstalled)
-				expectConditionsObservedGeneration(meshName, testNs)
 				expectMeshReady(meshName, testNs)
 			})
 		})
@@ -260,7 +259,6 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 				expectMeshNotReady(meshName, testNs)
 				expectNoManifestWorks()
 				expectClusterOperatorConditionReason(meshName, testNs, clusterName, meshv1alpha1.ReasonMissingProductClaim)
-				expectConditionsObservedGeneration(meshName, testNs)
 			})
 
 			It("should process it when a claim is set", func() {
@@ -308,7 +306,6 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 					Expect(unmarshalManifest(work.Spec.Workload.Manifests[2], sub)).To(Succeed())
 					return sub.Spec.Channel
 				}).Should(Equal("tech-preview"))
-				expectConditionsObservedGeneration(meshName, testNs)
 			})
 
 			It("should restore ManifestWork spec when externally modified", func() {
@@ -482,7 +479,6 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 
 			It("should block the newer mesh", func() {
 				expectMeshConditionReason(otherMesh, testNs, meshv1alpha1.ConditionReady, meshv1alpha1.ReasonOperatorConfigConflict)
-				expectConditionsObservedGeneration(otherMesh, testNs)
 			})
 
 			It("should unblock the newer mesh when the older mesh is deleted", func() {
@@ -942,39 +938,46 @@ func expectSubscription(work *workv1.ManifestWork, index int, isOCP bool, expect
 	Expect(sub.Spec.InstallPlanApproval).To(Equal(expectedInstallPlanApproval))
 }
 
-func getMeshCondition(meshName, namespace, conditionType string) *metav1.Condition {
-	mesh := &meshv1alpha1.MultiClusterMesh{}
-	if err := k8sClient.Get(ctx, types.NamespacedName{Name: meshName, Namespace: namespace}, mesh); err != nil {
-		return nil
-	}
-	return meta.FindStatusCondition(mesh.Status.Conditions, conditionType)
+func findCondition(g Gomega, conditions []metav1.Condition, conditionType string) *metav1.Condition {
+	c := meta.FindStatusCondition(conditions, conditionType)
+	g.Expect(c).NotTo(BeNil(), "condition %s not found", conditionType)
+	return c
 }
 
 func expectMeshNotReady(meshName, namespace string) {
-	Eventually(func() metav1.ConditionStatus {
-		if c := getMeshCondition(meshName, namespace, meshv1alpha1.ConditionReady); c != nil {
-			return c.Status
-		}
-		return ""
-	}).Should(Equal(metav1.ConditionFalse))
+	Eventually(func(g Gomega) {
+		mesh := &meshv1alpha1.MultiClusterMesh{}
+		g.Expect(k8sClient.Get(ctx, key.Of(meshName, namespace), mesh)).To(Succeed())
+		c := findCondition(g, mesh.Status.Conditions, meshv1alpha1.ConditionReady)
+		g.Expect(c.Status).To(Equal(metav1.ConditionFalse))
+		g.Expect(c.ObservedGeneration).To(Equal(mesh.Generation))
+	}).Should(Succeed())
 }
 
 func expectMeshReady(meshName, namespace string) {
-	Eventually(func() metav1.ConditionStatus {
-		if c := getMeshCondition(meshName, namespace, meshv1alpha1.ConditionReady); c != nil {
-			return c.Status
-		}
-		return ""
-	}).Should(Equal(metav1.ConditionTrue))
+	Eventually(func(g Gomega) {
+		mesh := &meshv1alpha1.MultiClusterMesh{}
+		g.Expect(k8sClient.Get(ctx, key.Of(meshName, namespace), mesh)).To(Succeed())
+		c := findCondition(g, mesh.Status.Conditions, meshv1alpha1.ConditionReady)
+		g.Expect(c.Status).To(Equal(metav1.ConditionTrue))
+		g.Expect(c.ObservedGeneration).To(Equal(mesh.Generation))
+	}).Should(Succeed())
 }
 
-func expectMeshConditionReason(meshName, namespace, conditionType, reason string) {
-	Eventually(func() string {
-		if c := getMeshCondition(meshName, namespace, conditionType); c != nil {
-			return c.Reason
+func expectClusterOperatorConditionReason(meshName, namespace, clusterName, reason string) {
+	Eventually(func(g Gomega) {
+		mesh := &meshv1alpha1.MultiClusterMesh{}
+		g.Expect(k8sClient.Get(ctx, key.Of(meshName, namespace), mesh)).To(Succeed())
+		for _, cs := range mesh.Status.ClusterStatus {
+			if cs.ClusterName == clusterName {
+				c := findCondition(g, cs.Conditions, meshv1alpha1.ConditionOperatorInstalled)
+				g.Expect(c.Reason).To(Equal(reason))
+				g.Expect(c.ObservedGeneration).To(Equal(mesh.Generation))
+				return
+			}
 		}
-		return ""
-	}).Should(Equal(reason))
+		g.Expect(false).To(BeTrue(), "cluster %s not found in status", clusterName)
+	}).Should(Succeed())
 }
 
 func expectNoClusterStatus(meshName, namespace, clusterName string) {
@@ -992,39 +995,12 @@ func expectNoClusterStatus(meshName, namespace, clusterName string) {
 	}).Should(BeTrue())
 }
 
-func expectClusterOperatorConditionReason(meshName, namespace, clusterName, reason string) {
-	Eventually(func() string {
-		mesh := &meshv1alpha1.MultiClusterMesh{}
-		if err := k8sClient.Get(ctx, key.Of(meshName, namespace), mesh); err != nil {
-			return ""
-		}
-		for _, cs := range mesh.Status.ClusterStatus {
-			if cs.ClusterName == clusterName {
-				if c := meta.FindStatusCondition(cs.Conditions, meshv1alpha1.ConditionOperatorInstalled); c != nil {
-					return c.Reason
-				}
-			}
-		}
-		return ""
-	}).Should(Equal(reason))
-}
-
-func expectConditionsObservedGeneration(meshName, namespace string) {
+func expectMeshConditionReason(meshName, namespace, conditionType, reason string) {
 	Eventually(func(g Gomega) {
 		mesh := &meshv1alpha1.MultiClusterMesh{}
-		g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: meshName, Namespace: namespace}, mesh)).To(Succeed())
-		g.Expect(mesh.Status.Conditions).NotTo(BeEmpty())
-
-		for _, c := range mesh.Status.Conditions {
-			g.Expect(c.ObservedGeneration).To(Equal(mesh.Generation),
-				"mesh-level condition %s should have ObservedGeneration=%d", c.Type, mesh.Generation)
-		}
-
-		for _, cs := range mesh.Status.ClusterStatus {
-			for _, c := range cs.Conditions {
-				g.Expect(c.ObservedGeneration).To(Equal(mesh.Generation),
-					"cluster %s condition %s should have ObservedGeneration=%d", cs.ClusterName, c.Type, mesh.Generation)
-			}
-		}
+		g.Expect(k8sClient.Get(ctx, key.Of(meshName, namespace), mesh)).To(Succeed())
+		c := findCondition(g, mesh.Status.Conditions, conditionType)
+		g.Expect(c.Reason).To(Equal(reason))
+		g.Expect(c.ObservedGeneration).To(Equal(mesh.Generation))
 	}).Should(Succeed())
 }
