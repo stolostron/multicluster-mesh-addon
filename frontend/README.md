@@ -41,7 +41,7 @@ ossm-acm-ui/
 
 - [CRC](https://crc.dev) running with ACM installed
 - `oc` logged in as `kubeadmin`
-- Node.js 20+
+- Node.js 20 (Node 22+ may fail due to stricter ESM module resolution in ts-node)
 
 ## Building
 
@@ -99,8 +99,8 @@ oc apply -f deploy/consoleplugin.yaml
 
 ```bash
 oc patch console.operator.openshift.io cluster \
-  --type=merge \
-  --patch='{"spec":{"plugins":["ossm-acm"]}}'
+  --type=json \
+  --patch='[{"op":"add","path":"/spec/plugins/-","value":"ossm-acm"}]'
 ```
 
 ### 7. Restart the console pod
