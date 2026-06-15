@@ -149,12 +149,7 @@ oc new-project ossm-acm-plugin
 
 # Push built assets as a ConfigMap
 oc create configmap ossm-acm-plugin-dist \
-  --from-file=dist/plugin-manifest.json \
-  --from-file=dist/plugin-entry.js \
-  --from-file=dist/exposed-serviceMeshPage.js \
-  --from-file=dist/exposed-perspective.js \
-  --from-file=dist/exposed-perspectiveIcon.js \
-  --from-file=dist/766.js \
+  --from-file=dist/ \
   -n ossm-acm-plugin
 
 # Push the nginx config
@@ -197,12 +192,7 @@ cd <multicluster-mesh-addon-repo>/frontend
 npm run build
 
 oc create configmap ossm-acm-plugin-dist \
-  --from-file=dist/plugin-manifest.json \
-  --from-file=dist/plugin-entry.js \
-  --from-file=dist/exposed-serviceMeshPage.js \
-  --from-file=dist/exposed-perspective.js \
-  --from-file=dist/exposed-perspectiveIcon.js \
-  --from-file=dist/766.js \
+  --from-file=dist/ \
   -n ossm-acm-plugin --dry-run=client -o yaml | oc apply -f -
 
 oc rollout restart deployment/ossm-acm-plugin -n ossm-acm-plugin
@@ -234,11 +224,12 @@ oc rollout status deployment/multicluster-mesh-controller \
 ## Teardown
 
 ```bash
+cd <multicluster-mesh-addon-repo>
+
 # Remove the frontend plugin from the console operator plugins list
-PLUGINS=$(oc get console.operator.openshift.io cluster -o jsonpath='{.spec.plugins}' | \
-  python3 -c "import sys,json; p=json.load(sys.stdin); p.remove('ossm-acm') if 'ossm-acm' in p else None; print(json.dumps(p))")
-oc patch console.operator.openshift.io cluster \
-  --type=merge --patch="{\"spec\":{\"plugins\":${PLUGINS}}}" 2>/dev/null; true
+oc get console.operator.openshift.io cluster -o json | \
+  jq '.spec.plugins |= map(select(. != "ossm-acm"))' | \
+  oc apply -f -
 oc delete -f frontend/deploy/consoleplugin.yaml --ignore-not-found
 oc delete -f frontend/deploy/deployment.yaml --ignore-not-found
 oc delete namespace ossm-acm-plugin --ignore-not-found

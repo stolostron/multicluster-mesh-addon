@@ -13,11 +13,33 @@ spec:
       labels:
         app: ossm-acm-plugin
     spec:
+      automountServiceAccountToken: false
       containers:
         - name: nginx
           image: nginx:1.27-alpine
           ports:
             - containerPort: 9443
+          resources:
+            limits:
+              cpu: 200m
+              memory: 256Mi
+            requests:
+              cpu: 50m
+              memory: 64Mi
+          livenessProbe:
+            httpGet:
+              path: /plugin-manifest.json
+              port: 9443
+              scheme: HTTPS
+            initialDelaySeconds: 5
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /plugin-manifest.json
+              port: 9443
+              scheme: HTTPS
+            initialDelaySeconds: 3
+            periodSeconds: 10
           volumeMounts:
             - name: dist
               mountPath: /usr/share/nginx/html
@@ -35,6 +57,7 @@ spec:
               mountPath: /var/run
           securityContext:
             allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
             runAsNonRoot: true
             capabilities:
               drop: ["ALL"]

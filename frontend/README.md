@@ -64,12 +64,7 @@ oc new-project ossm-acm-plugin
 
 ```bash
 oc create configmap ossm-acm-plugin-dist \
-  --from-file=dist/plugin-manifest.json \
-  --from-file=dist/plugin-entry.js \
-  --from-file=dist/exposed-serviceMeshPage.js \
-  --from-file=dist/exposed-perspective.js \
-  --from-file=dist/exposed-perspectiveIcon.js \
-  --from-file=dist/766.js \
+  --from-file=dist/ \
   -n ossm-acm-plugin
 ```
 
@@ -135,12 +130,7 @@ After changing source files:
 ```bash
 npm run build
 oc create configmap ossm-acm-plugin-dist \
-  --from-file=dist/plugin-manifest.json \
-  --from-file=dist/plugin-entry.js \
-  --from-file=dist/exposed-serviceMeshPage.js \
-  --from-file=dist/exposed-perspective.js \
-  --from-file=dist/exposed-perspectiveIcon.js \
-  --from-file=dist/766.js \
+  --from-file=dist/ \
   -n ossm-acm-plugin --dry-run=client -o yaml | oc apply -f -
 oc rollout restart deployment/ossm-acm-plugin -n ossm-acm-plugin
 oc rollout restart deployment/console -n openshift-console
