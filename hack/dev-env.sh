@@ -16,11 +16,34 @@ CLUSTER2="cluster2"
 log() { echo "==> $*"; }
 err() { echo "ERROR: $*" >&2; exit 1; }
 
+MIN_INOTIFY_WATCHES=524288
+MIN_INOTIFY_INSTANCES=512
+
+check_inotify_limits() {
+    [[ "$(uname -s)" != "Linux" ]] && return 0
+
+    local watches instances msg=""
+    watches="$(sysctl -n fs.inotify.max_user_watches 2>/dev/null || echo 0)"
+    instances="$(sysctl -n fs.inotify.max_user_instances 2>/dev/null || echo 0)"
+
+    if (( watches < MIN_INOTIFY_WATCHES )); then
+        msg="fs.inotify.max_user_watches is ${watches} (need >= ${MIN_INOTIFY_WATCHES})"
+    fi
+    if (( instances < MIN_INOTIFY_INSTANCES )); then
+        msg="${msg:+${msg}; }fs.inotify.max_user_instances is ${instances} (need >= ${MIN_INOTIFY_INSTANCES})"
+    fi
+
+    if [[ -n "${msg}" ]]; then
+        err "${msg}. Creating 3 Kind clusters requires higher inotify limits. See https://kind.sigs.k8s.io/docs/user/known-issues/#pod-errors-due-to-too-many-open-files"
+    fi
+}
+
 kubeconfig_for() {
     echo "${DEV_KUBE_DIR}/${1}.config"
 }
 
 create_clusters() {
+    check_inotify_limits
     mkdir -p "${DEV_KUBE_DIR}"
 
     local existing_clusters
