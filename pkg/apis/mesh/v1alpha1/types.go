@@ -123,9 +123,10 @@ type IssuerReference struct {
 // DiscoveryConfig defines endpoint discovery token configuration
 type DiscoveryConfig struct {
 	// TokenValidity defines how long discovery tokens are valid
-	// Supports hours (h), minutes (m), seconds (s) or milliseconds (ms). If unset, defaults to 360h
+	// Supports hours (h), minutes (m), seconds (s). If unset, defaults to 360h
 	// +optional
 	// +kubebuilder:default="360h"
+	// +kubebuilder:validation:XValidation:rule="matches(self, '^([0-9]{1,5}(h|m|s)){1,3}$')",message="invalid value: TokenValidity supports hours (h), minutes (m), seconds (s)"
 	// +kubebuilder:validation:XValidation:rule="duration(self) >= duration('10m')", message="TokenValidity must be at least 10 minutes"
 	TokenValidity *metav1.Duration `json:"tokenValidity,omitempty"`
 }
