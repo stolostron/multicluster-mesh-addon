@@ -1,5 +1,6 @@
-PLUGIN_NAME ?= ossm-acm
-PLUGIN_NAMESPACE ?= ossm-acm-plugin
+# Not overridable — these values are hardcoded in deploy/deployment.yaml and deploy/consoleplugin.yaml
+PLUGIN_NAME := ossm-acm
+PLUGIN_NAMESPACE := ossm-acm-plugin
 
 OC ?= oc
 
@@ -26,7 +27,7 @@ deploy: ## Deploy (or redeploy) the frontend plugin to the cluster
 		$(OC) patch console.operator.openshift.io cluster \
 			--type=merge \
 			--patch='{"spec":{"plugins":["$(PLUGIN_NAME)"]}}'; \
-	elif ! echo "$$plugins" | grep -q '$(PLUGIN_NAME)'; then \
+	elif ! echo "$$plugins" | jq -e 'index("$(PLUGIN_NAME)")' >/dev/null 2>&1; then \
 		$(OC) patch console.operator.openshift.io cluster \
 			--type=json \
 			--patch='[{"op":"add","path":"/spec/plugins/-","value":"$(PLUGIN_NAME)"}]'; \
