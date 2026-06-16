@@ -31,6 +31,7 @@ import {
 import type { MultiClusterMesh, K8sCondition, ClusterMeshStatus } from '../types/multiClusterMesh'
 import { multiClusterMeshGroupVersionKind } from '../types/multiClusterMesh'
 import { MeshStatus } from './MeshStatus'
+import { TrustStatusCard } from './TrustStatusCard'
 
 function conditionMessage(condition: K8sCondition): string {
   if (condition.message) return condition.message
@@ -299,6 +300,15 @@ const MeshDetailContent: React.FC<{ ns: string; name: string }> = ({ ns, name })
                 </DescriptionList>
               </CardBody>
             </Card>
+          </GridItem>
+
+          <GridItem span={12}>
+            <TrustStatusCard
+              meshName={mesh.metadata?.name ?? ''}
+              meshNamespace={ns}
+              issuerName={issuerName ?? ''}
+              clusterStatuses={clusterStatuses}
+            />
           </GridItem>
 
           <GridItem span={12}>

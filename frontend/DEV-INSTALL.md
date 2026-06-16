@@ -135,6 +135,43 @@ EOF
 oc get multiclustermesh my-mesh -n mesh-system -o yaml
 ```
 
+## 4a. (Optional) Enable trust distribution
+
+To test certificate and trust distribution, create a cert-manager Issuer and configure the mesh to use it. This step is optional -- the mesh works without it, but the Trust Status card in the UI will show "not configured" until an issuer is set.
+
+```bash
+cd <multicluster-mesh-addon-repo>
+
+# Create a self-signed Issuer (sample provided in the repo)
+oc apply -f samples/cert-manager-issuer.yaml
+
+# Configure the mesh to use it
+oc patch multiclustermesh my-mesh -n mesh-system --type=merge \
+  --patch='{"spec":{"security":{"trust":{"certManager":{"issuerRef":{"name":"mesh-root-ca"}}}}}}'
+
+# Verify the controller created a Certificate
+oc get certificates -n mesh-system
+```
+
+After this, the controller will create a `cacerts-local-cluster` Certificate in `mesh-system` and cert-manager will mint a TLS secret. The controller will then attempt to distribute it via a ManifestWork to `local-cluster`. The distribution will show as failed until the `istio-system` namespace exists on the target cluster (this namespace is normally created when an Istio control plane is configured). To unblock it for testing, create the namespace manually:
+
+```bash
+oc create namespace istio-system
+```
+
+Once the namespace exists, the ManifestWork will succeed on its next reconciliation cycle. Verify the full trust chain:
+
+```bash
+# Certificate minted by cert-manager on the hub
+oc get certificate cacerts-local-cluster -n mesh-system
+
+# ManifestWork delivering the secret to the spoke
+oc get manifestwork multicluster-mesh-cacerts -n local-cluster
+
+# The distributed cacerts secret in istio-system (this is what Istio uses for mTLS)
+oc get secret cacerts -n istio-system
+```
+
 ## 5. Build and deploy the frontend ConsolePlugin
 
 *NOTE: These commands can also be run via `make build deploy` from the `frontend/` directory.*
