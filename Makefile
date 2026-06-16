@@ -239,7 +239,7 @@ export DEV_KUBE_DIR K8S_VERSION OLM_VERSION CERT_MANAGER_VERSION
 export KIND CLUSTERADM
 
 .PHONY: dev-env
-dev-env: create-clusters install-olm install-cert-manager init-ocm join-clusters deploy-addon ## Provision full dev environment (Kind + OCM + addon)
+dev-env: create-clusters install-olm install-cert-manager init-ocm join-clusters deploy-addon setup-mesh ## Provision full dev environment (Kind + OCM + addon + mesh)
 
 .PHONY: create-clusters
 create-clusters: $(KIND) ## Create 3 Kind clusters (hub, cluster1, cluster2)
@@ -276,10 +276,18 @@ deploy-addon: $(KIND) gen images $(KUSTOMIZE) ## Build and deploy addon to the h
 		-n multicluster-mesh-system --timeout=180s
 	@echo "==> Addon controller deployed successfully. Use KUBECONFIG=$(HUB_KUBECONFIG) to interact with the hub."
 
+.PHONY: setup-mesh
+setup-mesh: ## Create cert-manager trust chain, mesh-system namespace, and MultiClusterMesh CR
+	$(DEV_ENV_SCRIPT) setup-mesh
+
 .PHONY: dev-clean-meshes
-dev-clean-meshes: ## Delete all addon resources from the dev-env whether user created, or "leaked" resources left by an aborted/failed test
+dev-clean-meshes: ## Delete all mesh resources, cert-manager trust chain, and mesh-system namespace
 	kubectl --kubeconfig=$(HUB_KUBECONFIG) delete multiclustermeshes -A --all --ignore-not-found=true
 	kubectl --kubeconfig=$(HUB_KUBECONFIG) delete manifestwork -A -l app.kubernetes.io/managed-by=multicluster-mesh-addon --ignore-not-found=true
+	kubectl --kubeconfig=$(HUB_KUBECONFIG) delete issuer mesh-root-ca -n mesh-system --ignore-not-found=true
+	kubectl --kubeconfig=$(HUB_KUBECONFIG) delete certificate mesh-root-ca -n mesh-system --ignore-not-found=true
+	kubectl --kubeconfig=$(HUB_KUBECONFIG) delete clusterissuer mesh-selfsigned-issuer --ignore-not-found=true
+	kubectl --kubeconfig=$(HUB_KUBECONFIG) delete namespace mesh-system --ignore-not-found=true
 
 .PHONY: dev-clean
 dev-clean: ## Destroy dev clusters and remove .kube/ folder

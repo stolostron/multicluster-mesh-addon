@@ -6,8 +6,7 @@ metadata:
 spec:
   # Reference to the ManagedClusterSet that defines which clusters participate in the mesh
   # NOTE: Update this to match your ManagedClusterSet name
-  clusterSet: default
-
+  clusterSet: mesh-cluster-set
   # Minimal security configuration using cert-manager for trust
   security:
     trust:

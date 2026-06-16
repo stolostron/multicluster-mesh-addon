@@ -3,7 +3,7 @@
 # This file is invoked by Makefile targets with an action argument.
 #
 # Usage: hack/dev-env.sh <action>
-# Actions: create-clusters, install-olm, install-cert-manager, init-ocm, join-clusters, clean
+# Actions: create-clusters, install-olm, install-cert-manager, init-ocm, join-clusters, setup-mesh, clean
 
 set -euo pipefail
 
@@ -250,6 +250,47 @@ join_clusters() {
     kubectl --kubeconfig="${hub_kubeconfig}" get managedclustersets
 }
 
+setup_mesh() {
+    local hub_kubeconfig
+    hub_kubeconfig="$(kubeconfig_for "${HUB}")"
+
+    if [[ ! -f "${hub_kubeconfig}" ]]; then
+        err "Hub kubeconfig not found at ${hub_kubeconfig}. Run 'make deploy-addon' first."
+    fi
+
+    if kubectl --kubeconfig="${hub_kubeconfig}" get namespace mesh-system &>/dev/null; then
+        log "Namespace mesh-system already exists, skipping"
+    else
+        log "Creating namespace mesh-system"
+        kubectl --kubeconfig="${hub_kubeconfig}" create namespace mesh-system
+    fi
+
+    log "Waiting for cert-manager-cainjector to be ready..."
+    kubectl --kubeconfig="${hub_kubeconfig}" rollout status deployment/cert-manager-cainjector \
+        -n cert-manager --timeout=120s
+
+    log "Applying cert-manager trust chain (ClusterIssuer, root CA Certificate, Issuer)"
+    kubectl --kubeconfig="${hub_kubeconfig}" apply -f "${SCRIPT_DIR}/samples/cert-manager-issuer.yaml"
+
+    log "Waiting for ClusterIssuer to be ready..."
+    kubectl --kubeconfig="${hub_kubeconfig}" wait clusterissuer/mesh-selfsigned-issuer \
+        --for=condition=Ready --timeout=60s
+
+    log "Waiting for root CA Certificate to be issued..."
+    kubectl --kubeconfig="${hub_kubeconfig}" wait certificate/mesh-root-ca \
+        -n mesh-system --for=condition=Ready --timeout=120s
+
+    log "Waiting for CA-backed Issuer to be ready..."
+    kubectl --kubeconfig="${hub_kubeconfig}" wait issuer/mesh-root-ca \
+        -n mesh-system --for=condition=Ready --timeout=60s
+
+    log "Creating MultiClusterMesh CR"
+    kubectl --kubeconfig="${hub_kubeconfig}" apply -f "${SCRIPT_DIR}/samples/basic.yaml"
+
+    log "Mesh setup complete. The controller will now reconcile the mesh."
+    log "Monitor progress: kubectl --kubeconfig=${hub_kubeconfig} get multiclustermesh -n mesh-system"
+}
+
 clean() {
     log "Deleting Kind clusters..."
     for cluster in "${HUB}" "${CLUSTER1}" "${CLUSTER2}"; do
@@ -272,7 +313,8 @@ case "${ACTION}" in
     install-cert-manager)  install_cert_manager ;;
     init-ocm)              init_ocm ;;
     join-clusters)         join_clusters ;;
+    setup-mesh)            setup_mesh ;;
     clean)                 clean ;;
     *)
-        err "Unknown action: '${ACTION}'. Valid: create-clusters, install-olm, install-cert-manager, init-ocm, join-clusters, clean" ;;
+        err "Unknown action: '${ACTION}'. Valid: create-clusters, install-olm, install-cert-manager, init-ocm, join-clusters, setup-mesh, clean" ;;
 esac
