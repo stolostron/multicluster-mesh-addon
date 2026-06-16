@@ -142,7 +142,7 @@ const ClusterStatusSection: React.FC<{ clusterStatuses: ClusterMeshStatus[] }> =
 
             <div style={{ maxHeight: '400px', overflowY: 'auto' }}>
               <table className="pf-v6-c-table pf-m-grid-md pf-m-compact" role="grid">
-                <thead className="pf-v6-c-table__thead">
+                <thead className="pf-v6-c-table__thead" style={{ position: 'sticky', top: 0, zIndex: 1 }}>
                   <tr className="pf-v6-c-table__tr">
                     <th className="pf-v6-c-table__th">Cluster</th>
                     <th className="pf-v6-c-table__th">Operator Status</th>

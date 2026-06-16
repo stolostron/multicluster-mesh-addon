@@ -9,9 +9,14 @@ import {
   CardTitle,
   EmptyState,
   EmptyStateBody,
+  Flex,
+  FlexItem,
   Label,
+  SearchInput,
   Spinner,
   Title,
+  ToggleGroup,
+  ToggleGroupItem,
 } from '@patternfly/react-core'
 import type { ClusterMeshStatus } from '../types/multiClusterMesh'
 import type { Certificate } from '../types/certManager'
@@ -26,6 +31,20 @@ const MESH_NAMESPACE_LABEL = 'mesh.open-cluster-management.io/mesh-namespace'
 
 function findCondition(conditions: K8sCondition[] | undefined, type: string): K8sCondition | undefined {
   return conditions?.find((c) => c.type === type)
+}
+
+type TrustCategory = 'all' | 'ready' | 'pending' | 'failed'
+
+function categorizeTrust(cert: Certificate | undefined, mw: ManifestWork | undefined): TrustCategory {
+  if (!cert) return 'pending'
+  const ready = findCondition(cert.status?.conditions, 'Ready')
+  if (!ready || ready.status !== 'True') return 'failed'
+  if (!mw) return 'pending'
+  const applied = findCondition(mw.status?.conditions, 'Applied')
+  const available = findCondition(mw.status?.conditions, 'Available')
+  if (applied?.status === 'True' && available?.status === 'True') return 'ready'
+  if (applied?.status === 'True') return 'pending'
+  return 'failed'
 }
 
 function certStatusLabel(cert: Certificate | undefined): React.ReactNode {
@@ -65,6 +84,8 @@ export const TrustStatusCard: React.FC<TrustStatusCardProps> = ({
   clusterStatuses,
 }) => {
   const hasIssuer = !!issuerName
+  const [filter, setFilter] = React.useState<TrustCategory>('all')
+  const [search, setSearch] = React.useState('')
 
   const [certs, certsLoaded, certsError] = useK8sWatchResource<Certificate[]>(
     hasIssuer
@@ -175,40 +196,111 @@ export const TrustStatusCard: React.FC<TrustStatusCardProps> = ({
     )
   }
 
+  const categoryByCluster = new Map<string, TrustCategory>()
+  const counts = { ready: 0, pending: 0, failed: 0 }
+  clusterStatuses.forEach((cs) => {
+    const cat = categorizeTrust(certsByCluster.get(cs.clusterName), mwByCluster.get(cs.clusterName))
+    categoryByCluster.set(cs.clusterName, cat)
+    if (cat !== 'all') counts[cat]++
+  })
+
+  const filtered = clusterStatuses.filter((cs) => {
+    if (filter !== 'all' && categoryByCluster.get(cs.clusterName) !== filter) return false
+    if (search && !cs.clusterName.toLowerCase().includes(search.toLowerCase())) return false
+    return true
+  })
+
   return (
     <Card isCompact>
-      <CardTitle>Trust Status</CardTitle>
+      <CardTitle>Trust Status ({clusterStatuses.length})</CardTitle>
       <CardBody>
-        <table className="pf-v6-c-table pf-m-grid-md pf-m-compact" role="grid">
-          <thead className="pf-v6-c-table__thead">
-            <tr className="pf-v6-c-table__tr">
-              <th className="pf-v6-c-table__th">Cluster</th>
-              <th className="pf-v6-c-table__th">Certificate</th>
-              <th className="pf-v6-c-table__th">Expires</th>
-              <th className="pf-v6-c-table__th">Renews</th>
-              <th className="pf-v6-c-table__th">Distribution</th>
-            </tr>
-          </thead>
-          <tbody className="pf-v6-c-table__tbody">
-            {clusterStatuses.map((cs) => {
-              const cert = certsByCluster.get(cs.clusterName)
-              const mw = mwByCluster.get(cs.clusterName)
-              return (
-                <tr className="pf-v6-c-table__tr" key={cs.clusterName}>
-                  <td className="pf-v6-c-table__td">{cs.clusterName}</td>
-                  <td className="pf-v6-c-table__td">{certStatusLabel(cert)}</td>
-                  <td className="pf-v6-c-table__td">
-                    {cert?.status?.notAfter ? <Timestamp timestamp={cert.status.notAfter} /> : '-'}
+        <Flex style={{ marginBottom: '1rem' }} spaceItems={{ default: 'spaceItemsMd' }}>
+          <FlexItem>
+            <Label color="green" isCompact>{counts.ready} Distributed</Label>
+          </FlexItem>
+          <FlexItem>
+            <Label color="grey" isCompact>{counts.pending} Pending</Label>
+          </FlexItem>
+          <FlexItem>
+            <Label color="red" isCompact>{counts.failed} Failed</Label>
+          </FlexItem>
+        </Flex>
+
+        <Flex style={{ marginBottom: '1rem' }}>
+          <FlexItem>
+            <ToggleGroup>
+              <ToggleGroupItem
+                text={`All (${clusterStatuses.length})`}
+                isSelected={filter === 'all'}
+                onChange={() => setFilter('all')}
+              />
+              <ToggleGroupItem
+                text={`Distributed (${counts.ready})`}
+                isSelected={filter === 'ready'}
+                onChange={() => setFilter('ready')}
+              />
+              <ToggleGroupItem
+                text={`Pending (${counts.pending})`}
+                isSelected={filter === 'pending'}
+                onChange={() => setFilter('pending')}
+              />
+              <ToggleGroupItem
+                text={`Failed (${counts.failed})`}
+                isSelected={filter === 'failed'}
+                onChange={() => setFilter('failed')}
+              />
+            </ToggleGroup>
+          </FlexItem>
+          <FlexItem grow={{ default: 'grow' }}>
+            <SearchInput
+              placeholder="Filter by cluster name"
+              value={search}
+              onChange={(_event, value) => setSearch(value)}
+              onClear={() => setSearch('')}
+            />
+          </FlexItem>
+        </Flex>
+
+        <div style={{ maxHeight: '400px', overflowY: 'auto' }}>
+          <table className="pf-v6-c-table pf-m-grid-md pf-m-compact" role="grid">
+            <thead className="pf-v6-c-table__thead" style={{ position: 'sticky', top: 0, zIndex: 1 }}>
+              <tr className="pf-v6-c-table__tr">
+                <th className="pf-v6-c-table__th">Cluster</th>
+                <th className="pf-v6-c-table__th">Certificate</th>
+                <th className="pf-v6-c-table__th">Expires</th>
+                <th className="pf-v6-c-table__th">Renews</th>
+                <th className="pf-v6-c-table__th">Distribution</th>
+              </tr>
+            </thead>
+            <tbody className="pf-v6-c-table__tbody">
+              {filtered.length === 0 ? (
+                <tr className="pf-v6-c-table__tr">
+                  <td className="pf-v6-c-table__td" colSpan={5} style={{ textAlign: 'center' }}>
+                    No clusters match the current filter.
                   </td>
-                  <td className="pf-v6-c-table__td">
-                    {cert?.status?.renewalTime ? <Timestamp timestamp={cert.status.renewalTime} /> : '-'}
-                  </td>
-                  <td className="pf-v6-c-table__td">{distributionStatusLabel(mw, mwError)}</td>
                 </tr>
-              )
-            })}
-          </tbody>
-        </table>
+              ) : (
+                filtered.map((cs) => {
+                  const cert = certsByCluster.get(cs.clusterName)
+                  const mw = mwByCluster.get(cs.clusterName)
+                  return (
+                    <tr className="pf-v6-c-table__tr" key={cs.clusterName}>
+                      <td className="pf-v6-c-table__td">{cs.clusterName}</td>
+                      <td className="pf-v6-c-table__td">{certStatusLabel(cert)}</td>
+                      <td className="pf-v6-c-table__td">
+                        {cert?.status?.notAfter ? <Timestamp timestamp={cert.status.notAfter} /> : '-'}
+                      </td>
+                      <td className="pf-v6-c-table__td">
+                        {cert?.status?.renewalTime ? <Timestamp timestamp={cert.status.renewalTime} /> : '-'}
+                      </td>
+                      <td className="pf-v6-c-table__td">{distributionStatusLabel(mw, mwError)}</td>
+                    </tr>
+                  )
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
       </CardBody>
     </Card>
   )
