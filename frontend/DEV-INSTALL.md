@@ -137,6 +137,8 @@ oc get multiclustermesh my-mesh -n mesh-system -o yaml
 
 ## 5. Build and deploy the frontend ConsolePlugin
 
+*NOTE: These commands can also be run via `make build deploy` from the `frontend/` directory.*
+
 ```bash
 cd <multicluster-mesh-addon-repo>/frontend
 
@@ -145,7 +147,7 @@ npm install
 npm run build
 
 # Create the plugin namespace
-oc new-project ossm-acm-plugin
+oc create namespace ossm-acm-plugin --dry-run=client -o yaml | oc apply -f -
 
 # Push built assets as a ConfigMap
 oc create configmap ossm-acm-plugin-dist \
@@ -184,6 +186,8 @@ oc rollout status deployment/console -n openshift-console --timeout=120s
 
 ## Iterating on frontend changes
 
+*NOTE: These commands can also be run via `make build deploy` from the `frontend/` directory.*
+
 After modifying frontend source files:
 
 ```bash
@@ -196,6 +200,7 @@ oc create configmap ossm-acm-plugin-dist \
   -n ossm-acm-plugin --dry-run=client -o yaml | oc apply -f -
 
 oc rollout restart deployment/ossm-acm-plugin -n ossm-acm-plugin
+oc rollout status deployment/ossm-acm-plugin -n ossm-acm-plugin --timeout=120s
 oc rollout restart deployment/console -n openshift-console
 oc rollout status deployment/console -n openshift-console --timeout=120s
 ```
@@ -222,6 +227,8 @@ oc rollout status deployment/multicluster-mesh-controller \
 ```
 
 ## Teardown
+
+*NOTE: The frontend plugin teardown commands can also be run via `make teardown` from the `frontend/` directory.*
 
 ```bash
 cd <multicluster-mesh-addon-repo>

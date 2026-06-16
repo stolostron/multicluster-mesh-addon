@@ -34,6 +34,15 @@ const fleetMeshesNavItem: EncodedExtension = {
   },
 }
 
+const fleetMeshDetailRoute: EncodedExtension = {
+  type: 'console.page/route',
+  properties: {
+    perspective: 'fleet-service-mesh',
+    path: '/service-mesh/:ns/:name',
+    component: { $codeRef: 'meshDetailPage.default' },
+  },
+}
+
 const fleetMeshOverviewRoute: EncodedExtension = {
   type: 'console.page/route',
   properties: {
@@ -43,9 +52,12 @@ const fleetMeshOverviewRoute: EncodedExtension = {
   },
 }
 
+// Detail route must be registered before the list route because React Router v5
+// matches the first route whose path prefix matches the URL.
 export const extensions: EncodedExtension[] = [
   fleetServiceMeshPerspective,
   fleetMeshNavSection,
   fleetMeshesNavItem,
+  fleetMeshDetailRoute,
   fleetMeshOverviewRoute,
 ]

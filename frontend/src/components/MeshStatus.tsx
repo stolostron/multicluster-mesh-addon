@@ -4,17 +4,18 @@ import type { K8sCondition } from '../types/multiClusterMesh'
 
 type StatusColor = 'green' | 'red' | 'orange' | 'grey'
 
-function deriveStatus(conditions?: K8sCondition[]): { label: string; color: StatusColor } {
+function deriveStatus(conditions?: K8sCondition[], conditionType?: string): { label: string; color: StatusColor } {
   if (!conditions || conditions.length === 0) {
     return { label: 'Unknown', color: 'grey' }
   }
 
-  const ready = conditions.find((c) => c.type === 'Ready')
-  if (ready) {
-    if (ready.status === 'True') {
-      return { label: 'Ready', color: 'green' }
+  const targetType = conditionType ?? 'Ready'
+  const target = conditions.find((c) => c.type === targetType)
+  if (target) {
+    if (target.status === 'True') {
+      return { label: targetType, color: 'green' }
     }
-    return { label: ready.reason ?? 'Not Ready', color: 'red' }
+    return { label: target.reason ?? `Not ${targetType}`, color: 'red' }
   }
 
   const degraded = conditions.find((c) => c.status !== 'True')
@@ -25,7 +26,12 @@ function deriveStatus(conditions?: K8sCondition[]): { label: string; color: Stat
   return { label: 'Healthy', color: 'green' }
 }
 
-export const MeshStatus: React.FC<{ conditions?: K8sCondition[] }> = ({ conditions }) => {
-  const { label, color } = deriveStatus(conditions)
+interface MeshStatusProps {
+  conditions?: K8sCondition[]
+  conditionType?: string
+}
+
+export const MeshStatus: React.FC<MeshStatusProps> = ({ conditions, conditionType }) => {
+  const { label, color } = deriveStatus(conditions, conditionType)
   return <Label color={color}>{label}</Label>
 }

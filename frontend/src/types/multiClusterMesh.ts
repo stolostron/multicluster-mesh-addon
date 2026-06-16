@@ -16,9 +16,6 @@ export interface K8sCondition {
 
 export interface ClusterMeshStatus {
   clusterName: string
-  operatorReady: boolean
-  trustEstablished: boolean
-  discoveryConfigured: boolean
   conditions?: K8sCondition[]
 }
 

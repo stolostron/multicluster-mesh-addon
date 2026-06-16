@@ -6,6 +6,7 @@ export const pluginMetadata: ConsolePluginBuildMetadata = {
   displayName: 'OpenShift Service Mesh — ACM Integration',
   description: 'Adds Service Mesh visibility to the ACM Fleet Management console',
   exposedModules: {
+    meshDetailPage: './src/components/MeshDetailPage',
     serviceMeshPage: './src/components/ServiceMeshPage',
     perspective: './src/perspective',
     perspectiveIcon: './src/perspectiveIcon',

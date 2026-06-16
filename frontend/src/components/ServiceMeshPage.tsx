@@ -1,4 +1,5 @@
 import * as React from 'react'
+import { Link } from 'react-router-dom-v5-compat'
 import {
   ListPageHeader,
   ListPageBody,
@@ -43,7 +44,9 @@ const columns: TableColumn<MultiClusterMesh>[] = [
 const MeshRow: React.FC<RowProps<MultiClusterMesh>> = ({ obj, activeColumnIDs }) => (
   <>
     <TableData id="name" activeColumnIDs={activeColumnIDs}>
-      {obj.metadata?.name ?? '-'}
+      <Link to={`/service-mesh/${obj.metadata?.namespace}/${obj.metadata?.name}`}>
+        {obj.metadata?.name ?? '-'}
+      </Link>
     </TableData>
     <TableData id="clusterSet" activeColumnIDs={activeColumnIDs}>
       {obj.spec.clusterSet}
