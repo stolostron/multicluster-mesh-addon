@@ -36,11 +36,11 @@ import { TrustStatusCard } from './TrustStatusCard'
 function conditionMessage(condition: K8sCondition): string {
   if (condition.message) return condition.message
   if (condition.reason) return condition.reason
-  return condition.status === 'True' ? 'True' : 'False'
+  return condition.status
 }
 
 function statusIcon(status: string): React.ReactNode {
-  const color = status === 'True' ? 'green' : 'red'
+  const color = status === 'True' ? 'green' : status === 'Unknown' ? 'grey' : 'red'
   return <Label color={color}>{status}</Label>
 }
 
@@ -50,6 +50,7 @@ function categorizeCluster(cs: ClusterMeshStatus): ClusterStatusCategory {
   const op = cs.conditions?.find((c) => c.type === 'OperatorInstalled')
   if (!op) return 'unknown'
   if (op.status === 'True') return 'ready'
+  if (op.status === 'Unknown') return 'unknown'
   return 'notReady'
 }
 
@@ -338,7 +339,7 @@ const MeshDetailContent: React.FC<{ ns: string; name: string }> = ({ ns, name })
                           <td className="pf-v6-c-table__td">{c.reason ?? '-'}</td>
                           <td className="pf-v6-c-table__td">{c.message ?? '-'}</td>
                           <td className="pf-v6-c-table__td">
-                            <Timestamp timestamp={c.lastTransitionTime} />
+                            {c.lastTransitionTime ? <Timestamp timestamp={c.lastTransitionTime} /> : '-'}
                           </td>
                         </tr>
                       ))}
