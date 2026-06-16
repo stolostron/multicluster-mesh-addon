@@ -14,10 +14,13 @@ CLUSTER1="cluster1"
 CLUSTER2="cluster2"
 
 log() { echo "==> $*"; }
+warn() { echo "WARNING: $*" >&2; }
 err() { echo "ERROR: $*" >&2; exit 1; }
 
 MIN_INOTIFY_WATCHES=524288
 MIN_INOTIFY_INSTANCES=512
+MIN_KERNEL_KEYS=20000
+MIN_KERNEL_BYTES=500000
 
 check_inotify_limits() {
     [[ "$(uname -s)" != "Linux" ]] && return 0
@@ -38,12 +41,35 @@ check_inotify_limits() {
     fi
 }
 
+check_kernel_keyring_limits() {
+    [[ "$(uname -s)" != "Linux" ]] && return 0
+    command -v podman &>/dev/null || return 0
+
+    if (( EUID != 0 )) && ! podman info --format '{{.Host.Security.Rootless}}' 2>/dev/null | grep -q false; then
+        local maxkeys maxbytes msg=""
+        maxkeys="$(sysctl -n kernel.keys.maxkeys 2>/dev/null || echo 0)"
+        maxbytes="$(sysctl -n kernel.keys.maxbytes 2>/dev/null || echo 0)"
+
+        if (( maxkeys < MIN_KERNEL_KEYS )); then
+            msg="kernel.keys.maxkeys is ${maxkeys} (recommend >= ${MIN_KERNEL_KEYS})"
+        fi
+        if (( maxbytes < MIN_KERNEL_BYTES )); then
+            msg="${msg:+${msg}; }kernel.keys.maxbytes is ${maxbytes} (recommend >= ${MIN_KERNEL_BYTES})"
+        fi
+
+        if [[ -n "${msg}" ]]; then
+            warn "${msg}. Rootless podman with 3 Kind clusters may fail with 'could not create session key: disk quota exceeded'. See https://github.com/kubernetes-sigs/kind/issues/3806"
+        fi
+    fi
+}
+
 kubeconfig_for() {
     echo "${DEV_KUBE_DIR}/${1}.config"
 }
 
 create_clusters() {
     check_inotify_limits
+    check_kernel_keyring_limits
     mkdir -p "${DEV_KUBE_DIR}"
 
     local existing_clusters
