@@ -17,7 +17,6 @@ bin/
 *~
 
 # Generated files
-config/crd
 test/integration/crds/
 
 # Go vendor directory
