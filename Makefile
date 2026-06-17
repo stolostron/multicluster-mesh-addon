@@ -193,7 +193,7 @@ undeploy: gen ## Remove the controller from the cluster (PLATFORM=openshift|kind
 
 .PHONY: help
 help: ## Display this help
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
+	@grep -E '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
 
 # Dev Environment (local Kind + OCM clusters)
 KIND_VERSION ?= v0.31.0
