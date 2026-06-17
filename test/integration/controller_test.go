@@ -521,11 +521,11 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 				Expect(cert.Spec.Subject.OrganizationalUnits).To(ConsistOf(clusterName))
 			})
 
-			It("should set DNS SAN with cluster name and trust domain", func() {
+			It("should set URI SAN with trust domain and cluster name", func() {
 				cert := expectCertificate(testNs, clusterName, "mesh-issuer")
 
-				expectedSAN := clusterName + ".istio-ca." + meshName
-				Expect(cert.Spec.DNSNames).To(ConsistOf(expectedSAN))
+				expectedSAN := "spiffe://" + meshName + "/cluster/" + clusterName + "/ca/istio-ca"
+				Expect(cert.Spec.URIs).To(ConsistOf(expectedSAN))
 			})
 
 			It("should restore Certificate spec when externally modified", func() {

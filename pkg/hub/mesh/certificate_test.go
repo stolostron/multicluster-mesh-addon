@@ -43,7 +43,7 @@ func TestFormatOU(t *testing.T) {
 	}
 }
 
-func TestCertDNSName(t *testing.T) {
+func TestCertURI(t *testing.T) {
 	tests := []struct {
 		name        string
 		clusterName string
@@ -54,33 +54,21 @@ func TestCertDNSName(t *testing.T) {
 			name:        "short cluster name",
 			clusterName: "dev-cluster",
 			trustDomain: "mesh.local",
-			expected:    "dev-cluster.istio-ca.mesh.local",
+			expected:    "spiffe://mesh.local/cluster/dev-cluster/ca/istio-ca",
 		},
 		{
 			name:        "long cluster name preserves full name",
 			clusterName: "production-environment-kubernetes-cluster-us-east-2-deployment-pipeline-id-992384",
 			trustDomain: "company.internal",
-			expected:    "production-environment-kubernetes-cluster-us-east-2-deployment-pipeline-id-992384.istio-ca.company.internal",
-		},
-		{
-			name:        "trailing dash is stripped",
-			clusterName: "production-cluster-",
-			trustDomain: "company.internal",
-			expected:    "production-cluster.istio-ca.company.internal",
-		},
-		{
-			name:        "multiple trailing dashes are stripped",
-			clusterName: "production-cluster---",
-			trustDomain: "company.internal",
-			expected:    "production-cluster.istio-ca.company.internal",
+			expected:    "spiffe://company.internal/cluster/production-environment-kubernetes-cluster-us-east-2-deployment-pipeline-id-992384/ca/istio-ca",
 		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := certDNSName(tc.clusterName, tc.trustDomain)
+			got := certURI(tc.clusterName, tc.trustDomain)
 			if got != tc.expected {
-				t.Errorf("certDNSName(%q, %q) = %q, want %q", tc.clusterName, tc.trustDomain, got, tc.expected)
+				t.Errorf("certURI(%q, %q) = %q, want %q", tc.clusterName, tc.trustDomain, got, tc.expected)
 			}
 		})
 	}

@@ -792,7 +792,7 @@ func (r *Reconciler) ensureCertificateForCluster(ctx context.Context, mesh *mesh
 			WithSubject(certmanagerapply.X509Subject().
 				WithOrganizations(mesh.Name).
 				WithOrganizationalUnits(formatOU(cluster.Name))).
-			WithDNSNames(certDNSName(cluster.Name, mesh.Name)).
+			WithURIs(certURI(cluster.Name, mesh.Name)).
 			WithIsCA(true).
 			WithUsages(
 				certmanagerv1.UsageDigitalSignature,

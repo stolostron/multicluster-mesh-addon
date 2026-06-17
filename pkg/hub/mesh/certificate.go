@@ -3,7 +3,6 @@ package mesh
 import (
 	"crypto/sha256"
 	"fmt"
-	"strings"
 )
 
 const maxOULength = 63
@@ -21,8 +20,6 @@ func formatOU(clusterName string) string {
 	return clusterName[:54] + "-" + hash[:8]
 }
 
-// certDNSName generates the SAN DNS name for an Istio CA certificate.
-// Trailing dashes are stripped from the cluster name to produce a valid DNS name.
-func certDNSName(clusterName, trustDomain string) string {
-	return strings.TrimRight(clusterName, "-") + ".istio-ca." + trustDomain
+func certURI(clusterName, trustDomain string) string {
+	return "spiffe://" + trustDomain + "/cluster/" + clusterName + "/ca/istio-ca"
 }
