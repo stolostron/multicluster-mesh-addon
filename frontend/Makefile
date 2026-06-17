@@ -1,16 +1,26 @@
-# Not overridable — these values are hardcoded in deploy/deployment.yaml and deploy/consoleplugin.yaml
+# Not overridable — these values are hardcoded in deploy/*.yaml
 PLUGIN_NAME := ossm-acm
 PLUGIN_NAMESPACE := ossm-acm-plugin
 
 OC ?= oc
+CONTAINER_ENGINE ?= $(shell which podman 2>/dev/null || which docker 2>/dev/null)
+INTERNAL_REGISTRY := image-registry.openshift-image-registry.svc:5000
 
-.PHONY: build deploy teardown help
+# REGISTRY and IMG are lazily evaluated so dev-* targets don't require the image registry to be exposed.
+# Override IMG to push to an external registry (e.g. make prod-build IMG=quay.io/myorg/ossm-acm-console-plugin:v1)
+REGISTRY = $(shell $(OC) get image.config.openshift.io/cluster -o jsonpath='{.status.externalRegistryHostnames[0]}' 2>/dev/null)
+IMG ?= $(REGISTRY)/$(PLUGIN_NAMESPACE)/ossm-acm-console-plugin:latest
+INTERNAL_IMG = $(INTERNAL_REGISTRY)/$(PLUGIN_NAMESPACE)/ossm-acm-console-plugin:latest
 
-build: ## Build the frontend plugin
+.PHONY: dev-build dev-deploy dev-teardown prod-build prod-push prod-deploy prod-teardown help
+
+##@ Development
+
+dev-build: ## Compile TS/React source into dist/ for local dev
 	npm install
 	npm run build
 
-deploy: ## Deploy (or redeploy) the frontend plugin to the cluster
+dev-deploy: ## Deploy (or redeploy) the plugin to the cluster using ConfigMaps
 	@$(OC) create namespace $(PLUGIN_NAMESPACE) --dry-run=client -o yaml | $(OC) apply -f -
 	@$(OC) delete configmap $(PLUGIN_NAMESPACE)-dist -n $(PLUGIN_NAMESPACE) --ignore-not-found
 	@$(OC) create configmap $(PLUGIN_NAMESPACE)-dist \
@@ -20,7 +30,7 @@ deploy: ## Deploy (or redeploy) the frontend plugin to the cluster
 	@$(OC) create configmap $(PLUGIN_NAMESPACE)-nginx \
 		--from-file=nginx.conf=deploy/nginx.conf \
 		-n $(PLUGIN_NAMESPACE)
-	@$(OC) apply -f deploy/deployment.yaml
+	@$(OC) apply -f deploy/dev-deployment.yaml
 	@$(OC) apply -f deploy/consoleplugin.yaml
 	@plugins=$$($(OC) get console.operator.openshift.io cluster -o jsonpath='{.spec.plugins}' 2>/dev/null); \
 	if [ -z "$$plugins" ]; then \
@@ -37,15 +47,60 @@ deploy: ## Deploy (or redeploy) the frontend plugin to the cluster
 	@$(OC) rollout restart deployment/console -n openshift-console
 	@$(OC) rollout status deployment/console -n openshift-console --timeout=120s
 
-teardown: ## Remove the frontend plugin from the cluster
+dev-teardown: ## Remove the dev plugin deployment from the cluster
 	@$(OC) get console.operator.openshift.io cluster -o json | \
 		jq '.spec.plugins |= (. // [] | map(select(. != "$(PLUGIN_NAME)")))' | \
 		$(OC) apply -f -
 	@$(OC) delete -f deploy/consoleplugin.yaml --ignore-not-found
-	@$(OC) delete -f deploy/deployment.yaml --ignore-not-found
+	@$(OC) delete -f deploy/dev-deployment.yaml --ignore-not-found
 	@$(OC) delete namespace $(PLUGIN_NAMESPACE) --ignore-not-found
 	@$(OC) rollout restart deployment/console -n openshift-console
 	@$(OC) rollout status deployment/console -n openshift-console --timeout=120s
 
-help: ## Display this help
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
+##@ Production
+
+prod-build: ## Build the production container image (includes npm ci + webpack)
+	@if [ -z "$(CONTAINER_ENGINE)" ]; then echo "Error: no container engine found (podman or docker)"; exit 1; fi
+	$(CONTAINER_ENGINE) build -t $(IMG) .
+
+prod-push: ## Push the container image to the registry (default: OpenShift internal registry)
+	@if [ -z "$(REGISTRY)" ] || [ "$(REGISTRY)" = "<none>" ]; then \
+		echo "Error: cannot detect OpenShift registry. Ensure you are logged in via 'oc login' and the registry is exposed."; \
+		echo "To push to an external registry, override IMG: make prod-push IMG=quay.io/myorg/ossm-acm-console-plugin:v1"; \
+		exit 1; \
+	fi
+	@$(OC) create namespace $(PLUGIN_NAMESPACE) --dry-run=client -o yaml | $(OC) apply -f -
+	$(CONTAINER_ENGINE) push --tls-verify=false $(IMG)
+
+prod-deploy: prod-push ## Push the image and deploy the plugin using the baked image
+	@sed 's|IMAGE_PLACEHOLDER|$(INTERNAL_IMG)|g' deploy/prod-deployment.yaml | $(OC) apply -f -
+	@$(OC) apply -f deploy/consoleplugin.yaml
+	@plugins=$$($(OC) get console.operator.openshift.io cluster -o jsonpath='{.spec.plugins}' 2>/dev/null); \
+	if [ -z "$$plugins" ]; then \
+		$(OC) patch console.operator.openshift.io cluster \
+			--type=merge \
+			--patch='{"spec":{"plugins":["$(PLUGIN_NAME)"]}}'; \
+	elif ! echo "$$plugins" | jq -e 'index("$(PLUGIN_NAME)")' >/dev/null 2>&1; then \
+		$(OC) patch console.operator.openshift.io cluster \
+			--type=json \
+			--patch='[{"op":"add","path":"/spec/plugins/-","value":"$(PLUGIN_NAME)"}]'; \
+	fi
+	@$(OC) rollout restart deployment/$(PLUGIN_NAMESPACE) -n $(PLUGIN_NAMESPACE)
+	@$(OC) rollout status deployment/$(PLUGIN_NAMESPACE) -n $(PLUGIN_NAMESPACE) --timeout=120s
+	@$(OC) rollout restart deployment/console -n openshift-console
+	@$(OC) rollout status deployment/console -n openshift-console --timeout=120s
+
+prod-teardown: ## Remove the production plugin deployment from the cluster
+	@$(OC) get console.operator.openshift.io cluster -o json | \
+		jq '.spec.plugins |= (. // [] | map(select(. != "$(PLUGIN_NAME)")))' | \
+		$(OC) apply -f -
+	@$(OC) delete -f deploy/consoleplugin.yaml --ignore-not-found
+	@$(OC) delete -f deploy/prod-deployment.yaml --ignore-not-found
+	@$(OC) delete namespace $(PLUGIN_NAMESPACE) --ignore-not-found
+	@$(OC) rollout restart deployment/console -n openshift-console
+	@$(OC) rollout status deployment/console -n openshift-console --timeout=120s
+
+##@ Help
+
+help: ## Display available targets with descriptions
+	@awk 'BEGIN {FS = ":.*##"; printf "\nUsage:\n  make \033[36m<target>\033[0m\n"} /^[a-zA-Z_-]+:.*?##/ { printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2 } /^##@/ { printf "\n\033[1m%s\033[0m\n", substr($$0, 5) }' $(MAKEFILE_LIST)

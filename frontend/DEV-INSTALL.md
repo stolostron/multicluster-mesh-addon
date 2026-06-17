@@ -174,7 +174,7 @@ oc get secret cacerts -n istio-system
 
 ## 5. Build and deploy the frontend ConsolePlugin
 
-*NOTE: These commands can also be run via `make build deploy` from the `frontend/` directory.*
+*NOTE: These commands can also be run via `make dev-build dev-deploy` from the `frontend/` directory.*
 
 ```bash
 cd <multicluster-mesh-addon-repo>/frontend
@@ -197,7 +197,7 @@ oc create configmap ossm-acm-plugin-nginx \
   -n ossm-acm-plugin
 
 # Deploy nginx (serves plugin assets over TLS)
-oc apply -f deploy/deployment.yaml
+oc apply -f deploy/dev-deployment.yaml
 oc rollout status deployment/ossm-acm-plugin -n ossm-acm-plugin --timeout=120s
 
 # Register the ConsolePlugin
@@ -223,7 +223,7 @@ oc rollout status deployment/console -n openshift-console --timeout=120s
 
 ## Iterating on frontend changes
 
-*NOTE: These commands can also be run via `make build deploy` from the `frontend/` directory.*
+*NOTE: These commands can also be run via `make dev-build dev-deploy` from the `frontend/` directory.*
 
 After modifying frontend source files:
 
@@ -265,17 +265,17 @@ oc rollout status deployment/multicluster-mesh-controller \
 
 ## Teardown
 
-*NOTE: The frontend plugin teardown commands can also be run via `make teardown` from the `frontend/` directory.*
+*NOTE: The frontend plugin teardown commands can also be run via `make dev-teardown` from the `frontend/` directory.*
 
 ```bash
 cd <multicluster-mesh-addon-repo>
 
 # Remove the frontend plugin from the console operator plugins list
 oc get console.operator.openshift.io cluster -o json | \
-  jq '.spec.plugins |= map(select(. != "ossm-acm"))' | \
+  jq '.spec.plugins |= (. // [] | map(select(. != "ossm-acm")))' | \
   oc apply -f -
 oc delete -f frontend/deploy/consoleplugin.yaml --ignore-not-found
-oc delete -f frontend/deploy/deployment.yaml --ignore-not-found
+oc delete -f frontend/deploy/dev-deployment.yaml --ignore-not-found
 oc delete namespace ossm-acm-plugin --ignore-not-found
 
 # Remove test mesh resources

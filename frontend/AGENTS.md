@@ -24,12 +24,21 @@ Related links:
 
 Requires Node.js 20 (not 22+, which has ESM resolution issues with ts-node).
 
-- `make build` — `npm install && npm run build` (webpack production build to `dist/`)
-- `make deploy` — Idempotent deploy to OpenShift (configmaps, deployment, consoleplugin, console restart)
-- `make teardown` — Remove plugin from cluster
-- `make build deploy` — The standard dev workflow for iterating on changes
+Run `make help` to see all available targets.
 
-The plugin runs as stock `nginx:1.27-alpine` serving static JS files via ConfigMap. No custom container image is needed for the frontend.
+**Dev workflow** (ConfigMap + stock nginx, no image build needed):
+- `make dev-build` — `npm install && npm run build` (compiles to `dist/`)
+- `make dev-deploy` — Idempotent deploy to OpenShift (configmaps, deployment, consoleplugin, console restart)
+- `make dev-teardown` — Remove dev plugin from cluster
+- `make dev-build dev-deploy` — The standard dev workflow for iterating on changes
+
+**Production workflow** (baked container image):
+- `make prod-build` — Build container image via Dockerfile (npm ci + webpack inside the image)
+- `make prod-push` — Push image to registry (default: auto-detected OpenShift internal registry)
+- `make prod-deploy` — Push + deploy using the baked image (no ConfigMaps)
+- `make prod-teardown` — Remove prod plugin from cluster
+
+Override `IMG` to push to an external registry: `make prod-build IMG=quay.io/myorg/ossm-acm-console-plugin:v1`
 
 ## Key Architecture Decisions
 
