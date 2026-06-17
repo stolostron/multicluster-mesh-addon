@@ -133,7 +133,7 @@ The MVP supports the [Multi-Primary Multi-Network] mesh topology. This aligns wi
 | `spec.operator.startingCSV` | No | Pin to a specific operator version |
 | `spec.operator.installPlanApproval` | No | `Automatic` or `Manual` (default: `Automatic`) |
 | `spec.security.trust.certManager.issuerRef.name` | No | cert-manager Issuer name for Root CA |
-| `spec.security.discovery.tokenValidity` | No | ManagedServiceAccount token lifetime (default: `1m`) |
+| `spec.security.discovery.tokenValidity` | No | ManagedServiceAccount token lifetime (default: `360h`, minimum value: `10m`) |
 
 ### Example
 
