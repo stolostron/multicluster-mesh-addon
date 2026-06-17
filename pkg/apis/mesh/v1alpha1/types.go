@@ -127,7 +127,7 @@ type DiscoveryConfig struct {
 	// +optional
 	// +kubebuilder:default="360h"
 	// +kubebuilder:validation:XValidation:rule="duration(self) >= duration('10m')", message="TokenValidity must be at least 10 minutes"
-	TokenValidity metav1.Duration `json:"tokenValidity,omitempty"`
+	TokenValidity *metav1.Duration `json:"tokenValidity,omitempty"`
 }
 
 const (

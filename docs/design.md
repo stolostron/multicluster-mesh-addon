@@ -157,7 +157,7 @@ spec:
         issuerRef:
           name: mesh-root-issuer
     discovery:
-      tokenValidity: "1w"
+      tokenValidity: "168h"
 ```
 
 ## Cluster Selection and Multi-Tenancy
