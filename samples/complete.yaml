@@ -49,5 +49,5 @@ spec:
     # Endpoint discovery token configuration
     discovery:
       # How long discovery tokens remain valid
-      # Supports: hours (h), days (d), weeks (w), months (m)
-      tokenValidity: 1m
+      # Supports hours (h), minutes (m), seconds (s)
+      tokenValidity: 360h

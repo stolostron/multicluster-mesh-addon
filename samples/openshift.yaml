@@ -33,4 +33,4 @@ spec:
           name: mesh-root-ca
     discovery:
       # Weekly token rotation for enhanced security
-      tokenValidity: 1w
+      tokenValidity: 168h
