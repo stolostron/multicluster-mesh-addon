@@ -162,7 +162,11 @@ const ClusterStatusSection: React.FC<{ clusterStatuses: ClusterMeshStatus[] }> =
                       const operatorCondition = cs.conditions?.find((c) => c.type === 'OperatorInstalled')
                       return (
                         <tr className="pf-v6-c-table__tr" key={cs.clusterName}>
-                          <td className="pf-v6-c-table__td">{cs.clusterName}</td>
+                          <td className="pf-v6-c-table__td">
+                            <Link to={`/multicloud/infrastructure/clusters/details/${cs.clusterName}`}>
+                              {cs.clusterName}
+                            </Link>
+                          </td>
                           <td className="pf-v6-c-table__td">
                             <MeshStatus conditions={cs.conditions} conditionType="OperatorInstalled" />
                           </td>

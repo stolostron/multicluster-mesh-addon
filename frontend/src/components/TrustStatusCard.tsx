@@ -1,4 +1,5 @@
 import * as React from 'react'
+import { Link } from 'react-router-dom-v5-compat'
 import {
   useK8sWatchResource,
   Timestamp,
@@ -285,7 +286,11 @@ export const TrustStatusCard: React.FC<TrustStatusCardProps> = ({
                   const mw = mwByCluster.get(cs.clusterName)
                   return (
                     <tr className="pf-v6-c-table__tr" key={cs.clusterName}>
-                      <td className="pf-v6-c-table__td">{cs.clusterName}</td>
+                      <td className="pf-v6-c-table__td">
+                        <Link to={`/multicloud/infrastructure/clusters/details/${cs.clusterName}`}>
+                          {cs.clusterName}
+                        </Link>
+                      </td>
                       <td className="pf-v6-c-table__td">{certStatusLabel(cert)}</td>
                       <td className="pf-v6-c-table__td">
                         {cert?.status?.notAfter ? <Timestamp timestamp={cert.status.notAfter} /> : '-'}
