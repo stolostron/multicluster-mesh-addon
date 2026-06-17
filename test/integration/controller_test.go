@@ -513,6 +513,21 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 				Expect(*ownerRef.BlockOwnerDeletion).To(BeTrue())
 			})
 
+			It("should set Subject with Organization and OrganizationalUnit", func() {
+				cert := expectCertificate(testNs, clusterName, "mesh-issuer")
+
+				Expect(cert.Spec.Subject).NotTo(BeNil())
+				Expect(cert.Spec.Subject.Organizations).To(ConsistOf(meshName))
+				Expect(cert.Spec.Subject.OrganizationalUnits).To(ConsistOf(clusterName))
+			})
+
+			It("should set DNS SAN with cluster name and trust domain", func() {
+				cert := expectCertificate(testNs, clusterName, "mesh-issuer")
+
+				expectedSAN := clusterName + ".istio-ca." + meshName
+				Expect(cert.Spec.DNSNames).To(ConsistOf(expectedSAN))
+			})
+
 			It("should restore Certificate spec when externally modified", func() {
 				cert := expectCertificate(testNs, clusterName, "mesh-issuer")
 
@@ -525,7 +540,7 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 						return ""
 					}
 					return c.Spec.CommonName
-				}).Should(Equal("Intermediate Istio CA"))
+				}).Should(Equal("Istio CA"))
 			})
 
 			It("should recreate Certificate when it is externally deleted", func() {
