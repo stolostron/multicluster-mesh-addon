@@ -106,7 +106,7 @@ kubectl create namespace multicluster-mesh-system
 
 #### Local Kind+OCM Dev Environment
 
-Provisions a complete multi-cluster topology (1 hub + 2 managed clusters) using Kind and OCM, then builds and deploys the addon controller with a ready-to-use mesh:
+Provisions a complete multi-cluster topology (1 hub + 2 managed clusters) using Kind and OCM, then builds and deploys the addon controller:
 
 ```bash
 make dev-env
@@ -154,8 +154,6 @@ See the [Kind known issues](https://kind.sigs.k8s.io/docs/user/known-issues/#pod
 ### Usage
 
 #### Quick Start
-
-> **Note:** If you used `make dev-env`, the mesh is already set up. The following manual steps are for deploying on existing clusters.
 
 1. Create a namespace for your mesh resources:
 ```bash
