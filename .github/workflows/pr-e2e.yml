@@ -1,0 +1,47 @@
+name: E2E Tests (Kind)
+
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # GitHub runners have limited disk space (~70-145GB depending on host)
+      # E2E tests with Kind clusters, operator installations, and container images
+      # can consume 40-50GB, so we free up space by removing unused pre-installed tools
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /usr/local/share/boost
+          docker system prune -af
+          df -h
+
+      - name: Increase inotify limits
+        run: |
+          sudo sysctl fs.inotify.max_user_watches=524288
+          sudo sysctl fs.inotify.max_user_instances=512
+
+      - name: Set up dev environment
+        run: make dev-env
+
+      - name: Run e2e tests
+        run: make test-e2e
+
+      - name: Cleanup
+        if: always()
+        run: make clean-clusters || true
