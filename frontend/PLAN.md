@@ -1,5 +1,22 @@
 # OSSM ACM UI Plugin — Implementation Plan
 
+## Implementation Status
+
+As of June 2026, the following phases from this plan have been implemented:
+
+- **Phase 1 (Project scaffolding)**: Complete
+- **Phase 2 (Fleet Service Mesh perspective)**: Complete, with additional features:
+  - Mesh detail page with Overview, OSSM Operator, Trust Status, and Cluster Status cards
+  - List page with Namespace, Trust columns and all-column sorting
+  - Cross-perspective links to ACM cluster details
+  - Scale support for 5-500 clusters (filters, search, scroll)
+- **Phase 3 (Additional pages)**: Partially complete — detail page done, topology view not started
+- **Phase 4 (Build and deployment)**: Using ConfigMap + nginx for dev; Dockerfile approach not yet needed
+
+The rest of this document is the original spike research by Nick Fox.
+
+---
+
 ## Goal
 
 Build an OpenShift `ConsolePlugin` that registers a standalone "Fleet Service Mesh" perspective in the OpenShift Console perspective switcher. The plugin will use the `@stolostron/multicluster-sdk` for multicluster service mesh visibility and have full control over its own navigation, pages, and layout. The Fleet Service Mesh perspective should surface a small number of key metrics and health indicators for each mesh in a high level view that would help an administrator identify mesh instances to investigate or troubleshoot. Initially, it should focus navigating a read-only "mesh of meshes", we will later want to consider administrative functions that help with multi-mesh administrative tasks with the under development ACM mesh addon.
