@@ -11,10 +11,14 @@ import {
   Timestamp,
 } from '@openshift-console/dynamic-plugin-sdk'
 import type { TableColumn, RowProps } from '@openshift-console/dynamic-plugin-sdk'
-import { Label } from '@patternfly/react-core'
+import {
+  EmptyState,
+  EmptyStateBody,
+  Label,
+} from '@patternfly/react-core'
 import { useMultiClusterMeshes } from '../hooks/useMultiClusterMeshes'
 import type { MultiClusterMesh } from '../types/multiClusterMesh'
-import { MeshStatus } from './MeshStatus'
+import { MeshStatus, getStatusRank } from './MeshStatus'
 
 const columns: TableColumn<MultiClusterMesh>[] = [
   {
@@ -57,27 +61,23 @@ const columns: TableColumn<MultiClusterMesh>[] = [
     id: 'status',
     sort: (data, sortDirection) => {
       const dir = sortDirection === 'asc' ? 1 : -1
-      return [...data].sort((a, b) => {
-        const aReady = a.status?.conditions?.find((c) => c.type === 'Ready')
-        const bReady = b.status?.conditions?.find((c) => c.type === 'Ready')
-        const aVal = aReady?.status === 'True' ? 0 : aReady?.status === 'Unknown' ? 1 : 2
-        const bVal = bReady?.status === 'True' ? 0 : bReady?.status === 'Unknown' ? 1 : 2
-        return dir * (aVal - bVal)
-      })
+      return [...data].sort((a, b) =>
+        dir * (getStatusRank(a.status?.conditions) - getStatusRank(b.status?.conditions))
+      )
     },
   },
 ]
 
 const NoMeshesMsg: React.FC = () => (
-  <div style={{ textAlign: 'center', padding: '2rem' }}>
-    No meshes have been created yet.
-  </div>
+  <EmptyState variant="xs">
+    <EmptyStateBody>No meshes have been created yet.</EmptyStateBody>
+  </EmptyState>
 )
 
 const NoMatchMsg: React.FC = () => (
-  <div style={{ textAlign: 'center', padding: '2rem' }}>
-    No meshes match the current filter.
-  </div>
+  <EmptyState variant="xs">
+    <EmptyStateBody>No meshes match the current filter.</EmptyStateBody>
+  </EmptyState>
 )
 
 const MeshRow: React.FC<RowProps<MultiClusterMesh>> = ({ obj, activeColumnIDs }) => {

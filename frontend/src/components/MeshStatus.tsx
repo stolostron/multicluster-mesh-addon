@@ -26,6 +26,14 @@ function deriveStatus(conditions?: K8sCondition[], conditionType?: string): { la
   return { label: 'Healthy', color: 'green' }
 }
 
+export function getStatusRank(conditions?: K8sCondition[], conditionType?: string): number {
+  const { color } = deriveStatus(conditions, conditionType)
+  if (color === 'green') return 0
+  if (color === 'grey') return 1
+  if (color === 'orange') return 2
+  return 3
+}
+
 interface MeshStatusProps {
   conditions?: K8sCondition[]
   conditionType?: string
