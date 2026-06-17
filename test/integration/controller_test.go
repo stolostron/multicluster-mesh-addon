@@ -656,7 +656,34 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 			msa2 := expectManagedServiceAccount(fmt.Sprintf("%s-%s-%s", testNs, msaRootWord, meshName), cluster2)
 
 			Expect(msa1.Labels[meshcontroller.ManagedByLabel]).To(Equal(meshcontroller.ManagedByValue))
+			Expect(msa1.Labels[meshcontroller.MeshNameLabel]).To(Equal(meshName))
+			Expect(msa1.Labels[meshcontroller.MeshNamespaceLabel]).To(Equal(testNs))
+			Expect(msa1.Labels[meshcontroller.ClusterNameLabel]).To(Equal(cluster1))
 			Expect(msa2.Spec.Rotation.Validity).To(Equal(metav1.Duration{Duration: 360 * time.Hour}))
+			Expect(msa2.Labels[meshcontroller.ClusterNameLabel]).To(Equal(cluster2))
+		})
+
+		It("should create ManagedServiceAccount resources with custom TokenValidity value", func() {
+			secondNs := util.UniqueName("second-ns")
+			util.CreateNamespace(ctx, k8sClient, secondNs)
+			secondMesh := util.UniqueName("second-mesh")
+			util.CreateMultiClusterMesh(ctx, k8sClient, secondMesh, secondNs, testClusterSet, meshv1alpha1.MultiClusterMeshSpec{
+				Security: meshv1alpha1.SecurityConfig{
+					Discovery: meshv1alpha1.DiscoveryConfig{
+						TokenValidity: &metav1.Duration{Duration: 15 * time.Minute},
+					},
+				},
+			})
+
+			msa1 := expectManagedServiceAccount(fmt.Sprintf("%s-%s-%s", secondNs, msaRootWord, secondMesh), cluster1)
+			msa2 := expectManagedServiceAccount(fmt.Sprintf("%s-%s-%s", secondNs, msaRootWord, secondMesh), cluster2)
+
+			Expect(msa1.Labels[meshcontroller.ManagedByLabel]).To(Equal(meshcontroller.ManagedByValue))
+			Expect(msa1.Labels[meshcontroller.MeshNameLabel]).To(Equal(secondMesh))
+			Expect(msa1.Labels[meshcontroller.MeshNamespaceLabel]).To(Equal(secondNs))
+			Expect(msa1.Labels[meshcontroller.ClusterNameLabel]).To(Equal(cluster1))
+			Expect(msa2.Spec.Rotation.Validity).To(Equal(metav1.Duration{Duration: 15 * time.Minute}))
+			Expect(msa2.Labels[meshcontroller.ClusterNameLabel]).To(Equal(cluster2))
 		})
 
 		When("add a cluster to the ClusterSet", func() {

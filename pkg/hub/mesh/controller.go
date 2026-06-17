@@ -157,6 +157,7 @@ func RegisterController(mgr manager.Manager) error {
 //+kubebuilder:rbac:groups=cluster.open-cluster-management.io,resources=managedclustersets,verbs=get;list;watch
 //+kubebuilder:rbac:groups=work.open-cluster-management.io,resources=manifestworks,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=cert-manager.io,resources=certificates,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=authentication.open-cluster-management.io,resources=managedserviceaccounts,verbs=get;list;watch;create;delete
 //+kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
 
 // Reconcile implements the reconcile loop for MultiClusterMesh resources
@@ -300,8 +301,7 @@ func (r *Reconciler) doReconcile(ctx context.Context, mesh *meshv1alpha1.MultiCl
 
 	// Create ManagedServiceAccount resources for each cluster
 	if err := r.createManagedServiceAccounts(ctx, mesh, clusters); err != nil {
-		klog.Errorf("Failed to create ManagedServiceAccount resources: %v", err)
-		return reconcile.Result{}, err
+		return reconcile.Result{}, fmt.Errorf("failed to create ManagedServiceAccounts: %w", err)
 	}
 
 	forceCleanupAll := mesh.Spec.Security.Trust.CertManager.IssuerRef.Name == ""

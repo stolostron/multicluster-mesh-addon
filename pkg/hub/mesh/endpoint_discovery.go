@@ -22,8 +22,6 @@ const (
 	msaRootWord              = "istio-reader"
 )
 
-var validity metav1.Duration
-
 // createManagedServiceAccounts creates ManagedServiceAccount resources for each cluster in the ClusterSet
 func (r *Reconciler) createManagedServiceAccounts(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, clusters []clusterv1.ManagedCluster) error {
 	if len(clusters) == 0 {
@@ -31,7 +29,8 @@ func (r *Reconciler) createManagedServiceAccounts(ctx context.Context, mesh *mes
 		return nil
 	}
 
-	klog.Info("Creating ManagedServiceAccount resources for each managed cluster in the ClusterSet")
+	var validity metav1.Duration
+
 	for _, cluster := range clusters {
 		existing := &msav1beta1.ManagedServiceAccount{}
 		msaName := fmt.Sprintf("%s-%s-%s", mesh.Namespace, msaRootWord, mesh.Name)
@@ -78,14 +77,14 @@ func (r *Reconciler) cleanupManagedServiceAccounts(ctx context.Context, mesh *me
 
 	msaList := &msav1beta1.ManagedServiceAccountList{}
 	if err := r.List(ctx, msaList,
-		client.MatchingLabels{ManagedByLabel: ManagedByValue, MeshNameLabel: mesh.Name}); err != nil {
+		client.MatchingLabels{MeshNameLabel: mesh.Name, MeshNamespaceLabel: mesh.Namespace}); err != nil {
 		return fmt.Errorf("failed to list ManagedServiceAccounts: %w", err)
 	}
 
 	secretList := &corev1.SecretList{}
 	if err := r.List(ctx, secretList, client.InNamespace(mesh.Namespace), client.MatchingLabels{
-		multiClusterSecretLabel: "true", ManagedByLabel: ManagedByValue, MeshNameLabel: mesh.Name,
-	}); err != nil && !errors.IsNotFound(err) {
+		multiClusterSecretLabel: "true", MeshNameLabel: mesh.Name, MeshNamespaceLabel: mesh.Namespace,
+	}); err != nil {
 		return fmt.Errorf("failed to list istio-remote secrets managed by mesh %s: %w", mesh.Name, err)
 	}
 
@@ -119,22 +118,21 @@ func (r *Reconciler) cleanupManagedServiceAccounts(ctx context.Context, mesh *me
 // deleteAllManagedServiceAccounts deletes all ManagedServiceAccount resources managed by a mesh
 func (r *Reconciler) deleteAllManagedServiceAccounts(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh) error {
 	msaList := &msav1beta1.ManagedServiceAccountList{}
-	if err := r.List(ctx, msaList, client.MatchingLabels{ManagedByLabel: ManagedByValue, MeshNameLabel: mesh.Name}); err != nil && !errors.IsNotFound(err) {
+	if err := r.List(ctx, msaList, client.MatchingLabels{MeshNameLabel: mesh.Name, MeshNamespaceLabel: mesh.Namespace}); err != nil {
 		return fmt.Errorf("failed to list ManagedServiceAccount resources managed by mesh %s: %w", mesh.Name, err)
 	}
 
 	secretList := &corev1.SecretList{}
 	if err := r.List(ctx, secretList, client.InNamespace(mesh.Namespace), client.MatchingLabels{
-		multiClusterSecretLabel: "true", ManagedByLabel: ManagedByValue, MeshNameLabel: mesh.Name,
-	}); err != nil && !errors.IsNotFound(err) {
+		multiClusterSecretLabel: "true", MeshNameLabel: mesh.Name, MeshNamespaceLabel: mesh.Namespace,
+	}); err != nil {
 		return fmt.Errorf("failed to list istio-remote secrets managed by mesh %s: %w", mesh.Name, err)
 	}
 
 	for _, msa := range msaList.Items {
-		if err := r.Delete(ctx, &msa); err != nil && !errors.IsNotFound(err) {
-			return fmt.Errorf("failed to delete a ManagedServiceAccount resource %s: %w", msa.Name, err)
-		} else {
-			klog.Infof("Deleting a ManagedServiceAccount resource %s", msa.Name)
+		klog.Infof("Deleting ManagedServiceAccount %s/%s", msa.Namespace, msa.Name)
+		if err := client.IgnoreNotFound(r.Delete(ctx, &msa)); err != nil {
+			return fmt.Errorf("failed to delete ManagedServiceAccount %s/%s: %w", msa.Namespace, msa.Name, err)
 		}
 	}
 

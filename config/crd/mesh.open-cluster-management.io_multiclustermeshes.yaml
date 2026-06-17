@@ -98,11 +98,14 @@ spec:
                     description: Discovery defines the endpoint discovery configuration
                     properties:
                       tokenValidity:
-                        default: 1m
+                        default: 360h
                         description: |-
                           TokenValidity defines how long discovery tokens are valid
-                          Supports hours (h), days (d), weeks (w), or months (m)
+                          Supports hours (h), minutes (m), seconds (s). If unset, defaults to 360h
                         type: string
+                        x-kubernetes-validations:
+                        - message: TokenValidity must be at least 10 minutes
+                          rule: duration(self) >= duration('10m')
                     type: object
                   trust:
                     description: Trust defines the mTLS trust configuration
