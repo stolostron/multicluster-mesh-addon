@@ -106,7 +106,7 @@ kubectl create namespace multicluster-mesh-system
 
 #### Local Kind+OCM Dev Environment
 
-Provisions a complete multi-cluster topology (1 hub + 2 managed clusters) using Kind and OCM, then builds and deploys the addon controller:
+Provisions a complete multi-cluster topology (1 hub + 2 managed clusters) using Kind and OCM, then builds and deploys the addon controller with a ready-to-use mesh:
 
 ```bash
 make dev-env
@@ -114,14 +114,17 @@ make dev-env
 
 Individual targets are also available:
 
-| Target                 | Description                                            |
-|------------------------|--------------------------------------------------------|
-| `make create-clusters` | Create three Kind clusters (hub, cluster1, cluster2)   |
-| `make install-olm`     | Install OLM on managed clusters                        |
-| `make init-ocm`        | Initialize hub as OCM control plane                    |
-| `make join-clusters`   | Register managed clusters and create ManagedClusterSet |
-| `make deploy-addon`    | Build and deploy addon to the hub Kind cluster         |
-| `make dev-clean`       | Destroy clusters and remove `.kube/`                   |
+| Target                      | Description                                            |
+|-----------------------------|--------------------------------------------------------|
+| `make create-clusters`      | Create three Kind clusters (hub, cluster1, cluster2)   |
+| `make install-olm`          | Install OLM on managed clusters                        |
+| `make install-cert-manager` | Install cert-manager on the hub cluster                |
+| `make init-ocm`             | Initialize hub as OCM control plane                    |
+| `make join-clusters`        | Register managed clusters and create ManagedClusterSet |
+| `make deploy-addon`         | Build and deploy addon to the hub Kind cluster         |
+| `make setup-mesh`           | Create cert-manager trust chain and MultiClusterMesh CR|
+| `make dev-clean`            | Destroy clusters and remove `.kube/`                   |
+| `make dev-clean-meshes`     | Delete mesh resources only (re-run `setup-mesh` to recreate) |
 
 **Configuration (override via environment or command-line):**
 
@@ -152,12 +155,14 @@ See the [Kind known issues](https://kind.sigs.k8s.io/docs/user/known-issues/#pod
 
 #### Quick Start
 
+> **Note:** If you used `make dev-env`, the mesh is already set up. The following manual steps are for deploying on existing clusters.
+
 1. Create a namespace for your mesh resources:
 ```bash
 kubectl create namespace mesh-system
 ```
 
-2. Create a cert-manager Issuer to act as the Root CA:
+2. Create the cert-manager trust chain (ClusterIssuer, root CA Certificate, and CA-backed Issuer):
 ```bash
 kubectl apply -f samples/cert-manager-issuer.yaml
 ```
@@ -167,7 +172,7 @@ kubectl apply -f samples/cert-manager-issuer.yaml
 kubectl apply -f samples/basic.yaml
 ```
 
-> **Note:** All samples use `clusterSet: default` as the ManagedClusterSet reference. Update this field to match your actual ManagedClusterSet name as needed.
+> **Note:** The `basic.yaml` sample uses `clusterSet: mesh-cluster-set`. Update this field to match your actual ManagedClusterSet name as needed.
 
 For more configuration options, see the [samples](./samples/) directory:
 
@@ -175,7 +180,7 @@ For more configuration options, see the [samples](./samples/) directory:
 - **[complete.yaml](./samples/complete.yaml)** - All available fields with documentation
 - **[openshift.yaml](./samples/openshift.yaml)** - OpenShift-specific configuration
 - **[pinned-version.yaml](./samples/pinned-version.yaml)** - Version pinning with manual approval
-- **[cert-manager-issuer.yaml](./samples/cert-manager-issuer.yaml)** - Example cert-manager Issuer setup
+- **[cert-manager-issuer.yaml](./samples/cert-manager-issuer.yaml)** - cert-manager trust chain (ClusterIssuer + root CA + Issuer)
 
 #### What the Addon Does
 
