@@ -17,9 +17,8 @@ import (
 )
 
 const (
-	multiClusterSecretLabel  = "istio/multiCluster"
-	clusterNameAnnotationKey = "networking.istio.io/cluster"
-	msaRootWord              = "istio-reader"
+	multiClusterSecretLabel = "istio/multiCluster"
+	msaRootWord             = "istio-reader"
 )
 
 // createManagedServiceAccounts creates ManagedServiceAccount resources for each cluster in the ClusterSet
@@ -29,23 +28,22 @@ func (r *Reconciler) createManagedServiceAccounts(ctx context.Context, mesh *mes
 		return nil
 	}
 
+	msaName := fmt.Sprintf("%s-%s-%s", mesh.Namespace, msaRootWord, mesh.Name)
+
 	var validity metav1.Duration
+	if mesh.Spec.Security.Discovery.TokenValidity == nil {
+		validity = metav1.Duration{Duration: 360 * time.Hour}
+	} else {
+		validity = *mesh.Spec.Security.Discovery.TokenValidity
+	}
 
 	for _, cluster := range clusters {
 		existing := &msav1beta1.ManagedServiceAccount{}
-		msaName := fmt.Sprintf("%s-%s-%s", mesh.Namespace, msaRootWord, mesh.Name)
-
 		if err := r.Get(ctx, types.NamespacedName{Name: msaName, Namespace: cluster.Name}, existing); err == nil {
 			klog.Infof("Cluster %s has an existing ManagedServiceAccount resource %s, skipping createManagedServiceAccount", cluster.Name, msaName)
 			continue
 		} else if !errors.IsNotFound(err) {
 			return fmt.Errorf("failed to get ManagedServiceAccount %s/%s: %w", cluster.Name, msaName, err)
-		}
-
-		if mesh.Spec.Security.Discovery.TokenValidity == nil {
-			validity = metav1.Duration{Duration: 360 * time.Hour}
-		} else {
-			validity = *mesh.Spec.Security.Discovery.TokenValidity
 		}
 
 		msa := &msav1beta1.ManagedServiceAccount{
@@ -95,7 +93,7 @@ func (r *Reconciler) cleanupManagedServiceAccounts(ctx context.Context, mesh *me
 		}
 
 		klog.Infof("Deleting ManagedServiceAccount %s/%s (cluster %s no longer in ClusterSet %s)", msa.Namespace, msa.Name, clusterName, mesh.Spec.ClusterSet)
-		if err := r.Delete(ctx, &msa); err != nil {
+		if err := client.IgnoreNotFound(r.Delete(ctx, &msa)); err != nil {
 			return fmt.Errorf("failed to delete ManagedServiceAccount %s/%s: %w", msa.Namespace, msa.Name, err)
 		}
 	}
