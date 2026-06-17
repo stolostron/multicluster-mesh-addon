@@ -69,6 +69,8 @@ func (r *Reconciler) createManagedServiceAccounts(ctx context.Context, mesh *mes
 	return nil
 }
 
+// TODO(yxun): (#120) Update existing ManagedServiceAccount resources when the user changes the tokenValidity on the mesh
+
 // cleanupManagedServiceAccounts deletes ManagedServiceAccount on clusters that are removed from the given ClusterSet.
 func (r *Reconciler) cleanupManagedServiceAccounts(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, clusters []clusterv1.ManagedCluster) error {
 	clusterNames := clusterNameSet(clusters)
