@@ -64,16 +64,28 @@ prod-build: ## Build the production container image (includes npm ci + webpack)
 	$(CONTAINER_ENGINE) build -t $(IMG) .
 
 prod-push: ## Push the container image to the registry (default: OpenShift internal registry)
+ifeq ($(origin IMG),command line)
+	$(CONTAINER_ENGINE) push $(IMG)
+else
 	@if [ -z "$(REGISTRY)" ] || [ "$(REGISTRY)" = "<none>" ]; then \
 		echo "Error: cannot detect OpenShift registry. Ensure you are logged in via 'oc login' and the registry is exposed."; \
 		echo "To push to an external registry, override IMG: make prod-push IMG=quay.io/myorg/ossm-acm-console-plugin:v1"; \
 		exit 1; \
 	fi
+	# OpenShift internal registry requires the namespace to exist before accepting image pushes
 	@$(OC) create namespace $(PLUGIN_NAMESPACE) --dry-run=client -o yaml | $(OC) apply -f -
 	$(CONTAINER_ENGINE) push --tls-verify=false $(IMG)
+endif
 
 prod-deploy: prod-push ## Push the image and deploy the plugin using the baked image
+ifeq ($(origin IMG),command line)
+	# External registry: namespace wasn't created in prod-push, so create it here
+	@$(OC) create namespace $(PLUGIN_NAMESPACE) --dry-run=client -o yaml | $(OC) apply -f -
+	@sed 's|IMAGE_PLACEHOLDER|$(IMG)|g' deploy/prod-deployment.yaml | $(OC) apply -f -
+else
+	# Internal registry: namespace was already created in prod-push
 	@sed 's|IMAGE_PLACEHOLDER|$(INTERNAL_IMG)|g' deploy/prod-deployment.yaml | $(OC) apply -f -
+endif
 	@$(OC) apply -f deploy/consoleplugin.yaml
 	@plugins=$$($(OC) get console.operator.openshift.io cluster -o jsonpath='{.spec.plugins}' 2>/dev/null); \
 	if [ -z "$$plugins" ]; then \
