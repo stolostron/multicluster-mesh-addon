@@ -239,7 +239,7 @@ export DEV_KUBE_DIR K8S_VERSION OLM_VERSION CERT_MANAGER_VERSION
 export KIND CLUSTERADM
 
 .PHONY: dev-env
-dev-env: create-clusters install-olm install-cert-manager init-ocm join-clusters deploy-addon setup-mesh ## Provision full dev environment (Kind + OCM + addon + mesh)
+dev-env: create-clusters install-olm install-cert-manager init-ocm join-clusters deploy-addon ## Provision full dev environment (Kind + OCM + addon)
 
 .PHONY: create-clusters
 create-clusters: $(KIND) ## Create 3 Kind clusters (hub, cluster1, cluster2)
