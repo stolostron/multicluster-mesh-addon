@@ -18,6 +18,23 @@ Further frontend work is blocked on backend changes:
 - Kiali deep links (backend doesn't produce Kiali URLs yet)
 - Endpoint discovery status (API exists, controller logic not implemented)
 
+### Pending backend PRs that will unblock frontend features
+
+**[#119 — Report operator installation status via ManifestWork feedback](https://github.com/stolostron/multicluster-mesh-addon/pull/119)**
+Directly addresses the accurate readiness status blocker. The frontend's Cluster Status card already renders `OperatorInstalled` conditions per cluster, but the controller currently doesn't populate them from real ManifestWork feedback. Once merged, the per-cluster `operatorReady` field in `status.clusterStatus[]` becomes meaningful and the card will reflect actual operator state.
+
+**[#128 — Prevent missing ObservedGeneration on status conditions](https://github.com/stolostron/multicluster-mesh-addon/pull/128)**
+Also addresses the accurate readiness status blocker. A missing `ObservedGeneration` causes the frontend's `MeshStatus` component to show stale or incorrect condition states because it cannot tell whether the status has been reconciled after the last spec change. This is a correctness fix for the condition data the frontend already consumes.
+
+**[#130 — Implement ManagedServiceAccount resources reconciliation](https://github.com/stolostron/multicluster-mesh-addon/pull/130)**
+Directly unblocks the endpoint discovery status feature. The frontend already has a Discovery column and card that reads `discoveryConfigured` from `status.clusterStatus[]`, but the controller never sets it. This PR implements the backend reconciliation logic that will make that field non-empty and allow the discovery status card to show real data.
+
+**[#139 — Set X.509 subject fields and SAN on Istio CA certificates](https://github.com/stolostron/multicluster-mesh-addon/pull/139)**
+Enriches the `Certificate` resources that the frontend's Trust Status card already watches. Adds proper SAN fields and X.509 subject metadata to the cert objects, enabling richer certificate detail display (e.g. SAN entries, issuer subject) in future iterations of the Trust Status card.
+
+**[#106 — Skip cacerts distribution for clusters without product claims](https://github.com/stolostron/multicluster-mesh-addon/pull/106)**
+Affects which clusters have `trustEstablished` set to true in `status.clusterStatus[]`. After this merges, non-OpenShift clusters (those lacking product claims) will intentionally never receive trust distribution. The Trust Status card currently treats all clusters the same — once this is in, it will be worth distinguishing "not applicable" from "not yet established" in the UI.
+
 The rest of this document is the original spike research by Nick Fox.
 
 ---
