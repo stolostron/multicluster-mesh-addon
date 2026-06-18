@@ -43,7 +43,3 @@ jobs:
 
       - name: Run e2e tests
         run: make test-e2e
-
-      - name: Cleanup
-        if: always()
-        run: make clean-clusters || true
