@@ -13,18 +13,23 @@ The plugin provides:
 
 ## Prerequisites
 
-- [CRC](https://crc.dev) or OpenShift cluster with ACM installed
+- [CRC](https://crc.dev) or OpenShift cluster with ACM installed and the multicluster-mesh-addon backend controller deployed. See [DEV-INSTALL.md](DEV-INSTALL.md) steps 1-4 for full setup instructions.
 - `oc` logged in as `kubeadmin`
 - Node.js 20 (Node 22+ may fail due to stricter ESM module resolution in ts-node)
+- `jq`, `make`
 - For production image builds: `podman` or `docker`
 
 ## Quick Start
 
-```bash
-# Dev workflow (ConfigMap + stock nginx, no image build)
-make dev-build dev-deploy
+The **dev workflow** compiles the TypeScript/React source locally and deploys the output to the cluster via ConfigMaps, served by a stock nginx container. No container image build is needed — fast iteration for development:
 
-# Production workflow (baked container image)
+```bash
+make dev-build dev-deploy
+```
+
+The **production workflow** builds a self-contained container image (UBI9 nginx with assets baked in), pushes it to the OpenShift internal registry, and deploys it. This is how the plugin would be packaged for release:
+
+```bash
 make prod-build prod-deploy
 ```
 
