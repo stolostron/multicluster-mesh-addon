@@ -80,14 +80,20 @@ gen-rbac: ## Generate RBAC manifests from controller annotations
 .PHONY: gen
 gen: gen-code gen-crds gen-rbac ## Generate code, CRDs, and RBAC
 
-# TODO: Add verify-gen target to check if generated files are up to date (CI/pre-commit)
+.PHONY: verify-gen
+verify-gen: gen ## Verify generated files are up to date
+	@if ! git diff --quiet HEAD -- config/ pkg/apis/**/zz_generated.*.go config/deploy/base/clusterrole.yaml; then \
+		echo "Generated files are out of date. Stage and commit the changes shown below."; \
+		git diff --stat HEAD; \
+		exit 1; \
+	fi
 
 .PHONY: vet
 vet: ## Run go vet
 	go vet ./...
 
 .PHONY: verify
-verify: verify-gofmt verify-modules vet ## Verify code passes all checks without modifying files
+verify: verify-gofmt verify-modules verify-gen vet ## Run all checks (may regenerate files)
 
 .PHONY: verify-gofmt
 verify-gofmt: ## Verify code is formatted correctly
