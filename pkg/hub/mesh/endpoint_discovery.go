@@ -54,8 +54,8 @@ func (r *Reconciler) createManagedServiceAccounts(ctx context.Context, mesh *mes
 			},
 			Spec: msav1beta1.ManagedServiceAccountSpec{
 				Rotation: msav1beta1.ManagedServiceAccountRotation{
-					Enabled:  true,     // the ServiceAccount token will be rotated before it expires
-					Validity: validity, // the duration of validity for requesting the signed ServiceAccount token
+					Enabled:  true,
+					Validity: validity,
 				},
 			},
 		}
@@ -107,7 +107,7 @@ func (r *Reconciler) cleanupManagedServiceAccounts(ctx context.Context, mesh *me
 		}
 
 		klog.Infof("Deleting istio remote secret %s/%s (cluster %s no longer in ClusterSet %s)", sec.Namespace, sec.Name, clusterName, mesh.Spec.ClusterSet)
-		if err := r.Delete(ctx, &sec); err != nil {
+		if err := client.IgnoreNotFound(r.Delete(ctx, &sec)); err != nil {
 			return fmt.Errorf("failed to delete istio remote secret %s/%s: %w", sec.Namespace, sec.Name, err)
 		}
 	}
@@ -137,10 +137,9 @@ func (r *Reconciler) deleteAllManagedServiceAccounts(ctx context.Context, mesh *
 	}
 
 	for _, sec := range secretList.Items {
-		if err := r.Delete(ctx, &sec); err != nil && !errors.IsNotFound(err) {
+		klog.Infof("Deleting an istio remote secret %s", sec.Name)
+		if err := client.IgnoreNotFound(r.Delete(ctx, &sec)); err != nil {
 			return fmt.Errorf("failed to delete an istio remote secret %s: %w", sec.Name, err)
-		} else {
-			klog.Infof("Deleting an istio remote secret %s", sec.Name)
 		}
 	}
 
