@@ -9,6 +9,7 @@ Complete instructions to go from zero to a working Fleet Service Mesh ConsolePlu
 - `oc` CLI installed
 - `podman` installed
 - Node.js 20 (use `nvm`, `fnm`, or `n` to switch versions)
+- `jq` installed
 - Go toolchain and `make`
 
 ## 1. Start CRC and install ACM
@@ -142,7 +143,7 @@ To test certificate and trust distribution, create a cert-manager Issuer and con
 ```bash
 cd <multicluster-mesh-addon-repo>
 
-# Create a self-signed Issuer (sample provided in the repo)
+# Create a cert-manager trust chain (ClusterIssuer -> root CA Certificate -> CA-backed Issuer)
 oc apply -f samples/cert-manager-issuer.yaml
 
 # Configure the mesh to use it

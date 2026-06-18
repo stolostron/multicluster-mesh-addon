@@ -11,7 +11,12 @@ As of June 2026, the following phases from this plan have been implemented:
   - Cross-perspective links to ACM cluster details
   - Scale support for 5-500 clusters (filters, search, scroll)
 - **Phase 3 (Additional pages)**: Partially complete — detail page done, topology view not started
-- **Phase 4 (Build and deployment)**: Using ConfigMap + nginx for dev; Dockerfile approach not yet needed
+- **Phase 4 (Build and deployment)**: Complete — dev workflow uses ConfigMap + stock nginx; production workflow uses Dockerfile with UBI9 base images
+
+Further frontend work is blocked on backend changes:
+- Accurate mesh readiness status ([issue #89](https://github.com/stolostron/multicluster-mesh-addon/issues/89))
+- Kiali deep links (backend doesn't produce Kiali URLs yet)
+- Endpoint discovery status (API exists, controller logic not implemented)
 
 The rest of this document is the original spike research by Nick Fox.
 
