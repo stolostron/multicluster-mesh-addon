@@ -790,9 +790,9 @@ func (r *Reconciler) ensureCertificateForCluster(ctx context.Context, mesh *mesh
 			WithRenewBefore(metav1.Duration{Duration: 15 * Day}).
 			WithCommonName("Istio CA").
 			WithSubject(certmanagerapply.X509Subject().
-				WithOrganizations(mesh.Name).
+				WithOrganizations(mesh.GetTrustDomain()).
 				WithOrganizationalUnits(formatOU(cluster.Name))).
-			WithURIs(certURI(cluster.Name, mesh.Name)).
+			WithURIs(certURI(cluster.Name, mesh.GetTrustDomain())).
 			WithIsCA(true).
 			WithUsages(
 				certmanagerv1.UsageDigitalSignature,
