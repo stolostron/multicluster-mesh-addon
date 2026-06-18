@@ -160,7 +160,7 @@ See the [Kind known issues](https://kind.sigs.k8s.io/docs/user/known-issues/#pod
 kubectl create namespace mesh-system
 ```
 
-2. Create the cert-manager trust chain (ClusterIssuer, root CA Certificate, and CA-backed Issuer):
+2. Create the cert-manager trust chain (self-signed Issuer, root CA Certificate, and CA-backed Issuer):
 ```bash
 kubectl apply -f samples/cert-manager-issuer.yaml
 ```
@@ -178,7 +178,7 @@ For more configuration options, see the [samples](./samples/) directory:
 - **[complete.yaml](./samples/complete.yaml)** - All available fields with documentation
 - **[openshift.yaml](./samples/openshift.yaml)** - OpenShift-specific configuration
 - **[pinned-version.yaml](./samples/pinned-version.yaml)** - Version pinning with manual approval
-- **[cert-manager-issuer.yaml](./samples/cert-manager-issuer.yaml)** - cert-manager trust chain (ClusterIssuer + root CA + Issuer)
+- **[cert-manager-issuer.yaml](./samples/cert-manager-issuer.yaml)** - cert-manager trust chain (self-signed Issuer + root CA + CA-backed Issuer)
 
 #### What the Addon Does
 

@@ -1,24 +1,25 @@
 # cert-manager trust chain for MultiClusterMesh
 #
 # Architecture:
-#   ClusterIssuer (self-signed) --> Certificate (root CA) --> Issuer (CA-backed)
+#   Issuer (self-signed) --> Certificate (root CA) --> Issuer (CA-backed)
 #
-# The self-signed ClusterIssuer bootstraps a root CA Certificate.
-# That Certificate's Secret backs a namespace-scoped Issuer, which the
+# The self-signed Issuer bootstraps a root CA Certificate.
+# That Certificate's Secret backs a CA-backed Issuer, which the
 # MultiClusterMesh controller uses to mint intermediate CAs for each cluster.
 # This ensures all clusters share a common trust root.
 
 ---
-# Step 1: Bootstrap issuer (self-signed, cluster-scoped)
+# Step 1: Bootstrap issuer (self-signed)
 apiVersion: cert-manager.io/v1
-kind: ClusterIssuer
+kind: Issuer
 metadata:
   name: mesh-selfsigned-issuer
+  namespace: mesh-system
 spec:
   selfSigned: {}
 
 ---
-# Step 2: Root CA certificate (signed by the bootstrap ClusterIssuer)
+# Step 2: Root CA certificate (signed by the bootstrap Issuer)
 apiVersion: cert-manager.io/v1
 kind: Certificate
 metadata:
@@ -35,7 +36,7 @@ spec:
     size: 256
   issuerRef:
     name: mesh-selfsigned-issuer
-    kind: ClusterIssuer
+    kind: Issuer
     group: cert-manager.io
 
 ---
