@@ -5,6 +5,7 @@ import (
 	goflag "flag"
 	"fmt"
 	"os"
+	"strings"
 
 	certmanagerv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
 	"github.com/openshift/library-go/pkg/controller/controllercmd"
@@ -30,6 +31,7 @@ import (
 	meshv1alpha1 "github.com/stolostron/multicluster-mesh-addon/pkg/apis/mesh/v1alpha1"
 	meshcontroller "github.com/stolostron/multicluster-mesh-addon/pkg/hub/mesh"
 	"github.com/stolostron/multicluster-mesh-addon/pkg/version"
+	msav1beta1 "open-cluster-management.io/managed-serviceaccount/apis/authentication/v1beta1"
 )
 
 var (
@@ -45,6 +47,7 @@ func init() {
 	utilruntime.Must(operatorsv1.AddToScheme(runtimeScheme))
 	utilruntime.Must(operatorsv1alpha1.AddToScheme(runtimeScheme))
 	utilruntime.Must(certmanagerv1.AddToScheme(runtimeScheme))
+	utilruntime.Must(msav1beta1.AddToScheme(runtimeScheme))
 }
 
 func main() {
@@ -118,7 +121,7 @@ func runController(ctx context.Context, controllerContext *controllercmd.Control
 	if controllerNamespace == "" {
 		// Fallback to reading from service account namespace file
 		if namespaceBytes, err := os.ReadFile("/var/run/secrets/kubernetes.io/serviceaccount/namespace"); err == nil {
-			controllerNamespace = string(namespaceBytes)
+			controllerNamespace = strings.TrimSpace(string(namespaceBytes))
 			klog.Info("POD_NAMESPACE not set, using namespace from service account: ", controllerNamespace)
 		} else {
 			// Final fallback to default namespace

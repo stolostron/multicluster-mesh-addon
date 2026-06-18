@@ -31,4 +31,4 @@ spec:
           name: mesh-root-ca
     discovery:
       # Daily token rotation for staging environments
-      tokenValidity: 1d
+      tokenValidity: 24h

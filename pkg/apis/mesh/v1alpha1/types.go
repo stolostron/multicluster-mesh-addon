@@ -123,10 +123,11 @@ type IssuerReference struct {
 // DiscoveryConfig defines endpoint discovery token configuration
 type DiscoveryConfig struct {
 	// TokenValidity defines how long discovery tokens are valid
-	// Supports hours (h), days (d), weeks (w), or months (m)
+	// Supports hours (h), minutes (m), seconds (s). If unset, defaults to 360h
 	// +optional
-	// +kubebuilder:default="1m"
-	TokenValidity string `json:"tokenValidity,omitempty"`
+	// +kubebuilder:default="360h"
+	// +kubebuilder:validation:XValidation:rule="duration(self) >= duration('10m')", message="TokenValidity must be at least 10 minutes"
+	TokenValidity *metav1.Duration `json:"tokenValidity,omitempty"`
 }
 
 const (
@@ -153,15 +154,22 @@ const (
 
 	// ReasonOperatorConfigConflict indicates a conflict with an older mesh's operator config
 	ReasonOperatorConfigConflict = "OperatorConfigConflict"
+
+	// ReasonNamespaceConflict indicates a conflict with an older mesh's control plane namespace
+	ReasonNamespaceConflict = "NamespaceConflict"
 )
 
 // MultiClusterMeshStatus defines the observed state of MultiClusterMesh
 type MultiClusterMeshStatus struct {
 	// Conditions represent the latest available observations of the mesh state
+	// +listType=map
+	// +listMapKey=type
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 
 	// ClusterStatus tracks the status of each cluster in the mesh
+	// +listType=map
+	// +listMapKey=clusterName
 	// +optional
 	ClusterStatus []ClusterMeshStatus `json:"clusterStatus,omitempty"`
 }
@@ -169,9 +177,12 @@ type MultiClusterMeshStatus struct {
 // ClusterMeshStatus tracks the mesh status for a specific cluster
 type ClusterMeshStatus struct {
 	// ClusterName is the name of the managed cluster
+	// +required
 	ClusterName string `json:"clusterName"`
 
 	// Conditions represent the latest available observations of this cluster's state
+	// +listType=map
+	// +listMapKey=type
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 }

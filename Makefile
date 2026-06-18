@@ -108,9 +108,9 @@ test: ## Run unit tests
 	go test -short ./pkg/...
 
 .PHONY: update-test-crds
-update-test-crds: ## Update test CRDs from OCM API and cert-manager dependencies
+update-test-crds: ## Update test CRDs from OCM API, managed-serviceaccount and cert-manager dependencies
 	@echo "Updating test CRDs from open-cluster-management.io/api..."
-	@OCM_API_PATH=$$(go list -m -f '{{.Dir}}' open-cluster-management.io/api 2>/dev/null); \
+	@OCM_API_PATH=$$(go list -mod=mod -m -f '{{.Dir}}' open-cluster-management.io/api 2>/dev/null); \
 	if [ -z "$$OCM_API_PATH" ]; then \
 		echo "Error: open-cluster-management.io/api not found in go.mod"; \
 		echo "Run: go mod download open-cluster-management.io/api"; \
@@ -122,8 +122,18 @@ update-test-crds: ## Update test CRDs from OCM API and cert-manager dependencies
 	cp -v $$OCM_API_PATH/cluster/v1beta2/*.crd.yaml $(TEST_CRD_DIR)/ocm/ 2>/dev/null || true; \
 	cp -v $$OCM_API_PATH/work/v1/*.crd.yaml $(TEST_CRD_DIR)/ocm/ 2>/dev/null || true; \
 	echo "Test CRDs updated successfully in $(TEST_CRD_DIR)/ocm/"
+	@echo "Updating test CRDs from open-cluster-management.io/managed-serviceaccount..."
+	@OCM_MSA_PATH=$$(go list -mod=mod -m -f '{{.Dir}}' open-cluster-management.io/managed-serviceaccount 2>/dev/null); \
+	if [ -z "$$OCM_MSA_PATH" ]; then \
+		echo "Error: open-cluster-management.io/managed-serviceaccount not found in go.mod"; \
+		echo "Run: go mod download open-cluster-management.io/managed-serviceaccount"; \
+		exit 1; \
+	fi; \
+	echo "Copying CRDs from $$OCM_MSA_PATH..."; \
+	cp -v $$OCM_MSA_PATH/charts/managed-serviceaccount/crds/*.yaml $(TEST_CRD_DIR)/ocm/; \
+	echo "Test CRDs for MSA updated successfully in $(TEST_CRD_DIR)/ocm/"
 	@echo "Updating test CRDs from cert-manager..."
-	@CERTMANAGER_PATH=$$(go list -m -f '{{.Dir}}' github.com/cert-manager/cert-manager 2>/dev/null); \
+	@CERTMANAGER_PATH=$$(go list -mod=mod -m -f '{{.Dir}}' github.com/cert-manager/cert-manager 2>/dev/null); \
 	if [ -z "$$CERTMANAGER_PATH" ]; then \
 		echo "Error: github.com/cert-manager/cert-manager not found in go.mod"; \
 		echo "Run: go mod download github.com/cert-manager/cert-manager"; \
@@ -140,7 +150,12 @@ test-integration: $(ENVTEST) gen-crds deps update-test-crds ## Run integration t
 	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) -p path)" \
 	go run github.com/onsi/ginkgo/v2/ginkgo -v --tags=integration ./test/integration/...
 
-# TODO: Add test-e2e target for end-to-end tests against real cluster
+.PHONY: test-e2e
+test-e2e: ## Run e2e tests against dev-env clusters (requires make dev-env)
+	HUB_KUBECONFIG=$(HUB_KUBECONFIG) \
+	CLUSTER1_KUBECONFIG=$(DEV_KUBE_DIR)/cluster1.config \
+	CLUSTER2_KUBECONFIG=$(DEV_KUBE_DIR)/cluster2.config \
+	go run github.com/onsi/ginkgo/v2/ginkgo -v --fail-fast --tags=e2e ./test/e2e/...
 
 .PHONY: build
 build: $(BIN_DIR) ## Build addon binary
@@ -178,13 +193,14 @@ undeploy: gen ## Remove the controller from the cluster (PLATFORM=openshift|kind
 
 .PHONY: help
 help: ## Display this help
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
+	@grep -E '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
 
 # Dev Environment (local Kind + OCM clusters)
 KIND_VERSION ?= v0.31.0
 CLUSTERADM_VERSION ?= v1.3.1
 K8S_VERSION ?= v1.35.0
 OLM_VERSION ?= v0.43.0
+CERT_MANAGER_VERSION ?= v1.20.2
 
 OS := $(shell go env GOOS)
 ARCH := $(shell go env GOARCH)
@@ -219,11 +235,11 @@ $(CLUSTERADM): | $(BIN_DIR)
 
 DEV_ENV_SCRIPT := $(CURDIR)/hack/dev-env.sh
 
-export DEV_KUBE_DIR K8S_VERSION OLM_VERSION
+export DEV_KUBE_DIR K8S_VERSION OLM_VERSION CERT_MANAGER_VERSION
 export KIND CLUSTERADM
 
 .PHONY: dev-env
-dev-env: create-clusters install-olm init-ocm join-clusters deploy-addon ## Provision full dev environment (Kind + OCM + addon)
+dev-env: create-clusters install-olm install-cert-manager init-ocm join-clusters deploy-addon ## Provision full dev environment (Kind + OCM + addon)
 
 .PHONY: create-clusters
 create-clusters: $(KIND) ## Create 3 Kind clusters (hub, cluster1, cluster2)
@@ -232,6 +248,10 @@ create-clusters: $(KIND) ## Create 3 Kind clusters (hub, cluster1, cluster2)
 .PHONY: install-olm
 install-olm: ## Install OLM on managed clusters (cluster1, cluster2)
 	$(DEV_ENV_SCRIPT) install-olm
+
+.PHONY: install-cert-manager
+install-cert-manager: ## Install cert-manager on the hub cluster
+	$(DEV_ENV_SCRIPT) install-cert-manager
 
 .PHONY: init-ocm
 init-ocm: $(CLUSTERADM) ## Initialize hub as OCM control plane
@@ -255,6 +275,19 @@ deploy-addon: $(KIND) gen images $(KUSTOMIZE) ## Build and deploy addon to the h
 	kubectl --kubeconfig=$(HUB_KUBECONFIG) rollout status deployment/multicluster-mesh-controller \
 		-n multicluster-mesh-system --timeout=180s
 	@echo "==> Addon controller deployed successfully. Use KUBECONFIG=$(HUB_KUBECONFIG) to interact with the hub."
+
+.PHONY: setup-mesh
+setup-mesh: ## Create cert-manager trust chain, mesh-system namespace, and MultiClusterMesh CR
+	$(DEV_ENV_SCRIPT) setup-mesh
+
+.PHONY: dev-clean-meshes
+dev-clean-meshes: ## Delete all mesh resources, cert-manager trust chain, and mesh-system namespace
+	kubectl --kubeconfig=$(HUB_KUBECONFIG) delete multiclustermeshes -A --all --ignore-not-found=true
+	kubectl --kubeconfig=$(HUB_KUBECONFIG) delete manifestwork -A -l app.kubernetes.io/managed-by=multicluster-mesh-addon --ignore-not-found=true
+	kubectl --kubeconfig=$(HUB_KUBECONFIG) delete issuer mesh-root-ca -n mesh-system --ignore-not-found=true
+	kubectl --kubeconfig=$(HUB_KUBECONFIG) delete certificate mesh-root-ca -n mesh-system --ignore-not-found=true
+	kubectl --kubeconfig=$(HUB_KUBECONFIG) delete clusterissuer mesh-selfsigned-issuer --ignore-not-found=true
+	kubectl --kubeconfig=$(HUB_KUBECONFIG) delete namespace mesh-system --ignore-not-found=true
 
 .PHONY: dev-clean
 dev-clean: ## Destroy dev clusters and remove .kube/ folder

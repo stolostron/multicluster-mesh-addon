@@ -1,0 +1,279 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.20.1
+  name: multiclustermeshes.mesh.open-cluster-management.io
+spec:
+  group: mesh.open-cluster-management.io
+  names:
+    kind: MultiClusterMesh
+    listKind: MultiClusterMeshList
+    plural: multiclustermeshes
+    singular: multiclustermesh
+  scope: Namespaced
+  versions:
+  - name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: MultiClusterMesh represents a multi-cluster service mesh configuration
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: MultiClusterMeshSpec defines the desired state of a multi-cluster
+              mesh
+            properties:
+              clusterSet:
+                description: ClusterSet references the ACM ManagedClusterSet that
+                  defines cluster membership
+                type: string
+              controlPlane:
+                description: ControlPlane defines the target configuration for the
+                  mesh control plane
+                properties:
+                  namespace:
+                    default: istio-system
+                    description: Namespace is the namespace where Istio will be installed
+                      on each cluster
+                    type: string
+                type: object
+              operator:
+                description: Operator defines the Sail Operator installation configuration
+                properties:
+                  channel:
+                    default: stable
+                    description: Channel is the OLM subscription channel (e.g., "stable",
+                      "1.23")
+                    type: string
+                  installPlanApproval:
+                    default: Automatic
+                    description: InstallPlanApproval is the approval strategy (Automatic
+                      or Manual)
+                    enum:
+                    - Automatic
+                    - Manual
+                    type: string
+                  namespace:
+                    description: |-
+                      Namespace is the namespace where the Sail Operator will be installed
+                      Defaults to "openshift-operators" on OpenShift, "sail-operator" on vanilla Kubernetes
+                    type: string
+                  source:
+                    description: |-
+                      Source is the CatalogSource name
+                      Defaults to "redhat-operators" on OpenShift, "operatorhubio-catalog" on vanilla Kubernetes
+                    type: string
+                  sourceNamespace:
+                    description: |-
+                      SourceNamespace is the namespace of the CatalogSource
+                      Defaults to "openshift-marketplace" on OpenShift, "olm" on vanilla Kubernetes
+                    type: string
+                  startingCSV:
+                    description: |-
+                      StartingCSV is the specific operator version to install
+                      Useful for testing or pinning to a specific version
+                    type: string
+                type: object
+              security:
+                description: Security defines the trust and discovery configuration
+                properties:
+                  discovery:
+                    description: Discovery defines the endpoint discovery configuration
+                    properties:
+                      tokenValidity:
+                        default: 1m
+                        description: |-
+                          TokenValidity defines how long discovery tokens are valid
+                          Supports hours (h), days (d), weeks (w), or months (m)
+                        type: string
+                    type: object
+                  trust:
+                    description: Trust defines the mTLS trust configuration
+                    properties:
+                      certManager:
+                        description: CertManager defines the cert-manager issuer reference
+                        properties:
+                          issuerRef:
+                            description: IssuerRef references the cert-manager Issuer
+                              to use as Root CA
+                            properties:
+                              name:
+                                description: Name of the Issuer
+                                type: string
+                            required:
+                            - name
+                            type: object
+                        required:
+                        - issuerRef
+                        type: object
+                    type: object
+                type: object
+            required:
+            - clusterSet
+            type: object
+          status:
+            description: MultiClusterMeshStatus defines the observed state of MultiClusterMesh
+            properties:
+              clusterStatus:
+                description: ClusterStatus tracks the status of each cluster in the
+                  mesh
+                items:
+                  description: ClusterMeshStatus tracks the mesh status for a specific
+                    cluster
+                  properties:
+                    clusterName:
+                      description: ClusterName is the name of the managed cluster
+                      type: string
+                    conditions:
+                      description: Conditions represent the latest available observations
+                        of this cluster's state
+                      items:
+                        description: Condition contains details for one aspect of
+                          the current state of this API Resource.
+                        properties:
+                          lastTransitionTime:
+                            description: |-
+                              lastTransitionTime is the last time the condition transitioned from one status to another.
+                              This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                            format: date-time
+                            type: string
+                          message:
+                            description: |-
+                              message is a human readable message indicating details about the transition.
+                              This may be an empty string.
+                            maxLength: 32768
+                            type: string
+                          observedGeneration:
+                            description: |-
+                              observedGeneration represents the .metadata.generation that the condition was set based upon.
+                              For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                              with respect to the current state of the instance.
+                            format: int64
+                            minimum: 0
+                            type: integer
+                          reason:
+                            description: |-
+                              reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                              Producers of specific condition types may define expected values and meanings for this field,
+                              and whether the values are considered a guaranteed API.
+                              The value should be a CamelCase string.
+                              This field may not be empty.
+                            maxLength: 1024
+                            minLength: 1
+                            pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                            type: string
+                          status:
+                            description: status of the condition, one of True, False,
+                              Unknown.
+                            enum:
+                            - "True"
+                            - "False"
+                            - Unknown
+                            type: string
+                          type:
+                            description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                            maxLength: 316
+                            pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                            type: string
+                        required:
+                        - lastTransitionTime
+                        - message
+                        - reason
+                        - status
+                        - type
+                        type: object
+                      type: array
+                      x-kubernetes-list-map-keys:
+                      - type
+                      x-kubernetes-list-type: map
+                  required:
+                  - clusterName
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - clusterName
+                x-kubernetes-list-type: map
+              conditions:
+                description: Conditions represent the latest available observations
+                  of the mesh state
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

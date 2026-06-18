@@ -10,40 +10,35 @@ import (
 	meshv1alpha1 "github.com/stolostron/multicluster-mesh-addon/pkg/apis/mesh/v1alpha1"
 )
 
-// CreateMultiClusterMesh creates a MultiClusterMesh resource with optional operator configuration.
-func CreateMultiClusterMesh(ctx context.Context, k8sClient client.Client, name, namespace, clusterSet string, operatorConfig meshv1alpha1.OperatorConfig) {
+// CreateMultiClusterMesh creates a MultiClusterMesh resource.
+// An optional MeshSpec can be passed to override fields beyond clusterSet.
+func CreateMultiClusterMesh(ctx context.Context, k8sClient client.Client, name, namespace, clusterSet string, spec ...meshv1alpha1.MultiClusterMeshSpec) *meshv1alpha1.MultiClusterMesh {
+	var meshSpec meshv1alpha1.MultiClusterMeshSpec
+	if len(spec) > 0 {
+		meshSpec = spec[0]
+	}
+	meshSpec.ClusterSet = clusterSet
+
 	mesh := &meshv1alpha1.MultiClusterMesh{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: namespace,
 		},
-		Spec: meshv1alpha1.MultiClusterMeshSpec{
-			ClusterSet: clusterSet,
-			Operator:   operatorConfig,
-		},
+		Spec: meshSpec,
 	}
 	Expect(k8sClient.Create(ctx, mesh)).To(Succeed())
+	return mesh
 }
 
-// CreateMultiClusterMeshWithCertManager creates a MultiClusterMesh with cert-manager issuer configuration.
-func CreateMultiClusterMeshWithCertManager(ctx context.Context, k8sClient client.Client, name, namespace, clusterSet, issuerName string) {
-	mesh := &meshv1alpha1.MultiClusterMesh{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      name,
-			Namespace: namespace,
-		},
-		Spec: meshv1alpha1.MultiClusterMeshSpec{
-			ClusterSet: clusterSet,
-			Security: meshv1alpha1.SecurityConfig{
-				Trust: meshv1alpha1.TrustConfig{
-					CertManager: meshv1alpha1.CertManagerConfig{
-						IssuerRef: meshv1alpha1.IssuerReference{
-							Name: issuerName,
-						},
-					},
+// CertManagerSpec returns a MeshSpec with cert-manager issuer configuration.
+func CertManagerSpec(issuerName string) meshv1alpha1.MultiClusterMeshSpec {
+	return meshv1alpha1.MultiClusterMeshSpec{
+		Security: meshv1alpha1.SecurityConfig{
+			Trust: meshv1alpha1.TrustConfig{
+				CertManager: meshv1alpha1.CertManagerConfig{
+					IssuerRef: meshv1alpha1.IssuerReference{Name: issuerName},
 				},
 			},
 		},
 	}
-	Expect(k8sClient.Create(ctx, mesh)).To(Succeed())
 }

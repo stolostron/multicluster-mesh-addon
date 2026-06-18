@@ -3,7 +3,7 @@
 # This file is invoked by Makefile targets with an action argument.
 #
 # Usage: hack/dev-env.sh <action>
-# Actions: create-clusters, install-olm, init-ocm, join-clusters, clean
+# Actions: create-clusters, install-olm, install-cert-manager, init-ocm, join-clusters, setup-mesh, clean
 
 set -euo pipefail
 
@@ -14,13 +14,62 @@ CLUSTER1="cluster1"
 CLUSTER2="cluster2"
 
 log() { echo "==> $*"; }
+warn() { echo "WARNING: $*" >&2; }
 err() { echo "ERROR: $*" >&2; exit 1; }
+
+MIN_INOTIFY_WATCHES=524288
+MIN_INOTIFY_INSTANCES=512
+MIN_KERNEL_KEYS=20000
+MIN_KERNEL_BYTES=500000
+
+check_inotify_limits() {
+    [[ "$(uname -s)" != "Linux" ]] && return 0
+
+    local watches instances msg=""
+    watches="$(sysctl -n fs.inotify.max_user_watches 2>/dev/null || echo 0)"
+    instances="$(sysctl -n fs.inotify.max_user_instances 2>/dev/null || echo 0)"
+
+    if (( watches < MIN_INOTIFY_WATCHES )); then
+        msg="fs.inotify.max_user_watches is ${watches} (need >= ${MIN_INOTIFY_WATCHES})"
+    fi
+    if (( instances < MIN_INOTIFY_INSTANCES )); then
+        msg="${msg:+${msg}; }fs.inotify.max_user_instances is ${instances} (need >= ${MIN_INOTIFY_INSTANCES})"
+    fi
+
+    if [[ -n "${msg}" ]]; then
+        err "${msg}. Creating 3 Kind clusters requires higher inotify limits. See https://kind.sigs.k8s.io/docs/user/known-issues/#pod-errors-due-to-too-many-open-files"
+    fi
+}
+
+check_kernel_keyring_limits() {
+    [[ "$(uname -s)" != "Linux" ]] && return 0
+    command -v podman &>/dev/null || return 0
+
+    if (( EUID != 0 )) && ! podman info --format '{{.Host.Security.Rootless}}' 2>/dev/null | grep -q false; then
+        local maxkeys maxbytes msg=""
+        maxkeys="$(sysctl -n kernel.keys.maxkeys 2>/dev/null || echo 0)"
+        maxbytes="$(sysctl -n kernel.keys.maxbytes 2>/dev/null || echo 0)"
+
+        if (( maxkeys < MIN_KERNEL_KEYS )); then
+            msg="kernel.keys.maxkeys is ${maxkeys} (recommend >= ${MIN_KERNEL_KEYS})"
+        fi
+        if (( maxbytes < MIN_KERNEL_BYTES )); then
+            msg="${msg:+${msg}; }kernel.keys.maxbytes is ${maxbytes} (recommend >= ${MIN_KERNEL_BYTES})"
+        fi
+
+        if [[ -n "${msg}" ]]; then
+            warn "${msg}. Rootless podman with 3 Kind clusters may fail with 'could not create session key: disk quota exceeded'. See https://github.com/kubernetes-sigs/kind/issues/3806"
+        fi
+    fi
+}
 
 kubeconfig_for() {
     echo "${DEV_KUBE_DIR}/${1}.config"
 }
 
 create_clusters() {
+    check_inotify_limits
+    check_kernel_keyring_limits
     mkdir -p "${DEV_KUBE_DIR}"
 
     local existing_clusters
@@ -97,6 +146,30 @@ install_olm() {
         log "Granting klusterlet-work-sa OLM permissions on ${cluster}"
         kubectl --kubeconfig="$(kubeconfig_for "${cluster}")" apply -f "${SCRIPT_DIR}/config/deploy/overlays/kind/klusterlet-work-olm.yaml"
     done
+}
+
+install_cert_manager() {
+    local hub_kubeconfig
+    hub_kubeconfig="$(kubeconfig_for "${HUB}")"
+
+    if [[ ! -f "${hub_kubeconfig}" ]]; then
+        err "Hub kubeconfig not found at ${hub_kubeconfig}. Run 'make create-clusters' first."
+    fi
+
+    if kubectl --kubeconfig="${hub_kubeconfig}" get deployment cert-manager -n cert-manager &>/dev/null; then
+        log "cert-manager already installed on hub, skipping"
+        return
+    fi
+
+    log "Installing cert-manager ${CERT_MANAGER_VERSION} on hub..."
+    kubectl --kubeconfig="${hub_kubeconfig}" apply -f \
+        "https://github.com/cert-manager/cert-manager/releases/download/${CERT_MANAGER_VERSION}/cert-manager.yaml"
+
+    log "Waiting for cert-manager to be ready..."
+    kubectl --kubeconfig="${hub_kubeconfig}" rollout status deployment/cert-manager -n cert-manager --timeout=120s
+    kubectl --kubeconfig="${hub_kubeconfig}" rollout status deployment/cert-manager-webhook -n cert-manager --timeout=120s
+
+    log "cert-manager ${CERT_MANAGER_VERSION} installed on hub"
 }
 
 init_ocm() {
@@ -203,6 +276,47 @@ join_clusters() {
     kubectl --kubeconfig="${hub_kubeconfig}" get managedclustersets
 }
 
+setup_mesh() {
+    local hub_kubeconfig
+    hub_kubeconfig="$(kubeconfig_for "${HUB}")"
+
+    if [[ ! -f "${hub_kubeconfig}" ]]; then
+        err "Hub kubeconfig not found at ${hub_kubeconfig}. Run 'make deploy-addon' first."
+    fi
+
+    if kubectl --kubeconfig="${hub_kubeconfig}" get namespace mesh-system &>/dev/null; then
+        log "Namespace mesh-system already exists, skipping"
+    else
+        log "Creating namespace mesh-system"
+        kubectl --kubeconfig="${hub_kubeconfig}" create namespace mesh-system
+    fi
+
+    log "Waiting for cert-manager-cainjector to be ready..."
+    kubectl --kubeconfig="${hub_kubeconfig}" rollout status deployment/cert-manager-cainjector \
+        -n cert-manager --timeout=120s
+
+    log "Applying cert-manager trust chain (ClusterIssuer, root CA Certificate, Issuer)"
+    kubectl --kubeconfig="${hub_kubeconfig}" apply -f "${SCRIPT_DIR}/samples/cert-manager-issuer.yaml"
+
+    log "Waiting for ClusterIssuer to be ready..."
+    kubectl --kubeconfig="${hub_kubeconfig}" wait clusterissuer/mesh-selfsigned-issuer \
+        --for=condition=Ready --timeout=60s
+
+    log "Waiting for root CA Certificate to be issued..."
+    kubectl --kubeconfig="${hub_kubeconfig}" wait certificate/mesh-root-ca \
+        -n mesh-system --for=condition=Ready --timeout=120s
+
+    log "Waiting for CA-backed Issuer to be ready..."
+    kubectl --kubeconfig="${hub_kubeconfig}" wait issuer/mesh-root-ca \
+        -n mesh-system --for=condition=Ready --timeout=60s
+
+    log "Creating MultiClusterMesh CR"
+    kubectl --kubeconfig="${hub_kubeconfig}" apply -f "${SCRIPT_DIR}/samples/basic.yaml"
+
+    log "Mesh setup complete. The controller will now reconcile the mesh."
+    log "Monitor progress: kubectl --kubeconfig=${hub_kubeconfig} get multiclustermesh -n mesh-system"
+}
+
 clean() {
     log "Deleting Kind clusters..."
     for cluster in "${HUB}" "${CLUSTER1}" "${CLUSTER2}"; do
@@ -220,10 +334,13 @@ clean() {
 
 ACTION="${1:-}"
 case "${ACTION}" in
-    create-clusters) create_clusters ;;
-    install-olm)     install_olm ;;
-    init-ocm)        init_ocm ;;
-    join-clusters)   join_clusters ;;
-    clean)           clean ;;
-    *)               err "Unknown action: '${ACTION}'. Valid: create-clusters, install-olm, init-ocm, join-clusters, clean" ;;
+    create-clusters)       create_clusters ;;
+    install-olm)           install_olm ;;
+    install-cert-manager)  install_cert_manager ;;
+    init-ocm)              init_ocm ;;
+    join-clusters)         join_clusters ;;
+    setup-mesh)            setup_mesh ;;
+    clean)                 clean ;;
+    *)
+        err "Unknown action: '${ACTION}'. Valid: create-clusters, install-olm, install-cert-manager, init-ocm, join-clusters, setup-mesh, clean" ;;
 esac
