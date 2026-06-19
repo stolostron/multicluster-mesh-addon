@@ -20,6 +20,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	applyconfigv1 "k8s.io/client-go/applyconfigurations/meta/v1"
+	"k8s.io/client-go/util/retry"
 	"k8s.io/klog/v2"
 	workclient "open-cluster-management.io/api/client/work/clientset/versioned"
 	workinformers "open-cluster-management.io/api/client/work/informers/externalversions"
@@ -184,7 +185,6 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (resu
 		return
 	}
 
-	// Copy the status so we can avoid updating it in case nothing changed.
 	oldStatus := mesh.Status.DeepCopy()
 
 	var invalidCondition *metav1.Condition
@@ -211,10 +211,17 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (resu
 		}
 	}
 
-	// Update status only if something changed, to avoid unnecessary reconciliations
 	var statusErr error
 	if !reflect.DeepEqual(oldStatus, &mesh.Status) {
-		statusErr = r.Status().Update(ctx, mesh)
+		newStatus := mesh.Status
+		statusErr = retry.RetryOnConflict(retry.DefaultRetry, func() error {
+			latest := &meshv1alpha1.MultiClusterMesh{}
+			if err := r.Get(ctx, req.NamespacedName, latest); err != nil {
+				return err
+			}
+			latest.Status = newStatus
+			return r.Status().Update(ctx, latest)
+		})
 	}
 
 	return result, errors.Join(reconcileErr, statusErr)
