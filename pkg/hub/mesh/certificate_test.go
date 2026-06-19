@@ -43,6 +43,37 @@ func TestFormatOU(t *testing.T) {
 	}
 }
 
+func TestFormatLabelValue(t *testing.T) {
+	tests := []struct {
+		name        string
+		clusterName string
+		expected    string
+	}{
+		{
+			name:        "name up to 63 characters is used as-is",
+			clusterName: strings.Repeat("a", 63),
+			expected:    strings.Repeat("a", 63),
+		},
+		{
+			name:        "long CI-generated name",
+			clusterName: "ci-managed-cluster-with-a-very-long-generated-name-that-exceeds-64-chars",
+			expected:    "ci-managed-cluster-with-a-very-long-generated-name-tha-1d71f97d",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := formatLabelValue(tc.clusterName)
+			if got != tc.expected {
+				t.Errorf("formatLabelValue(%q) = %q, want %q", tc.clusterName, got, tc.expected)
+			}
+			if len(got) > maxLabelLength {
+				t.Errorf("formatLabelValue(%q) produced %d characters, exceeds limit of %d", tc.clusterName, len(got), maxLabelLength)
+			}
+		})
+	}
+}
+
 func TestCertURI(t *testing.T) {
 	tests := []struct {
 		name        string

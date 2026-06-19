@@ -513,18 +513,24 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 				Expect(*ownerRef.BlockOwnerDeletion).To(BeTrue())
 			})
 
-			It("should set Subject with Organization and OrganizationalUnit", func() {
-				cert := expectCertificate(testNs, clusterName, "mesh-issuer")
+			It("should set Subject and URI SAN with truncated OU and full cluster name", func() {
+				longCluster := "ci-managed-cluster-with-a-very-long-generated-name-that-exceeds-64-chars"
+				Expect(k8sClient.Create(ctx, &clusterv1.ManagedCluster{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: longCluster,
+						Labels: map[string]string{
+							meshcontroller.ClusterSetLabel: testClusterSet,
+						},
+					},
+				})).To(Succeed())
+
+				cert := expectCertificate(testNs, longCluster, "mesh-issuer")
 
 				Expect(cert.Spec.Subject).NotTo(BeNil())
 				Expect(cert.Spec.Subject.Organizations).To(ConsistOf(meshName))
-				Expect(cert.Spec.Subject.OrganizationalUnits).To(ConsistOf(clusterName))
-			})
+				Expect(cert.Spec.Subject.OrganizationalUnits).To(ConsistOf("ci-managed-cluster-with-a-very-long-generated-name-that-1d71f97d"))
 
-			It("should set URI SAN with trust domain and cluster name", func() {
-				cert := expectCertificate(testNs, clusterName, "mesh-issuer")
-
-				expectedSAN := "spiffe://" + meshName + "/cluster/" + clusterName + "/ca/istio-ca"
+				expectedSAN := "spiffe://" + meshName + "/cluster/" + longCluster + "/ca/istio-ca"
 				Expect(cert.Spec.URIs).To(ConsistOf(expectedSAN))
 			})
 
