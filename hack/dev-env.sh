@@ -144,7 +144,7 @@ install_olm() {
     # Grant the OCM work agent (klusterlet-work-sa) permission to manage OLM resources.
     for cluster in "${CLUSTER1}" "${CLUSTER2}"; do
         log "Granting klusterlet-work-sa OLM permissions on ${cluster}"
-        kubectl --kubeconfig="$(kubeconfig_for "${cluster}")" apply -f "${SCRIPT_DIR}/config/deploy/overlays/kind/klusterlet-work-olm.yaml"
+        kubectl --kubeconfig="$(kubeconfig_for "${cluster}")" apply -f "${SCRIPT_DIR}/hack/kind/klusterlet-work-olm.yaml"
     done
 }
 
@@ -261,7 +261,7 @@ join_clusters() {
     # uses for platform detection.
     for cluster in "${CLUSTER1}" "${CLUSTER2}"; do
         log "Creating product ClusterClaim on ${cluster}"
-        kubectl --kubeconfig="$(kubeconfig_for "${cluster}")" apply -f "${SCRIPT_DIR}/config/deploy/overlays/kind/product-clusterclaim.yaml"
+        kubectl --kubeconfig="$(kubeconfig_for "${cluster}")" apply -f "${SCRIPT_DIR}/hack/kind/product-clusterclaim.yaml"
     done
 
     for cluster in "${CLUSTER1}" "${CLUSTER2}"; do

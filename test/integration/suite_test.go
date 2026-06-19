@@ -51,7 +51,7 @@ var _ = BeforeSuite(func() {
 
 	testEnv = &envtest.Environment{
 		CRDDirectoryPaths: []string{
-			filepath.Join("..", "..", "config", "crd"),                               // Custom MultiClusterMesh CRD
+			filepath.Join("..", "..", "chart", "crds"),                               // Custom MultiClusterMesh CRD
 			filepath.Join("..", "..", "test", "integration", "crds", "ocm"),          // OCM CRDs
 			filepath.Join("..", "..", "test", "integration", "crds", "cert-manager"), // cert-manager CRDs
 		},
