@@ -14,19 +14,19 @@ func TestFormatOU(t *testing.T) {
 		expected    string
 	}{
 		{
-			name:        "name up to 63 characters is used as-is",
-			clusterName: strings.Repeat("a", 63),
-			expected:    strings.Repeat("a", 63),
+			name:        "name up to 64 characters is used as-is",
+			clusterName: strings.Repeat("a", 64),
+			expected:    strings.Repeat("a", 64),
 		},
 		{
-			name:        "64 characters triggers truncation",
-			clusterName: strings.Repeat("a", 64),
-			expected:    strings.Repeat("a", 54) + "-" + hashPrefix(strings.Repeat("a", 64)),
+			name:        "65 characters triggers truncation",
+			clusterName: strings.Repeat("a", 65),
+			expected:    strings.Repeat("a", 55) + "-" + hashPrefix(strings.Repeat("a", 65)),
 		},
 		{
 			name:        "long production name",
 			clusterName: "production-environment-kubernetes-cluster-us-east-2-deployment-pipeline-id-992384",
-			expected:    "production-environment-kubernetes-cluster-us-east-2-de-9cdc3049",
+			expected:    "production-environment-kubernetes-cluster-us-east-2-dep-9cdc3049",
 		},
 	}
 
