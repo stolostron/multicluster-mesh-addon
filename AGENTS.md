@@ -15,7 +15,7 @@ The controller manages the `MultiClusterMesh` custom resource on the hub cluster
 - `pkg/apis/mesh/v1alpha1/` - CRD type definitions (`MultiClusterMesh`)
 - `pkg/hub/mesh/controller.go` - Main reconciliation controller
 - `pkg/version/` - Build version info
-- `config/crd/` - Generated CRD manifests
+- `chart/crds/` - Generated CRD manifests (used by Helm)
 - `test/integration/` - Ginkgo/Gomega integration tests using envtest
 - `test/util/` - Shared test helpers (k8s resource creation/deletion, mesh helpers, OCM helpers)
 - `tools/` - Tool dependencies (golangci-lint, ginkgo, etc.)

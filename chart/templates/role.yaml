@@ -1,9 +1,10 @@
----
+# Namespace-scoped permissions for controller-runtime leader election and event recording.
+# This is static configuration, not generated from kubebuilder annotations.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
   name: multicluster-mesh-controller
-  namespace: multicluster-mesh-system
+  namespace: {{ .Release.Namespace }}
 rules:
   - apiGroups:
       - coordination.k8s.io
