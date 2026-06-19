@@ -17,6 +17,22 @@ log() { echo "==> $*"; }
 warn() { echo "WARNING: $*" >&2; }
 err() { echo "ERROR: $*" >&2; exit 1; }
 
+retry() {
+    local retries=$1 delay=$2
+    shift 2
+    local attempt
+    for attempt in $(seq 1 "$retries"); do
+        if "$@"; then
+            return 0
+        fi
+        if (( attempt < retries )); then
+            log "Attempt ${attempt}/${retries} failed, retrying in ${delay}s..."
+            sleep "$delay"
+        fi
+    done
+    err "Command failed after ${retries} attempts: $*"
+}
+
 MIN_INOTIFY_WATCHES=524288
 MIN_INOTIFY_INSTANCES=512
 MIN_KERNEL_KEYS=20000
@@ -126,7 +142,9 @@ install_olm() {
         log "Installing OLM ${OLM_VERSION} on ${cluster}..."
 
         kubectl --kubeconfig="${kubeconfig}" apply --server-side -f "${olm_base_url}/crds.yaml"
-        kubectl --kubeconfig="${kubeconfig}" wait --for=condition=Established \
+        # kubectl wait errors immediately when .status.conditions is nil
+        # (before the API server has processed the CRD), so retry a few times.
+        retry 5 2 kubectl --kubeconfig="${kubeconfig}" wait --for=condition=Established \
             crd/catalogsources.operators.coreos.com \
             crd/subscriptions.operators.coreos.com \
             --timeout=60s
