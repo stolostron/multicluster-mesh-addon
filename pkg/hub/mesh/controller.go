@@ -811,7 +811,7 @@ func (r *Reconciler) ensureCertificateForCluster(ctx context.Context, mesh *mesh
 			).
 			WithIssuerRef(cmmetaapply.IssuerReference().
 				WithName(mesh.Spec.Security.Trust.CertManager.IssuerRef.Name).
-				WithKind("Issuer").
+				WithKind(mesh.Spec.Security.Trust.CertManager.IssuerRef.Kind).
 				WithGroup("cert-manager.io")))
 
 	if err := r.Apply(ctx, cert, client.FieldOwner(ManagedByValue), client.ForceOwnership); err != nil {

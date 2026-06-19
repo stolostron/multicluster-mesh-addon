@@ -2,14 +2,22 @@ apiVersion: mesh.open-cluster-management.io/v1alpha1
 kind: MultiClusterMesh
 metadata:
   name: basic-mesh
-  namespace: mesh-system
+  namespace: open-cluster-management
 spec:
   # Reference to the ManagedClusterSet that defines which clusters participate in the mesh
   # NOTE: Update this to match your ManagedClusterSet name
-  clusterSet: mesh-cluster-set
+  clusterSet: default
   # Minimal security configuration using cert-manager for trust
   security:
     trust:
       certManager:
         issuerRef:
-          name: mesh-root-ca
+          name: root-ca
+---
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: root-ca
+  namespace: open-cluster-management
+spec:
+  selfSigned: {}

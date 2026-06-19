@@ -496,7 +496,7 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 			})
 
 			It("should create Certificate resource with owner reference", func() {
-				cert := expectCertificate(testNs, clusterName, "mesh-issuer")
+				cert := expectCertificate(testNs, clusterName, "mesh-issuer", "Issuer")
 
 				mesh := &meshv1alpha1.MultiClusterMesh{}
 				Expect(k8sClient.Get(ctx, key.Of(meshName, testNs), mesh)).To(Succeed())
@@ -522,7 +522,7 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 					},
 				})).To(Succeed())
 
-				cert := expectCertificate(testNs, longCluster, "mesh-issuer")
+				cert := expectCertificate(testNs, longCluster, "mesh-issuer", "Issuer")
 
 				Expect(cert.Spec.Subject).NotTo(BeNil())
 				Expect(cert.Spec.Subject.Organizations).To(ConsistOf(meshName))
@@ -533,7 +533,7 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 			})
 
 			It("should restore Certificate spec when externally modified", func() {
-				cert := expectCertificate(testNs, clusterName, "mesh-issuer")
+				cert := expectCertificate(testNs, clusterName, "mesh-issuer", "Issuer")
 
 				cert.Spec.CommonName = "tampered"
 				Expect(k8sClient.Update(ctx, cert)).To(Succeed())
@@ -548,12 +548,12 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 			})
 
 			It("should recreate Certificate when it is externally deleted", func() {
-				cert := expectCertificate(testNs, clusterName, "mesh-issuer")
+				cert := expectCertificate(testNs, clusterName, "mesh-issuer", "Issuer")
 				originalUID := cert.UID
 				Expect(k8sClient.Delete(ctx, cert)).To(Succeed())
 
 				Eventually(func() types.UID {
-					return expectCertificate(testNs, clusterName, "mesh-issuer").UID
+					return expectCertificate(testNs, clusterName, "mesh-issuer", "Issuer").UID
 				}).ShouldNot(Equal(originalUID))
 			})
 
@@ -589,6 +589,17 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 			})
 		})
 
+		When("cert-manager ClusterIssuer is configured", func() {
+			BeforeEach(func() {
+				util.CreateK8sManagedCluster(ctx, k8sClient, clusterName, testClusterSet)
+				util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet, util.CertManagerSpecWithKind("cluster-issuer", "ClusterIssuer"))
+			})
+
+			It("should create Certificate with ClusterIssuer kind", func() {
+				expectCertificate(testNs, clusterName, "cluster-issuer", "ClusterIssuer")
+			})
+		})
+
 		When("multiple clusters have cacerts secrets", func() {
 			It("should create ManifestWork for each cluster", func() {
 				cluster1 := util.UniqueName("cluster")
@@ -610,7 +621,7 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 			It("should cleanup Certificate for that cluster", func() {
 				util.CreateK8sManagedCluster(ctx, k8sClient, clusterName, testClusterSet)
 				util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet, util.CertManagerSpec("mesh-issuer"))
-				expectCertificate(testNs, clusterName, "mesh-issuer")
+				expectCertificate(testNs, clusterName, "mesh-issuer", "Issuer")
 
 				updateClusterSetLabel(clusterName, "")
 
@@ -623,7 +634,7 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 			It("should cleanup all Certificates", func() {
 				util.CreateK8sManagedCluster(ctx, k8sClient, clusterName, testClusterSet)
 				util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet, util.CertManagerSpec("mesh-issuer"))
-				expectCertificate(testNs, clusterName, "mesh-issuer")
+				expectCertificate(testNs, clusterName, "mesh-issuer", "Issuer")
 
 				updateMesh(meshName, testNs, func(mesh *meshv1alpha1.MultiClusterMesh) {
 					mesh.Spec.Security.Trust.CertManager.IssuerRef.Name = ""
@@ -769,7 +780,7 @@ func expectNoCacertsManifestWork(clusterNamespace string) {
 	}).Should(BeTrue())
 }
 
-func expectCertificate(namespace, clusterName, issuerName string) *certmanagerv1.Certificate {
+func expectCertificate(namespace, clusterName, issuerName, issuerKind string) *certmanagerv1.Certificate {
 	cert := &certmanagerv1.Certificate{}
 	Eventually(func() error {
 		return k8sClient.Get(ctx, key.Of(fmt.Sprintf("cacerts-%s", clusterName), namespace), cert)
@@ -779,7 +790,7 @@ func expectCertificate(namespace, clusterName, issuerName string) *certmanagerv1
 	Expect(cert.Spec.SecretName).To(Equal(fmt.Sprintf("cacerts-%s", clusterName)))
 	Expect(cert.Spec.IsCA).To(BeTrue())
 	Expect(cert.Spec.IssuerRef.Name).To(Equal(issuerName))
-	Expect(cert.Spec.IssuerRef.Kind).To(Equal("Issuer"))
+	Expect(cert.Spec.IssuerRef.Kind).To(Equal(issuerKind))
 	return cert
 }
 

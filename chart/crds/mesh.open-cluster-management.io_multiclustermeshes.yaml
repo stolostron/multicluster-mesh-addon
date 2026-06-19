@@ -117,8 +117,15 @@ spec:
                             description: IssuerRef references the cert-manager Issuer
                               to use as Root CA
                             properties:
+                              kind:
+                                default: Issuer
+                                description: Kind of the issuer (Issuer or ClusterIssuer)
+                                enum:
+                                - Issuer
+                                - ClusterIssuer
+                                type: string
                               name:
-                                description: Name of the Issuer
+                                description: Name of the Issuer or ClusterIssuer
                                 type: string
                             required:
                             - name
