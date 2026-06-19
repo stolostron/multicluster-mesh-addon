@@ -16,8 +16,7 @@ func formatOU(clusterName string) string {
 		return clusterName
 	}
 
-	hash := fmt.Sprintf("%x", sha256.Sum256([]byte(clusterName)))
-	return clusterName[:55] + "-" + hash[:8]
+	return fmt.Sprintf("%.55s-%.4x", clusterName, sha256.Sum256([]byte(clusterName)))
 }
 
 func certURI(clusterName, trustDomain string) string {
