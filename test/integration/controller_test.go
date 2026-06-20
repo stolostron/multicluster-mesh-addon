@@ -268,10 +268,9 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 			It("should not update operator ManifestWork when operator config hasn't changed", func() {
 				originalVersion := work.ResourceVersion
 
-				mesh := &meshv1alpha1.MultiClusterMesh{}
-				Expect(k8sClient.Get(ctx, key.Of(meshName, testNs), mesh)).To(Succeed())
-				mesh.Spec.ControlPlane.Namespace = "different-ns"
-				Expect(k8sClient.Update(ctx, mesh)).To(Succeed())
+				updateMesh(meshName, testNs, func(mesh *meshv1alpha1.MultiClusterMesh) {
+					mesh.Spec.ControlPlane.Namespace = "different-ns"
+				})
 
 				Consistently(func() string {
 					return expectOperatorManifestWork(clusterName).ResourceVersion
@@ -279,10 +278,9 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 			})
 
 			It("should update ManifestWork when operator config changes", func() {
-				mesh := &meshv1alpha1.MultiClusterMesh{}
-				Expect(k8sClient.Get(ctx, key.Of(meshName, testNs), mesh)).To(Succeed())
-				mesh.Spec.Operator.Channel = "tech-preview"
-				Expect(k8sClient.Update(ctx, mesh)).To(Succeed())
+				updateMesh(meshName, testNs, func(mesh *meshv1alpha1.MultiClusterMesh) {
+					mesh.Spec.Operator.Channel = "tech-preview"
+				})
 
 				Eventually(func() string {
 					work := expectOperatorManifestWork(clusterName)
@@ -524,6 +522,27 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 				Expect(*ownerRef.BlockOwnerDeletion).To(BeTrue())
 			})
 
+			It("should set Subject and URI SAN with truncated OU and full cluster name", func() {
+				longCluster := "ci-managed-cluster-with-a-very-long-generated-name-that-exceeds-64-chars"
+				Expect(k8sClient.Create(ctx, &clusterv1.ManagedCluster{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: longCluster,
+						Labels: map[string]string{
+							meshcontroller.ClusterSetLabel: testClusterSet,
+						},
+					},
+				})).To(Succeed())
+
+				cert := expectCertificate(testNs, longCluster, "mesh-issuer")
+
+				Expect(cert.Spec.Subject).NotTo(BeNil())
+				Expect(cert.Spec.Subject.Organizations).To(ConsistOf(meshName))
+				Expect(cert.Spec.Subject.OrganizationalUnits).To(ConsistOf("ci-managed-cluster-with-a-very-long-generated-name-that-1d71f97d"))
+
+				expectedSAN := "spiffe://" + meshName + "/cluster/" + longCluster + "/ca/istio-ca"
+				Expect(cert.Spec.URIs).To(ConsistOf(expectedSAN))
+			})
+
 			It("should restore Certificate spec when externally modified", func() {
 				cert := expectCertificate(testNs, clusterName, "mesh-issuer")
 
@@ -536,7 +555,7 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 						return ""
 					}
 					return c.Spec.CommonName
-				}).Should(Equal("Intermediate Istio CA"))
+				}).Should(Equal("Istio CA"))
 			})
 
 			It("should recreate Certificate when it is externally deleted", func() {
@@ -617,10 +636,9 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 				util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet, util.CertManagerSpec("mesh-issuer"))
 				expectCertificate(testNs, clusterName, "mesh-issuer")
 
-				mesh := &meshv1alpha1.MultiClusterMesh{}
-				Expect(k8sClient.Get(ctx, key.Of(meshName, testNs), mesh)).To(Succeed())
-				mesh.Spec.Security.Trust.CertManager.IssuerRef.Name = ""
-				Expect(k8sClient.Update(ctx, mesh)).To(Succeed())
+				updateMesh(meshName, testNs, func(mesh *meshv1alpha1.MultiClusterMesh) {
+					mesh.Spec.Security.Trust.CertManager.IssuerRef.Name = ""
+				})
 
 				util.ExpectResourceDeleted(ctx, k8sClient, &certmanagerv1.Certificate{},
 					fmt.Sprintf("cacerts-%s", clusterName), testNs)
@@ -826,13 +844,25 @@ func expectNoManifestWorks() {
 // causing safeToSkipApply to read stale generation and skip the patch.
 // TODO(mkolesnik): Remove once WorkApplier uses the CR cache (sdk-go#226).
 func triggerReconcile(meshName, namespace string) {
+	updateMesh(meshName, namespace, func(mesh *meshv1alpha1.MultiClusterMesh) {
+		if mesh.Annotations == nil {
+			mesh.Annotations = map[string]string{}
+		}
+		mesh.Annotations["test.reconcile-trigger"] = mesh.ResourceVersion
+	})
+}
+
+// updateMesh makes sure to retry the read-modify-write cycle in case of a conflict.
+func updateMesh(meshName, namespace string, mutate func(*meshv1alpha1.MultiClusterMesh)) *meshv1alpha1.MultiClusterMesh {
 	mesh := &meshv1alpha1.MultiClusterMesh{}
-	Expect(k8sClient.Get(ctx, key.Of(meshName, namespace), mesh)).To(Succeed())
-	if mesh.Annotations == nil {
-		mesh.Annotations = map[string]string{}
-	}
-	mesh.Annotations["test.reconcile-trigger"] = mesh.ResourceVersion
-	Expect(k8sClient.Update(ctx, mesh)).To(Succeed())
+	Eventually(func() error {
+		if err := k8sClient.Get(ctx, key.Of(meshName, namespace), mesh); err != nil {
+			return err
+		}
+		mutate(mesh)
+		return k8sClient.Update(ctx, mesh)
+	}).Should(Succeed())
+	return mesh
 }
 
 // expectAllManifestWorksDeleted makes sure ManifestWorks are deleted and none remain

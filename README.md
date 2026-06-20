@@ -54,17 +54,19 @@ make deploy
 # Or run individual steps:
 make images      # Build container image
 make push        # Push to registry
-make deploy      # Apply CRDs and deployment
+make deploy      # Deploy using Helm
 ```
 
 The `deploy` target will:
 1. Build and push the container image to the registry (default: `quay.io/sail-dev`)
-2. Apply the CRD manifests from `config/crd/`
-3. Deploy the controller with the built image
+2. Install the controller using Helm chart from `chart/`
+3. Create the namespace and deploy all resources (CRDs, RBAC, Deployment)
 
 **Configuration:**
 - `REGISTRY_BASE`: Override the image registry (default: `quay.io/sail-dev`)
 - `IMG`: Full image reference (default: `${REGISTRY_BASE}/multicluster-mesh-addon:${GIT_VERSION}`)
+- `ADDON_NAMESPACE`: Namespace where addon will be deployed (default: `multicluster-mesh-system`)
+- `PLATFORM`: Platform type (default: `openshift`, or `kind` for Kind clusters)
 
 To remove the deployment:
 
@@ -79,7 +81,7 @@ To run the controller from localhost for development:
 ```bash
 # Generate and install CRDs
 make gen-crds
-kubectl apply -f config/crd/
+kubectl apply -f chart/crds/
 
 # Build the binary
 make build
@@ -89,7 +91,7 @@ make build
 ```
 
 **Prerequisites:**
-- CRDs must be installed in the cluster (via `kubectl apply -f config/crd/`)
+- CRDs must be installed in the cluster (via `kubectl apply -f chart/crds/`)
 - Valid kubeconfig pointing to your cluster (specify with `--kubeconfig` flag)
 
 The controller runs against the specified kubeconfig context. Leader election is disabled to avoid requiring the `multicluster-mesh-system` namespace and associated RBAC permissions during local development.
@@ -106,7 +108,7 @@ kubectl create namespace multicluster-mesh-system
 
 #### Local Kind+OCM Dev Environment
 
-Provisions a complete multi-cluster topology (1 hub + 2 managed clusters) using Kind and OCM, then builds and deploys the addon controller with a ready-to-use mesh:
+Provisions a complete multi-cluster topology (1 hub + 2 managed clusters) using Kind and OCM, then builds and deploys the addon controller:
 
 ```bash
 make dev-env
@@ -154,8 +156,6 @@ See the [Kind known issues](https://kind.sigs.k8s.io/docs/user/known-issues/#pod
 ### Usage
 
 #### Quick Start
-
-> **Note:** If you used `make dev-env`, the mesh is already set up. The following manual steps are for deploying on existing clusters.
 
 1. Create a namespace for your mesh resources:
 ```bash

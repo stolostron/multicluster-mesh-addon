@@ -24,3 +24,6 @@ vendor/
 
 # Dev environment (make dev-env)
 .kube/
+
+# Helm packaged charts
+chart/*.tgz

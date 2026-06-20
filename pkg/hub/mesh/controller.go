@@ -20,6 +20,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	applyconfigv1 "k8s.io/client-go/applyconfigurations/meta/v1"
+	"k8s.io/client-go/util/retry"
 	"k8s.io/klog/v2"
 	workclient "open-cluster-management.io/api/client/work/clientset/versioned"
 	workinformers "open-cluster-management.io/api/client/work/informers/externalversions"
@@ -185,7 +186,6 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (resu
 		return
 	}
 
-	// Copy the status so we can avoid updating it in case nothing changed.
 	oldStatus := mesh.Status.DeepCopy()
 
 	var invalidCondition *metav1.Condition
@@ -212,10 +212,17 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (resu
 		}
 	}
 
-	// Update status only if something changed, to avoid unnecessary reconciliations
 	var statusErr error
 	if !reflect.DeepEqual(oldStatus, &mesh.Status) {
-		statusErr = r.Status().Update(ctx, mesh)
+		newStatus := mesh.Status
+		statusErr = retry.RetryOnConflict(retry.DefaultRetry, func() error {
+			latest := &meshv1alpha1.MultiClusterMesh{}
+			if err := r.Get(ctx, req.NamespacedName, latest); err != nil {
+				return err
+			}
+			latest.Status = newStatus
+			return r.Status().Update(ctx, latest)
+		})
 	}
 
 	return result, errors.Join(reconcileErr, statusErr)
@@ -439,7 +446,10 @@ func (r *Reconciler) cleanupManifestWorks(ctx context.Context, clusterSet string
 // are removed (e.g. when the issuer is cleared). Otherwise, only Certificates for clusters no longer in the
 // ClusterSet are removed.
 func (r *Reconciler) cleanupCertificates(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, clusters []clusterv1.ManagedCluster, forceCleanupAll bool) error {
-	clusterNames := clusterNameSet(clusters)
+	labelValues := make(map[string]bool, len(clusters))
+	for _, c := range clusters {
+		labelValues[formatLabelValue(c.Name)] = true
+	}
 
 	certList := &certmanagerv1.CertificateList{}
 	if err := r.List(ctx, certList,
@@ -451,7 +461,7 @@ func (r *Reconciler) cleanupCertificates(ctx context.Context, mesh *meshv1alpha1
 
 	for _, cert := range certList.Items {
 		clusterName := cert.Labels[ClusterNameLabel]
-		if !forceCleanupAll && clusterNames[clusterName] {
+		if !forceCleanupAll && labelValues[clusterName] {
 			continue
 		}
 
@@ -803,7 +813,11 @@ func (r *Reconciler) ensureCertificateForCluster(ctx context.Context, mesh *mesh
 				WithLabels(meshOwnedLabels(mesh, cluster.Name))).
 			WithDuration(metav1.Duration{Duration: 60 * Day}).
 			WithRenewBefore(metav1.Duration{Duration: 15 * Day}).
-			WithCommonName("Intermediate Istio CA").
+			WithCommonName("Istio CA").
+			WithSubject(certmanagerapply.X509Subject().
+				WithOrganizations(mesh.GetTrustDomain()).
+				WithOrganizationalUnits(formatOU(cluster.Name))).
+			WithURIs(certURI(cluster.Name, mesh.GetTrustDomain())).
 			WithIsCA(true).
 			WithUsages(
 				certmanagerv1.UsageDigitalSignature,
@@ -892,6 +906,6 @@ func meshOwnedLabels(mesh *meshv1alpha1.MultiClusterMesh, clusterName string) ma
 		ClusterSetLabel:    mesh.Spec.ClusterSet,
 		MeshNameLabel:      mesh.Name,
 		MeshNamespaceLabel: mesh.Namespace,
-		ClusterNameLabel:   clusterName,
+		ClusterNameLabel:   formatLabelValue(clusterName),
 	}
 }

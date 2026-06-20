@@ -1,9 +1,8 @@
----
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: multicluster-mesh-controller
-  namespace: multicluster-mesh-system
+  namespace: {{ .Release.Namespace }}
   labels:
     app: multicluster-mesh-controller
 spec:
@@ -19,8 +18,8 @@ spec:
       serviceAccountName: multicluster-mesh-controller
       containers:
         - name: controller
-          image: quay.io/sail-dev/multicluster-mesh-addon:latest
-          imagePullPolicy: Always
+          image: {{ .Values.image.repository }}:{{ .Values.image.tag }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
           command:
             - /multicluster-mesh-addon
             - controller
