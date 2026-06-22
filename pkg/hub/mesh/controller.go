@@ -498,7 +498,7 @@ func (r *Reconciler) determineStatus(ctx context.Context, mesh *meshv1alpha1.Mul
 			return fmt.Errorf("failed to get operator ManifestWork for cluster %s: %w", cluster.Name, err)
 		}
 
-		if installedCSV := getManifestWorkFeedback(operatorWork, FeedbackInstalledCSV); installedCSV != nil {
+		if installedCSV := getManifestWorkFeedback(operatorWork); installedCSV != nil {
 			meta.SetStatusCondition(&status.Conditions, metav1.Condition{
 				Type:               meshv1alpha1.ConditionOperatorInstalled,
 				Status:             metav1.ConditionTrue,
@@ -537,10 +537,10 @@ func (r *Reconciler) determineStatus(ctx context.Context, mesh *meshv1alpha1.Mul
 	return nil
 }
 
-func getManifestWorkFeedback(work *workv1.ManifestWork, name string) *string {
+func getManifestWorkFeedback(work *workv1.ManifestWork) *string {
 	for _, manifest := range work.Status.ResourceStatus.Manifests {
 		for _, value := range manifest.StatusFeedbacks.Values {
-			if value.Name == name {
+			if value.Name == FeedbackInstalledCSV {
 				return value.Value.String
 			}
 		}
