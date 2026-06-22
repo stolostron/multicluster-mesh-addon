@@ -295,12 +295,12 @@ setup_mesh() {
     kubectl --kubeconfig="${hub_kubeconfig}" rollout status deployment/cert-manager-cainjector \
         -n cert-manager --timeout=120s
 
-    log "Applying cert-manager trust chain (ClusterIssuer, root CA Certificate, Issuer)"
+    log "Applying cert-manager trust chain (self-signed Issuer, root CA Certificate, CA-backed Issuer)"
     kubectl --kubeconfig="${hub_kubeconfig}" apply -f "${SCRIPT_DIR}/samples/cert-manager-issuer.yaml"
 
-    log "Waiting for ClusterIssuer to be ready..."
-    kubectl --kubeconfig="${hub_kubeconfig}" wait clusterissuer/mesh-selfsigned-issuer \
-        --for=condition=Ready --timeout=60s
+    log "Waiting for bootstrap Issuer to be ready..."
+    kubectl --kubeconfig="${hub_kubeconfig}" wait issuer/mesh-selfsigned-issuer \
+        -n mesh-system --for=condition=Ready --timeout=60s
 
     log "Waiting for root CA Certificate to be issued..."
     kubectl --kubeconfig="${hub_kubeconfig}" wait certificate/mesh-root-ca \

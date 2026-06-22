@@ -314,9 +314,6 @@ setup-mesh: ## Create cert-manager trust chain, mesh-system namespace, and Multi
 dev-clean-meshes: ## Delete all mesh resources, cert-manager trust chain, and mesh-system namespace
 	kubectl --kubeconfig=$(HUB_KUBECONFIG) delete multiclustermeshes -A --all --ignore-not-found=true
 	kubectl --kubeconfig=$(HUB_KUBECONFIG) delete manifestwork -A -l app.kubernetes.io/managed-by=multicluster-mesh-addon --ignore-not-found=true
-	kubectl --kubeconfig=$(HUB_KUBECONFIG) delete issuer mesh-root-ca -n mesh-system --ignore-not-found=true
-	kubectl --kubeconfig=$(HUB_KUBECONFIG) delete certificate mesh-root-ca -n mesh-system --ignore-not-found=true
-	kubectl --kubeconfig=$(HUB_KUBECONFIG) delete clusterissuer mesh-selfsigned-issuer --ignore-not-found=true
 	kubectl --kubeconfig=$(HUB_KUBECONFIG) delete namespace mesh-system --ignore-not-found=true
 
 .PHONY: dev-clean
