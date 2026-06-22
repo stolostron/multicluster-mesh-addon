@@ -1,7 +1,10 @@
 package v1alpha1
 
 import (
+	"fmt"
+
 	operatorsv1alpha1 "github.com/operator-framework/api/pkg/operators/v1alpha1"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -30,6 +33,40 @@ func (m *MultiClusterMesh) GetControlPlaneNamespace() string {
 		return "istio-system"
 	}
 	return m.Spec.ControlPlane.Namespace
+}
+
+// SetReadyCondition sets the mesh-level Ready condition.
+func (m *MultiClusterMesh) SetReadyCondition(status metav1.ConditionStatus, reason string, messageFmt string, args ...any) {
+	meta.SetStatusCondition(&m.Status.Conditions, metav1.Condition{
+		Type:               ConditionReady,
+		Status:             status,
+		Reason:             reason,
+		ObservedGeneration: m.Generation,
+		Message:            fmt.Sprintf(messageFmt, args...),
+	})
+}
+
+// SetClusterCondition sets a per-cluster condition, creating the cluster status entry if needed.
+func (m *MultiClusterMesh) SetClusterCondition(clusterName string, conditionType string, status metav1.ConditionStatus, reason string, messageFmt string, args ...any) {
+	cs := m.getOrCreateClusterStatus(clusterName)
+	meta.SetStatusCondition(&cs.Conditions, metav1.Condition{
+		Type:               conditionType,
+		Status:             status,
+		Reason:             reason,
+		ObservedGeneration: m.Generation,
+		Message:            fmt.Sprintf(messageFmt, args...),
+	})
+}
+
+func (m *MultiClusterMesh) getOrCreateClusterStatus(clusterName string) *ClusterMeshStatus {
+	// Index-based iteration to return a pointer into the slice, not a copy.
+	for i := range m.Status.ClusterStatus {
+		if m.Status.ClusterStatus[i].ClusterName == clusterName {
+			return &m.Status.ClusterStatus[i]
+		}
+	}
+	m.Status.ClusterStatus = append(m.Status.ClusterStatus, ClusterMeshStatus{ClusterName: clusterName})
+	return &m.Status.ClusterStatus[len(m.Status.ClusterStatus)-1]
 }
 
 // MultiClusterMeshSpec defines the desired state of a multi-cluster mesh
