@@ -727,7 +727,7 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 				expectNoCertificate(testNs, clusterName)
 
 				util.SetProductClaim(ctx, k8sClient, clusterName, "Other")
-				expectCertificate(testNs, clusterName, "mesh-issuer")
+				expectCertificate(testNs, clusterName, "mesh-issuer", "Issuer")
 			})
 		})
 	})
