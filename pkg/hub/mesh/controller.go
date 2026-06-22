@@ -58,6 +58,8 @@ const (
 	OperatorManifestWorkName = "multicluster-mesh-operator"
 	ManifestWorkNameCacerts  = "multicluster-mesh-cacerts"
 
+	FeedbackInstalledCSV = "installedCSV"
+
 	CacertsSecretName = "cacerts"
 
 	FinalizerName = "mesh.open-cluster-management.io/finalizer"
@@ -501,11 +503,20 @@ func (r *Reconciler) determineStatus(ctx context.Context, mesh *meshv1alpha1.Mul
 			continue
 		}
 
-		work := &workv1.ManifestWork{}
-		err := r.Get(ctx, key.Of(OperatorManifestWorkName, cluster.Name), work)
+		operatorWork := &workv1.ManifestWork{}
+		if err := r.Get(ctx, key.Of(OperatorManifestWorkName, cluster.Name), operatorWork); err != nil {
+			return fmt.Errorf("failed to get operator ManifestWork for cluster %s: %w", cluster.Name, err)
+		}
 
-		if err == nil {
-			// TODO: Set to actual status when operator installation is confirmed via ManifestWork status feedback
+		if installedCSV := getManifestWorkFeedback(operatorWork); installedCSV != nil {
+			meta.SetStatusCondition(&status.Conditions, metav1.Condition{
+				Type:               meshv1alpha1.ConditionOperatorInstalled,
+				Status:             metav1.ConditionTrue,
+				Reason:             meshv1alpha1.ReasonOperatorInstalled,
+				ObservedGeneration: mesh.Generation,
+				Message:            fmt.Sprintf("Operator installed: %s", *installedCSV),
+			})
+		} else {
 			allReady = false
 			meta.SetStatusCondition(&status.Conditions, metav1.Condition{
 				Type:               meshv1alpha1.ConditionOperatorInstalled,
@@ -514,8 +525,6 @@ func (r *Reconciler) determineStatus(ctx context.Context, mesh *meshv1alpha1.Mul
 				ObservedGeneration: mesh.Generation,
 				Message:            "Operator ManifestWork has been created, awaiting installation confirmation",
 			})
-		} else {
-			return fmt.Errorf("failed to get operator ManifestWork for cluster %s: %w", cluster.Name, err)
 		}
 
 		clusterStatuses = append(clusterStatuses, status)
@@ -535,6 +544,17 @@ func (r *Reconciler) determineStatus(ctx context.Context, mesh *meshv1alpha1.Mul
 	}
 	meta.SetStatusCondition(&mesh.Status.Conditions, readyCondition)
 
+	return nil
+}
+
+func getManifestWorkFeedback(work *workv1.ManifestWork) *string {
+	for _, manifest := range work.Status.ResourceStatus.Manifests {
+		for _, value := range manifest.StatusFeedbacks.Values {
+			if value.Name == FeedbackInstalledCSV {
+				return value.Value.String
+			}
+		}
+	}
 	return nil
 }
 
@@ -703,6 +723,24 @@ func (r *Reconciler) buildOperatorManifestWork(mesh *meshv1alpha1.MultiClusterMe
 			Workload: workv1.ManifestsTemplate{
 				Manifests: manifests,
 			},
+			// Report the Subscription's installedCSV field back to the hub via ManifestWork feedback.
+			// OLM sets this field only after the operator's CSV reaches the Succeeded phase,
+			// so a non-empty value confirms the operator is installed.
+			ManifestConfigs: []workv1.ManifestConfigOption{{
+				ResourceIdentifier: workv1.ResourceIdentifier{
+					Group:     "operators.coreos.com",
+					Resource:  "subscriptions",
+					Name:      packageName,
+					Namespace: config.Namespace,
+				},
+				FeedbackRules: []workv1.FeedbackRule{{
+					Type: workv1.JSONPathsType,
+					JsonPaths: []workv1.JsonPath{{
+						Name: FeedbackInstalledCSV,
+						Path: ".status.installedCSV",
+					}},
+				}},
+			}},
 		},
 	}
 }

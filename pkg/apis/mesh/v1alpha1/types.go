@@ -157,6 +157,9 @@ const (
 	// ReasonManifestWorkCreated indicates the operator ManifestWork has been created
 	ReasonManifestWorkCreated = "ManifestWorkCreated"
 
+	// ReasonOperatorInstalled indicates the operator CSV has been successfully installed
+	ReasonOperatorInstalled = "Installed"
+
 	// ReasonMissingProductClaim indicates the cluster is missing its product claim
 	ReasonMissingProductClaim = "MissingProductClaim"
 
