@@ -57,7 +57,7 @@ function categorizeCluster(cs: ClusterMeshStatus): ClusterStatusCategory {
 
 const CONFLICT_REASONS = ['OperatorConfigConflict', 'NamespaceConflict']
 
-const ClusterStatusSection: React.FC<{ clusterStatuses: ClusterMeshStatus[]; meshConditions?: K8sCondition[] }> = ({
+export const ClusterStatusSection: React.FC<{ clusterStatuses: ClusterMeshStatus[]; meshConditions?: K8sCondition[] }> = ({
   clusterStatuses,
   meshConditions,
 }) => {
@@ -253,7 +253,7 @@ const MeshDetailContent: React.FC<{ ns: string; name: string }> = ({ ns, name })
 
   return (
     <>
-      <PageSection variant="light">
+      <PageSection>
         <Breadcrumb>
           <BreadcrumbItem>
             <Link to="/service-mesh">{t('Meshes')}</Link>
