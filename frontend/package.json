@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "build": "webpack --mode production",
+    "build": "ts-node -O '{\"module\":\"commonjs\"}' node_modules/.bin/webpack --mode production",
     "start": "webpack serve --mode development",
     "test": "jest --config jest.config.cjs"
   },

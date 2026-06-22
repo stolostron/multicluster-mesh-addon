@@ -10,7 +10,7 @@ Complete instructions to go from zero to a working Fleet Service Mesh ConsolePlu
 - `podman` installed
 - `jq` installed
 - `make` installed
-- **Node.js 20** — Node 22+ will NOT work (stricter ESM module resolution breaks ts-node/webpack). Use `nvm`, `fnm`, or `n` to switch (e.g. `nvm use 20`). The Makefile will fail fast if the wrong version is active.
+- Node.js 20+
 - Go toolchain
 
 ## 1. Start CRC and install ACM
@@ -173,7 +173,7 @@ oc get secret cacerts -n istio-system
 ```bash
 cd <multicluster-mesh-addon-repo>/frontend
 
-# Build (requires Node.js 20)
+# Build
 npm install
 npm run build
 

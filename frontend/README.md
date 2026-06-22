@@ -15,7 +15,7 @@ The plugin provides:
 
 - [CRC](https://crc.dev) or OpenShift cluster with ACM installed and the multicluster-mesh-addon backend controller deployed. See [DEV-INSTALL.md](DEV-INSTALL.md) steps 1-4 for full setup instructions.
 - `oc` logged in as `kubeadmin`
-- Node.js 20 (Node 22+ may fail due to stricter ESM module resolution in ts-node)
+- Node.js 20+
 - `jq`, `make`
 - For production image builds: `podman` or `docker`
 

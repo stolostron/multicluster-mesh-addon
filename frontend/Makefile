@@ -12,27 +12,11 @@ REGISTRY = $(shell $(OC) get image.config.openshift.io/cluster -o jsonpath='{.st
 IMG ?= $(REGISTRY)/$(PLUGIN_NAMESPACE)/ossm-acm-console-plugin:latest
 INTERNAL_IMG = $(INTERNAL_REGISTRY)/$(PLUGIN_NAMESPACE)/ossm-acm-console-plugin:latest
 
-# Node 20 is required — Node 22+ has stricter ESM module resolution that breaks
-# ts-node's loading of webpack.config.ts. The Dockerfile uses ubi9/nodejs-20 so
-# production image builds are unaffected; this check guards local dev builds only.
-REQUIRED_NODE_MAJOR := 20
-NODE_MAJOR := $(shell node -v 2>/dev/null | sed 's/v\([0-9]*\).*/\1/')
-define CHECK_NODE
-	@if [ -z "$(NODE_MAJOR)" ]; then \
-		echo "Error: node is not installed. Install Node.js $(REQUIRED_NODE_MAJOR) (use nvm, fnm, or n)."; \
-		exit 1; \
-	elif [ "$(NODE_MAJOR)" != "$(REQUIRED_NODE_MAJOR)" ]; then \
-		echo "Error: Node.js $(REQUIRED_NODE_MAJOR) is required but you have $$(node -v). Switch with nvm/fnm/n (e.g. nvm use $(REQUIRED_NODE_MAJOR))"; \
-		exit 1; \
-	fi
-endef
-
 .PHONY: help dev-build dev-deploy dev-teardown prod-build prod-push prod-deploy prod-teardown test
 
 ##@ Development
 
 dev-build: ## Compile TS/React source into dist/ for local dev
-	$(CHECK_NODE)
 	npm install
 	npm run build
 
@@ -76,7 +60,6 @@ dev-teardown: ## Remove the dev plugin deployment from the cluster
 ##@ Testing
 
 test: ## Run unit tests
-	$(CHECK_NODE)
 	npm test
 
 ##@ Production

@@ -28,7 +28,7 @@ Related links:
 
 ## Build & Deploy
 
-Requires Node.js 20 (not 22+, which has ESM resolution issues with ts-node).
+Requires Node.js 20+.
 
 Run `make help` to see all available targets.
 
