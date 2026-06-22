@@ -166,6 +166,41 @@ oc get manifestwork multicluster-mesh-cacerts -n local-cluster
 oc get secret cacerts -n istio-system
 ```
 
+## 4b. (Optional) Create additional test meshes
+
+To test the list page with multiple meshes in different states, create additional `MultiClusterMesh` CRs. If you use the same cluster set as `my-mesh`, they will show various conflict and status conditions if you induce conflicts in their config.
+
+```bash
+# A second mesh without trust. Trust is intentionally omitted because on a
+# single-node CRC, two trust-enabled meshes sharing the same cluster set will
+# fight over the same cacerts ManifestWork, causing status to oscillate.
+# To test conflicts, try changing controlPlane.namespace to "istio-system"
+# (same as my-mesh's default) to trigger a NamespaceConflict, or add
+# operator settings (e.g. spec.operator.channel: "preview") that differ from
+# my-mesh to trigger an OperatorConfigConflict. Both show a blocked-mesh
+# banner on the detail page and a red status on the list page.
+oc apply -f - <<'EOF'
+apiVersion: mesh.open-cluster-management.io/v1alpha1
+kind: MultiClusterMesh
+metadata:
+  name: staging-mesh
+  namespace: mesh-system
+spec:
+  clusterSet: mesh-cluster-set
+  controlPlane:
+    namespace: istio-staging
+EOF
+
+# Verify all meshes
+oc get multiclustermesh -n mesh-system
+```
+
+To clean up the extra meshes later:
+
+```bash
+oc delete multiclustermesh staging-mesh dev-mesh -n mesh-system
+```
+
 ## 5. Build and deploy the frontend ConsolePlugin
 
 *NOTE: These commands can also be run via `make dev-build dev-deploy` from the `frontend/` directory.*
