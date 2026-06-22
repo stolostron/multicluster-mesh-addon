@@ -27,7 +27,12 @@ const makeCluster = (name: string): ClusterMeshStatus => ({
   conditions: [makeCondition('OperatorInstalled', 'True')],
 })
 
-const makeCert = (clusterName: string, readyStatus: 'True' | 'False' | 'Unknown', reason?: string): Certificate => ({
+const makeCert = (
+  clusterName: string,
+  readyStatus: 'True' | 'False' | 'Unknown',
+  reason?: string,
+  timestamps?: { notAfter?: string; renewalTime?: string },
+): Certificate => ({
   apiVersion: 'cert-manager.io/v1',
   kind: 'Certificate',
   metadata: {
@@ -38,7 +43,10 @@ const makeCert = (clusterName: string, readyStatus: 'True' | 'False' | 'Unknown'
       [MESH_NAME_LABEL]: 'test-mesh',
     },
   },
-  status: { conditions: [makeCondition('Ready', readyStatus, reason)] },
+  status: {
+    conditions: [makeCondition('Ready', readyStatus, reason)],
+    ...timestamps,
+  },
 })
 
 const makeMW = (clusterName: string, applied: boolean, available: boolean): ManifestWork => ({
@@ -170,12 +178,26 @@ describe('TrustStatusCard — empty states', () => {
 
 describe('TrustStatusCard — row status labels', () => {
   it('shows Distributed when cert is Ready and MW is Applied + Available', () => {
-    const certs = [makeCert('cluster-a', 'True')]
+    const certs = [makeCert('cluster-a', 'True', undefined, {
+      notAfter: '2026-12-31T00:00:00Z',
+      renewalTime: '2026-11-30T00:00:00Z',
+    })]
     const mws = [makeMW('cluster-a', true, true)]
     setupWatches(certs, mws)
     render(<TrustStatusCard {...defaultProps} />)
     expect(screen.getByText('Ready')).toBeInTheDocument()
     expect(screen.getByText('Distributed')).toBeInTheDocument()
+    expect(screen.getByText('2026-12-31T00:00:00Z')).toBeInTheDocument()
+    expect(screen.getByText('2026-11-30T00:00:00Z')).toBeInTheDocument()
+  })
+
+  it('shows dash in Expires and Renews columns when cert has no timestamp fields', () => {
+    const certs = [makeCert('cluster-a', 'True')]
+    const mws = [makeMW('cluster-a', true, true)]
+    setupWatches(certs, mws)
+    render(<TrustStatusCard {...defaultProps} />)
+    // Two dashes: one for Expires, one for Renews
+    expect(screen.getAllByText('-').length).toBeGreaterThanOrEqual(2)
   })
 
   it('shows Applied when cert is Ready but MW is only Applied (not yet Available)', () => {

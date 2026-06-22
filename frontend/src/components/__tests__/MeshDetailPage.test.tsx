@@ -205,6 +205,13 @@ describe('ClusterStatusSection', () => {
     expect(screen.getByText(/OperatorConfigConflict/)).toBeInTheDocument()
   })
 
+  it('does not show the conflict message when clusterStatuses is non-empty', () => {
+    const conditions = [makeCondition('Ready', 'False', 'OperatorConfigConflict', 'Operator conflict detected')]
+    render(<ClusterStatusSection clusterStatuses={[makeCluster('cluster-a', 'True')]} meshConditions={conditions} />)
+    expect(screen.queryByText(/blocked/)).not.toBeInTheDocument()
+    expect(screen.getByText('cluster-a')).toBeInTheDocument()
+  })
+
   it('renders all cluster rows and the count in the card title', () => {
     const clusters = [
       makeCluster('cluster-a', 'True'),
