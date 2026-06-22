@@ -39,4 +39,5 @@ Run `make help` to see all available targets.
 
 - [DEV-INSTALL.md](DEV-INSTALL.md) — End-to-end setup guide for CRC (ACM, cert-manager, backend controller, frontend plugin)
 - [AGENTS.md](AGENTS.md) — AI/dev agent context for the frontend codebase
-- [PLAN.md](PLAN.md) — Original spike research and architecture notes
+- [ROADMAP.md](ROADMAP.md) — Current status and future plans
+- [SPIKE.md](SPIKE.md) — Original spike research and architecture notes

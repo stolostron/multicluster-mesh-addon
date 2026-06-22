@@ -7,7 +7,8 @@ OpenShift ConsolePlugin that adds a "Fleet Service Mesh" perspective to the Open
 Related links:
 - [OSSM-12887](https://redhat.atlassian.net/browse/OSSM-12887) — Epic: OSSM/Kiali ACM console integration developer preview
 - [OCPSTRAT-2989](https://redhat.atlassian.net/browse/OCPSTRAT-2989) — Feature: Fleet-wide service mesh console integration with ACM
-- [PLAN.md](PLAN.md) — Original spike research and architecture notes
+- [ROADMAP.md](ROADMAP.md) — Current status and future plans
+- [SPIKE.md](SPIKE.md) — Original spike research and architecture notes
 - [DEV-INSTALL.md](DEV-INSTALL.md) — End-to-end dev setup on CRC
 
 ## Project Structure
