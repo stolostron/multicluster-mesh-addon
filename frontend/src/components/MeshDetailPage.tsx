@@ -54,7 +54,9 @@ function categorizeCluster(cs: ClusterMeshStatus): ClusterStatusCategory {
   return 'notReady'
 }
 
-const ClusterStatusSection: React.FC<{ clusterStatuses: ClusterMeshStatus[] }> = ({ clusterStatuses }) => {
+const CONFLICT_REASONS = ['OperatorConfigConflict', 'NamespaceConflict']
+
+const ClusterStatusSection: React.FC<{ clusterStatuses: ClusterMeshStatus[]; meshConditions?: K8sCondition[] }> = ({ clusterStatuses, meshConditions }) => {
   const [filter, setFilter] = React.useState<ClusterStatusCategory>('all')
   const [search, setSearch] = React.useState('')
 
@@ -76,12 +78,18 @@ const ClusterStatusSection: React.FC<{ clusterStatuses: ClusterMeshStatus[] }> =
   }, [clusterStatuses, filter, search])
 
   if (clusterStatuses.length === 0) {
+    const readyCondition = meshConditions?.find((c) => c.type === 'Ready')
+    const isConflict = readyCondition && CONFLICT_REASONS.includes(readyCondition.reason ?? '')
     return (
       <Card>
         <CardTitle>Cluster Status (0)</CardTitle>
         <CardBody>
           <EmptyState variant="xs">
-            <EmptyStateBody>No clusters are part of this mesh yet.</EmptyStateBody>
+            <EmptyStateBody>
+              {isConflict
+                ? `This mesh is blocked: ${readyCondition?.message || readyCondition?.reason}. Resolve the conflict to allow reconciliation.`
+                : 'No clusters are part of this mesh yet.'}
+            </EmptyStateBody>
           </EmptyState>
         </CardBody>
       </Card>
@@ -322,7 +330,7 @@ const MeshDetailContent: React.FC<{ ns: string; name: string }> = ({ ns, name })
           </GridItem>
 
           <GridItem span={12}>
-            <ClusterStatusSection clusterStatuses={clusterStatuses} />
+            <ClusterStatusSection clusterStatuses={clusterStatuses} meshConditions={conditions} />
           </GridItem>
 
           {conditions.length > 0 && (
