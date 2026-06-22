@@ -84,8 +84,18 @@ check_kernel_keyring_limits() {
     fi
 }
 
-kubeconfig_for() {
-    echo "${DEV_KUBE_DIR}/${1}.config"
+on() {
+    local cluster="${1}"
+    shift
+    "$@" --kubeconfig="${DEV_KUBE_DIR}/${cluster}.config"
+}
+
+require_clusters() {
+    for cluster in "$@"; do
+        if [[ ! -f "${DEV_KUBE_DIR}/${cluster}.config" ]]; then
+            err "Kubeconfig not found for ${cluster}. Run 'make create-clusters' first."
+        fi
+    done
 }
 
 create_clusters() {
@@ -109,18 +119,14 @@ create_clusters() {
     local kind_node_image="kindest/node:${K8S_VERSION}"
 
     for cluster in "${HUB}" "${CLUSTER1}" "${CLUSTER2}"; do
-        local kubeconfig
-        kubeconfig="$(kubeconfig_for "${cluster}")"
-
         log "Creating Kind cluster: ${cluster}"
-        ${KIND} create cluster \
+        on "${cluster}" "${KIND}" create cluster \
             --name "${cluster}" \
-            --kubeconfig "${kubeconfig}" \
             --image "${kind_node_image}" \
             --wait 120s
 
         log "Waiting for cluster ${cluster} API to be ready..."
-        kubectl --kubeconfig="${kubeconfig}" wait --for=condition=Ready nodes --all --timeout=120s
+        on "${cluster}" kubectl wait --for=condition=Ready nodes --all --timeout=120s
     done
 
     log "All clusters created successfully"
@@ -128,98 +134,72 @@ create_clusters() {
 }
 
 install_olm() {
+    require_clusters "${CLUSTER1}" "${CLUSTER2}"
     local olm_base_url="https://github.com/operator-framework/operator-lifecycle-manager/releases/download/${OLM_VERSION}"
 
     for cluster in "${CLUSTER1}" "${CLUSTER2}"; do
-        local kubeconfig
-        kubeconfig="$(kubeconfig_for "${cluster}")"
-
-        if [[ ! -f "${kubeconfig}" ]]; then
-            err "Kubeconfig not found for ${cluster} at ${kubeconfig}. Run 'make create-clusters' first."
-        fi
-
-        # Check if OLM is already installed
-        if kubectl --kubeconfig="${kubeconfig}" get deployment olm-operator -n olm &>/dev/null; then
+        if on "${cluster}" kubectl get deployment olm-operator -n olm &>/dev/null; then
             log "OLM already installed on ${cluster}, skipping"
             continue
         fi
 
         log "Installing OLM ${OLM_VERSION} on ${cluster}..."
 
-        kubectl --kubeconfig="${kubeconfig}" apply --server-side -f "${olm_base_url}/crds.yaml"
-        retry kubectl --kubeconfig="${kubeconfig}" wait --for=condition=Established \
+        on "${cluster}" kubectl apply --server-side -f "${olm_base_url}/crds.yaml"
+        on "${cluster}" retry kubectl wait --for=condition=Established \
             crd/catalogsources.operators.coreos.com \
             crd/subscriptions.operators.coreos.com \
             --timeout=60s
 
         log "Applying OLM components on ${cluster}..."
-        kubectl --kubeconfig="${kubeconfig}" apply -f "${olm_base_url}/olm.yaml"
+        on "${cluster}" kubectl apply -f "${olm_base_url}/olm.yaml"
 
         log "Waiting for OLM components to be ready on ${cluster}..."
-        kubectl --kubeconfig="${kubeconfig}" rollout status deployment/olm-operator -n olm --timeout=180s
-        kubectl --kubeconfig="${kubeconfig}" rollout status deployment/catalog-operator -n olm --timeout=180s
+        on "${cluster}" kubectl rollout status deployment/olm-operator -n olm --timeout=180s
+        on "${cluster}" kubectl rollout status deployment/catalog-operator -n olm --timeout=180s
 
         log "OLM ${OLM_VERSION} installed on ${cluster}"
     done
 
-    # Grant the OCM work agent (klusterlet-work-sa) permission to manage OLM resources.
     for cluster in "${CLUSTER1}" "${CLUSTER2}"; do
         log "Granting klusterlet-work-sa OLM permissions on ${cluster}"
-        kubectl --kubeconfig="$(kubeconfig_for "${cluster}")" apply -f "${SCRIPT_DIR}/hack/kind/klusterlet-work-olm.yaml"
+        on "${cluster}" kubectl apply -f "${SCRIPT_DIR}/hack/kind/klusterlet-work-olm.yaml"
     done
 }
 
 install_cert_manager() {
-    local hub_kubeconfig
-    hub_kubeconfig="$(kubeconfig_for "${HUB}")"
-
-    if [[ ! -f "${hub_kubeconfig}" ]]; then
-        err "Hub kubeconfig not found at ${hub_kubeconfig}. Run 'make create-clusters' first."
-    fi
-
-    if kubectl --kubeconfig="${hub_kubeconfig}" get deployment cert-manager -n cert-manager &>/dev/null; then
+    require_clusters "${HUB}"
+    if on "${HUB}" kubectl get deployment cert-manager -n cert-manager &>/dev/null; then
         log "cert-manager already installed on hub, skipping"
         return
     fi
 
     log "Installing cert-manager ${CERT_MANAGER_VERSION} on hub..."
-    kubectl --kubeconfig="${hub_kubeconfig}" apply -f \
+    on "${HUB}" kubectl apply -f \
         "https://github.com/cert-manager/cert-manager/releases/download/${CERT_MANAGER_VERSION}/cert-manager.yaml"
 
     log "Waiting for cert-manager to be ready..."
-    kubectl --kubeconfig="${hub_kubeconfig}" rollout status deployment/cert-manager -n cert-manager --timeout=120s
-    kubectl --kubeconfig="${hub_kubeconfig}" rollout status deployment/cert-manager-webhook -n cert-manager --timeout=120s
+    on "${HUB}" kubectl rollout status deployment/cert-manager -n cert-manager --timeout=120s
+    on "${HUB}" kubectl rollout status deployment/cert-manager-webhook -n cert-manager --timeout=120s
 
     log "cert-manager ${CERT_MANAGER_VERSION} installed on hub"
 }
 
 init_ocm() {
-    local hub_kubeconfig
-    hub_kubeconfig="$(kubeconfig_for "${HUB}")"
-
-    if [[ ! -f "${hub_kubeconfig}" ]]; then
-        err "Hub kubeconfig not found at ${hub_kubeconfig}. Run 'make create-clusters' first."
-    fi
-
+    require_clusters "${HUB}"
     log "Initializing OCM hub on cluster: ${HUB}"
-    ${CLUSTERADM} init --wait --kubeconfig="${hub_kubeconfig}"
+    on "${HUB}" "${CLUSTERADM}" init --wait
 
     log "Waiting for OCM hub components to be ready..."
-    retry kubectl --kubeconfig="${hub_kubeconfig}" wait --for=condition=Available \
+    on "${HUB}" retry kubectl wait --for=condition=Available \
         deployment/cluster-manager -n open-cluster-management --timeout=120s
 }
 
 join_clusters() {
-    local hub_kubeconfig
-    hub_kubeconfig="$(kubeconfig_for "${HUB}")"
-
-    if [[ ! -f "${hub_kubeconfig}" ]]; then
-        err "Hub kubeconfig not found at ${hub_kubeconfig}. Run 'make init-ocm' first."
-    fi
-
+    require_clusters "${HUB}" "${CLUSTER1}" "${CLUSTER2}"
     log "Retrieving hub token..."
     local token_json hub_token hub_apiserver
-    token_json="$(${CLUSTERADM} get token --kubeconfig="${hub_kubeconfig}" -o json)"
+    token_json="$(on "${HUB}" "${CLUSTERADM}" get token -o json)"
     hub_token="$(echo "${token_json}" | jq -r '.["hub-token"]')"
     hub_apiserver="$(echo "${token_json}" | jq -r '.["hub-apiserver"]')"
 
@@ -228,52 +208,43 @@ join_clusters() {
     fi
 
     for cluster in "${CLUSTER1}" "${CLUSTER2}"; do
-        local kubeconfig
-        kubeconfig="$(kubeconfig_for "${cluster}")"
-
-        if [[ ! -f "${kubeconfig}" ]]; then
-            err "Kubeconfig not found for ${cluster} at ${kubeconfig}"
-        fi
-
-        if kubectl --kubeconfig="${hub_kubeconfig}" get managedcluster "${cluster}" &>/dev/null; then
+        if on "${HUB}" kubectl get managedcluster "${cluster}" &>/dev/null; then
             log "ManagedCluster ${cluster} already exists on hub, skipping join"
             continue
         fi
 
         log "Joining ${cluster} to hub..."
-        ${CLUSTERADM} join \
+        on "${cluster}" "${CLUSTERADM}" join \
             --hub-token "${hub_token}" \
             --hub-apiserver "${hub_apiserver}" \
             --cluster-name "${cluster}" \
             --force-internal-endpoint-lookup \
-            --wait \
-            --kubeconfig="${kubeconfig}"
+            --wait
     done
 
     log "Accepting managed clusters on hub..."
-    ${CLUSTERADM} accept \
+    on "${HUB}" "${CLUSTERADM}" accept \
         --clusters="${CLUSTER1},${CLUSTER2}" \
         --skip-approve-check \
-        --wait \
-        --kubeconfig="${hub_kubeconfig}"
+        --wait
 
     log "Waiting for ManagedCluster conditions..."
     for cluster in "${CLUSTER1}" "${CLUSTER2}"; do
-        retry kubectl --kubeconfig="${hub_kubeconfig}" wait managedcluster/"${cluster}" \
+        on "${HUB}" retry kubectl wait managedcluster/"${cluster}" \
             --for=condition=HubAcceptedManagedCluster=True \
             --timeout=120s
-        retry kubectl --kubeconfig="${hub_kubeconfig}" wait managedcluster/"${cluster}" \
+        on "${HUB}" retry kubectl wait managedcluster/"${cluster}" \
             --for=condition=ManagedClusterJoined=True \
             --timeout=300s
-        retry kubectl --kubeconfig="${hub_kubeconfig}" wait managedcluster/"${cluster}" \
+        on "${HUB}" retry kubectl wait managedcluster/"${cluster}" \
             --for=condition=ManagedClusterConditionAvailable=True \
             --timeout=300s
         log "Cluster ${cluster} joined, accepted, and available"
     done
 
     log "Creating ManagedClusterSet: mesh-cluster-set"
-    ${CLUSTERADM} --kubeconfig="${hub_kubeconfig}" create clusterset mesh-cluster-set
-    ${CLUSTERADM} --kubeconfig="${hub_kubeconfig}" clusterset set mesh-cluster-set --clusters "${CLUSTER1},${CLUSTER2}"
+    on "${HUB}" "${CLUSTERADM}" create clusterset mesh-cluster-set
+    on "${HUB}" "${CLUSTERADM}" clusterset set mesh-cluster-set --clusters "${CLUSTER1},${CLUSTER2}"
 
     # On OpenShift, the product ClusterClaim is created automatically by the
     # klusterlet agent. On vanilla Kind clusters there is no such agent,
@@ -282,60 +253,54 @@ join_clusters() {
     # uses for platform detection.
     for cluster in "${CLUSTER1}" "${CLUSTER2}"; do
         log "Creating product ClusterClaim on ${cluster}"
-        kubectl --kubeconfig="$(kubeconfig_for "${cluster}")" apply -f "${SCRIPT_DIR}/hack/kind/product-clusterclaim.yaml"
+        on "${cluster}" kubectl apply -f "${SCRIPT_DIR}/hack/kind/product-clusterclaim.yaml"
     done
 
     for cluster in "${CLUSTER1}" "${CLUSTER2}"; do
         log "Waiting for product claim on ${cluster} to propagate to the hub..."
-        retry kubectl --kubeconfig="${hub_kubeconfig}" wait managedcluster/"${cluster}" \
+        on "${HUB}" retry kubectl wait managedcluster/"${cluster}" \
             --for='jsonpath={.status.clusterClaims[?(@.name=="product.open-cluster-management.io")].value}=Kind' \
             --timeout=60s
     done
 
     log "OCM topology ready"
-    kubectl --kubeconfig="${hub_kubeconfig}" get managedclusters
-    kubectl --kubeconfig="${hub_kubeconfig}" get managedclustersets
+    on "${HUB}" kubectl get managedclusters
+    on "${HUB}" kubectl get managedclustersets
 }
 
 setup_mesh() {
-    local hub_kubeconfig
-    hub_kubeconfig="$(kubeconfig_for "${HUB}")"
-
-    if [[ ! -f "${hub_kubeconfig}" ]]; then
-        err "Hub kubeconfig not found at ${hub_kubeconfig}. Run 'make deploy-addon' first."
-    fi
-
-    if kubectl --kubeconfig="${hub_kubeconfig}" get namespace mesh-system &>/dev/null; then
+    require_clusters "${HUB}"
+    if on "${HUB}" kubectl get namespace mesh-system &>/dev/null; then
         log "Namespace mesh-system already exists, skipping"
     else
         log "Creating namespace mesh-system"
-        kubectl --kubeconfig="${hub_kubeconfig}" create namespace mesh-system
+        on "${HUB}" kubectl create namespace mesh-system
     fi
 
     log "Waiting for cert-manager-cainjector to be ready..."
-    kubectl --kubeconfig="${hub_kubeconfig}" rollout status deployment/cert-manager-cainjector \
+    on "${HUB}" kubectl rollout status deployment/cert-manager-cainjector \
         -n cert-manager --timeout=120s
 
     log "Applying cert-manager trust chain (self-signed Issuer, root CA Certificate, CA-backed Issuer)"
-    kubectl --kubeconfig="${hub_kubeconfig}" apply -f "${SCRIPT_DIR}/samples/cert-manager-issuer.yaml"
+    on "${HUB}" kubectl apply -f "${SCRIPT_DIR}/samples/cert-manager-issuer.yaml"
 
     log "Waiting for bootstrap Issuer to be ready..."
-    retry kubectl --kubeconfig="${hub_kubeconfig}" wait issuer/mesh-selfsigned-issuer \
+    on "${HUB}" retry kubectl wait issuer/mesh-selfsigned-issuer \
         -n mesh-system --for=condition=Ready --timeout=60s
 
     log "Waiting for root CA Certificate to be issued..."
-    retry kubectl --kubeconfig="${hub_kubeconfig}" wait certificate/mesh-root-ca \
+    on "${HUB}" retry kubectl wait certificate/mesh-root-ca \
         -n mesh-system --for=condition=Ready --timeout=120s
 
     log "Waiting for CA-backed Issuer to be ready..."
-    retry kubectl --kubeconfig="${hub_kubeconfig}" wait issuer/mesh-root-ca \
+    on "${HUB}" retry kubectl wait issuer/mesh-root-ca \
         -n mesh-system --for=condition=Ready --timeout=60s
 
     log "Creating MultiClusterMesh CR"
-    kubectl --kubeconfig="${hub_kubeconfig}" apply -f "${SCRIPT_DIR}/samples/basic.yaml"
+    on "${HUB}" kubectl apply -f "${SCRIPT_DIR}/samples/basic.yaml"
 
     log "Mesh setup complete. The controller will now reconcile the mesh."
-    log "Monitor progress: kubectl --kubeconfig=${hub_kubeconfig} get multiclustermesh -n mesh-system"
+    log "Monitor progress: $(on "${HUB}" echo kubectl get multiclustermesh -n mesh-system)"
 }
 
 clean() {
