@@ -4,13 +4,14 @@ Complete instructions to go from zero to a working Fleet Service Mesh ConsolePlu
 
 ## Prerequisites
 
-- [CRC](https://crc.dev) installed with the internal image registry exposed
+- [crc](https://crc.dev) binary installed
 - A [Red Hat pull secret](https://console.redhat.com/openshift/create/local)
-- `oc` CLI installed
+- `oc` installed
 - `podman` installed
-- Node.js 20 (use `nvm`, `fnm`, or `n` to switch versions)
 - `jq` installed
-- Go toolchain and `make`
+- `make` installed
+- Node.js 20 (use `nvm`, `fnm`, or `n` to switch versions)
+- Go toolchain
 
 ## 1. Start CRC and install ACM
 
