@@ -13,25 +13,23 @@ Complete instructions to go from zero to a working Fleet Service Mesh ConsolePlu
 - Node.js 20+
 - Go toolchain
 
-## 1. Start CRC and install ACM
+## 1. Get an OpenShift cluster with ACM
 
-*NOTE: The [install-acm.sh](https://github.com/kiali/kiali/blob/master/hack/install-acm.sh) script in the Kiali repo automates a full CRC/OpenShift + ACM setup. Note that its* `init-openshift` *command depends on other scripts in the same repo, so you need the [kiali server repo](https://github.com/kiali/kiali) cloned locally. All commands below are run from that repo's directory.*
+You need an OpenShift cluster with ACM (Advanced Cluster Management) installed. The image registry must be exposed. How you get this is up to you — any method that produces a working ACM hub cluster will work.
 
-Start CRC with at least 12 CPUs and 100 GB disk, enable cluster monitoring, User Workload Monitoring, and expose the image registry. Using the Kiali helper script:
+One option is the [install-acm.sh](https://github.com/kiali/kiali/blob/master/hack/install-acm.sh) script in the Kiali repo, which automates a full CRC/OpenShift + ACM setup. Its `init-openshift` command depends on other scripts in the same repo, so you need the [kiali server repo](https://github.com/kiali/kiali) cloned locally. All commands below are run from that repo's directory:
 
 ```bash
+# Start CRC with 12 CPUs, 100GB disk, exposed image registry
 ./hack/install-acm.sh --crc-pull-secret-file <path-to-your-pull-secret-file> init-openshift
-```
 
-Then install ACM (operator, MultiClusterHub, observability). Using the Kiali helper script:
-
-```bash
+# Install ACM (operator, MultiClusterHub, observability)
 ./hack/install-acm.sh install-acm
 ```
 
-This installs the ACM operator, creates a MultiClusterHub, sets up MinIO for metrics storage, and enables observability. It also auto-registers `local-cluster` as a managed cluster (the hub acts as its own spoke).
+This takes 15-20 minutes. It installs the ACM operator, creates a MultiClusterHub, sets up MinIO for metrics storage, and enables observability. It also auto-registers `local-cluster` as a managed cluster (the hub acts as its own spoke).
 
-This step takes 15-20 minutes. Verify when done:
+Regardless of how you set up your cluster, verify ACM is ready before proceeding:
 
 ```bash
 oc get mch multiclusterhub -n open-cluster-management -o jsonpath='{.status.phase}'
