@@ -90,8 +90,12 @@ func clientFrom(kubeconfig string) client.Client {
 	cfg, err := clientcmd.BuildConfigFromFlags("", kubeconfig)
 	Expect(err).NotTo(HaveOccurred(), "failed to load kubeconfig from %s", kubeconfig)
 
-	// installing CRDs
-	envtest.InstallCRDs(cfg, envtest.CRDInstallOptions{Paths: CRDDirectoryPaths})
+	crds, err := envtest.InstallCRDs(cfg, envtest.CRDInstallOptions{
+		Paths:              CRDDirectoryPaths,
+		ErrorIfPathMissing: true,
+	})
+	Expect(err).NotTo(HaveOccurred(), "failed to install CRDs from configured paths")
+	Expect(crds).NotTo(BeEmpty(), "expected CRDs to be installed before client creation")
 
 	c, err := client.New(cfg, client.Options{Scheme: scheme.Scheme})
 	Expect(err).NotTo(HaveOccurred(), "failed to create client from %s", kubeconfig)
