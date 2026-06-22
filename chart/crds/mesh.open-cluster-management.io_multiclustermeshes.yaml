@@ -43,7 +43,11 @@ spec:
               clusterSet:
                 description: ClusterSet references the ACM ManagedClusterSet that
                   defines cluster membership
+                minLength: 1
                 type: string
+                x-kubernetes-validations:
+                - message: spec.clusterSet is immutable
+                  rule: self == oldSelf
               controlPlane:
                 description: ControlPlane defines the target configuration for the
                   mesh control plane

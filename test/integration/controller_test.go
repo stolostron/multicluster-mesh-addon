@@ -440,6 +440,29 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 			expectOperatorManifestWork(clusterName)
 		})
 
+		When("spec.clusterSet is empty", func() {
+			It("should reject creation", func() {
+				mesh := &meshv1alpha1.MultiClusterMesh{
+					ObjectMeta: metav1.ObjectMeta{Name: meshName + "-empty", Namespace: testNs},
+					Spec:       meshv1alpha1.MultiClusterMeshSpec{ClusterSet: ""},
+				}
+				err := k8sClient.Create(ctx, mesh)
+				Expect(err).To(HaveOccurred(), "expected validation error for empty clusterSet")
+				Expect(errors.IsInvalid(err)).To(BeTrue())
+			})
+		})
+
+		When("spec.clusterSet is changed on update", func() {
+			It("should reject the update", func() {
+				mesh := &meshv1alpha1.MultiClusterMesh{}
+				Expect(k8sClient.Get(ctx, types.NamespacedName{Name: meshName, Namespace: testNs}, mesh)).To(Succeed())
+				mesh.Spec.ClusterSet = "different-set"
+				err := k8sClient.Update(ctx, mesh)
+				Expect(err).To(HaveOccurred(), "expected validation error when updating the clusterSet")
+				Expect(errors.IsInvalid(err)).To(BeTrue())
+			})
+		})
+
 		It("should allow two meshes with different control plane namespaces", func() {
 			util.CreateMultiClusterMesh(ctx, k8sClient, otherMesh, testNs, testClusterSet, meshv1alpha1.MultiClusterMeshSpec{
 				ControlPlane: meshv1alpha1.ControlPlaneConfig{Namespace: "istio-system-2"},

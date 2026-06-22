@@ -36,6 +36,8 @@ func (m *MultiClusterMesh) GetControlPlaneNamespace() string {
 type MultiClusterMeshSpec struct {
 	// ClusterSet references the ACM ManagedClusterSet that defines cluster membership
 	// +required
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="spec.clusterSet is immutable"
 	ClusterSet string `json:"clusterSet"`
 
 	// ControlPlane defines the target configuration for the mesh control plane
