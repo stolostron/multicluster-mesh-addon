@@ -5,11 +5,11 @@
 - **Meshes list page** — sortable table with Name, Namespace, Cluster Set, Clusters, Trust, Age, Status columns. Empty states for no data and no filter matches.
 - **Mesh detail page** — Overview and OSSM Operator config cards, Trust Status card (watches cert-manager Certificates + ManifestWorks), Cluster Status card with per-cluster operator install status, Conditions table. Designed for 1 to hundreds of clusters with filters, search, and scroll.
 - **Cross-perspective links** — cluster names link to ACM cluster detail page.
+- **Conflict mesh UX** — friendly labels for backend condition reasons, and blocked meshes show an explanatory message instead of "No clusters."
 - **Production packaging** — Dockerfile (UBI9 nodejs-20 + nginx-124), Makefile with `dev-*` and `prod-*` targets.
 
 ## What's next (not blocked)
 
-- **Conflict mesh UX** — The backend now detects multi-mesh collisions (`OperatorConfigConflict`, `NamespaceConflict` reasons on `Ready=False`). Blocked meshes have empty `clusterStatus`. The UI should distinguish "blocked by conflict" from "clusters not ready" with friendlier messaging.
 - **Create / delete mesh actions** — Add a "Create Mesh" button to the list page and "Delete Mesh" on the detail page.
 - **Edit mesh** — Edit issuer, operator config, etc. from the detail page.
 
