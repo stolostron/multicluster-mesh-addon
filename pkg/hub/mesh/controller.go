@@ -306,7 +306,7 @@ func (r *Reconciler) doReconcile(ctx context.Context, mesh *meshv1alpha1.MultiCl
 		}
 	}
 
-	// Create ManagedServiceAccount resources for each cluster
+	// Create ManagedServiceAccount resources for each cluster.
 	if err := r.createManagedServiceAccounts(ctx, mesh, clusters); err != nil {
 		return reconcile.Result{}, fmt.Errorf("failed to create ManagedServiceAccounts: %w", err)
 	}
@@ -320,6 +320,7 @@ func (r *Reconciler) doReconcile(ctx context.Context, mesh *meshv1alpha1.MultiCl
 		return reconcile.Result{}, fmt.Errorf("failed to cleanup ManifestWorks: %w", err)
 	}
 
+	// Cleanup ManagedServiceAccount when the cluster(s) are removed from the ClusterSet.
 	if err := r.cleanupManagedServiceAccounts(ctx, mesh, clusters); err != nil {
 		return reconcile.Result{}, fmt.Errorf("failed to cleanup ManagedServiceAccounts: %w", err)
 	}

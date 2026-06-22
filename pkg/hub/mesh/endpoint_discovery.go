@@ -21,7 +21,9 @@ const (
 	msaRootWord             = "istio-reader"
 )
 
-// createManagedServiceAccounts creates ManagedServiceAccount resources for each cluster in the ClusterSet
+// createManagedServiceAccounts creates ManagedServiceAccount resources for each cluster.
+// It checks and uses the mesh.Spec.Security.Discovery.TokenValidity value.
+// If there is an existing ManagedServiceAccount, it skips creation.
 func (r *Reconciler) createManagedServiceAccounts(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, clusters []clusterv1.ManagedCluster) error {
 	if len(clusters) == 0 {
 		klog.V(4).Info("The ClusterSet has no managed cluster")
@@ -71,7 +73,8 @@ func (r *Reconciler) createManagedServiceAccounts(ctx context.Context, mesh *mes
 
 // TODO(yxun): (#120) Update existing ManagedServiceAccount resources when the user changes the tokenValidity on the mesh
 
-// cleanupManagedServiceAccounts deletes ManagedServiceAccount on clusters that are removed from the given ClusterSet.
+// cleanupManagedServiceAccounts deletes ManagedServiceAccount and istio-remote secret,
+// when the cluster(s) are removed from the given mesh's ClusterSet.
 func (r *Reconciler) cleanupManagedServiceAccounts(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, clusters []clusterv1.ManagedCluster) error {
 	clusterNames := clusterNameSet(clusters)
 
