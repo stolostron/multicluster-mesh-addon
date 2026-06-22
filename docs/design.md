@@ -120,6 +120,7 @@ The MVP supports the [Multi-Primary Multi-Network] mesh topology. This aligns wi
 ## Custom Resource
 
 `MultiClusterMesh` is a namespaced resource. The namespace provides tenant isolation on the hub.
+The resource name (`metadata.name`) is limited to 63 characters because it is used in X.509 certificate subject fields and Kubernetes label values.
 
 ### Key Fields
 

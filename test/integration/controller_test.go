@@ -437,6 +437,19 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 			expectOperatorManifestWork(clusterName)
 		})
 
+		When("metadata.name exceeds 63 characters", func() {
+			It("should reject creation", func() {
+				longName := "a-mesh-name-that-is-way-too-long-and-exceeds-the-sixty-three-character-limit"
+				mesh := &meshv1alpha1.MultiClusterMesh{
+					ObjectMeta: metav1.ObjectMeta{Name: longName, Namespace: testNs},
+					Spec:       meshv1alpha1.MultiClusterMeshSpec{ClusterSet: testClusterSet},
+				}
+				err := k8sClient.Create(ctx, mesh)
+				Expect(err).To(HaveOccurred(), "expected validation error for long name")
+				Expect(errors.IsInvalid(err)).To(BeTrue())
+			})
+		})
+
 		When("spec.clusterSet is empty", func() {
 			It("should reject creation", func() {
 				mesh := &meshv1alpha1.MultiClusterMesh{
