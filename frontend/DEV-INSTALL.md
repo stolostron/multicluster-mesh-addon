@@ -54,9 +54,7 @@ oc rollout status deployment/cert-manager-webhook -n cert-manager --timeout=120s
 
 ## 3. Build and deploy the backend controller
 
-The Makefile's `deploy` target assumes push access to `quay.io/sail-dev`,
-so we build and push to the OpenShift internal registry manually, then
-use kustomize to apply the deployment with the correct image reference.
+The backend deploys via Helm. We build the image, push it to the OpenShift internal registry, then use `helm upgrade --install` to deploy.
 
 ```bash
 cd <multicluster-mesh-addon-repo>
@@ -64,40 +62,34 @@ cd <multicluster-mesh-addon-repo>
 REGISTRY=$(oc get image.config.openshift.io/cluster \
   -o jsonpath='{.status.externalRegistryHostnames[0]}')
 INTERNAL_REGISTRY=image-registry.openshift-image-registry.svc:5000
-IMG_TAG=multicluster-mesh-system/multicluster-mesh-addon:dev
+BACKEND_NAMESPACE=multicluster-mesh-system
+BACKEND_IMAGE_NAME=multicluster-mesh-addon
+BACKEND_IMAGE_TAG=dev
 
-# Login to the registry
+# Login to the OpenShift image registry
 podman login --tls-verify=false \
   -u $(oc whoami | tr -d ':') \
   -p $(oc whoami -t) \
   ${REGISTRY}
 
-# Create the controller namespace
-oc create namespace multicluster-mesh-system --dry-run=client -o yaml | oc apply -f -
+# Create the controller namespace if it doesn't exist (required before pushing to the internal registry)
+oc create namespace ${BACKEND_NAMESPACE} --dry-run=client -o yaml | oc apply -f -
 
-# Build and push the image
-make images IMG=${REGISTRY}/${IMG_TAG}
-podman push --tls-verify=false ${REGISTRY}/${IMG_TAG}
+# Build and push the controller image
+make images IMG=${REGISTRY}/${BACKEND_NAMESPACE}/${BACKEND_IMAGE_NAME}:${BACKEND_IMAGE_TAG}
+podman push --tls-verify=false ${REGISTRY}/${BACKEND_NAMESPACE}/${BACKEND_IMAGE_NAME}:${BACKEND_IMAGE_TAG}
 
-# Generate CRDs and RBAC, then apply CRDs
-make gen
-oc apply -f config/crd/
-
-# Deploy the controller manifests (namespace, RBAC, deployment).
-# There should be a Makefile target for deploying to OpenShift with
-# the internal registry, but there isn't one yet (the existing
-# `make deploy` assumes push access to quay.io). So we run kustomize
-# manually to swap the default image for ours.
-pushd config/deploy/overlays/openshift
-kustomize edit set image \
-  quay.io/sail-dev/multicluster-mesh-addon=${INTERNAL_REGISTRY}/${IMG_TAG}
-oc apply -k .
-git checkout -- kustomization.yaml
-popd
+# Deploy the controller using Helm with the internal registry image
+helm upgrade --install ${BACKEND_IMAGE_NAME} chart/ \
+  --create-namespace \
+  --namespace ${BACKEND_NAMESPACE} \
+  --set image.repository=${INTERNAL_REGISTRY}/${BACKEND_NAMESPACE}/${BACKEND_IMAGE_NAME} \
+  --set image.tag=${BACKEND_IMAGE_TAG} \
+  --wait --timeout 180s
 
 # Verify the controller is running
 oc rollout status deployment/multicluster-mesh-controller \
-  -n multicluster-mesh-system --timeout=120s
+  -n ${BACKEND_NAMESPACE} --timeout=120s
 ```
 
 ## 4. Create a test mesh
@@ -252,16 +244,18 @@ cd <multicluster-mesh-addon-repo>
 
 REGISTRY=$(oc get image.config.openshift.io/cluster \
   -o jsonpath='{.status.externalRegistryHostnames[0]}')
-INTERNAL_REGISTRY=image-registry.openshift-image-registry.svc:5000
+BACKEND_NAMESPACE=multicluster-mesh-system
+BACKEND_IMAGE_NAME=multicluster-mesh-addon
+BACKEND_IMAGE_TAG=dev
 
-make images IMG=${REGISTRY}/multicluster-mesh-system/multicluster-mesh-addon:dev
+make images IMG=${REGISTRY}/${BACKEND_NAMESPACE}/${BACKEND_IMAGE_NAME}:${BACKEND_IMAGE_TAG}
 podman push --tls-verify=false \
-  ${REGISTRY}/multicluster-mesh-system/multicluster-mesh-addon:dev
+  ${REGISTRY}/${BACKEND_NAMESPACE}/${BACKEND_IMAGE_NAME}:${BACKEND_IMAGE_TAG}
 
 oc rollout restart deployment/multicluster-mesh-controller \
-  -n multicluster-mesh-system
+  -n ${BACKEND_NAMESPACE}
 oc rollout status deployment/multicluster-mesh-controller \
-  -n multicluster-mesh-system --timeout=120s
+  -n ${BACKEND_NAMESPACE} --timeout=120s
 ```
 
 ## Teardown
@@ -286,6 +280,6 @@ oc label managedcluster local-cluster cluster.open-cluster-management.io/cluster
 oc delete managedclusterset mesh-cluster-set --ignore-not-found
 
 # Remove the backend controller
-make undeploy PLATFORM=openshift
+make undeploy
 ```
 
