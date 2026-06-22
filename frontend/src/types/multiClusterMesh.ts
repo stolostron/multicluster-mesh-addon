@@ -30,7 +30,7 @@ export interface MultiClusterMeshSpec {
   security?: {
     trust?: {
       certManager?: {
-        issuerRef: { name: string }
+        issuerRef: { name: string; kind?: 'Issuer' | 'ClusterIssuer' }
       }
     }
     discovery?: {

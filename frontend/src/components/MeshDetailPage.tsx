@@ -230,7 +230,8 @@ const MeshDetailContent: React.FC<{ ns: string; name: string }> = ({ ns, name })
   const status = mesh.status
   const clusterStatuses = status?.clusterStatus ?? []
   const conditions = status?.conditions ?? []
-  const issuerName = spec.security?.trust?.certManager?.issuerRef?.name
+  const issuerRef = spec.security?.trust?.certManager?.issuerRef
+  const issuerName = issuerRef?.name
 
   return (
     <>
@@ -268,7 +269,11 @@ const MeshDetailContent: React.FC<{ ns: string; name: string }> = ({ ns, name })
                   </DescriptionListGroup>
                   <DescriptionListGroup>
                     <DescriptionListTerm>cert-manager Issuer</DescriptionListTerm>
-                    <DescriptionListDescription>{issuerName || 'Not configured'}</DescriptionListDescription>
+                    <DescriptionListDescription>
+                      {issuerName
+                        ? `${issuerName} (${issuerRef?.kind || 'Issuer'})`
+                        : 'Not configured'}
+                    </DescriptionListDescription>
                   </DescriptionListGroup>
                   <DescriptionListGroup>
                     <DescriptionListTerm>Created</DescriptionListTerm>
