@@ -10,7 +10,7 @@ Complete instructions to go from zero to a working Fleet Service Mesh ConsolePlu
 - `podman` installed
 - `jq` installed
 - `make` installed
-- Node.js 20 (use `nvm`, `fnm`, or `n` to switch versions)
+- **Node.js 20** — Node 22+ will NOT work (stricter ESM module resolution breaks ts-node/webpack). Use `nvm`, `fnm`, or `n` to switch (e.g. `nvm use 20`). The Makefile will fail fast if the wrong version is active.
 - Go toolchain
 
 ## 1. Start CRC and install ACM
@@ -180,12 +180,15 @@ npm run build
 # Create the plugin namespace
 oc create namespace ossm-acm-plugin --dry-run=client -o yaml | oc apply -f -
 
-# Push built assets as a ConfigMap
+# Push built assets as a ConfigMap (delete first for idempotency — oc apply
+# hits the 262KB last-applied-configuration annotation limit with large dist/)
+oc delete configmap ossm-acm-plugin-dist -n ossm-acm-plugin --ignore-not-found
 oc create configmap ossm-acm-plugin-dist \
   --from-file=dist/ \
   -n ossm-acm-plugin
 
 # Push the nginx config
+oc delete configmap ossm-acm-plugin-nginx -n ossm-acm-plugin --ignore-not-found
 oc create configmap ossm-acm-plugin-nginx \
   --from-file=nginx.conf=deploy/nginx.conf \
   -n ossm-acm-plugin
@@ -226,9 +229,10 @@ cd <multicluster-mesh-addon-repo>/frontend
 
 npm run build
 
+oc delete configmap ossm-acm-plugin-dist -n ossm-acm-plugin --ignore-not-found
 oc create configmap ossm-acm-plugin-dist \
   --from-file=dist/ \
-  -n ossm-acm-plugin --dry-run=client -o yaml | oc apply -f -
+  -n ossm-acm-plugin
 
 oc rollout restart deployment/ossm-acm-plugin -n ossm-acm-plugin
 oc rollout status deployment/ossm-acm-plugin -n ossm-acm-plugin --timeout=120s

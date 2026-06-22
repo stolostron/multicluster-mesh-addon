@@ -9,7 +9,7 @@ This plugin registers a new **console perspective** — a top-level entry in the
 The plugin provides:
 - **Meshes list page** — sortable table of all `MultiClusterMesh` resources with status, trust configuration, and cluster counts
 - **Mesh detail page** — overview, operator config, per-cluster trust status (cert-manager Certificates + ManifestWorks), cluster status with filters/search, and conditions
-- **Cross-perspective links** — cluster names link to ACM's cluster detail page
+- **Cross-perspective links** — cluster names link to ACM cluster detail pages; cluster set names link to ACM cluster set detail pages
 
 ## Prerequisites
 
