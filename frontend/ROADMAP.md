@@ -12,6 +12,7 @@
 
 ## What's next (not blocked)
 
+- **Discovered meshes (single pane of glass)** — A unified landing page that discovers Istio CRs across all managed clusters via ACM Search, independent of the addon. Users without the addon see their mesh instances; addon users see the same view enriched with fleet management context. See [DISCOVERY-OPTIONS.md](DISCOVERY-OPTIONS.md) for the full design.
 - **Create / delete mesh actions** — Add a "Create Mesh" button to the list page and "Delete Mesh" on the detail page.
 - **Edit mesh** — Edit issuer, operator config, etc. from the detail page.
 - **CI workflow** — Add a GitHub Actions workflow to the parent repo (`.github/workflows/frontend-ci.yml`) that runs `make test dev-build` on PRs touching `frontend/**`, using Node 20 and two parallel jobs (test and build).
