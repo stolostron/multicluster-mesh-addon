@@ -296,7 +296,7 @@ export const TrustStatusCard: React.FC<TrustStatusCardProps> = ({
                   return (
                     <tr className="pf-v6-c-table__tr" key={cs.clusterName}>
                       <td className="pf-v6-c-table__td">
-                        <Link to={`/multicloud/infrastructure/clusters/details/${cs.clusterName}`}>
+                        <Link to={`/multicloud/infrastructure/clusters/details/${cs.clusterName}/${cs.clusterName}/overview`}>
                           {cs.clusterName}
                         </Link>
                       </td>

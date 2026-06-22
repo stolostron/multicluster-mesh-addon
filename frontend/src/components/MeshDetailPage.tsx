@@ -178,7 +178,7 @@ export const ClusterStatusSection: React.FC<{ clusterStatuses: ClusterMeshStatus
                       return (
                         <tr className="pf-v6-c-table__tr" key={cs.clusterName}>
                           <td className="pf-v6-c-table__td">
-                            <Link to={`/multicloud/infrastructure/clusters/details/${cs.clusterName}`}>
+                            <Link to={`/multicloud/infrastructure/clusters/details/${cs.clusterName}/${cs.clusterName}/overview`}>
                               {cs.clusterName}
                             </Link>
                           </td>
@@ -279,7 +279,11 @@ const MeshDetailContent: React.FC<{ ns: string; name: string }> = ({ ns, name })
                 <DescriptionList isHorizontal isCompact>
                   <DescriptionListGroup>
                     <DescriptionListTerm>{t('Cluster Set')}</DescriptionListTerm>
-                    <DescriptionListDescription>{spec.clusterSet}</DescriptionListDescription>
+                    <DescriptionListDescription>
+                      <Link to={`/multicloud/infrastructure/clusters/sets/details/${spec.clusterSet}/overview`}>
+                        {spec.clusterSet}
+                      </Link>
+                    </DescriptionListDescription>
                   </DescriptionListGroup>
                   <DescriptionListGroup>
                     <DescriptionListTerm>{t('Control Plane Namespace')}</DescriptionListTerm>

@@ -92,10 +92,13 @@ describe('MeshDetailPage', () => {
       expect(screen.getByRole('heading', { name: 'test-mesh' })).toBeInTheDocument()
     })
 
-    it('shows spec.clusterSet in the Overview card', () => {
+    it('links spec.clusterSet to the ACM cluster set detail page', () => {
       mockUseK8sWatchResource.mockReturnValue([makeMesh({ spec: { clusterSet: 'my-clusterset' } }), true, null])
       render(<MeshDetailPage />)
-      expect(screen.getByText('my-clusterset')).toBeInTheDocument()
+      expect(screen.getByRole('link', { name: 'my-clusterset' })).toHaveAttribute(
+        'href',
+        '/multicloud/infrastructure/clusters/sets/details/my-clusterset/overview',
+      )
     })
 
     it('shows the istio-system default when controlPlane.namespace is absent', () => {
@@ -239,7 +242,7 @@ describe('ClusterStatusSection', () => {
     render(<ClusterStatusSection clusterStatuses={[makeCluster('cluster-a', 'True')]} />)
     expect(screen.getByRole('link', { name: 'cluster-a' })).toHaveAttribute(
       'href',
-      '/multicloud/infrastructure/clusters/details/cluster-a',
+      '/multicloud/infrastructure/clusters/details/cluster-a/cluster-a/overview',
     )
   })
 

@@ -83,7 +83,9 @@ const MeshRow: React.FC<RowProps<MultiClusterMesh>> = ({ obj, activeColumnIDs })
         {obj.metadata?.namespace ?? '-'}
       </TableData>
       <TableData id="clusterSet" activeColumnIDs={activeColumnIDs}>
-        {obj.spec.clusterSet}
+        <Link to={`/multicloud/infrastructure/clusters/sets/details/${obj.spec.clusterSet}/overview`}>
+          {obj.spec.clusterSet}
+        </Link>
       </TableData>
       <TableData id="clusters" activeColumnIDs={activeColumnIDs}>
         {obj.status?.clusterStatus?.length ?? 0}

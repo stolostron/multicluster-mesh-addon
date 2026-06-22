@@ -63,6 +63,14 @@ describe('ServiceMeshPage', () => {
     expect(link).toHaveAttribute('href', '/service-mesh/mesh-system/test-mesh')
   })
 
+  it('links cluster set names to ACM cluster set detail pages', () => {
+    const mesh = makeMesh()
+    mockUseMultiClusterMeshes.mockReturnValue([[mesh], true, null])
+    render(<ServiceMeshPage />)
+    const link = screen.getByRole('link', { name: 'global' })
+    expect(link).toHaveAttribute('href', '/multicloud/infrastructure/clusters/sets/details/global/overview')
+  })
+
   it('shows Configured trust label when issuerRef is set', () => {
     const mesh = makeMesh({
       spec: {

@@ -311,7 +311,7 @@ describe('TrustStatusCard — cluster links', () => {
     render(<TrustStatusCard {...defaultProps} />)
     expect(screen.getByRole('link', { name: 'cluster-a' })).toHaveAttribute(
       'href',
-      '/multicloud/infrastructure/clusters/details/cluster-a',
+      '/multicloud/infrastructure/clusters/details/cluster-a/cluster-a/overview',
     )
   })
 })
