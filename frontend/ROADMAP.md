@@ -14,6 +14,7 @@
 
 - **Create / delete mesh actions** — Add a "Create Mesh" button to the list page and "Delete Mesh" on the detail page.
 - **Edit mesh** — Edit issuer, operator config, etc. from the detail page.
+- **CI workflow** — Add a GitHub Actions workflow to the parent repo (`.github/workflows/frontend-ci.yml`) that runs `make test dev-build` on PRs touching `frontend/**`, using Node 20 and two parallel jobs (test and build).
 
 ## Blocked on backend
 
