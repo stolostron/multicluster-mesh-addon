@@ -134,6 +134,7 @@ The MVP supports the [Multi-Primary Multi-Network] mesh topology. This aligns wi
 | `spec.operator.startingCSV` | No | Pin to a specific operator version |
 | `spec.operator.installPlanApproval` | No | `Automatic` or `Manual` (default: `Automatic`) |
 | `spec.security.trust.certManager.issuerRef.name` | No | cert-manager Issuer name for Root CA |
+| `spec.security.trust.certManager.issuerRef.kind` | No | Kind of the cert-manager issuer (`Issuer` or `ClusterIssuer`, default: `Issuer`) |
 | `spec.security.discovery.tokenValidity` | No | ManagedServiceAccount token lifetime (default: `360h`, minimum value: `10m`) |
 
 ### Example
@@ -157,6 +158,7 @@ spec:
       certManager:
         issuerRef:
           name: mesh-root-issuer
+          kind: Issuer
     discovery:
       tokenValidity: "168h"
 ```
@@ -198,11 +200,11 @@ The add-on does not validate OpenShift version compatibility with the requested 
 
 ## Trust Distribution
 
-Trust distribution requires [cert-manager] to be installed on the hub cluster. The user is responsible for setting up cert-manager and creating the `Issuer` resource that acts as the Root CA.
+Trust distribution requires [cert-manager] to be installed on the hub cluster. The user is responsible for setting up cert-manager and creating the `Issuer` or `ClusterIssuer` resource that acts as the Root CA.
 
 The add-on implements Istio's [Plug-in CA] pattern:
 
-1. A cert-manager `Issuer` in the mesh namespace acts as the Root CA (user-provisioned)
+1. A cert-manager `Issuer` or `ClusterIssuer` acts as the Root CA (user-provisioned)
 2. The add-on creates per-cluster `Certificate` resources, yielding intermediate CAs
 3. Intermediate CAs are distributed to managed clusters as `cacerts` secrets in the control plane namespace
 4. The root CA private key never leaves the hub

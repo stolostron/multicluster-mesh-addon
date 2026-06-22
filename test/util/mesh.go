@@ -32,11 +32,16 @@ func CreateMultiClusterMesh(ctx context.Context, k8sClient client.Client, name, 
 
 // CertManagerSpec returns a MeshSpec with cert-manager issuer configuration.
 func CertManagerSpec(issuerName string) meshv1alpha1.MultiClusterMeshSpec {
+	return CertManagerSpecWithKind(issuerName, "Issuer")
+}
+
+// CertManagerSpecWithKind returns a MeshSpec with cert-manager issuer configuration and a specific issuer kind.
+func CertManagerSpecWithKind(issuerName, issuerKind string) meshv1alpha1.MultiClusterMeshSpec {
 	return meshv1alpha1.MultiClusterMeshSpec{
 		Security: meshv1alpha1.SecurityConfig{
 			Trust: meshv1alpha1.TrustConfig{
 				CertManager: meshv1alpha1.CertManagerConfig{
-					IssuerRef: meshv1alpha1.IssuerReference{Name: issuerName},
+					IssuerRef: meshv1alpha1.IssuerReference{Name: issuerName, Kind: issuerKind},
 				},
 			},
 		},
