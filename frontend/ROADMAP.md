@@ -12,6 +12,8 @@
 
 - **Create / delete mesh actions** — Add a "Create Mesh" button to the list page and "Delete Mesh" on the detail page.
 - **Edit mesh** — Edit issuer, operator config, etc. from the detail page.
+- **Automated tests** — Add unit and/or integration test framework and specific tests for components suitable for testing.
+- **Internationalization (i18n)** — Externalize all user-facing strings to support localization.
 
 ## Blocked on backend
 
