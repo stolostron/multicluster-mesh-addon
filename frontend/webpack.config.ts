@@ -1,4 +1,5 @@
 import { ConsoleRemotePlugin } from '@openshift-console/dynamic-plugin-sdk-webpack'
+import CopyPlugin from 'copy-webpack-plugin'
 import { extensions } from './console-extensions'
 import { pluginMetadata } from './console-plugin-metadata'
 
@@ -19,6 +20,11 @@ export default function (_env: unknown, _argv: unknown) {
       ],
     },
     plugins: [
+      // Copy locale files to dist/ so the Console can load translations at runtime.
+      // The Console loads: {pluginBaseURL}/locales/{lang}/{namespace}.json
+      new CopyPlugin({
+        patterns: [{ from: 'src/locales', to: 'locales' }],
+      }),
       new ConsoleRemotePlugin({
         pluginMetadata,
         extensions,

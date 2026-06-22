@@ -1,5 +1,6 @@
 import * as React from 'react'
 import { Link } from 'react-router-dom-v5-compat'
+import { Trans } from 'react-i18next'
 import {
   useK8sWatchResource,
   Timestamp,
@@ -25,6 +26,7 @@ import { certificateGroupVersionKind } from '../types/certManager'
 import type { ManifestWork } from '../types/manifestWork'
 import { manifestWorkGroupVersionKind } from '../types/manifestWork'
 import type { K8sCondition } from '../types/common'
+import { useMeshTranslation } from '../utils/i18nUtils'
 
 const CLUSTER_NAME_LABEL = 'mesh.open-cluster-management.io/cluster-name'
 const MESH_NAME_LABEL = 'mesh.open-cluster-management.io/mesh-name'
@@ -48,42 +50,47 @@ function categorizeTrust(cert: Certificate | undefined, mw: ManifestWork | undef
   return 'failed'
 }
 
-function certStatusLabel(cert: Certificate | undefined): React.ReactNode {
-  if (!cert) return <Label color="grey" isCompact>Pending</Label>
+function certStatusLabel(cert: Certificate | undefined, t: (key: string) => string): React.ReactNode {
+  if (!cert) return <Label color="grey" isCompact>{t('Pending')}</Label>
   const ready = findCondition(cert.status?.conditions, 'Ready')
-  if (!ready) return <Label color="grey" isCompact>Unknown</Label>
-  if (ready.status === 'True') return <Label color="green" isCompact>Ready</Label>
-  return <Label color="red" isCompact>{ready.reason ?? 'Not Ready'}</Label>
+  if (!ready) return <Label color="grey" isCompact>{t('Unknown')}</Label>
+  if (ready.status === 'True') return <Label color="green" isCompact>{t('Ready')}</Label>
+  return <Label color="red" isCompact>{ready.reason ?? t('Not Ready')}</Label>
 }
 
-function distributionStatusLabel(mw: ManifestWork | undefined, mwError: unknown): React.ReactNode {
-  if (mwError) return <Label color="grey" isCompact>Unavailable</Label>
-  if (!mw) return <Label color="grey" isCompact>Pending</Label>
+function distributionStatusLabel(
+  mw: ManifestWork | undefined,
+  mwError: unknown,
+  t: (key: string) => string,
+): React.ReactNode {
+  if (mwError) return <Label color="grey" isCompact>{t('Unavailable')}</Label>
+  if (!mw) return <Label color="grey" isCompact>{t('Pending')}</Label>
   const applied = findCondition(mw.status?.conditions, 'Applied')
   const available = findCondition(mw.status?.conditions, 'Available')
   if (applied?.status === 'True' && available?.status === 'True') {
-    return <Label color="green" isCompact>Distributed</Label>
+    return <Label color="green" isCompact>{t('Distributed')}</Label>
   }
   if (applied?.status === 'True') {
-    return <Label color="orange" isCompact>Applied</Label>
+    return <Label color="orange" isCompact>{t('Applied')}</Label>
   }
   const failed = mw.status?.conditions?.find((c) => c.status !== 'True')
-  return <Label color="red" isCompact>{failed?.reason ?? 'Pending'}</Label>
+  return <Label color="red" isCompact>{failed?.reason ?? t('Pending')}</Label>
 }
 
 interface TrustStatusCardProps {
+  clusterStatuses: ClusterMeshStatus[]
+  issuerName: string
   meshName: string
   meshNamespace: string
-  issuerName: string
-  clusterStatuses: ClusterMeshStatus[]
 }
 
 export const TrustStatusCard: React.FC<TrustStatusCardProps> = ({
+  clusterStatuses,
+  issuerName,
   meshName,
   meshNamespace,
-  issuerName,
-  clusterStatuses,
 }) => {
+  const { t } = useMeshTranslation()
   const hasIssuer = !!issuerName
   const [filter, setFilter] = React.useState<TrustCategory>('all')
   const [search, setSearch] = React.useState('')
@@ -119,11 +126,11 @@ export const TrustStatusCard: React.FC<TrustStatusCardProps> = ({
   if (!hasIssuer) {
     return (
       <Card isCompact>
-        <CardTitle>Trust Status</CardTitle>
+        <CardTitle>{t('Trust Status')}</CardTitle>
         <CardBody>
           <EmptyState variant="xs">
             <EmptyStateBody>
-              Trust distribution is not configured. Set <code>spec.security.trust.certManager.issuerRef.name</code> on the mesh to enable it.
+              <Trans t={t} i18nKey="trustNotConfiguredMessage" components={{ code: <code /> }} />
             </EmptyStateBody>
           </EmptyState>
         </CardBody>
@@ -134,10 +141,10 @@ export const TrustStatusCard: React.FC<TrustStatusCardProps> = ({
   if (certsError) {
     return (
       <Card isCompact>
-        <CardTitle>Trust Status</CardTitle>
+        <CardTitle>{t('Trust Status')}</CardTitle>
         <CardBody>
           <EmptyState variant="xs">
-            <Title headingLevel="h4" size="md">Unable to load certificate data</Title>
+            <Title headingLevel="h4" size="md">{t('Unable to load certificate data')}</Title>
             <EmptyStateBody>
               {certsError instanceof Error ? certsError.message : String(certsError)}
             </EmptyStateBody>
@@ -150,9 +157,9 @@ export const TrustStatusCard: React.FC<TrustStatusCardProps> = ({
   if (!certsLoaded || (!mwLoaded && !mwError)) {
     return (
       <Card isCompact>
-        <CardTitle>Trust Status</CardTitle>
+        <CardTitle>{t('Trust Status')}</CardTitle>
         <CardBody>
-          <Spinner aria-label="Loading trust status" size="lg" />
+          <Spinner aria-label={t('Loading trust status')} size="lg" />
         </CardBody>
       </Card>
     )
@@ -161,10 +168,10 @@ export const TrustStatusCard: React.FC<TrustStatusCardProps> = ({
   if (clusterStatuses.length === 0) {
     return (
       <Card isCompact>
-        <CardTitle>Trust Status</CardTitle>
+        <CardTitle>{t('Trust Status')}</CardTitle>
         <CardBody>
           <EmptyState variant="xs">
-            <EmptyStateBody>No clusters are part of this mesh yet.</EmptyStateBody>
+            <EmptyStateBody>{t('No clusters are part of this mesh yet.')}</EmptyStateBody>
           </EmptyState>
         </CardBody>
       </Card>
@@ -187,10 +194,12 @@ export const TrustStatusCard: React.FC<TrustStatusCardProps> = ({
   if (noCertsAtAll) {
     return (
       <Card isCompact>
-        <CardTitle>Trust Status</CardTitle>
+        <CardTitle>{t('Trust Status')}</CardTitle>
         <CardBody>
           <EmptyState variant="xs">
-            <EmptyStateBody>No certificates have been created yet — the controller may still be reconciling.</EmptyStateBody>
+            <EmptyStateBody>
+              {t('No certificates have been created yet — the controller may still be reconciling.')}
+            </EmptyStateBody>
           </EmptyState>
         </CardBody>
       </Card>
@@ -213,17 +222,17 @@ export const TrustStatusCard: React.FC<TrustStatusCardProps> = ({
 
   return (
     <Card isCompact>
-      <CardTitle>Trust Status ({clusterStatuses.length})</CardTitle>
+      <CardTitle>{t('Trust Status ({{count}})', { count: clusterStatuses.length })}</CardTitle>
       <CardBody>
         <Flex style={{ marginBottom: '1rem' }} spaceItems={{ default: 'spaceItemsMd' }}>
           <FlexItem>
-            <Label color="green" isCompact>{counts.ready} Distributed</Label>
+            <Label color="green" isCompact>{t('{{count}} Distributed', { count: counts.ready })}</Label>
           </FlexItem>
           <FlexItem>
-            <Label color="grey" isCompact>{counts.pending} Pending</Label>
+            <Label color="grey" isCompact>{t('{{count}} Pending', { count: counts.pending })}</Label>
           </FlexItem>
           <FlexItem>
-            <Label color="red" isCompact>{counts.failed} Failed</Label>
+            <Label color="red" isCompact>{t('{{count}} Failed', { count: counts.failed })}</Label>
           </FlexItem>
         </Flex>
 
@@ -231,22 +240,22 @@ export const TrustStatusCard: React.FC<TrustStatusCardProps> = ({
           <FlexItem>
             <ToggleGroup>
               <ToggleGroupItem
-                text={`All (${clusterStatuses.length})`}
+                text={t('All ({{count}})', { count: clusterStatuses.length })}
                 isSelected={filter === 'all'}
                 onChange={() => setFilter('all')}
               />
               <ToggleGroupItem
-                text={`Distributed (${counts.ready})`}
+                text={t('Distributed ({{count}})', { count: counts.ready })}
                 isSelected={filter === 'ready'}
                 onChange={() => setFilter('ready')}
               />
               <ToggleGroupItem
-                text={`Pending (${counts.pending})`}
+                text={t('Pending ({{count}})', { count: counts.pending })}
                 isSelected={filter === 'pending'}
                 onChange={() => setFilter('pending')}
               />
               <ToggleGroupItem
-                text={`Failed (${counts.failed})`}
+                text={t('Failed ({{count}})', { count: counts.failed })}
                 isSelected={filter === 'failed'}
                 onChange={() => setFilter('failed')}
               />
@@ -254,7 +263,7 @@ export const TrustStatusCard: React.FC<TrustStatusCardProps> = ({
           </FlexItem>
           <FlexItem grow={{ default: 'grow' }}>
             <SearchInput
-              placeholder="Filter by cluster name"
+              placeholder={t('Filter by cluster name')}
               value={search}
               onChange={(_event, value) => setSearch(value)}
               onClear={() => setSearch('')}
@@ -266,18 +275,18 @@ export const TrustStatusCard: React.FC<TrustStatusCardProps> = ({
           <table className="pf-v6-c-table pf-m-grid-md pf-m-compact" role="grid">
             <thead className="pf-v6-c-table__thead" style={{ position: 'sticky', top: 0, zIndex: 1 }}>
               <tr className="pf-v6-c-table__tr">
-                <th className="pf-v6-c-table__th">Cluster</th>
-                <th className="pf-v6-c-table__th">Certificate</th>
-                <th className="pf-v6-c-table__th">Expires</th>
-                <th className="pf-v6-c-table__th">Renews</th>
-                <th className="pf-v6-c-table__th">Distribution</th>
+                <th className="pf-v6-c-table__th">{t('Cluster')}</th>
+                <th className="pf-v6-c-table__th">{t('Certificate')}</th>
+                <th className="pf-v6-c-table__th">{t('Expires')}</th>
+                <th className="pf-v6-c-table__th">{t('Renews')}</th>
+                <th className="pf-v6-c-table__th">{t('Distribution')}</th>
               </tr>
             </thead>
             <tbody className="pf-v6-c-table__tbody">
               {filtered.length === 0 ? (
                 <tr className="pf-v6-c-table__tr">
                   <td className="pf-v6-c-table__td" colSpan={5} style={{ textAlign: 'center' }}>
-                    No clusters match the current filter.
+                    {t('No clusters match the current filter.')}
                   </td>
                 </tr>
               ) : (
@@ -291,14 +300,14 @@ export const TrustStatusCard: React.FC<TrustStatusCardProps> = ({
                           {cs.clusterName}
                         </Link>
                       </td>
-                      <td className="pf-v6-c-table__td">{certStatusLabel(cert)}</td>
+                      <td className="pf-v6-c-table__td">{certStatusLabel(cert, t)}</td>
                       <td className="pf-v6-c-table__td">
                         {cert?.status?.notAfter ? <Timestamp timestamp={cert.status.notAfter} /> : '-'}
                       </td>
                       <td className="pf-v6-c-table__td">
                         {cert?.status?.renewalTime ? <Timestamp timestamp={cert.status.renewalTime} /> : '-'}
                       </td>
-                      <td className="pf-v6-c-table__td">{distributionStatusLabel(mw, mwError)}</td>
+                      <td className="pf-v6-c-table__td">{distributionStatusLabel(mw, mwError, t)}</td>
                     </tr>
                   )
                 })

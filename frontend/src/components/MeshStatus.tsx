@@ -1,15 +1,17 @@
 import * as React from 'react'
 import { Label } from '@patternfly/react-core'
 import type { K8sCondition } from '../types/multiClusterMesh'
+import { useMeshTranslation } from '../utils/i18nUtils'
 
 type StatusColor = 'green' | 'red' | 'orange' | 'grey'
 
+// Maps K8s condition reason codes to user-friendly English strings (also the i18n keys).
 const friendlyReasons: Record<string, string> = {
-  OperatorConfigConflict: 'Operator Config Conflict',
-  NamespaceConflict: 'Namespace Conflict',
   ClustersNotReady: 'Clusters Not Ready',
   ManifestWorkCreated: 'Installing',
   MissingProductClaim: 'Missing Product Claim',
+  NamespaceConflict: 'Namespace Conflict',
+  OperatorConfigConflict: 'Operator Config Conflict',
   ReconcileError: 'Reconcile Error',
 }
 
@@ -23,6 +25,9 @@ function deriveStatus(conditions?: K8sCondition[], conditionType?: string): { la
   if (target) {
     if (target.status === 'True') {
       return { label: targetType, color: 'green' }
+    }
+    if (target.status === 'Unknown') {
+      return { label: 'Unknown', color: 'grey' }
     }
     const reason = target.reason ?? `Not ${targetType}`
     return { label: friendlyReasons[reason] ?? reason, color: 'red' }
@@ -50,6 +55,7 @@ interface MeshStatusProps {
 }
 
 export const MeshStatus: React.FC<MeshStatusProps> = ({ conditions, conditionType }) => {
+  const { t } = useMeshTranslation()
   const { label, color } = deriveStatus(conditions, conditionType)
-  return <Label color={color}>{label}</Label>
+  return <Label color={color}>{t(label)}</Label>
 }

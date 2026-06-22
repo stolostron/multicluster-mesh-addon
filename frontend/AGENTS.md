@@ -15,11 +15,16 @@ Related links:
 
 - `console-extensions.ts` — Declares perspective, nav items, page routes
 - `console-plugin-metadata.ts` — Plugin name, version, exposed modules
-- `webpack.config.ts` — Build config (ConsoleRemotePlugin)
+- `webpack.config.ts` — Build config (ConsoleRemotePlugin + CopyPlugin for locales)
+- `jest.config.cjs` / `tsconfig.jest.json` — Test runner config
 - `deploy/` — Kubernetes manifests (ConsolePlugin CR, Deployment/Service, nginx config)
 - `src/types/` — TypeScript types for K8s resources (MultiClusterMesh, Certificate, ManifestWork)
 - `src/components/` — React page and card components
 - `src/hooks/` — Data fetching hooks
+- `src/utils/i18nUtils.ts` — i18n hook (`useMeshTranslation`) and namespace constant
+- `src/locales/en/plugin__ossm-acm.json` — English translation strings
+- `src/__mocks__/` — Jest mocks for Console SDK, react-router, and static assets
+- `src/setupTests.tsx` — Jest global setup (jest-dom, i18n mock, jsdom stubs)
 
 ## Build & Deploy
 
@@ -81,7 +86,46 @@ No multicluster-sdk hooks (`useFleetK8sWatchResource`) are used yet — all curr
 
 ### MeshStatus component
 
-`MeshStatus` accepts an optional `conditionType` prop (default `"Ready"`). Use `conditionType="OperatorInstalled"` for per-cluster operator status. The component shows the condition type name (e.g. "Ready") for True status, and the reason string for False/Unknown.
+`MeshStatus` accepts an optional `conditionType` prop (default `"Ready"`). Use `conditionType="OperatorInstalled"` for per-cluster operator status. The component shows the condition type name (e.g. "Ready") for True status, "Unknown" for Unknown status, and the friendly reason string for False status.
+
+### Internationalization (i18n)
+
+All user-facing strings must be wrapped with `t()` from `useMeshTranslation()`. The plugin namespace is `plugin__ossm-acm` (matching the Console plugin name convention).
+
+```typescript
+import { useMeshTranslation } from '../utils/i18nUtils'
+
+const MyComponent: React.FC = () => {
+  const { t } = useMeshTranslation()
+  return <span>{t('My string')}</span>
+}
+```
+
+For strings with interpolated values, use `{{variable}}` syntax:
+```typescript
+t('Cluster Status ({{count}})', { count: clusterStatuses.length })
+```
+
+For navigation and perspective names in `console-extensions.ts`, use the `consoleName()` helper which produces `%plugin__ossm-acm~Title%` markers for the Console's own i18n system (separate from react-i18next).
+
+When adding new user-facing strings, also add them to `src/locales/en/plugin__ossm-acm.json`.
+
+The Console provides react-i18next at runtime; this plugin never initializes i18next itself.
+
+### Testing
+
+Run tests with `make test`. Tests live in `__tests__/` subdirectories alongside source, using `*.test.tsx` naming.
+
+- `@openshift-console/dynamic-plugin-sdk` is mocked in `src/__mocks__/consoleSdkMock.tsx`. Override hook return values with `mockReturnValue()` in individual tests.
+- `react-router-dom-v5-compat` is mocked in `src/__mocks__/routerMock.tsx` (`Link` renders `<a>`, `useParams` returns `{}`).
+- `react-i18next` is mocked globally in `src/setupTests.tsx` — `t(key)` returns the English key string with `{{variable}}` interpolations substituted. Tests can assert directly on English source strings.
+
+When mocking `useK8sWatchResource` in a test:
+```typescript
+import { useK8sWatchResource } from '@openshift-console/dynamic-plugin-sdk'
+const mockWatch = useK8sWatchResource as jest.Mock
+mockWatch.mockReturnValue([data, true, null])  // [data, loaded, error]
+```
 
 ## Conventions
 
@@ -114,10 +158,11 @@ No multicluster-sdk hooks (`useFleetK8sWatchResource`) are used yet — all curr
 
 ### Adding a column to the list page
 
-1. Add entry to `columns` array in `ServiceMeshPage.tsx` with `title`, `id`, and optionally `sort`
-2. `sort` can be a dot-path string or a function `(data: D[], sortDirection) => D[]`
-3. Add a `<TableData id="..." activeColumnIDs={activeColumnIDs}>` cell to `MeshRow`
-4. Cell order doesn't need to match column order (matched by `id`), but keep them aligned for readability
+1. Add entry to `buildColumns()` in `ServiceMeshPage.tsx` with `title: t('...')`, `id`, and optionally `sort`
+2. `sort` can be a dot-path string or a function — if using a function, add explicit types: `(data: MultiClusterMesh[], sortDirection: string) => MultiClusterMesh[]`
+3. Add the new string key to `src/locales/en/plugin__ossm-acm.json`
+4. Add a `<TableData id="..." activeColumnIDs={activeColumnIDs}>` cell to `MeshRow`
+5. Cell order doesn't need to match column order (matched by `id`), but keep them aligned for readability
 
 ## Backend CRD Reference
 

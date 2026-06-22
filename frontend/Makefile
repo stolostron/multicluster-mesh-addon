@@ -12,7 +12,7 @@ REGISTRY = $(shell $(OC) get image.config.openshift.io/cluster -o jsonpath='{.st
 IMG ?= $(REGISTRY)/$(PLUGIN_NAMESPACE)/ossm-acm-console-plugin:latest
 INTERNAL_IMG = $(INTERNAL_REGISTRY)/$(PLUGIN_NAMESPACE)/ossm-acm-console-plugin:latest
 
-.PHONY: dev-build dev-deploy dev-teardown prod-build prod-push prod-deploy prod-teardown help
+.PHONY: help dev-build dev-deploy dev-teardown prod-build prod-push prod-deploy prod-teardown test
 
 ##@ Development
 
@@ -56,6 +56,11 @@ dev-teardown: ## Remove the dev plugin deployment from the cluster
 	@$(OC) delete namespace $(PLUGIN_NAMESPACE) --ignore-not-found
 	@$(OC) rollout restart deployment/console -n openshift-console
 	@$(OC) rollout status deployment/console -n openshift-console --timeout=120s
+
+##@ Testing
+
+test: ## Run unit tests
+	npm test
 
 ##@ Production
 

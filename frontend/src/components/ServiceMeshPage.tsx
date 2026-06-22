@@ -19,68 +19,58 @@ import {
 import { useMultiClusterMeshes } from '../hooks/useMultiClusterMeshes'
 import type { MultiClusterMesh } from '../types/multiClusterMesh'
 import { MeshStatus, getStatusRank } from './MeshStatus'
+import { useMeshTranslation } from '../utils/i18nUtils'
 
-const columns: TableColumn<MultiClusterMesh>[] = [
-  {
-    title: 'Name',
-    id: 'name',
-    sort: 'metadata.name',
-  },
-  {
-    title: 'Namespace',
-    id: 'namespace',
-    sort: 'metadata.namespace',
-  },
-  {
-    title: 'Cluster Set',
-    id: 'clusterSet',
-    sort: 'spec.clusterSet',
-  },
-  {
-    title: 'Clusters',
-    id: 'clusters',
-    sort: (data, sortDirection) => {
-      const dir = sortDirection === 'asc' ? 1 : -1
-      return [...data].sort((a, b) =>
-        dir * ((a.status?.clusterStatus?.length ?? 0) - (b.status?.clusterStatus?.length ?? 0))
-      )
+function buildColumns(t: (key: string) => string): TableColumn<MultiClusterMesh>[] {
+  return [
+    { title: t('Name'), id: 'name', sort: 'metadata.name' },
+    { title: t('Namespace'), id: 'namespace', sort: 'metadata.namespace' },
+    { title: t('Cluster Set'), id: 'clusterSet', sort: 'spec.clusterSet' },
+    {
+      title: t('Clusters'),
+      id: 'clusters',
+      sort: (data: MultiClusterMesh[], sortDirection: string) => {
+        const dir = sortDirection === 'asc' ? 1 : -1
+        return [...data].sort(
+          (a, b) => dir * ((a.status?.clusterStatus?.length ?? 0) - (b.status?.clusterStatus?.length ?? 0)),
+        )
+      },
     },
-  },
-  {
-    title: 'Trust',
-    id: 'trust',
-    sort: 'spec.security.trust.certManager.issuerRef.name',
-  },
-  {
-    title: 'Age',
-    id: 'age',
-    sort: 'metadata.creationTimestamp',
-  },
-  {
-    title: 'Status',
-    id: 'status',
-    sort: (data, sortDirection) => {
-      const dir = sortDirection === 'asc' ? 1 : -1
-      return [...data].sort((a, b) =>
-        dir * (getStatusRank(a.status?.conditions) - getStatusRank(b.status?.conditions))
-      )
+    { title: t('Trust'), id: 'trust', sort: 'spec.security.trust.certManager.issuerRef.name' },
+    { title: t('Age'), id: 'age', sort: 'metadata.creationTimestamp' },
+    {
+      title: t('Status'),
+      id: 'status',
+      sort: (data: MultiClusterMesh[], sortDirection: string) => {
+        const dir = sortDirection === 'asc' ? 1 : -1
+        return [...data].sort(
+          (a, b) => dir * (getStatusRank(a.status?.conditions) - getStatusRank(b.status?.conditions)),
+        )
+      },
     },
-  },
-]
+  ]
+}
 
-const NoMeshesMsg: React.FC = () => (
-  <EmptyState variant="xs">
-    <EmptyStateBody>No meshes have been created yet.</EmptyStateBody>
-  </EmptyState>
-)
+const NoMeshesMsg: React.FC = () => {
+  const { t } = useMeshTranslation()
+  return (
+    <EmptyState variant="xs">
+      <EmptyStateBody>{t('No meshes have been created yet.')}</EmptyStateBody>
+    </EmptyState>
+  )
+}
 
-const NoMatchMsg: React.FC = () => (
-  <EmptyState variant="xs">
-    <EmptyStateBody>No meshes match the current filter.</EmptyStateBody>
-  </EmptyState>
-)
+const NoMatchMsg: React.FC = () => {
+  const { t } = useMeshTranslation()
+  return (
+    <EmptyState variant="xs">
+      <EmptyStateBody>{t('No meshes match the current filter.')}</EmptyStateBody>
+    </EmptyState>
+  )
+}
 
 const MeshRow: React.FC<RowProps<MultiClusterMesh>> = ({ obj, activeColumnIDs }) => {
+  const { t } = useMeshTranslation()
   const issuerName = obj.spec.security?.trust?.certManager?.issuerRef?.name
   return (
     <>
@@ -100,8 +90,8 @@ const MeshRow: React.FC<RowProps<MultiClusterMesh>> = ({ obj, activeColumnIDs })
       </TableData>
       <TableData id="trust" activeColumnIDs={activeColumnIDs}>
         {issuerName
-          ? <Label color="green" isCompact>Configured</Label>
-          : <Label color="grey" isCompact>Not configured</Label>}
+          ? <Label color="green" isCompact>{t('Configured')}</Label>
+          : <Label color="grey" isCompact>{t('Not configured')}</Label>}
       </TableData>
       <TableData id="age" activeColumnIDs={activeColumnIDs}>
         <Timestamp timestamp={obj.metadata?.creationTimestamp} />
@@ -115,6 +105,8 @@ const MeshRow: React.FC<RowProps<MultiClusterMesh>> = ({ obj, activeColumnIDs })
 
 const ServiceMeshPage: React.FC = () => {
   const [meshes, loaded, error] = useMultiClusterMeshes()
+  const { t } = useMeshTranslation()
+  const columns = React.useMemo(() => buildColumns(t), [t])
   const [staticData, filteredData, onFilterChange] = useListPageFilter(meshes)
   const [activeColumns, userSettingsLoaded] = useActiveColumns({
     columns,
@@ -124,7 +116,7 @@ const ServiceMeshPage: React.FC = () => {
 
   return (
     <>
-      <ListPageHeader title="Meshes" />
+      <ListPageHeader title={t('Meshes')} />
       <ListPageBody>
         <ListPageFilter
           data={staticData}

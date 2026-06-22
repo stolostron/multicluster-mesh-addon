@@ -32,6 +32,7 @@ import type { MultiClusterMesh, K8sCondition, ClusterMeshStatus } from '../types
 import { multiClusterMeshGroupVersionKind } from '../types/multiClusterMesh'
 import { MeshStatus } from './MeshStatus'
 import { TrustStatusCard } from './TrustStatusCard'
+import { useMeshTranslation } from '../utils/i18nUtils'
 
 function conditionMessage(condition: K8sCondition): string {
   if (condition.message) return condition.message
@@ -56,7 +57,11 @@ function categorizeCluster(cs: ClusterMeshStatus): ClusterStatusCategory {
 
 const CONFLICT_REASONS = ['OperatorConfigConflict', 'NamespaceConflict']
 
-const ClusterStatusSection: React.FC<{ clusterStatuses: ClusterMeshStatus[]; meshConditions?: K8sCondition[] }> = ({ clusterStatuses, meshConditions }) => {
+const ClusterStatusSection: React.FC<{ clusterStatuses: ClusterMeshStatus[]; meshConditions?: K8sCondition[] }> = ({
+  clusterStatuses,
+  meshConditions,
+}) => {
+  const { t } = useMeshTranslation()
   const [filter, setFilter] = React.useState<ClusterStatusCategory>('all')
   const [search, setSearch] = React.useState('')
 
@@ -82,13 +87,15 @@ const ClusterStatusSection: React.FC<{ clusterStatuses: ClusterMeshStatus[]; mes
     const isConflict = readyCondition && CONFLICT_REASONS.includes(readyCondition.reason ?? '')
     return (
       <Card>
-        <CardTitle>Cluster Status (0)</CardTitle>
+        <CardTitle>{t('Cluster Status (0)')}</CardTitle>
         <CardBody>
           <EmptyState variant="xs">
             <EmptyStateBody>
               {isConflict
-                ? `This mesh is blocked: ${readyCondition?.message || readyCondition?.reason}. Resolve the conflict to allow reconciliation.`
-                : 'No clusters are part of this mesh yet.'}
+                ? t('This mesh is blocked: {{reason}}. Resolve the conflict to allow reconciliation.', {
+                    reason: readyCondition?.message || readyCondition?.reason,
+                  })
+                : t('No clusters are part of this mesh yet.')}
             </EmptyStateBody>
           </EmptyState>
         </CardBody>
@@ -98,17 +105,17 @@ const ClusterStatusSection: React.FC<{ clusterStatuses: ClusterMeshStatus[]; mes
 
   return (
     <Card>
-      <CardTitle>Cluster Status ({clusterStatuses.length})</CardTitle>
+      <CardTitle>{t('Cluster Status ({{count}})', { count: clusterStatuses.length })}</CardTitle>
       <CardBody>
         <Flex style={{ marginBottom: '1rem' }} spaceItems={{ default: 'spaceItemsMd' }}>
           <FlexItem>
-            <Label color="green" isCompact>{counts.ready} Ready</Label>
+            <Label color="green" isCompact>{t('{{count}} Ready', { count: counts.ready })}</Label>
           </FlexItem>
           <FlexItem>
-            <Label color="red" isCompact>{counts.notReady} Not Ready</Label>
+            <Label color="red" isCompact>{t('{{count}} Not Ready', { count: counts.notReady })}</Label>
           </FlexItem>
           <FlexItem>
-            <Label color="grey" isCompact>{counts.unknown} Unknown</Label>
+            <Label color="grey" isCompact>{t('{{count}} Unknown', { count: counts.unknown })}</Label>
           </FlexItem>
         </Flex>
 
@@ -118,22 +125,22 @@ const ClusterStatusSection: React.FC<{ clusterStatuses: ClusterMeshStatus[]; mes
               <FlexItem>
                 <ToggleGroup>
                   <ToggleGroupItem
-                    text={`All (${clusterStatuses.length})`}
+                    text={t('All ({{count}})', { count: clusterStatuses.length })}
                     isSelected={filter === 'all'}
                     onChange={() => setFilter('all')}
                   />
                   <ToggleGroupItem
-                    text={`Ready (${counts.ready})`}
+                    text={t('Ready ({{count}})', { count: counts.ready })}
                     isSelected={filter === 'ready'}
                     onChange={() => setFilter('ready')}
                   />
                   <ToggleGroupItem
-                    text={`Not Ready (${counts.notReady})`}
+                    text={t('Not Ready ({{count}})', { count: counts.notReady })}
                     isSelected={filter === 'notReady'}
                     onChange={() => setFilter('notReady')}
                   />
                   <ToggleGroupItem
-                    text={`Unknown (${counts.unknown})`}
+                    text={t('Unknown ({{count}})', { count: counts.unknown })}
                     isSelected={filter === 'unknown'}
                     onChange={() => setFilter('unknown')}
                   />
@@ -141,7 +148,7 @@ const ClusterStatusSection: React.FC<{ clusterStatuses: ClusterMeshStatus[]; mes
               </FlexItem>
               <FlexItem grow={{ default: 'grow' }}>
                 <SearchInput
-                  placeholder="Filter by cluster name"
+                  placeholder={t('Filter by cluster name')}
                   value={search}
                   onChange={(_event, value) => setSearch(value)}
                   onClear={() => setSearch('')}
@@ -153,16 +160,16 @@ const ClusterStatusSection: React.FC<{ clusterStatuses: ClusterMeshStatus[]; mes
               <table className="pf-v6-c-table pf-m-grid-md pf-m-compact" role="grid">
                 <thead className="pf-v6-c-table__thead" style={{ position: 'sticky', top: 0, zIndex: 1 }}>
                   <tr className="pf-v6-c-table__tr">
-                    <th className="pf-v6-c-table__th">Cluster</th>
-                    <th className="pf-v6-c-table__th">Operator Status</th>
-                    <th className="pf-v6-c-table__th">Message</th>
+                    <th className="pf-v6-c-table__th">{t('Cluster')}</th>
+                    <th className="pf-v6-c-table__th">{t('Operator Status')}</th>
+                    <th className="pf-v6-c-table__th">{t('Message')}</th>
                   </tr>
                 </thead>
                 <tbody className="pf-v6-c-table__tbody">
                   {filtered.length === 0 ? (
                     <tr className="pf-v6-c-table__tr">
                       <td className="pf-v6-c-table__td" colSpan={3} style={{ textAlign: 'center' }}>
-                        No clusters match the current filter.
+                        {t('No clusters match the current filter.')}
                       </td>
                     </tr>
                   ) : (
@@ -178,7 +185,9 @@ const ClusterStatusSection: React.FC<{ clusterStatuses: ClusterMeshStatus[]; mes
                           <td className="pf-v6-c-table__td">
                             <MeshStatus conditions={cs.conditions} conditionType="OperatorInstalled" />
                           </td>
-                          <td className="pf-v6-c-table__td">{operatorCondition ? conditionMessage(operatorCondition) : '-'}</td>
+                          <td className="pf-v6-c-table__td">
+                            {operatorCondition ? conditionMessage(operatorCondition) : '-'}
+                          </td>
                         </tr>
                       )
                     })
@@ -194,6 +203,7 @@ const ClusterStatusSection: React.FC<{ clusterStatuses: ClusterMeshStatus[]; mes
 }
 
 const MeshDetailContent: React.FC<{ ns: string; name: string }> = ({ ns, name }) => {
+  const { t } = useMeshTranslation()
   const [mesh, loaded, loadError] = useK8sWatchResource<MultiClusterMesh>({
     groupVersionKind: multiClusterMeshGroupVersionKind,
     name,
@@ -204,7 +214,7 @@ const MeshDetailContent: React.FC<{ ns: string; name: string }> = ({ ns, name })
     return (
       <PageSection>
         <EmptyState>
-          <Title headingLevel="h2" size="lg">Error loading mesh</Title>
+          <Title headingLevel="h2" size="lg">{t('Error loading mesh')}</Title>
           <EmptyStateBody>
             {loadError instanceof Error ? loadError.message : String(loadError)}
           </EmptyStateBody>
@@ -216,7 +226,7 @@ const MeshDetailContent: React.FC<{ ns: string; name: string }> = ({ ns, name })
   if (!loaded) {
     return (
       <PageSection>
-        <Spinner aria-label="Loading mesh details" />
+        <Spinner aria-label={t('Loading mesh details')} />
       </PageSection>
     )
   }
@@ -225,9 +235,9 @@ const MeshDetailContent: React.FC<{ ns: string; name: string }> = ({ ns, name })
     return (
       <PageSection>
         <EmptyState>
-          <Title headingLevel="h2" size="lg">Mesh not found</Title>
+          <Title headingLevel="h2" size="lg">{t('Mesh not found')}</Title>
           <EmptyStateBody>
-            MultiClusterMesh &quot;{name}&quot; was not found in namespace &quot;{ns}&quot;.
+            {t('MultiClusterMesh "{{name}}" was not found in namespace "{{ns}}".', { name, ns })}
           </EmptyStateBody>
         </EmptyState>
       </PageSection>
@@ -246,7 +256,7 @@ const MeshDetailContent: React.FC<{ ns: string; name: string }> = ({ ns, name })
       <PageSection variant="light">
         <Breadcrumb>
           <BreadcrumbItem>
-            <Link to="/service-mesh">Meshes</Link>
+            <Link to="/service-mesh">{t('Meshes')}</Link>
           </BreadcrumbItem>
           <BreadcrumbItem isActive>{mesh.metadata?.name}</BreadcrumbItem>
         </Breadcrumb>
@@ -264,27 +274,29 @@ const MeshDetailContent: React.FC<{ ns: string; name: string }> = ({ ns, name })
         <Grid hasGutter>
           <GridItem span={6}>
             <Card isCompact>
-              <CardTitle>Overview</CardTitle>
+              <CardTitle>{t('Overview')}</CardTitle>
               <CardBody>
                 <DescriptionList isHorizontal isCompact>
                   <DescriptionListGroup>
-                    <DescriptionListTerm>Cluster Set</DescriptionListTerm>
+                    <DescriptionListTerm>{t('Cluster Set')}</DescriptionListTerm>
                     <DescriptionListDescription>{spec.clusterSet}</DescriptionListDescription>
                   </DescriptionListGroup>
                   <DescriptionListGroup>
-                    <DescriptionListTerm>Control Plane Namespace</DescriptionListTerm>
-                    <DescriptionListDescription>{spec.controlPlane?.namespace || 'istio-system'}</DescriptionListDescription>
-                  </DescriptionListGroup>
-                  <DescriptionListGroup>
-                    <DescriptionListTerm>cert-manager Issuer</DescriptionListTerm>
+                    <DescriptionListTerm>{t('Control Plane Namespace')}</DescriptionListTerm>
                     <DescriptionListDescription>
-                      {issuerName
-                        ? `${issuerName} (${issuerRef?.kind || 'Issuer'})`
-                        : 'Not configured'}
+                      {spec.controlPlane?.namespace || 'istio-system'}
                     </DescriptionListDescription>
                   </DescriptionListGroup>
                   <DescriptionListGroup>
-                    <DescriptionListTerm>Created</DescriptionListTerm>
+                    <DescriptionListTerm>{t('cert-manager Issuer')}</DescriptionListTerm>
+                    <DescriptionListDescription>
+                      {issuerName
+                        ? `${issuerName} (${issuerRef?.kind || 'Issuer'})`
+                        : t('Not configured')}
+                    </DescriptionListDescription>
+                  </DescriptionListGroup>
+                  <DescriptionListGroup>
+                    <DescriptionListTerm>{t('Created')}</DescriptionListTerm>
                     <DescriptionListDescription>
                       <Timestamp timestamp={mesh.metadata?.creationTimestamp} />
                     </DescriptionListDescription>
@@ -296,24 +308,30 @@ const MeshDetailContent: React.FC<{ ns: string; name: string }> = ({ ns, name })
 
           <GridItem span={6}>
             <Card isCompact>
-              <CardTitle>OSSM Operator</CardTitle>
+              <CardTitle>{t('OSSM Operator')}</CardTitle>
               <CardBody>
                 <DescriptionList isHorizontal isCompact>
                   <DescriptionListGroup>
-                    <DescriptionListTerm>Namespace</DescriptionListTerm>
-                    <DescriptionListDescription>{spec.operator?.namespace || '(platform default)'}</DescriptionListDescription>
+                    <DescriptionListTerm>{t('Namespace')}</DescriptionListTerm>
+                    <DescriptionListDescription>
+                      {spec.operator?.namespace || t('(platform default)')}
+                    </DescriptionListDescription>
                   </DescriptionListGroup>
                   <DescriptionListGroup>
-                    <DescriptionListTerm>Channel</DescriptionListTerm>
+                    <DescriptionListTerm>{t('Channel')}</DescriptionListTerm>
                     <DescriptionListDescription>{spec.operator?.channel || 'stable'}</DescriptionListDescription>
                   </DescriptionListGroup>
                   <DescriptionListGroup>
-                    <DescriptionListTerm>Source</DescriptionListTerm>
-                    <DescriptionListDescription>{spec.operator?.source || '(platform default)'}</DescriptionListDescription>
+                    <DescriptionListTerm>{t('Source')}</DescriptionListTerm>
+                    <DescriptionListDescription>
+                      {spec.operator?.source || t('(platform default)')}
+                    </DescriptionListDescription>
                   </DescriptionListGroup>
                   <DescriptionListGroup>
-                    <DescriptionListTerm>Install Plan Approval</DescriptionListTerm>
-                    <DescriptionListDescription>{spec.operator?.installPlanApproval || 'Automatic'}</DescriptionListDescription>
+                    <DescriptionListTerm>{t('Install Plan Approval')}</DescriptionListTerm>
+                    <DescriptionListDescription>
+                      {spec.operator?.installPlanApproval || 'Automatic'}
+                    </DescriptionListDescription>
                   </DescriptionListGroup>
                 </DescriptionList>
               </CardBody>
@@ -322,10 +340,10 @@ const MeshDetailContent: React.FC<{ ns: string; name: string }> = ({ ns, name })
 
           <GridItem span={12}>
             <TrustStatusCard
+              clusterStatuses={clusterStatuses}
+              issuerName={issuerName ?? ''}
               meshName={mesh.metadata?.name ?? ''}
               meshNamespace={ns}
-              issuerName={issuerName ?? ''}
-              clusterStatuses={clusterStatuses}
             />
           </GridItem>
 
@@ -336,16 +354,16 @@ const MeshDetailContent: React.FC<{ ns: string; name: string }> = ({ ns, name })
           {conditions.length > 0 && (
             <GridItem span={12}>
               <Card>
-                <CardTitle>Conditions</CardTitle>
+                <CardTitle>{t('Conditions')}</CardTitle>
                 <CardBody>
                   <table className="pf-v6-c-table pf-m-grid-md pf-m-compact" role="grid">
                     <thead className="pf-v6-c-table__thead">
                       <tr className="pf-v6-c-table__tr">
-                        <th className="pf-v6-c-table__th">Type</th>
-                        <th className="pf-v6-c-table__th">Status</th>
-                        <th className="pf-v6-c-table__th">Reason</th>
-                        <th className="pf-v6-c-table__th">Message</th>
-                        <th className="pf-v6-c-table__th">Last Transition</th>
+                        <th className="pf-v6-c-table__th">{t('Type')}</th>
+                        <th className="pf-v6-c-table__th">{t('Status')}</th>
+                        <th className="pf-v6-c-table__th">{t('Reason')}</th>
+                        <th className="pf-v6-c-table__th">{t('Message')}</th>
+                        <th className="pf-v6-c-table__th">{t('Last Transition')}</th>
                       </tr>
                     </thead>
                     <tbody className="pf-v6-c-table__tbody">
@@ -373,14 +391,17 @@ const MeshDetailContent: React.FC<{ ns: string; name: string }> = ({ ns, name })
 }
 
 const MeshDetailPage: React.FC = () => {
+  const { t } = useMeshTranslation()
   const { ns, name } = useParams<{ ns: string; name: string }>()
 
   if (!ns || !name) {
     return (
       <PageSection>
         <EmptyState>
-          <Title headingLevel="h2" size="lg">Not Found</Title>
-          <EmptyStateBody>Invalid mesh URL. Expected /service-mesh/:namespace/:name.</EmptyStateBody>
+          <Title headingLevel="h2" size="lg">{t('Not Found')}</Title>
+          <EmptyStateBody>
+            {t('Invalid mesh URL. Expected /service-mesh/:namespace/:name.')}
+          </EmptyStateBody>
         </EmptyState>
       </PageSection>
     )

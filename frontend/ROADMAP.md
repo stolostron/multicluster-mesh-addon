@@ -6,14 +6,14 @@
 - **Mesh detail page** — Overview and OSSM Operator config cards, Trust Status card (watches cert-manager Certificates + ManifestWorks), Cluster Status card with per-cluster operator install status, Conditions table. Designed for 1 to hundreds of clusters with filters, search, and scroll.
 - **Cross-perspective links** — cluster names link to ACM cluster detail page.
 - **Conflict mesh UX** — friendly labels for backend condition reasons, and blocked meshes show an explanatory message instead of "No clusters."
-- **Production packaging** — Dockerfile (UBI9 nodejs-20 + nginx-124), Makefile with `dev-*` and `prod-*` targets.
+- **Production packaging** — Dockerfile (UBI9 nodejs-20 + nginx-124), Makefile with `dev-*`, `prod-*`, and `test` targets.
+- **Automated tests** — Jest + Testing Library unit test framework (`make test`), with mocks for the Console SDK and react-router. Initial tests cover `MeshStatus` logic and `ServiceMeshPage` rendering.
+- **Internationalization (i18n)** — All user-facing strings externalized via react-i18next under the `plugin__ossm-acm` namespace. Locale bundle served from `dist/locales/en/plugin__ossm-acm.json`.
 
 ## What's next (not blocked)
 
 - **Create / delete mesh actions** — Add a "Create Mesh" button to the list page and "Delete Mesh" on the detail page.
 - **Edit mesh** — Edit issuer, operator config, etc. from the detail page.
-- **Automated tests** — Add unit and/or integration test framework and specific tests for components suitable for testing.
-- **Internationalization (i18n)** — Externalize all user-facing strings to support localization.
 
 ## Blocked on backend
 
