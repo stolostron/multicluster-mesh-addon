@@ -7,12 +7,9 @@ import type { MultiClusterMesh, K8sCondition, ClusterMeshStatus } from '../../ty
 
 // TrustStatusCard has its own test file; stub it here to avoid consuming
 // useK8sWatchResource mock slots meant for the mesh watch.
-jest.mock('../TrustStatusCard', () => ({
+rstest.mock('../TrustStatusCard', () => ({
   TrustStatusCard: () => <div data-testid="trust-status-card" />,
 }))
-
-const mockUseParams = useParams as jest.Mock
-const mockUseK8sWatchResource = useK8sWatchResource as jest.Mock
 
 // ---------------------------------------------------------------------------
 // Test data factories
@@ -47,11 +44,11 @@ const makeCluster = (
 // ---------------------------------------------------------------------------
 
 describe('MeshDetailPage', () => {
-  afterEach(() => jest.clearAllMocks())
+  afterEach(() => rstest.clearAllMocks())
 
   describe('invalid URL (missing params)', () => {
     it('shows Not Found when ns and name are absent', () => {
-      mockUseParams.mockReturnValue({})
+      rstest.mocked(useParams).mockReturnValue({})
       render(<MeshDetailPage />)
       expect(screen.getByText('Not Found')).toBeInTheDocument()
       expect(screen.getByText('Invalid mesh URL. Expected /service-mesh/:namespace/:name.')).toBeInTheDocument()
@@ -60,24 +57,24 @@ describe('MeshDetailPage', () => {
 
   describe('MeshDetailContent states', () => {
     beforeEach(() => {
-      mockUseParams.mockReturnValue({ ns: 'mesh-system', name: 'test-mesh' })
+      rstest.mocked(useParams).mockReturnValue({ ns: 'mesh-system', name: 'test-mesh' })
     })
 
     it('shows a spinner while loading', () => {
-      mockUseK8sWatchResource.mockReturnValue([null, false, null])
+      rstest.mocked(useK8sWatchResource).mockReturnValue([null, false, null])
       render(<MeshDetailPage />)
       expect(screen.getByLabelText('Loading mesh details')).toBeInTheDocument()
     })
 
     it('shows the error message when the watch fails', () => {
-      mockUseK8sWatchResource.mockReturnValue([null, true, new Error('watch exploded')])
+      rstest.mocked(useK8sWatchResource).mockReturnValue([null, true, new Error('watch exploded')])
       render(<MeshDetailPage />)
       expect(screen.getByText('Error loading mesh')).toBeInTheDocument()
-      expect(screen.getByText('watch exploded')).toBeInTheDocument()
+      expect(screen.getByText('An unexpected error occurred. Check the browser console for details.')).toBeInTheDocument()
     })
 
     it('shows mesh not found when loaded but mesh is null', () => {
-      mockUseK8sWatchResource.mockReturnValue([null, true, null])
+      rstest.mocked(useK8sWatchResource).mockReturnValue([null, true, null])
       render(<MeshDetailPage />)
       expect(screen.getByText('Mesh not found')).toBeInTheDocument()
       expect(
@@ -86,14 +83,14 @@ describe('MeshDetailPage', () => {
     })
 
     it('renders the breadcrumb and mesh name heading when loaded', () => {
-      mockUseK8sWatchResource.mockReturnValue([makeMesh(), true, null])
+      rstest.mocked(useK8sWatchResource).mockReturnValue([makeMesh(), true, null])
       render(<MeshDetailPage />)
-      expect(screen.getByRole('link', { name: 'Meshes' })).toBeInTheDocument()
+      expect(screen.getByRole('link', { name: 'Fleet Meshes' })).toBeInTheDocument()
       expect(screen.getByRole('heading', { name: 'test-mesh' })).toBeInTheDocument()
     })
 
     it('links spec.clusterSet to the ACM cluster set detail page', () => {
-      mockUseK8sWatchResource.mockReturnValue([makeMesh({ spec: { clusterSet: 'my-clusterset' } }), true, null])
+      rstest.mocked(useK8sWatchResource).mockReturnValue([makeMesh({ spec: { clusterSet: 'my-clusterset' } }), true, null])
       render(<MeshDetailPage />)
       expect(screen.getByRole('link', { name: 'my-clusterset' })).toHaveAttribute(
         'href',
@@ -102,20 +99,20 @@ describe('MeshDetailPage', () => {
     })
 
     it('shows the istio-system default when controlPlane.namespace is absent', () => {
-      mockUseK8sWatchResource.mockReturnValue([makeMesh(), true, null])
+      rstest.mocked(useK8sWatchResource).mockReturnValue([makeMesh(), true, null])
       render(<MeshDetailPage />)
       expect(screen.getByText('istio-system')).toBeInTheDocument()
     })
 
     it('shows the actual controlPlane.namespace when set', () => {
       const mesh = makeMesh({ spec: { clusterSet: 'global', controlPlane: { namespace: 'custom-ns' } } })
-      mockUseK8sWatchResource.mockReturnValue([mesh, true, null])
+      rstest.mocked(useK8sWatchResource).mockReturnValue([mesh, true, null])
       render(<MeshDetailPage />)
       expect(screen.getByText('custom-ns')).toBeInTheDocument()
     })
 
     it('shows Not configured for issuer when none is set', () => {
-      mockUseK8sWatchResource.mockReturnValue([makeMesh(), true, null])
+      rstest.mocked(useK8sWatchResource).mockReturnValue([makeMesh(), true, null])
       render(<MeshDetailPage />)
       expect(screen.getByText('Not configured')).toBeInTheDocument()
     })
@@ -127,7 +124,7 @@ describe('MeshDetailPage', () => {
           security: { trust: { certManager: { issuerRef: { name: 'root-ca', kind: 'ClusterIssuer' } } } },
         },
       })
-      mockUseK8sWatchResource.mockReturnValue([mesh, true, null])
+      rstest.mocked(useK8sWatchResource).mockReturnValue([mesh, true, null])
       render(<MeshDetailPage />)
       expect(screen.getByText('root-ca (ClusterIssuer)')).toBeInTheDocument()
     })
@@ -139,25 +136,25 @@ describe('MeshDetailPage', () => {
           security: { trust: { certManager: { issuerRef: { name: 'my-issuer' } } } },
         },
       })
-      mockUseK8sWatchResource.mockReturnValue([mesh, true, null])
+      rstest.mocked(useK8sWatchResource).mockReturnValue([mesh, true, null])
       render(<MeshDetailPage />)
       expect(screen.getByText('my-issuer (Issuer)')).toBeInTheDocument()
     })
 
     it('shows the stable channel default when operator.channel is absent', () => {
-      mockUseK8sWatchResource.mockReturnValue([makeMesh(), true, null])
+      rstest.mocked(useK8sWatchResource).mockReturnValue([makeMesh(), true, null])
       render(<MeshDetailPage />)
       expect(screen.getByText('stable')).toBeInTheDocument()
     })
 
     it('shows the Automatic install plan approval default', () => {
-      mockUseK8sWatchResource.mockReturnValue([makeMesh(), true, null])
+      rstest.mocked(useK8sWatchResource).mockReturnValue([makeMesh(), true, null])
       render(<MeshDetailPage />)
       expect(screen.getByText('Automatic')).toBeInTheDocument()
     })
 
     it('hides the Conditions table when there are no conditions', () => {
-      mockUseK8sWatchResource.mockReturnValue([makeMesh(), true, null])
+      rstest.mocked(useK8sWatchResource).mockReturnValue([makeMesh(), true, null])
       render(<MeshDetailPage />)
       expect(screen.queryByText('Conditions')).not.toBeInTheDocument()
     })
@@ -166,7 +163,7 @@ describe('MeshDetailPage', () => {
       const mesh = makeMesh({
         status: { conditions: [makeCondition('Ready', 'True', 'AllClustersReady', 'All good')] },
       })
-      mockUseK8sWatchResource.mockReturnValue([mesh, true, null])
+      rstest.mocked(useK8sWatchResource).mockReturnValue([mesh, true, null])
       render(<MeshDetailPage />)
       expect(screen.getByText('Conditions')).toBeInTheDocument()
       // "Ready" also appears in the MeshStatus header label — use the unique reason/message to pin the table row
