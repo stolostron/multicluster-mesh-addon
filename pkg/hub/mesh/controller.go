@@ -189,12 +189,10 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (resu
 
 	oldStatus := mesh.Status.DeepCopy()
 
-	var invalidCondition *metav1.Condition
-	if invalidCondition, reconcileErr = r.validate(ctx, mesh); reconcileErr != nil {
-		r.setErrorStatus(mesh, reconcileErr)
-	} else if invalidCondition != nil {
-		meta.SetStatusCondition(&mesh.Status.Conditions, *invalidCondition)
-	} else {
+	var conflict bool
+	if conflict, reconcileErr = r.validate(ctx, mesh); reconcileErr != nil {
+		mesh.SetReadyCondition(metav1.ConditionFalse, meshv1alpha1.ReasonReconcileError, "%v", reconcileErr)
+	} else if !conflict {
 		clusters, err := r.getClustersFromSet(ctx, mesh.Spec.ClusterSet)
 		if err != nil {
 			reconcileErr = fmt.Errorf("failed to get clusters from set %s: %w", mesh.Spec.ClusterSet, err)
@@ -209,7 +207,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (resu
 
 		if reconcileErr != nil {
 			klog.Errorf("Encountered an error while reconciling MultiClusterMesh %s/%s: %v", mesh.Namespace, mesh.Name, reconcileErr)
-			r.setErrorStatus(mesh, reconcileErr)
+			mesh.SetReadyCondition(metav1.ConditionFalse, meshv1alpha1.ReasonReconcileError, "%v", reconcileErr)
 		}
 	}
 
@@ -230,37 +228,30 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (resu
 }
 
 // validate checks for conflicts that prevent reconciliation.
-// Returns a condition to set on the mesh if validation fails, or nil if ok.
-func (r *Reconciler) validate(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh) (conflict *metav1.Condition, err error) {
+// Sets a condition on the mesh and returns true if a conflict is found.
+func (r *Reconciler) validate(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh) (conflict bool, err error) {
 	if err = r.forEachMeshInClusterSet(ctx, mesh.Spec.ClusterSet, func(other *meshv1alpha1.MultiClusterMesh) {
-		if other.UID == mesh.UID || conflict != nil {
+		if other.UID == mesh.UID || conflict {
 			return
 		}
 		if isOlderMesh(mesh, other) {
 			return
 		}
 		if mesh.GetControlPlaneNamespace() == other.GetControlPlaneNamespace() {
-			conflict = &metav1.Condition{
-				Type:   meshv1alpha1.ConditionReady,
-				Status: metav1.ConditionFalse,
-				Reason: meshv1alpha1.ReasonNamespaceConflict,
-				Message: fmt.Sprintf("controlPlane.namespace %q conflicts with older mesh %s/%s targeting the same ClusterSet %s",
-					mesh.GetControlPlaneNamespace(), other.Namespace, other.Name, mesh.Spec.ClusterSet),
-			}
+			mesh.SetReadyCondition(metav1.ConditionFalse, meshv1alpha1.ReasonNamespaceConflict,
+				"controlPlane.namespace %q conflicts with older mesh %s/%s targeting the same ClusterSet %s",
+				mesh.GetControlPlaneNamespace(), other.Namespace, other.Name, mesh.Spec.ClusterSet)
+			conflict = true
 			return
 		}
 		if r.operatorConfigConflicts(mesh.Spec.Operator, other.Spec.Operator) {
-			conflict = &metav1.Condition{
-				Type:               meshv1alpha1.ConditionReady,
-				Status:             metav1.ConditionFalse,
-				Reason:             meshv1alpha1.ReasonOperatorConfigConflict,
-				ObservedGeneration: mesh.Generation,
-				Message: fmt.Sprintf("operator config conflicts with older mesh %s/%s targeting the same ClusterSet %s",
-					other.Namespace, other.Name, mesh.Spec.ClusterSet),
-			}
+			mesh.SetReadyCondition(metav1.ConditionFalse, meshv1alpha1.ReasonOperatorConfigConflict,
+				"operator config conflicts with older mesh %s/%s targeting the same ClusterSet %s",
+				other.Namespace, other.Name, mesh.Spec.ClusterSet)
+			conflict = true
 		}
 	}); err != nil {
-		return nil, fmt.Errorf("failed to validate: %w", err)
+		return false, fmt.Errorf("failed to validate: %w", err)
 	}
 
 	return conflict, nil
@@ -433,10 +424,7 @@ func (r *Reconciler) cleanupManifestWorks(ctx context.Context, clusterSet string
 // are removed (e.g. when the issuer is cleared). Otherwise, only Certificates for clusters no longer in the
 // ClusterSet are removed.
 func (r *Reconciler) cleanupCertificates(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, clusters []clusterv1.ManagedCluster, forceCleanupAll bool) error {
-	labelValues := make(map[string]bool, len(clusters))
-	for _, c := range clusters {
-		labelValues[formatLabelValue(c.Name)] = true
-	}
+	clusterNames := clusterNameSet(clusters)
 
 	certList := &certmanagerv1.CertificateList{}
 	if err := r.List(ctx, certList,
@@ -448,7 +436,7 @@ func (r *Reconciler) cleanupCertificates(ctx context.Context, mesh *meshv1alpha1
 
 	for _, cert := range certList.Items {
 		clusterName := cert.Labels[ClusterNameLabel]
-		if !forceCleanupAll && labelValues[clusterName] {
+		if !forceCleanupAll && clusterNames[clusterName] {
 			continue
 		}
 
@@ -482,24 +470,14 @@ func (r *Reconciler) triggerReconcileForNotReadyMeshes(ctx context.Context, mesh
 }
 
 func (r *Reconciler) determineStatus(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, clusters []clusterv1.ManagedCluster) error {
-	var clusterStatuses []meshv1alpha1.ClusterMeshStatus
+	mesh.Status.ClusterStatus = make([]meshv1alpha1.ClusterMeshStatus, 0, len(clusters))
 	allReady := len(clusters) > 0
 
 	for _, cluster := range clusters {
-		status := meshv1alpha1.ClusterMeshStatus{
-			ClusterName: cluster.Name,
-		}
-
 		if getProductClaim(&cluster) == "" {
 			allReady = false
-			meta.SetStatusCondition(&status.Conditions, metav1.Condition{
-				Type:               meshv1alpha1.ConditionOperatorInstalled,
-				Status:             metav1.ConditionFalse,
-				Reason:             meshv1alpha1.ReasonMissingProductClaim,
-				ObservedGeneration: mesh.Generation,
-				Message:            "Cluster is missing product claim, cannot determine platform",
-			})
-			clusterStatuses = append(clusterStatuses, status)
+			mesh.SetClusterCondition(cluster.Name, meshv1alpha1.ConditionOperatorInstalled, metav1.ConditionFalse,
+				meshv1alpha1.ReasonMissingProductClaim, "Cluster is missing product claim, cannot determine platform")
 			continue
 		}
 
@@ -509,40 +487,22 @@ func (r *Reconciler) determineStatus(ctx context.Context, mesh *meshv1alpha1.Mul
 		}
 
 		if installedCSV := getManifestWorkFeedback(operatorWork); installedCSV != nil {
-			meta.SetStatusCondition(&status.Conditions, metav1.Condition{
-				Type:               meshv1alpha1.ConditionOperatorInstalled,
-				Status:             metav1.ConditionTrue,
-				Reason:             meshv1alpha1.ReasonOperatorInstalled,
-				ObservedGeneration: mesh.Generation,
-				Message:            fmt.Sprintf("Operator installed: %s", *installedCSV),
-			})
+			mesh.SetClusterCondition(cluster.Name, meshv1alpha1.ConditionOperatorInstalled, metav1.ConditionTrue,
+				meshv1alpha1.ReasonOperatorInstalled, "Operator installed: %s", *installedCSV)
 		} else {
 			allReady = false
-			meta.SetStatusCondition(&status.Conditions, metav1.Condition{
-				Type:               meshv1alpha1.ConditionOperatorInstalled,
-				Status:             metav1.ConditionFalse,
-				Reason:             meshv1alpha1.ReasonManifestWorkCreated,
-				ObservedGeneration: mesh.Generation,
-				Message:            "Operator ManifestWork has been created, awaiting installation confirmation",
-			})
+			mesh.SetClusterCondition(cluster.Name, meshv1alpha1.ConditionOperatorInstalled, metav1.ConditionFalse,
+				meshv1alpha1.ReasonManifestWorkCreated, "Operator ManifestWork has been created, awaiting installation confirmation")
 		}
-
-		clusterStatuses = append(clusterStatuses, status)
 	}
 
-	mesh.Status.ClusterStatus = clusterStatuses
-
-	readyCondition := metav1.Condition{Type: meshv1alpha1.ConditionReady, ObservedGeneration: mesh.Generation}
 	if allReady {
-		readyCondition.Status = metav1.ConditionTrue
-		readyCondition.Reason = meshv1alpha1.ReasonAllClustersReady
-		readyCondition.Message = "All clusters are ready"
+		mesh.SetReadyCondition(metav1.ConditionTrue,
+			meshv1alpha1.ReasonAllClustersReady, "All clusters are ready")
 	} else {
-		readyCondition.Status = metav1.ConditionFalse
-		readyCondition.Reason = meshv1alpha1.ReasonClustersNotReady
-		readyCondition.Message = "Not all clusters are ready, check individual cluster statuses for details"
+		mesh.SetReadyCondition(metav1.ConditionFalse,
+			meshv1alpha1.ReasonClustersNotReady, "Not all clusters are ready, check individual cluster statuses for details")
 	}
-	meta.SetStatusCondition(&mesh.Status.Conditions, readyCondition)
 
 	return nil
 }
@@ -556,16 +516,6 @@ func getManifestWorkFeedback(work *workv1.ManifestWork) *string {
 		}
 	}
 	return nil
-}
-
-func (r *Reconciler) setErrorStatus(mesh *meshv1alpha1.MultiClusterMesh, reconcileErr error) {
-	meta.SetStatusCondition(&mesh.Status.Conditions, metav1.Condition{
-		Type:               meshv1alpha1.ConditionReady,
-		Status:             metav1.ConditionFalse,
-		Reason:             meshv1alpha1.ReasonReconcileError,
-		ObservedGeneration: mesh.Generation,
-		Message:            reconcileErr.Error(),
-	})
 }
 
 // getMeshEnabledClusters returns all clusters in the given ClusterSet if any non-deleting mesh targets it, or an empty set otherwise.
@@ -839,8 +789,8 @@ func (r *Reconciler) ensureCertificateForCluster(ctx context.Context, mesh *mesh
 			WithCommonName("Istio CA").
 			WithSubject(certmanagerapply.X509Subject().
 				WithOrganizations(mesh.GetTrustDomain()).
-				WithOrganizationalUnits(formatOU(cluster.Name))).
-			WithURIs(certURI(cluster.Name, mesh.GetTrustDomain())).
+				WithOrganizationalUnits(cluster.Name)).
+			WithURIs("spiffe://"+mesh.GetTrustDomain()+"/cluster/"+cluster.Name+"/ca/istio-ca").
 			WithIsCA(true).
 			WithUsages(
 				certmanagerv1.UsageDigitalSignature,
@@ -930,6 +880,6 @@ func meshOwnedLabels(mesh *meshv1alpha1.MultiClusterMesh, clusterName string) ma
 		ClusterSetLabel:    mesh.Spec.ClusterSet,
 		MeshNameLabel:      mesh.Name,
 		MeshNamespaceLabel: mesh.Namespace,
-		ClusterNameLabel:   formatLabelValue(clusterName),
+		ClusterNameLabel:   clusterName,
 	}
 }

@@ -1,0 +1,40 @@
+{
+  "name": "ossm-acm-ui",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "build": "ts-node -O '{\"module\":\"commonjs\"}' node_modules/.bin/webpack --mode production",
+    "start": "webpack serve --mode development",
+    "test": "jest --config jest.config.cjs"
+  },
+  "dependencies": {
+    "@patternfly/react-core": "^6.4.3",
+    "@patternfly/react-icons": "^6.4.0",
+    "@patternfly/react-styles": "^6.4.0",
+    "@stolostron/multicluster-sdk": "^0.10.3",
+    "i18next": "^26.3.1",
+    "react": "^18.3.0",
+    "react-dom": "^18.3.0",
+    "react-i18next": "^17.0.8"
+  },
+  "devDependencies": {
+    "@openshift-console/dynamic-plugin-sdk": "^4.19.1",
+    "@openshift-console/dynamic-plugin-sdk-webpack": "^4.19.1",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
+    "@testing-library/user-event": "^14.6.1",
+    "@types/jest": "^30.0.0",
+    "@types/react": "^18.3.0",
+    "@types/react-dom": "^18.3.0",
+    "copy-webpack-plugin": "^14.0.0",
+    "jest": "^30.4.2",
+    "jest-environment-jsdom": "^30.4.1",
+    "ts-jest": "^29.4.11",
+    "ts-loader": "^9.5.1",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.8.3",
+    "webpack": "^5.97.0",
+    "webpack-cli": "^5.1.4",
+    "webpack-dev-server": "^5.2.0"
+  }
+}

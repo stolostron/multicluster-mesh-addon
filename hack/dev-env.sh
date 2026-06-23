@@ -18,19 +18,24 @@ warn() { echo "WARNING: $*" >&2; }
 err() { echo "ERROR: $*" >&2; exit 1; }
 
 retry() {
-    local retries=$1 delay=$2
-    shift 2
-    local attempt
-    for attempt in $(seq 1 "$retries"); do
-        if "$@"; then
+    local attempts=3 delay=2 attempt=1
+    while (( attempt <= attempts )); do
+        local output rc=0
+        output=$("$@" 2>&1) || rc=$?
+        echo "${output}"
+        if (( rc == 0 )); then
             return 0
         fi
-        if (( attempt < retries )); then
-            log "Attempt ${attempt}/${retries} failed, retrying in ${delay}s..."
-            sleep "$delay"
+        if [[ "${output}" == *"timed out waiting for"* ]]; then
+            err "Command timed out, not retrying: $*"
         fi
+        if (( attempt == attempts )); then
+            err "Command failed after ${attempts} attempts: $*"
+        fi
+        log "Attempt ${attempt}/${attempts} failed, retrying in ${delay}s..."
+        sleep "${delay}"
+        (( attempt++ ))
     done
-    err "Command failed after ${retries} attempts: $*"
 }
 
 MIN_INOTIFY_WATCHES=524288
@@ -142,9 +147,7 @@ install_olm() {
         log "Installing OLM ${OLM_VERSION} on ${cluster}..."
 
         kubectl --kubeconfig="${kubeconfig}" apply --server-side -f "${olm_base_url}/crds.yaml"
-        # kubectl wait errors immediately when .status.conditions is nil
-        # (before the API server has processed the CRD), so retry a few times.
-        retry 5 2 kubectl --kubeconfig="${kubeconfig}" wait --for=condition=Established \
+        retry kubectl --kubeconfig="${kubeconfig}" wait --for=condition=Established \
             crd/catalogsources.operators.coreos.com \
             crd/subscriptions.operators.coreos.com \
             --timeout=60s
@@ -202,7 +205,7 @@ init_ocm() {
     ${CLUSTERADM} init --wait --kubeconfig="${hub_kubeconfig}"
 
     log "Waiting for OCM hub components to be ready..."
-    kubectl --kubeconfig="${hub_kubeconfig}" wait --for=condition=Available \
+    retry kubectl --kubeconfig="${hub_kubeconfig}" wait --for=condition=Available \
         deployment/cluster-manager -n open-cluster-management --timeout=120s
 }
 
@@ -256,13 +259,13 @@ join_clusters() {
 
     log "Waiting for ManagedCluster conditions..."
     for cluster in "${CLUSTER1}" "${CLUSTER2}"; do
-        kubectl --kubeconfig="${hub_kubeconfig}" wait managedcluster/"${cluster}" \
+        retry kubectl --kubeconfig="${hub_kubeconfig}" wait managedcluster/"${cluster}" \
             --for=condition=HubAcceptedManagedCluster=True \
             --timeout=120s
-        kubectl --kubeconfig="${hub_kubeconfig}" wait managedcluster/"${cluster}" \
+        retry kubectl --kubeconfig="${hub_kubeconfig}" wait managedcluster/"${cluster}" \
             --for=condition=ManagedClusterJoined=True \
             --timeout=300s
-        kubectl --kubeconfig="${hub_kubeconfig}" wait managedcluster/"${cluster}" \
+        retry kubectl --kubeconfig="${hub_kubeconfig}" wait managedcluster/"${cluster}" \
             --for=condition=ManagedClusterConditionAvailable=True \
             --timeout=300s
         log "Cluster ${cluster} joined, accepted, and available"
@@ -284,7 +287,7 @@ join_clusters() {
 
     for cluster in "${CLUSTER1}" "${CLUSTER2}"; do
         log "Waiting for product claim on ${cluster} to propagate to the hub..."
-        kubectl --kubeconfig="${hub_kubeconfig}" wait managedcluster/"${cluster}" \
+        retry kubectl --kubeconfig="${hub_kubeconfig}" wait managedcluster/"${cluster}" \
             --for='jsonpath={.status.clusterClaims[?(@.name=="product.open-cluster-management.io")].value}=Kind' \
             --timeout=60s
     done
@@ -317,15 +320,15 @@ setup_mesh() {
     kubectl --kubeconfig="${hub_kubeconfig}" apply -f "${SCRIPT_DIR}/samples/cert-manager-issuer.yaml"
 
     log "Waiting for bootstrap Issuer to be ready..."
-    kubectl --kubeconfig="${hub_kubeconfig}" wait issuer/mesh-selfsigned-issuer \
+    retry kubectl --kubeconfig="${hub_kubeconfig}" wait issuer/mesh-selfsigned-issuer \
         -n mesh-system --for=condition=Ready --timeout=60s
 
     log "Waiting for root CA Certificate to be issued..."
-    kubectl --kubeconfig="${hub_kubeconfig}" wait certificate/mesh-root-ca \
+    retry kubectl --kubeconfig="${hub_kubeconfig}" wait certificate/mesh-root-ca \
         -n mesh-system --for=condition=Ready --timeout=120s
 
     log "Waiting for CA-backed Issuer to be ready..."
-    kubectl --kubeconfig="${hub_kubeconfig}" wait issuer/mesh-root-ca \
+    retry kubectl --kubeconfig="${hub_kubeconfig}" wait issuer/mesh-root-ca \
         -n mesh-system --for=condition=Ready --timeout=60s
 
     log "Creating MultiClusterMesh CR"
