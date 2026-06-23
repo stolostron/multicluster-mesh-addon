@@ -327,8 +327,6 @@ oc rollout status deployment/multicluster-mesh-controller \
 
 ## Teardown
 
-*NOTE: The frontend plugin teardown can also be run via `make teardown` from the `frontend/` directory.*
-
 ```bash
 cd <multicluster-mesh-addon-repo>
 
