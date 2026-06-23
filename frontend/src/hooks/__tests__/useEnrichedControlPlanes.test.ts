@@ -165,6 +165,60 @@ describe('useEnrichedControlPlanes', () => {
     })
   })
 
+  it('correlates using default istio-system when MCM has no explicit controlPlane.namespace', async () => {
+    mockFleetK8sGet.mockResolvedValue(makeIstio('istio-system'))
+    const results = [makeSearchResult('cluster-a', 'default')]
+    const mcms: MultiClusterMesh[] = [{
+      apiVersion: 'mesh.open-cluster-management.io/v1alpha1',
+      kind: 'MultiClusterMesh',
+      metadata: { name: 'my-mesh', namespace: 'mesh-system' },
+      spec: { clusterSet: 'global' },
+      status: { clusterStatus: [{ clusterName: 'cluster-a' }] },
+    }]
+
+    const { result } = renderHook(() => useEnrichedControlPlanes(results as any, mcms))
+
+    await waitFor(() => {
+      expect(result.current[0][0].managedBy).toEqual({ name: 'my-mesh', namespace: 'mesh-system' })
+    })
+  })
+
+  it('correlates using default istio-system when Istio CR controlPlaneNamespace is undefined', async () => {
+    mockFleetK8sGet.mockResolvedValue(makeIstio(undefined as any))
+    const results = [makeSearchResult('cluster-a', 'default')]
+    const mcms: MultiClusterMesh[] = [{
+      apiVersion: 'mesh.open-cluster-management.io/v1alpha1',
+      kind: 'MultiClusterMesh',
+      metadata: { name: 'my-mesh', namespace: 'mesh-system' },
+      spec: { clusterSet: 'global', controlPlane: { namespace: 'istio-system' } },
+      status: { clusterStatus: [{ clusterName: 'cluster-a' }] },
+    }]
+
+    const { result } = renderHook(() => useEnrichedControlPlanes(results as any, mcms))
+
+    await waitFor(() => {
+      expect(result.current[0][0].managedBy).toEqual({ name: 'my-mesh', namespace: 'mesh-system' })
+    })
+  })
+
+  it('does not correlate when MCM has empty clusterStatus', async () => {
+    mockFleetK8sGet.mockResolvedValue(makeIstio('istio-system'))
+    const results = [makeSearchResult('cluster-a', 'default')]
+    const mcms: MultiClusterMesh[] = [{
+      apiVersion: 'mesh.open-cluster-management.io/v1alpha1',
+      kind: 'MultiClusterMesh',
+      metadata: { name: 'my-mesh', namespace: 'mesh-system' },
+      spec: { clusterSet: 'global', controlPlane: { namespace: 'istio-system' } },
+      status: { clusterStatus: [] },
+    }]
+
+    const { result } = renderHook(() => useEnrichedControlPlanes(results as any, mcms))
+
+    await waitFor(() => {
+      expect(result.current[0][0].managedBy).toBeUndefined()
+    })
+  })
+
   it('does not correlate when namespace does not match', async () => {
     mockFleetK8sGet.mockResolvedValue(makeIstio('istio-other'))
     const results = [makeSearchResult('cluster-a', 'default')]

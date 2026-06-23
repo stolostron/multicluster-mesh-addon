@@ -3,6 +3,7 @@ import { fleetK8sGet } from '@stolostron/multicluster-sdk'
 import type { Istio, EnrichedControlPlane } from '../types/istio'
 import { istioModel } from '../types/istio'
 import type { MultiClusterMesh } from '../types/multiClusterMesh'
+import { findManagingMCM } from '../utils/correlateMCM'
 
 type FleetIstio = Istio & { cluster: string }
 
@@ -35,32 +36,6 @@ async function fetchInChunks(
     }
     setEnrichmentCount((c) => c + chunk.length)
   }
-}
-
-// Determines whether an Istio control plane is managed by a MultiClusterMesh.
-// A MultiClusterMesh declares intent to manage Istio on a set of clusters; the
-// controller creates the actual Istio CRs. This function matches a discovered
-// Istio CR back to its managing MCM by checking two things:
-//   1. The cluster running this control plane appears in the MCM's status.clusterStatus[]
-//   2. The control plane namespace (Istio.spec.namespace) matches the MCM's
-//      spec.controlPlane.namespace (default: istio-system)
-// If both match, the control plane is considered managed by that MCM.
-// Note: this is a best-effort correlation — an independently created Istio CR
-// that happens to be on the same cluster+namespace as an MCM will also match.
-function correlate(
-  plane: EnrichedControlPlane,
-  mcms: MultiClusterMesh[],
-): { name: string; namespace: string } | undefined {
-  if (!plane.controlPlaneNamespace) return undefined
-  for (const mcm of mcms) {
-    const mcmNs = mcm.spec.controlPlane?.namespace ?? 'istio-system'
-    if (mcmNs !== plane.controlPlaneNamespace) continue
-    const match = mcm.status?.clusterStatus?.find((cs) => cs.clusterName === plane.clusterName)
-    if (match) {
-      return { name: mcm.metadata?.name ?? '', namespace: mcm.metadata?.namespace ?? '' }
-    }
-  }
-  return undefined
 }
 
 export function useEnrichedControlPlanes(
@@ -104,7 +79,7 @@ export function useEnrichedControlPlanes(
         if (!cancelled) setEnrichmentLoaded(true)
       })
       .catch((e) => {
-        if (!cancelled) setError(e)
+        if (!cancelled) { setEnrichmentLoaded(true); setError(e) }
       })
 
     return () => { cancelled = true }
@@ -137,7 +112,7 @@ export function useEnrichedControlPlanes(
   const enrichedPlanes = React.useMemo(
     () => enrichedBeforeCorrelation.map((plane) => ({
       ...plane,
-      managedBy: correlate(plane, mcms),
+      managedBy: findManagingMCM(plane.clusterName, plane.controlPlaneNamespace, mcms),
     })),
     [enrichedBeforeCorrelation, mcms],
   )

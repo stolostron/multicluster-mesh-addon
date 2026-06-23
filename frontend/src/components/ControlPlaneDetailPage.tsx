@@ -28,31 +28,14 @@ import {
 import type { Istio } from '../types/istio'
 import { istioModel } from '../types/istio'
 import type { K8sCondition } from '../types/common'
-import type { MultiClusterMesh, ClusterMeshStatus } from '../types/multiClusterMesh'
 import { useMultiClusterMeshes } from '../hooks/useMultiClusterMeshes'
+import { findManagingMCM } from '../utils/correlateMCM'
 import { MeshStatus } from './MeshStatus'
 import { useMeshTranslation } from '../utils/i18nUtils'
 
 function statusIcon(status: string): React.ReactNode {
   const color = status === 'True' ? 'green' : status === 'Unknown' ? 'grey' : 'red'
   return <Label color={color}>{status}</Label>
-}
-
-function findMatchingMCM(
-  cluster: string,
-  istioNamespace: string | undefined,
-  mcms: MultiClusterMesh[],
-): { name: string; namespace: string } | undefined {
-  const ns = istioNamespace ?? 'istio-system'
-  for (const mcm of mcms) {
-    const mcmNs = mcm.spec.controlPlane?.namespace ?? 'istio-system'
-    if (mcmNs !== ns) continue
-    const match = mcm.status?.clusterStatus?.find((cs: ClusterMeshStatus) => cs.clusterName === cluster)
-    if (match) {
-      return { name: mcm.metadata?.name ?? '', namespace: mcm.metadata?.namespace ?? '' }
-    }
-  }
-  return undefined
 }
 
 const ControlPlaneDetailContent: React.FC<{ cluster: string; name: string }> = ({ cluster, name }) => {
@@ -106,7 +89,7 @@ const ControlPlaneDetailContent: React.FC<{ cluster: string; name: string }> = (
   const meshID = spec.values?.global?.meshID
   const network = spec.values?.global?.network
   const multiClusterName = spec.values?.global?.multiCluster?.clusterName
-  const matchedMCM = findMatchingMCM(cluster, spec.namespace, mcms ?? [])
+  const matchedMCM = findManagingMCM(cluster, spec.namespace, mcms ?? [])
 
   return (
     <>
