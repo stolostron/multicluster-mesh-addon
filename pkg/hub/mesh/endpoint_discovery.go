@@ -42,7 +42,7 @@ func (r *Reconciler) createManagedServiceAccounts(ctx context.Context, mesh *mes
 	for _, cluster := range clusters {
 		existing := &msav1beta1.ManagedServiceAccount{}
 		if err := r.Get(ctx, types.NamespacedName{Name: msaName, Namespace: cluster.Name}, existing); err == nil {
-			klog.Infof("Cluster %s has an existing ManagedServiceAccount resource %s, skipping createManagedServiceAccount", cluster.Name, msaName)
+			klog.V(4).Infof("Cluster %s has an existing ManagedServiceAccount resource %s, skipping createManagedServiceAccount", cluster.Name, msaName)
 			continue
 		} else if !errors.IsNotFound(err) {
 			return fmt.Errorf("failed to get ManagedServiceAccount %s/%s: %w", cluster.Name, msaName, err)
