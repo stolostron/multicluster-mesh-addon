@@ -21,9 +21,11 @@ Related:
 
 ## Discovery mechanism
 
-ACM Search (`useFleetSearchPoll` from `@stolostron/multicluster-sdk`) is the recommended approach for fleet-scale discovery. It queries a single server-side search index rather than opening per-cluster WebSocket connections, making it viable at 500-1000 clusters. Polling interval: 30 seconds.
+ACM Search (`useFleetSearchPoll` from `@stolostron/multicluster-sdk`) is the recommended approach for fleet-scale discovery. It queries a single server-side search index rather than opening per-cluster WebSocket connections, making it viable at 500-1000 clusters.
 
-The target resource is the sail-operator's `Istio` CR (`sailoperator.io/v1` kind `Istio`), which represents an Istio control plane on a cluster. OSSM 2.x `ServiceMeshControlPlane` (maistra.io) is out of support and is not targeted.
+The search query uses the GVK `{ group: 'sailoperator.io', version: 'v1', kind: 'Istio' }` to discover all sail-operator `Istio` CRs across managed clusters. OSSM 2.x `ServiceMeshControlPlane` (maistra.io) is out of support and is not targeted.
+
+**Polling interval:** 30 seconds. This is the SDK's minimum enforced interval (values 0-30 are clamped to 30s). For a fleet observability dashboard, 30-second freshness is sufficient — control plane status changes are infrequent and the search-collector's own sync interval is comparable.
 
 ## Two data sources
 
@@ -139,16 +141,20 @@ The Control Planes list is a flat table — one row per Istio CR. `meshID` is a 
 
 Since ACM Search does not index `meshID`, `version`, or `status` for the `Istio` CR, the Control Planes page uses a two-phase approach:
 
-**Phase 1 (immediate):** Search results arrive and the table renders with the fields search provides — cluster name, CR name, namespace, created timestamp. The table is usable immediately for basic discovery.
+**Phase 1 (immediate):** Search results arrive and the table renders with the fields search provides — cluster name, CR name, created timestamp. The table is usable immediately for basic discovery. Enrichment-dependent columns (`meshID`, `version`, `namespace`, `status`) show `-` until enrichment completes.
 
-**Phase 2 (background enrichment):** `fleetK8sGet` calls fetch the full `Istio` CR from each cluster to populate `meshID`, `version`, `spec.namespace`, and `status`. These calls are batched for the visible page rows only — `VirtualizedTable` virtualizes rows, so we only need enrichment data for what's on screen. As the user scrolls, additional enrichment is fetched. Results are cached by cluster+CR name so previously fetched CRs are not re-fetched.
+**Phase 2 (background enrichment):** `fleetK8sGet` calls fetch the full `Istio` CR from each cluster to populate `meshID`, `version`, `spec.namespace`, and `status`. Calls are concurrency-limited (e.g., 10 at a time) to avoid overwhelming the API. The Console SDK's `VirtualizedTable` does not expose which rows are currently visible, so viewport-aware batching is not possible — all discovered CRs are enriched with a concurrency cap.
 
-**Enrichment refresh:** When a search poll returns new Istio CRs (a new cluster appeared, or an Istio CR was created), enrichment is fetched for the new CRs only. Existing cached enrichment is retained. This avoids re-fetching the full fleet on every 30-second poll cycle.
+**Caching and invalidation:** Results are cached by `${clusterName}/${crName}`. When a search poll returns new Istio CRs, enrichment is fetched for the new CRs only. Cache entries have a TTL of 5 poll cycles (~2.5 minutes) — after expiry, the next search poll triggers a re-fetch. This ensures version upgrades, health changes, and `meshID` modifications are eventually reflected without re-fetching the full fleet on every poll.
+
+**Error handling:** If a `fleetK8sGet` call fails (cluster unreachable, RBAC denied, network timeout), the row remains in the table with `-` for all enrichment fields. Failed enrichment does not block other rows. The cache does not store failed results, so the next poll cycle will retry.
+
+**RBAC prerequisite:** `fleetK8sGet` fetches resources from managed clusters via the ACM hub proxy. The Console user must have read access to the `Istio` CR on each target cluster. Users who deploy OSSM independently should verify that ManagedClusterView or equivalent RBAC is in place for the sailoperator.io API group. RBAC failures surface as enrichment errors (see error handling above).
 
 This approach scales to hundreds of clusters because:
 - The initial render is not blocked on enrichment — the table is interactive immediately
-- Only visible rows are enriched, not the full dataset
-- Enrichment is cached and incrementally updated
+- Enrichment is concurrency-limited, cached, and incrementally updated
+- Failed enrichment degrades gracefully without breaking the page
 
 ## Correlation
 
@@ -157,35 +163,38 @@ Matching `Istio` CRs to `MultiClusterMesh` CRs uses the composite key: **cluster
 - **Cluster name:** The managed cluster name from the search result (implicit in search data) matched against `MultiClusterMesh.status.clusterStatus[].clusterName`.
 - **Control plane namespace:** `Istio.spec.namespace` (where the control plane pods run, fetched via `fleetK8sGet` enrichment) matched against `MultiClusterMesh.spec.controlPlane.namespace` (defaults to `istio-system` if not set).
 
-Note: The `Istio` CR is a cluster-scoped resource, so `metadata.namespace` is empty. The control plane namespace is always in `spec.namespace`, not `metadata.namespace`. ACM Search returns `metadata.namespace`, which will be empty for cluster-scoped resources — this is expected and correlation relies on the enriched `spec.namespace` from `fleetK8sGet`.
+Notes:
+- The `Istio` CR is a cluster-scoped resource, so `metadata.namespace` is empty. The control plane namespace is always in `spec.namespace`, not `metadata.namespace`. ACM Search returns `metadata.namespace`, which will be empty for cluster-scoped resources — this is expected and correlation relies on the enriched `spec.namespace` from `fleetK8sGet`.
+- `Istio.spec.namespace` is a required, immutable field per the sail-operator CRD. All official examples set it explicitly (typically to `istio-system`). As a defensive fallback, if `spec.namespace` is somehow absent after enrichment, correlation defaults to `istio-system`.
 
 ## Data flow for Option 4
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│              Unified Landing Page (new)                      │
+│              Control Planes Page (new)                       │
 │                                                             │
 │  useFleetSearchPoll ──► Discover Istio CRs across clusters  │
-│  useFleetSearchPoll ──► Discover MultiClusterMesh CRs       │
+│    GVK: sailoperator.io/v1 Istio, poll every 30s            │
 │                                                             │
-│  Both via search (30s poll). The existing Meshes list page  │
-│  continues to use useK8sWatchResource for real-time updates │
-│  on MultiClusterMesh CRs — this new page is additive.      │
+│  useK8sWatchResource ──► Watch MultiClusterMesh CRs on hub  │
+│    (reuses existing useMultiClusterMeshes hook)              │
+│    Hub-side CRDs may not be in the ACM Search index, so     │
+│    we use a direct hub watch rather than search.             │
 │                                                             │
-│  fleetK8sGet (per cluster) ──► Fetch full Istio CR          │
-│                                 for meshID, version, status │
+│  fleetK8sGet (per cluster, concurrency-limited) ──►         │
+│    Fetch full Istio CR for meshID, version, status           │
+│    Cached by cluster+name; re-fetch only for new CRs        │
+│    Cache entries expire after 5 poll cycles (~2.5 min)       │
+│    Failed fetches show '-' for enrichment fields             │
 │                                                             │
 │  Correlate: match Istio CRs to MultiClusterMesh by          │
 │             cluster name + control plane namespace          │
-│                                                             │
-│  Group by: meshID (from Istio CR spec.values.global)        │
-│            or MultiClusterMesh name (if addon-managed)      │
-│            or standalone (no meshID, no addon)              │
 │                                                             │
 │  Display: flat list of Istio CRs (one row per control plane)│
 │    - Controller-managed CRs show "Managed by: <MCM>" badge  │
 │    - meshID column for sorting/grouping                     │
 │    - All CRs show cluster, namespace, version, health       │
+│    - Enrichment columns show '-' while loading or on error  │
 └─────────────────────────────────────────────────────────────┘
          │                          │
          ▼                          ▼
@@ -201,7 +210,7 @@ Note: The `Istio` CR is a cluster-scoped resource, so `metadata.namespace` is em
 └─────────────────┘     └───────────────────────┘
 ```
 
-**Note:** The existing Fleet Meshes list page and MultiClusterMesh detail page are unchanged. They continue to use `useK8sWatchResource` for real-time hub-side watches. The Control Planes page is an additional view that uses search polling for both data sources, providing visibility into all control planes across the fleet.
+**Note:** The existing Fleet Meshes list page and MultiClusterMesh detail page are unchanged. They continue to use `useK8sWatchResource` for real-time hub-side watches. The Control Planes page is an additional view that provides visibility into all control planes across the fleet. The Istio CR detail page design is covered in the implementation plan.
 
 ## Navigation
 
@@ -210,7 +219,7 @@ The Fleet Service Mesh perspective will have two nav items:
 - **Fleet Meshes** — the existing `MultiClusterMesh` list page (fleet-level mesh configuration)
 - **Control Planes** — the new unified page showing discovered Istio CRs across all clusters
 
-The landing page (when switching to the Fleet Service Mesh perspective) remains **Fleet Meshes**. Names are tentative and may change after user feedback.
+The landing page (when switching to the Fleet Service Mesh perspective) remains **Fleet Meshes**. This means users who have no `MultiClusterMesh` CRs will land on an empty page and need to navigate to Control Planes — this is acceptable because the Fleet Meshes page is the primary management interface, and users who have independently deployed OSSM will quickly learn to navigate to Control Planes. If user feedback shows this is confusing, the landing page can be changed later. Names are tentative and may change after user feedback.
 
 ## Decisions
 
