@@ -34,8 +34,19 @@ const fleetMeshesNavItem: EncodedExtension = {
     perspective: 'fleet-service-mesh',
     section: 'fleet-service-mesh-main',
     id: 'fleet-meshes',
-    name: consoleName('Meshes'),
+    name: consoleName('Fleet Meshes'),
     href: '/service-mesh',
+  },
+}
+
+const controlPlanesNavItem: EncodedExtension = {
+  type: 'console.navigation/href',
+  properties: {
+    perspective: 'fleet-service-mesh',
+    section: 'fleet-service-mesh-main',
+    id: 'fleet-control-planes',
+    name: consoleName('Control Planes'),
+    href: '/control-planes',
   },
 }
 
@@ -57,12 +68,33 @@ const fleetMeshOverviewRoute: EncodedExtension = {
   },
 }
 
-// Detail route must be registered before the list route because React Router v5
+const controlPlaneDetailRoute: EncodedExtension = {
+  type: 'console.page/route',
+  properties: {
+    perspective: 'fleet-service-mesh',
+    path: '/control-planes/:cluster/:name',
+    component: { $codeRef: 'controlPlaneDetailPage.default' },
+  },
+}
+
+const controlPlanesRoute: EncodedExtension = {
+  type: 'console.page/route',
+  properties: {
+    perspective: 'fleet-service-mesh',
+    path: '/control-planes',
+    component: { $codeRef: 'controlPlanesPage.default' },
+  },
+}
+
+// Detail routes must be registered before their list routes because React Router v5
 // matches the first route whose path prefix matches the URL.
 export const extensions: EncodedExtension[] = [
   fleetServiceMeshPerspective,
   fleetMeshNavSection,
   fleetMeshesNavItem,
+  controlPlanesNavItem,
   fleetMeshDetailRoute,
   fleetMeshOverviewRoute,
+  controlPlaneDetailRoute,
+  controlPlanesRoute,
 ]

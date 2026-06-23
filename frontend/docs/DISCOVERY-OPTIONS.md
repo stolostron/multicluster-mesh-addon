@@ -130,7 +130,7 @@ When `MultiClusterMesh` CRs exist, their context is layered on top: which cluste
 - The existing `MultiClusterMesh` list/detail pages remain — they are the fleet management layer. The Control Planes page provides per-cluster visibility that users can also navigate to directly
 
 **List page design:**
-The Control Planes list is a flat table — one row per Istio CR. `meshID` is a sortable column; sorting by it naturally groups control planes belonging to the same mesh by placing them next to each other. No expandable/grouped rows — keep it simple. The detail page for a given Istio CR can show the other control planes sharing the same `meshID`.
+The Control Planes list is a flat table — one row per Istio CR. `meshID` is a sortable column; sorting by it naturally groups control planes belonging to the same mesh by placing them next to each other. No expandable/grouped rows — keep it simple. A future "Same Mesh" section on the detail page could show other control planes sharing the same `meshID`, but this is deferred until a shared enrichment cache is available.
 
 **Challenges:**
 - Need to correlate `Istio` CRs with `MultiClusterMesh` cluster membership (see Correlation below)
@@ -204,9 +204,9 @@ Notes:
 │ (fleet mgmt)    │     │ version, health,      │
 │ trust, operator,│     │ config, meshID        │
 │ cluster status  │     │                       │
-│    │            │     │ Reachable from:       │
-│    └────────────┼────►│ - MCM detail drilldown│
-│                 │     │ - Direct navigation   │
+│                 │     │ Reachable from:       │
+│    (deferred)   │     │ - Direct navigation   │
+│                 │     │ - MCM drilldown (future)
 └─────────────────┘     └───────────────────────┘
 ```
 

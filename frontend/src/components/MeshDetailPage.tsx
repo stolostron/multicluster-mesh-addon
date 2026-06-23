@@ -256,7 +256,7 @@ const MeshDetailContent: React.FC<{ ns: string; name: string }> = ({ ns, name })
       <PageSection>
         <Breadcrumb>
           <BreadcrumbItem>
-            <Link to="/service-mesh">{t('Meshes')}</Link>
+            <Link to="/service-mesh">{t('Fleet Meshes')}</Link>
           </BreadcrumbItem>
           <BreadcrumbItem isActive>{mesh.metadata?.name}</BreadcrumbItem>
         </Breadcrumb>

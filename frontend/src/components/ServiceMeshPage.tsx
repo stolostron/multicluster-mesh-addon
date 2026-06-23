@@ -118,7 +118,7 @@ const ServiceMeshPage: React.FC = () => {
 
   return (
     <>
-      <ListPageHeader title={t('Meshes')} />
+      <ListPageHeader title={t('Fleet Meshes')} />
       <ListPageBody>
         <ListPageFilter
           data={staticData}

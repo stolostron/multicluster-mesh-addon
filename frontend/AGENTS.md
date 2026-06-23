@@ -7,8 +7,8 @@ OpenShift ConsolePlugin that adds a "Fleet Service Mesh" perspective to the Open
 Related links:
 - [OSSM-12887](https://redhat.atlassian.net/browse/OSSM-12887) — Epic: OSSM/Kiali ACM console integration developer preview
 - [OCPSTRAT-2989](https://redhat.atlassian.net/browse/OCPSTRAT-2989) — Feature: Fleet-wide service mesh console integration with ACM
-- [ROADMAP.md](ROADMAP.md) — Current status and future plans
-- [SPIKE.md](SPIKE.md) — Original spike research and architecture notes
+- [docs/ROADMAP.md](docs/ROADMAP.md) — Current status and future plans
+- [docs/INITIAL-SPIKE.md](docs/INITIAL-SPIKE.md) — Original spike research and architecture notes
 - [DEV-INSTALL.md](DEV-INSTALL.md) — End-to-end dev setup on CRC
 
 ## Project Structure
@@ -18,33 +18,27 @@ Related links:
 - `webpack.config.ts` — Build config (ConsoleRemotePlugin + CopyPlugin for locales)
 - `jest.config.cjs` / `tsconfig.jest.json` — Test runner config
 - `deploy/` — Kubernetes manifests (ConsolePlugin CR, Deployment/Service, nginx config)
-- `src/types/` — TypeScript types for K8s resources (MultiClusterMesh, Certificate, ManifestWork)
-- `src/components/` — React page and card components
-- `src/hooks/` — Data fetching hooks
+- `src/types/` — TypeScript types for K8s resources (MultiClusterMesh, Certificate, ManifestWork, Istio)
+- `src/components/` — React page and card components (ServiceMeshPage, MeshDetailPage, ControlPlanesPage, ControlPlaneDetailPage, MeshStatus, TrustStatusCard)
+- `src/hooks/` — Data fetching hooks (useMultiClusterMeshes, useDiscoveredControlPlanes, useEnrichedControlPlanes)
 - `src/utils/i18nUtils.ts` — i18n hook (`useMeshTranslation`) and namespace constant
 - `src/locales/en/plugin__ossm-acm.json` — English translation strings
-- `src/__mocks__/` — Jest mocks for Console SDK, react-router, and static assets
+- `src/__mocks__/` — Jest mocks for Console SDK, multicluster-sdk, react-router, and static assets
 - `src/setupTests.tsx` — Jest global setup (jest-dom, i18n mock, jsdom stubs)
 
 ## Build & Deploy
 
-Requires Node.js 20+.
+Requires Node.js 20+ and `podman` or `docker` for container image builds.
 
 Run `make help` to see all available targets.
 
-**Dev workflow** (ConfigMap + stock nginx, no image build needed):
-- `make dev-build` — `npm install && npm run build` (compiles to `dist/`)
-- `make dev-deploy` — Idempotent deploy to OpenShift (configmaps, deployment, consoleplugin, console restart)
-- `make dev-teardown` — Remove dev plugin from cluster
-- `make dev-build dev-deploy` — The standard dev workflow for iterating on changes
+- `make build` — Build the container image (npm ci + webpack inside the container)
+- `make deploy` — Push image to registry and deploy to cluster (includes console restart)
+- `make teardown` — Remove the plugin from the cluster
+- `make test` — Run unit tests
+- `make build deploy` — The standard workflow for iterating on changes
 
-**Production workflow** (baked container image):
-- `make prod-build` — Build container image via Dockerfile (npm ci + webpack inside the image)
-- `make prod-push` — Push image to registry (default: auto-detected OpenShift internal registry)
-- `make prod-deploy` — Push + deploy using the baked image (no ConfigMaps)
-- `make prod-teardown` — Remove prod plugin from cluster
-
-Override `IMG` to push to an external registry: `make prod-build IMG=quay.io/myorg/ossm-acm-console-plugin:v1`
+Override `IMG` to push to an external registry: `make build IMG=quay.io/myorg/ossm-acm-console-plugin:v1`
 
 ## Key Architecture Decisions
 
@@ -82,7 +76,13 @@ All data comes from the hub cluster Kubernetes API via `useK8sWatchResource`:
 | `Certificate` (cert-manager.io/v1) | Mesh namespace | Per-cluster cert status, expiry, renewal |
 | `ManifestWork` (work.open-cluster-management.io/v1) | Per-cluster namespace (e.g. `local-cluster`) | Trust distribution status |
 
-No multicluster-sdk hooks (`useFleetK8sWatchResource`) are used yet — all current data is hub-side only.
+The Control Planes page uses `@stolostron/multicluster-sdk` for cross-cluster data:
+
+| Resource | SDK API | What it shows |
+|----------|---------|---------------|
+| `Istio` (sailoperator.io/v1) | `useFleetSearchPoll` (discovery) + `fleetK8sGet` (enrichment) | Per-cluster control plane version, meshID, health |
+
+The enrichment hook (`useEnrichedControlPlanes`) caches `fleetK8sGet` results in a `useRef<Map>` with a 2.5-minute TTL, fetches in batches of 10, and correlates with `MultiClusterMesh` CRs from `useMultiClusterMeshes`. See [docs/DISCOVERY-OPTIONS.md](docs/DISCOVERY-OPTIONS.md) for the full architecture.
 
 ### MeshStatus component
 

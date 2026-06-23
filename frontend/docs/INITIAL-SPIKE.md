@@ -2,7 +2,7 @@
 
 This document is Nick Fox's original spike research from [OSSM-11847](https://redhat.atlassian.net/browse/OSSM-11847). It served as the foundation for the initial frontend implementation.
 
-**Caution:** Parts of this document are outdated. In particular, the `@stolostron/multicluster-sdk` API signatures shown here (e.g. `useFleetSearchPoll` query shape and return tuple) do not match the current SDK (v0.10.3+). Always verify API signatures against the installed SDK type definitions in `node_modules/@stolostron/multicluster-sdk/lib/` rather than relying on the examples here. See [ROADMAP.md](ROADMAP.md).
+**Caution:** Parts of this document are outdated. In particular, the `@stolostron/multicluster-sdk` API signatures shown here (e.g. `useFleetSearchPoll` query shape and return tuple) do not match the current SDK (v0.10.3+). Always verify API signatures against the installed SDK type definitions in `node_modules/@stolostron/multicluster-sdk/lib/` rather than relying on the examples here. See [ROADMAP.md](./ROADMAP.md).
 
 ---
 

@@ -88,7 +88,7 @@ describe('MeshDetailPage', () => {
     it('renders the breadcrumb and mesh name heading when loaded', () => {
       mockUseK8sWatchResource.mockReturnValue([makeMesh(), true, null])
       render(<MeshDetailPage />)
-      expect(screen.getByRole('link', { name: 'Meshes' })).toBeInTheDocument()
+      expect(screen.getByRole('link', { name: 'Fleet Meshes' })).toBeInTheDocument()
       expect(screen.getByRole('heading', { name: 'test-mesh' })).toBeInTheDocument()
     })
 

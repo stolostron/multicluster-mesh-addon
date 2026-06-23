@@ -26,7 +26,7 @@ describe('ServiceMeshPage', () => {
   it('renders the page header', () => {
     mockUseMultiClusterMeshes.mockReturnValue([[], true, null])
     render(<ServiceMeshPage />)
-    expect(screen.getByText('Meshes')).toBeInTheDocument()
+    expect(screen.getByText('Fleet Meshes')).toBeInTheDocument()
   })
 
   it('shows empty state when no meshes exist and data is loaded', () => {

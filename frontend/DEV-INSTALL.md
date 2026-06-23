@@ -201,47 +201,14 @@ oc delete multiclustermesh staging-mesh dev-mesh -n mesh-system
 
 ## 5. Build and deploy the frontend ConsolePlugin
 
-*NOTE: These commands can also be run via `make dev-build dev-deploy` from the `frontend/` directory.*
+From the `frontend/` directory, build the container image and deploy:
 
 ```bash
 cd <multicluster-mesh-addon-repo>/frontend
-
-# Build
-npm install
-npm run build
-
-# Create the plugin namespace
-oc create namespace ossm-acm-plugin --dry-run=client -o yaml | oc apply -f -
-
-# Push built assets as a ConfigMap (delete first for idempotency — oc apply
-# hits the 262KB last-applied-configuration annotation limit with large dist/)
-oc delete configmap ossm-acm-plugin-dist -n ossm-acm-plugin --ignore-not-found
-oc create configmap ossm-acm-plugin-dist \
-  --from-file=dist/ \
-  -n ossm-acm-plugin
-
-# Push the nginx config
-oc delete configmap ossm-acm-plugin-nginx -n ossm-acm-plugin --ignore-not-found
-oc create configmap ossm-acm-plugin-nginx \
-  --from-file=nginx.conf=deploy/nginx.conf \
-  -n ossm-acm-plugin
-
-# Deploy nginx (serves plugin assets over TLS)
-oc apply -f deploy/dev-deployment.yaml
-oc rollout status deployment/ossm-acm-plugin -n ossm-acm-plugin --timeout=120s
-
-# Register the ConsolePlugin
-oc apply -f deploy/consoleplugin.yaml
-
-# Enable the plugin (appends to existing plugins list)
-oc patch console.operator.openshift.io cluster \
-  --type=json \
-  --patch='[{"op":"add","path":"/spec/plugins/-","value":"ossm-acm"}]'
-
-# Restart the console to pick up the new plugin
-oc rollout restart deployment/console -n openshift-console
-oc rollout status deployment/console -n openshift-console --timeout=120s
+make build deploy
 ```
+
+This builds a container image with the compiled plugin assets baked in (UBI9 nginx), pushes it to the OpenShift internal registry, deploys it, registers the ConsolePlugin, and restarts the console.
 
 ## 6. Verify
 
@@ -249,28 +216,90 @@ oc rollout status deployment/console -n openshift-console --timeout=120s
 2. Log in as `kubeadmin`
 3. Click the perspective switcher (top-left dropdown)
 4. Select **Fleet Service Mesh**
-5. The Meshes table should show `my-mesh` with its status
+5. The **Fleet Meshes** table should show `my-mesh` with its status
+6. Click **Control Planes** in the left nav — it shows Istio CRs discovered across managed clusters
+
+## 6a. (Optional) Create Istio CRs for the Control Planes page
+
+The Control Planes page discovers sail-operator `Istio` CRs across managed clusters via ACM Search. If you already have OSSM installed on your clusters, those Istio CRs will appear automatically. If not, you can create test data manually.
+
+```bash
+# Install the OSSM 3.x operator (if not already installed)
+oc apply -f - <<'EOF'
+apiVersion: operators.coreos.com/v1alpha1
+kind: Subscription
+metadata:
+  name: servicemeshoperator3
+  namespace: openshift-operators
+spec:
+  channel: stable
+  installPlanApproval: Automatic
+  name: servicemeshoperator3
+  source: redhat-operators
+  sourceNamespace: openshift-marketplace
+EOF
+
+# Wait for OLM to install the operator
+# Poll until the subscription has a currentCSV, then wait for that CSV to succeed
+until oc get subscription.operators.coreos.com servicemeshoperator3 \
+  -n openshift-operators -o jsonpath='{.status.currentCSV}' 2>/dev/null | grep -q .; do
+  echo "Waiting for subscription to resolve..."
+  sleep 5
+done
+CSV=$(oc get subscription.operators.coreos.com servicemeshoperator3 \
+  -n openshift-operators -o jsonpath='{.status.currentCSV}')
+echo "Waiting for ${CSV} to succeed..."
+oc wait --for=jsonpath='{.status.phase}'=Succeeded \
+  csv/${CSV} -n openshift-operators --timeout=180s
+
+# Create an Istio CR with meshID set (multi-cluster scenario).
+# Use a namespace that is NOT managed by a MultiClusterMesh CR (e.g. NOT
+# istio-system if an MCM already targets that). Otherwise the Control Planes
+# page will show this CR as "Managed by" the MCM even though it was created
+# independently. In production this wouldn't happen, but in a single-cluster
+# test environment the namespaces can easily collide.
+oc apply -f - <<'EOF'
+apiVersion: sailoperator.io/v1
+kind: Istio
+metadata:
+  name: default
+spec:
+  namespace: istio-system
+  values:
+    global:
+      meshID: mesh1
+      multiCluster:
+        clusterName: local-cluster
+      network: network1
+EOF
+
+# Verify the Istio CR was created
+oc get istios
+```
+
+The Control Planes page polls ACM Search every 30 seconds. After the search collector indexes the new Istio CR (typically within 1-2 minutes), it will appear in the Control Planes table.
+
+To clean up:
+
+```bash
+# Delete the Istio CR
+oc delete istio default
+
+# Remove the OSSM operator (CSV + subscription + CRDs)
+CSV=$(oc get subscription.operators.coreos.com servicemeshoperator3 \
+  -n openshift-operators -o jsonpath='{.status.currentCSV}')
+oc delete subscription.operators.coreos.com servicemeshoperator3 -n openshift-operators
+oc delete csv ${CSV} -n openshift-operators
+oc get crd -o name | grep -E 'sailoperator\.io|istio\.io' | xargs oc delete
+```
 
 ## Iterating on frontend changes
 
-*NOTE: These commands can also be run via `make dev-build dev-deploy` from the `frontend/` directory.*
-
-After modifying frontend source files:
+After modifying frontend source files, rebuild and redeploy:
 
 ```bash
 cd <multicluster-mesh-addon-repo>/frontend
-
-npm run build
-
-oc delete configmap ossm-acm-plugin-dist -n ossm-acm-plugin --ignore-not-found
-oc create configmap ossm-acm-plugin-dist \
-  --from-file=dist/ \
-  -n ossm-acm-plugin
-
-oc rollout restart deployment/ossm-acm-plugin -n ossm-acm-plugin
-oc rollout status deployment/ossm-acm-plugin -n ossm-acm-plugin --timeout=120s
-oc rollout restart deployment/console -n openshift-console
-oc rollout status deployment/console -n openshift-console --timeout=120s
+make build deploy
 ```
 
 ## Iterating on backend changes
@@ -298,18 +327,13 @@ oc rollout status deployment/multicluster-mesh-controller \
 
 ## Teardown
 
-*NOTE: The frontend plugin teardown commands can also be run via `make dev-teardown` from the `frontend/` directory.*
+*NOTE: The frontend plugin teardown can also be run via `make teardown` from the `frontend/` directory.*
 
 ```bash
 cd <multicluster-mesh-addon-repo>
 
-# Remove the frontend plugin from the console operator plugins list
-oc get console.operator.openshift.io cluster -o json | \
-  jq '.spec.plugins |= (. // [] | map(select(. != "ossm-acm")))' | \
-  oc apply -f -
-oc delete -f frontend/deploy/consoleplugin.yaml --ignore-not-found
-oc delete -f frontend/deploy/dev-deployment.yaml --ignore-not-found
-oc delete namespace ossm-acm-plugin --ignore-not-found
+# Remove the frontend plugin
+cd frontend && make teardown && cd ..
 
 # Remove test mesh resources
 oc delete multiclustermesh my-mesh -n mesh-system --ignore-not-found
