@@ -11,7 +11,7 @@ REGISTRY = $(shell $(OC) get image.config.openshift.io/cluster -o jsonpath='{.st
 IMG ?= $(REGISTRY)/$(PLUGIN_NAMESPACE)/ossm-acm-console-plugin:latest
 INTERNAL_IMG = $(INTERNAL_REGISTRY)/$(PLUGIN_NAMESPACE)/ossm-acm-console-plugin:latest
 
-.PHONY: help build deploy push teardown test
+.PHONY: help build clean deploy push teardown test
 
 ##@ Testing
 
@@ -19,6 +19,9 @@ test: ## Run unit tests
 	npm test
 
 ##@ Build & Deploy
+
+clean: ## Remove build artifacts and installed dependencies
+	rm -rf dist node_modules
 
 build: ## Build the container image (includes npm ci + webpack inside the container)
 	@if [ -z "$(CONTAINER_ENGINE)" ]; then echo "Error: no container engine found (podman or docker)"; exit 1; fi

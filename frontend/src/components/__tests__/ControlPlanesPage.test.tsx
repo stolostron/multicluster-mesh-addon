@@ -4,10 +4,6 @@ import { useFleetSearchPoll, useIsFleetAvailable } from '@stolostron/multicluste
 import { useK8sWatchResource } from '@openshift-console/dynamic-plugin-sdk'
 import type { EnrichedControlPlane } from '../../types/istio'
 
-const mockUseFleetSearchPoll = useFleetSearchPoll as jest.Mock
-const mockUseIsFleetAvailable = useIsFleetAvailable as jest.Mock
-const mockUseK8sWatchResource = useK8sWatchResource as jest.Mock
-
 const makeSearchResult = (cluster: string, name: string) => ({
   apiVersion: 'sailoperator.io/v1',
   kind: 'Istio',
@@ -16,28 +12,28 @@ const makeSearchResult = (cluster: string, name: string) => ({
   spec: { namespace: 'istio-system' },
 })
 
-afterEach(() => jest.clearAllMocks())
+afterEach(() => rstest.clearAllMocks())
 
 beforeEach(() => {
-  mockUseIsFleetAvailable.mockReturnValue(true)
-  mockUseK8sWatchResource.mockReturnValue([[], true, null])
+  rstest.mocked(useIsFleetAvailable).mockReturnValue(true)
+  rstest.mocked(useK8sWatchResource).mockReturnValue([[], true, null])
 })
 
 describe('ControlPlanesPage', () => {
   it('shows loading state while search is pending', () => {
-    mockUseFleetSearchPoll.mockReturnValue([undefined, false, undefined, jest.fn()])
+    rstest.mocked(useFleetSearchPoll).mockReturnValue([undefined, false, undefined, rstest.fn()])
     render(<ControlPlanesPage />)
     expect(screen.getByTestId('loading')).toBeInTheDocument()
   })
 
   it('shows empty state when no control planes are discovered', () => {
-    mockUseFleetSearchPoll.mockReturnValue([[], true, undefined, jest.fn()])
+    rstest.mocked(useFleetSearchPoll).mockReturnValue([[], true, undefined, rstest.fn()])
     render(<ControlPlanesPage />)
     expect(screen.getByText('No control planes discovered across the fleet.')).toBeInTheDocument()
   })
 
   it('shows error state when search fails', () => {
-    mockUseFleetSearchPoll.mockReturnValue([[], true, new Error('search failed'), jest.fn()])
+    rstest.mocked(useFleetSearchPoll).mockReturnValue([[], true, new Error('search failed'), rstest.fn()])
     render(<ControlPlanesPage />)
     expect(screen.getByTestId('load-error')).toBeInTheDocument()
   })
@@ -47,7 +43,7 @@ describe('ControlPlanesPage', () => {
       makeSearchResult('cluster-a', 'default'),
       makeSearchResult('cluster-b', 'default'),
     ]
-    mockUseFleetSearchPoll.mockReturnValue([results, true, undefined, jest.fn()])
+    rstest.mocked(useFleetSearchPoll).mockReturnValue([results, true, undefined, rstest.fn()])
     render(<ControlPlanesPage />)
     await waitFor(() => {
       expect(screen.getByText('cluster-a')).toBeInTheDocument()
@@ -57,7 +53,7 @@ describe('ControlPlanesPage', () => {
 
   it('links cluster names to ACM cluster detail pages', async () => {
     const results = [makeSearchResult('cluster-a', 'default')]
-    mockUseFleetSearchPoll.mockReturnValue([results, true, undefined, jest.fn()])
+    rstest.mocked(useFleetSearchPoll).mockReturnValue([results, true, undefined, rstest.fn()])
     render(<ControlPlanesPage />)
     await waitFor(() => {
       expect(screen.getByRole('link', { name: 'cluster-a' })).toHaveAttribute(
@@ -69,7 +65,7 @@ describe('ControlPlanesPage', () => {
 
   it('links CR names to control plane detail pages', async () => {
     const results = [makeSearchResult('cluster-a', 'myistio')]
-    mockUseFleetSearchPoll.mockReturnValue([results, true, undefined, jest.fn()])
+    rstest.mocked(useFleetSearchPoll).mockReturnValue([results, true, undefined, rstest.fn()])
     render(<ControlPlanesPage />)
     await waitFor(() => {
       expect(screen.getByRole('link', { name: 'myistio' })).toHaveAttribute(
@@ -81,7 +77,7 @@ describe('ControlPlanesPage', () => {
 
   it('shows dash for enrichment columns before enrichment completes', async () => {
     const results = [makeSearchResult('cluster-a', 'default')]
-    mockUseFleetSearchPoll.mockReturnValue([results, true, undefined, jest.fn()])
+    rstest.mocked(useFleetSearchPoll).mockReturnValue([results, true, undefined, rstest.fn()])
     render(<ControlPlanesPage />)
     await waitFor(() => {
       const nameLink = screen.getByRole('link', { name: 'default' })
@@ -92,22 +88,22 @@ describe('ControlPlanesPage', () => {
 
   describe('fleet availability guard', () => {
     it('shows RHACM message when loaded, no results, and fleet not available', () => {
-      mockUseFleetSearchPoll.mockReturnValue([[], true, undefined, jest.fn()])
-      mockUseIsFleetAvailable.mockReturnValue(false)
+      rstest.mocked(useFleetSearchPoll).mockReturnValue([[], true, undefined, rstest.fn()])
+      rstest.mocked(useIsFleetAvailable).mockReturnValue(false)
       render(<ControlPlanesPage />)
       expect(screen.getByText('This page requires Red Hat Advanced Cluster Management.')).toBeInTheDocument()
     })
 
     it('shows NoDataEmptyMsg when loaded, no results, but fleet is available', () => {
-      mockUseFleetSearchPoll.mockReturnValue([[], true, undefined, jest.fn()])
-      mockUseIsFleetAvailable.mockReturnValue(true)
+      rstest.mocked(useFleetSearchPoll).mockReturnValue([[], true, undefined, rstest.fn()])
+      rstest.mocked(useIsFleetAvailable).mockReturnValue(true)
       render(<ControlPlanesPage />)
       expect(screen.getByText('No control planes discovered across the fleet.')).toBeInTheDocument()
     })
 
     it('does not show guard during loading', () => {
-      mockUseFleetSearchPoll.mockReturnValue([undefined, false, undefined, jest.fn()])
-      mockUseIsFleetAvailable.mockReturnValue(false)
+      rstest.mocked(useFleetSearchPoll).mockReturnValue([undefined, false, undefined, rstest.fn()])
+      rstest.mocked(useIsFleetAvailable).mockReturnValue(false)
       render(<ControlPlanesPage />)
       expect(screen.queryByText('This page requires Red Hat Advanced Cluster Management.')).not.toBeInTheDocument()
     })

@@ -5,14 +5,16 @@
     }
   },
   "compilerOptions": {
-    "target": "ES2020",
+    "target": "es2022",
     "module": "ESNext",
     "moduleResolution": "bundler",
-    "jsx": "react",
+    "jsx": "react-jsx",
     "strict": true,
     "esModuleInterop": true,
-    "skipLibCheck": true,
-    "outDir": "dist"
+    "forceConsistentCasingInFileNames": true,
+    "noEmit": true,
+    "noFallthroughCasesInSwitch": true,
+    "skipLibCheck": true
   },
   "include": ["src", "console-extensions.ts", "console-plugin-metadata.ts", "webpack.config.ts"]
 }

@@ -1,4 +1,4 @@
-import * as React from 'react'
+import type { FC } from 'react'
 import { Label } from '@patternfly/react-core'
 import type { K8sCondition } from '../types/multiClusterMesh'
 import { useMeshTranslation } from '../utils/i18nUtils'
@@ -54,7 +54,7 @@ interface MeshStatusProps {
   conditionType?: string
 }
 
-export const MeshStatus: React.FC<MeshStatusProps> = ({ conditions, conditionType }) => {
+export const MeshStatus: FC<MeshStatusProps> = ({ conditions, conditionType }) => {
   const { t } = useMeshTranslation()
   const { label, color } = deriveStatus(conditions, conditionType)
   return <Label color={color}>{t(label)}</Label>

@@ -1,4 +1,4 @@
-import * as React from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { fleetK8sGet } from '@stolostron/multicluster-sdk'
 import type { Istio, EnrichedControlPlane } from '../types/istio'
 import { istioModel } from '../types/istio'
@@ -45,21 +45,21 @@ export function useEnrichedControlPlanes(
   searchResults: FleetIstio[],
   mcms: MultiClusterMesh[],
 ): [EnrichedControlPlane[], boolean, boolean, unknown] {
-  const cacheRef = React.useRef<Map<string, CacheEntry>>(new Map())
-  const [enrichmentCount, setEnrichmentCount] = React.useState(0)
-  const [enrichmentLoaded, setEnrichmentLoaded] = React.useState(false)
-  const [error, setError] = React.useState<unknown>(null)
+  const cacheRef = useRef<Map<string, CacheEntry>>(new Map())
+  const [enrichmentCount, setEnrichmentCount] = useState(0)
+  const [enrichmentLoaded, setEnrichmentLoaded] = useState(false)
+  const [error, setError] = useState<unknown>(null)
 
-  const searchKey = React.useMemo(
+  const searchKey = useMemo(
     () => searchResults.map((r) => `${r.cluster}/${r.metadata?.name}`).sort().join(','),
     [searchResults],
   )
 
   // Stabilize the search results reference so downstream memos don't fire on
   // every 30s poll when the actual data hasn't changed.
-  const stableResults = React.useMemo(() => searchResults, [searchKey]) // eslint-disable-line react-hooks/exhaustive-deps
+  const stableResults = useMemo(() => searchResults, [searchKey]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  React.useEffect(() => {
+  useEffect(() => {
     let cancelled = false
     const cache = cacheRef.current
     const now = Date.now()
@@ -95,7 +95,7 @@ export function useEnrichedControlPlanes(
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchKey])
 
-  const enrichedBeforeCorrelation = React.useMemo(() => {
+  const enrichedBeforeCorrelation = useMemo(() => {
     const cache = cacheRef.current
     return stableResults.map((r): EnrichedControlPlane => {
       const key = `${r.cluster}/${r.metadata?.name}`
@@ -118,7 +118,7 @@ export function useEnrichedControlPlanes(
     })
   }, [stableResults, enrichmentCount])
 
-  const enrichedPlanes = React.useMemo(
+  const enrichedPlanes = useMemo(
     () => enrichedBeforeCorrelation.map((plane) => ({
       ...plane,
       managedBy: findManagingMCM(plane.clusterName, plane.controlPlaneNamespace, mcms),

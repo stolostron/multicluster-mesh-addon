@@ -1,6 +1,6 @@
-import * as React from 'react'
+import type { FC } from 'react'
 
-const PerspectiveIcon: React.FC = () => (
+const PerspectiveIcon: FC = () => (
   <svg
     className="pf-v6-svg"
     viewBox="0 0 384 512"

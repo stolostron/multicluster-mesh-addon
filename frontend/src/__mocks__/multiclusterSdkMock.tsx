@@ -1,5 +1,7 @@
-export const useFleetSearchPoll = jest.fn(() => [undefined, false, undefined, jest.fn()])
+import { rs } from '@rstest/core'
 
-export const fleetK8sGet = jest.fn(() => Promise.resolve({}))
+export const useFleetSearchPoll = rs.fn(() => [undefined, false, undefined, rs.fn()])
 
-export const useIsFleetAvailable = jest.fn(() => true)
+export const fleetK8sGet = rs.fn(() => Promise.resolve({}))
+
+export const useIsFleetAvailable = rs.fn(() => true)

@@ -1,4 +1,5 @@
-import * as React from 'react'
+import { useEffect, useState } from 'react'
+import type { FC, ReactNode } from 'react'
 import { useParams, Link } from 'react-router-dom-v5-compat'
 import { fleetK8sGet } from '@stolostron/multicluster-sdk'
 import {
@@ -33,19 +34,19 @@ import { findManagingMCM } from '../utils/correlateMCM'
 import { MeshStatus } from './MeshStatus'
 import { useMeshTranslation } from '../utils/i18nUtils'
 
-function statusIcon(status: string): React.ReactNode {
+function statusIcon(status: string): ReactNode {
   const color = status === 'True' ? 'green' : status === 'Unknown' ? 'grey' : 'red'
   return <Label color={color}>{status}</Label>
 }
 
-const ControlPlaneDetailContent: React.FC<{ cluster: string; name: string }> = ({ cluster, name }) => {
+const ControlPlaneDetailContent: FC<{ cluster: string; name: string }> = ({ cluster, name }) => {
   const { t } = useMeshTranslation()
-  const [istio, setIstio] = React.useState<Istio | null>(null)
-  const [loaded, setLoaded] = React.useState(false)
-  const [error, setError] = React.useState<unknown>(null)
+  const [istio, setIstio] = useState<Istio | null>(null)
+  const [loaded, setLoaded] = useState(false)
+  const [error, setError] = useState<unknown>(null)
   const [mcms] = useMultiClusterMeshes()
 
-  React.useEffect(() => {
+  useEffect(() => {
     let cancelled = false
     setLoaded(false)
     setError(null)
@@ -221,7 +222,7 @@ const ControlPlaneDetailContent: React.FC<{ cluster: string; name: string }> = (
   )
 }
 
-const ControlPlaneDetailPage: React.FC = () => {
+const ControlPlaneDetailPage: FC = () => {
   const { t } = useMeshTranslation()
   const { cluster, name } = useParams<{ cluster: string; name: string }>()
 

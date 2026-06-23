@@ -1,4 +1,5 @@
-import * as React from 'react'
+import { useMemo } from 'react'
+import type { FC } from 'react'
 import { Link } from 'react-router-dom-v5-compat'
 import {
   ListPageHeader,
@@ -57,7 +58,7 @@ function buildColumns(t: (key: string) => string): TableColumn<EnrichedControlPl
   ]
 }
 
-const NoControlPlanesMsg: React.FC = () => {
+const NoControlPlanesMsg: FC = () => {
   const { t } = useMeshTranslation()
   return (
     <EmptyState variant="xs">
@@ -66,7 +67,7 @@ const NoControlPlanesMsg: React.FC = () => {
   )
 }
 
-const NoMatchMsg: React.FC = () => {
+const NoMatchMsg: FC = () => {
   const { t } = useMeshTranslation()
   return (
     <EmptyState variant="xs">
@@ -75,7 +76,7 @@ const NoMatchMsg: React.FC = () => {
   )
 }
 
-const ControlPlaneRow: React.FC<RowProps<EnrichedControlPlane>> = ({ obj, activeColumnIDs }) => {
+const ControlPlaneRow: FC<RowProps<EnrichedControlPlane>> = ({ obj, activeColumnIDs }) => {
   const { t } = useMeshTranslation()
   return (
     <>
@@ -122,13 +123,13 @@ const ControlPlaneRow: React.FC<RowProps<EnrichedControlPlane>> = ({ obj, active
   )
 }
 
-const ControlPlanesPage: React.FC = () => {
+const ControlPlanesPage: FC = () => {
   const { t } = useMeshTranslation()
   const { results: searchResults, loaded: searchLoaded, error: searchError, isFleetAvailable } = useDiscoveredControlPlanes()
   const [mcms] = useMultiClusterMeshes()
   const [enrichedPlanes, , , enrichmentError] = useEnrichedControlPlanes(searchResults, mcms ?? [])
 
-  const columns = React.useMemo(() => buildColumns(t), [t])
+  const columns = useMemo(() => buildColumns(t), [t])
   const [staticData, filteredData, onFilterChange] = useListPageFilter(enrichedPlanes)
   const [activeColumns, userSettingsLoaded] = useActiveColumns({
     columns,

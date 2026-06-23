@@ -2,25 +2,22 @@ import { renderHook } from '@testing-library/react'
 import { useDiscoveredControlPlanes } from '../useDiscoveredControlPlanes'
 import { useFleetSearchPoll, useIsFleetAvailable } from '@stolostron/multicluster-sdk'
 
-const mockUseFleetSearchPoll = useFleetSearchPoll as jest.Mock
-const mockUseIsFleetAvailable = useIsFleetAvailable as jest.Mock
-
-afterEach(() => jest.clearAllMocks())
+afterEach(() => rstest.clearAllMocks())
 
 beforeEach(() => {
-  mockUseIsFleetAvailable.mockReturnValue(true)
+  rstest.mocked(useIsFleetAvailable).mockReturnValue(true)
 })
 
 describe('useDiscoveredControlPlanes', () => {
   it('returns empty results when search returns undefined', () => {
-    mockUseFleetSearchPoll.mockReturnValue([undefined, true, undefined, jest.fn()])
+    rstest.mocked(useFleetSearchPoll).mockReturnValue([undefined, true, undefined, rstest.fn()])
     const { result } = renderHook(() => useDiscoveredControlPlanes())
     expect(result.current.results).toEqual([])
     expect(result.current.loaded).toBe(true)
   })
 
   it('returns empty results when search returns empty array', () => {
-    mockUseFleetSearchPoll.mockReturnValue([[], true, undefined, jest.fn()])
+    rstest.mocked(useFleetSearchPoll).mockReturnValue([[], true, undefined, rstest.fn()])
     const { result } = renderHook(() => useDiscoveredControlPlanes())
     expect(result.current.results).toEqual([])
   })
@@ -32,7 +29,7 @@ describe('useDiscoveredControlPlanes', () => {
       { metadata: { name: 'c' }, cluster: undefined, spec: { namespace: 'istio-system' } },
       { metadata: { name: 'd' }, cluster: 'cluster-2', spec: { namespace: 'istio-system' } },
     ]
-    mockUseFleetSearchPoll.mockReturnValue([results, true, undefined, jest.fn()])
+    rstest.mocked(useFleetSearchPoll).mockReturnValue([results, true, undefined, rstest.fn()])
     const { result } = renderHook(() => useDiscoveredControlPlanes())
     expect(result.current.results).toHaveLength(2)
     expect(result.current.results[0].cluster).toBe('cluster-1')
@@ -40,28 +37,28 @@ describe('useDiscoveredControlPlanes', () => {
   })
 
   it('passes through isFleetAvailable from useIsFleetAvailable', () => {
-    mockUseFleetSearchPoll.mockReturnValue([[], true, undefined, jest.fn()])
-    mockUseIsFleetAvailable.mockReturnValue(false)
+    rstest.mocked(useFleetSearchPoll).mockReturnValue([[], true, undefined, rstest.fn()])
+    rstest.mocked(useIsFleetAvailable).mockReturnValue(false)
     const { result } = renderHook(() => useDiscoveredControlPlanes())
     expect(result.current.isFleetAvailable).toBe(false)
   })
 
   it('passes through error from useFleetSearchPoll', () => {
     const err = new Error('search failed')
-    mockUseFleetSearchPoll.mockReturnValue([undefined, true, err, jest.fn()])
+    rstest.mocked(useFleetSearchPoll).mockReturnValue([undefined, true, err, rstest.fn()])
     const { result } = renderHook(() => useDiscoveredControlPlanes())
     expect(result.current.error).toBe(err)
   })
 
   it('passes through loaded=false when search is pending', () => {
-    mockUseFleetSearchPoll.mockReturnValue([undefined, false, undefined, jest.fn()])
+    rstest.mocked(useFleetSearchPoll).mockReturnValue([undefined, false, undefined, rstest.fn()])
     const { result } = renderHook(() => useDiscoveredControlPlanes())
     expect(result.current.loaded).toBe(false)
   })
 
   it('provides a refetch callback', () => {
-    const refetchFn = jest.fn()
-    mockUseFleetSearchPoll.mockReturnValue([[], true, undefined, refetchFn])
+    const refetchFn = rstest.fn()
+    rstest.mocked(useFleetSearchPoll).mockReturnValue([[], true, undefined, refetchFn])
     const { result } = renderHook(() => useDiscoveredControlPlanes())
     expect(result.current.refetch).toBe(refetchFn)
   })

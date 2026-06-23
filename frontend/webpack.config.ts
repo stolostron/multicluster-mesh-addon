@@ -14,8 +14,14 @@ export default function (_env: unknown, _argv: unknown) {
         {
           test: /\.(ts|tsx)$/,
           exclude: /node_modules/,
-          loader: 'ts-loader',
-          options: { transpileOnly: true },
+          loader: 'swc-loader',
+          options: {
+            jsc: {
+              parser: { syntax: 'typescript', tsx: true },
+              transform: { react: { runtime: 'automatic' } },
+              target: 'es2022',
+            },
+          },
         },
       ],
     },

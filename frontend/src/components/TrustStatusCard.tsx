@@ -1,4 +1,5 @@
-import * as React from 'react'
+import { useState } from 'react'
+import type { FC, ReactNode } from 'react'
 import { Link } from 'react-router-dom-v5-compat'
 import { Trans } from 'react-i18next'
 import {
@@ -50,7 +51,7 @@ function categorizeTrust(cert: Certificate | undefined, mw: ManifestWork | undef
   return 'failed'
 }
 
-function certStatusLabel(cert: Certificate | undefined, t: (key: string) => string): React.ReactNode {
+function certStatusLabel(cert: Certificate | undefined, t: (key: string) => string): ReactNode {
   if (!cert) return <Label color="grey" isCompact>{t('Pending')}</Label>
   const ready = findCondition(cert.status?.conditions, 'Ready')
   if (!ready) return <Label color="grey" isCompact>{t('Unknown')}</Label>
@@ -62,7 +63,7 @@ function distributionStatusLabel(
   mw: ManifestWork | undefined,
   mwError: unknown,
   t: (key: string) => string,
-): React.ReactNode {
+): ReactNode {
   if (mwError) return <Label color="grey" isCompact>{t('Unavailable')}</Label>
   if (!mw) return <Label color="grey" isCompact>{t('Pending')}</Label>
   const applied = findCondition(mw.status?.conditions, 'Applied')
@@ -84,7 +85,7 @@ interface TrustStatusCardProps {
   meshNamespace: string
 }
 
-export const TrustStatusCard: React.FC<TrustStatusCardProps> = ({
+export const TrustStatusCard: FC<TrustStatusCardProps> = ({
   clusterStatuses,
   issuerName,
   meshName,
@@ -92,8 +93,8 @@ export const TrustStatusCard: React.FC<TrustStatusCardProps> = ({
 }) => {
   const { t } = useMeshTranslation()
   const hasIssuer = !!issuerName
-  const [filter, setFilter] = React.useState<TrustCategory>('all')
-  const [search, setSearch] = React.useState('')
+  const [filter, setFilter] = useState<TrustCategory>('all')
+  const [search, setSearch] = useState('')
 
   const [certs, certsLoaded, certsError] = useK8sWatchResource<Certificate[]>(
     hasIssuer

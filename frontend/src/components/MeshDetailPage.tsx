@@ -1,4 +1,5 @@
-import * as React from 'react'
+import { useMemo, useState } from 'react'
+import type { FC, ReactNode } from 'react'
 import { useParams, Link } from 'react-router-dom-v5-compat'
 import {
   useK8sWatchResource,
@@ -40,7 +41,7 @@ function conditionMessage(condition: K8sCondition): string {
   return condition.status
 }
 
-function statusIcon(status: string): React.ReactNode {
+function statusIcon(status: string): ReactNode {
   const color = status === 'True' ? 'green' : status === 'Unknown' ? 'grey' : 'red'
   return <Label color={color}>{status}</Label>
 }
@@ -57,15 +58,15 @@ function categorizeCluster(cs: ClusterMeshStatus): ClusterStatusCategory {
 
 const CONFLICT_REASONS = ['OperatorConfigConflict', 'NamespaceConflict']
 
-export const ClusterStatusSection: React.FC<{ clusterStatuses: ClusterMeshStatus[]; meshConditions?: K8sCondition[] }> = ({
+export const ClusterStatusSection: FC<{ clusterStatuses: ClusterMeshStatus[]; meshConditions?: K8sCondition[] }> = ({
   clusterStatuses,
   meshConditions,
 }) => {
   const { t } = useMeshTranslation()
-  const [filter, setFilter] = React.useState<ClusterStatusCategory>('all')
-  const [search, setSearch] = React.useState('')
+  const [filter, setFilter] = useState<ClusterStatusCategory>('all')
+  const [search, setSearch] = useState('')
 
-  const counts = React.useMemo(() => {
+  const counts = useMemo(() => {
     const result = { ready: 0, notReady: 0, unknown: 0 }
     clusterStatuses.forEach((cs) => {
       const cat = categorizeCluster(cs)
@@ -74,7 +75,7 @@ export const ClusterStatusSection: React.FC<{ clusterStatuses: ClusterMeshStatus
     return result
   }, [clusterStatuses])
 
-  const filtered = React.useMemo(() => {
+  const filtered = useMemo(() => {
     return clusterStatuses.filter((cs) => {
       if (filter !== 'all' && categorizeCluster(cs) !== filter) return false
       if (search && !cs.clusterName.toLowerCase().includes(search.toLowerCase())) return false
@@ -202,7 +203,7 @@ export const ClusterStatusSection: React.FC<{ clusterStatuses: ClusterMeshStatus
   )
 }
 
-const MeshDetailContent: React.FC<{ ns: string; name: string }> = ({ ns, name }) => {
+const MeshDetailContent: FC<{ ns: string; name: string }> = ({ ns, name }) => {
   const { t } = useMeshTranslation()
   const [mesh, loaded, loadError] = useK8sWatchResource<MultiClusterMesh>({
     groupVersionKind: multiClusterMeshGroupVersionKind,
@@ -394,7 +395,7 @@ const MeshDetailContent: React.FC<{ ns: string; name: string }> = ({ ns, name })
   )
 }
 
-const MeshDetailPage: React.FC = () => {
+const MeshDetailPage: FC = () => {
   const { t } = useMeshTranslation()
   const { ns, name } = useParams<{ ns: string; name: string }>()
 

@@ -4,8 +4,6 @@ import { fleetK8sGet } from '@stolostron/multicluster-sdk'
 import type { Istio } from '../../types/istio'
 import type { MultiClusterMesh } from '../../types/multiClusterMesh'
 
-const mockFleetK8sGet = fleetK8sGet as jest.Mock
-
 const makeSearchResult = (cluster: string, name: string) => ({
   apiVersion: 'sailoperator.io/v1',
   kind: 'Istio',
@@ -27,13 +25,13 @@ const makeIstio = (namespace = 'istio-system', meshID?: string): Istio => ({
 })
 
 afterEach(() => {
-  jest.clearAllMocks()
-  jest.useRealTimers()
+  rstest.clearAllMocks()
+  rstest.useRealTimers()
 })
 
 describe('useEnrichedControlPlanes', () => {
   it('returns search-derived fields immediately before enrichment', () => {
-    mockFleetK8sGet.mockReturnValue(new Promise(() => {}))
+    rstest.mocked(fleetK8sGet).mockReturnValue(new Promise(() => {}))
     const results = [makeSearchResult('cluster-a', 'default')]
     const { result } = renderHook(() => useEnrichedControlPlanes(results as any, []))
     const [planes] = result.current
@@ -45,7 +43,7 @@ describe('useEnrichedControlPlanes', () => {
   })
 
   it('enrichmentLoaded starts false and becomes true after fleetK8sGet resolves', async () => {
-    mockFleetK8sGet.mockResolvedValue(makeIstio())
+    rstest.mocked(fleetK8sGet).mockResolvedValue(makeIstio())
     const results = [makeSearchResult('cluster-a', 'default')]
     const { result } = renderHook(() => useEnrichedControlPlanes(results as any, []))
 
@@ -57,7 +55,7 @@ describe('useEnrichedControlPlanes', () => {
   })
 
   it('populates enrichment fields after fleetK8sGet resolves', async () => {
-    mockFleetK8sGet.mockResolvedValue(makeIstio('istio-system', 'mesh1'))
+    rstest.mocked(fleetK8sGet).mockResolvedValue(makeIstio('istio-system', 'mesh1'))
     const results = [makeSearchResult('cluster-a', 'default')]
     const { result } = renderHook(() => useEnrichedControlPlanes(results as any, []))
 
@@ -69,7 +67,7 @@ describe('useEnrichedControlPlanes', () => {
   })
 
   it('caches enrichment and does not re-fetch on identical search results', async () => {
-    mockFleetK8sGet.mockResolvedValue(makeIstio())
+    rstest.mocked(fleetK8sGet).mockResolvedValue(makeIstio())
     const results = [makeSearchResult('cluster-a', 'default')]
     const { result, rerender } = renderHook(
       ({ r }) => useEnrichedControlPlanes(r as any, []),
@@ -77,16 +75,16 @@ describe('useEnrichedControlPlanes', () => {
     )
 
     await waitFor(() => expect(result.current[2]).toBe(true))
-    expect(mockFleetK8sGet).toHaveBeenCalledTimes(1)
+    expect(rstest.mocked(fleetK8sGet)).toHaveBeenCalledTimes(1)
 
     // Re-render with a new array reference but same content
     const results2 = [makeSearchResult('cluster-a', 'default')]
     rerender({ r: results2 })
-    expect(mockFleetK8sGet).toHaveBeenCalledTimes(1)
+    expect(rstest.mocked(fleetK8sGet)).toHaveBeenCalledTimes(1)
   })
 
   it('fetches enrichment for new CRs when search results change', async () => {
-    mockFleetK8sGet.mockResolvedValue(makeIstio())
+    rstest.mocked(fleetK8sGet).mockResolvedValue(makeIstio())
     const results1 = [makeSearchResult('cluster-a', 'default')]
     const { result, rerender } = renderHook(
       ({ r }) => useEnrichedControlPlanes(r as any, []),
@@ -94,7 +92,7 @@ describe('useEnrichedControlPlanes', () => {
     )
 
     await waitFor(() => expect(result.current[2]).toBe(true))
-    expect(mockFleetK8sGet).toHaveBeenCalledTimes(1)
+    expect(rstest.mocked(fleetK8sGet)).toHaveBeenCalledTimes(1)
 
     const results2 = [
       makeSearchResult('cluster-a', 'default'),
@@ -103,13 +101,13 @@ describe('useEnrichedControlPlanes', () => {
     rerender({ r: results2 })
 
     await waitFor(() => {
-      expect(mockFleetK8sGet).toHaveBeenCalledTimes(2)
+      expect(rstest.mocked(fleetK8sGet)).toHaveBeenCalledTimes(2)
     })
   })
 
   it('re-fetches after cache TTL expires', async () => {
-    jest.useFakeTimers()
-    mockFleetK8sGet.mockResolvedValue(makeIstio())
+    rstest.useFakeTimers()
+    rstest.mocked(fleetK8sGet).mockResolvedValue(makeIstio())
     const results = [makeSearchResult('cluster-a', 'default')]
 
     const { result, rerender } = renderHook(
@@ -117,11 +115,11 @@ describe('useEnrichedControlPlanes', () => {
       { initialProps: { r: results } },
     )
 
-    await act(async () => { await jest.runAllTimersAsync() })
-    expect(mockFleetK8sGet).toHaveBeenCalledTimes(1)
+    await act(async () => { await rstest.runAllTimersAsync() })
+    expect(rstest.mocked(fleetK8sGet)).toHaveBeenCalledTimes(1)
 
     // Advance past the 150s TTL
-    jest.setSystemTime(Date.now() + 160_000)
+    rstest.setSystemTime(Date.now() + 160_000)
 
     // Re-render with a new reference to trigger effect re-evaluation
     // The searchKey is the same, so the effect won't re-run from the key alone.
@@ -132,13 +130,13 @@ describe('useEnrichedControlPlanes', () => {
     ]
     rerender({ r: results2 })
 
-    await act(async () => { await jest.runAllTimersAsync() })
+    await act(async () => { await rstest.runAllTimersAsync() })
     // cluster-a should be re-fetched (TTL expired) + cluster-c is new
-    expect(mockFleetK8sGet).toHaveBeenCalledTimes(3)
+    expect(rstest.mocked(fleetK8sGet)).toHaveBeenCalledTimes(3)
   })
 
   it('leaves enrichment undefined when fleetK8sGet fails', async () => {
-    mockFleetK8sGet.mockRejectedValue(new Error('cluster unreachable'))
+    rstest.mocked(fleetK8sGet).mockRejectedValue(new Error('cluster unreachable'))
     const results = [makeSearchResult('cluster-a', 'default')]
     const { result } = renderHook(() => useEnrichedControlPlanes(results as any, []))
 
@@ -148,7 +146,7 @@ describe('useEnrichedControlPlanes', () => {
   })
 
   it('correlates with MultiClusterMesh when enrichment namespace matches', async () => {
-    mockFleetK8sGet.mockResolvedValue(makeIstio('istio-system'))
+    rstest.mocked(fleetK8sGet).mockResolvedValue(makeIstio('istio-system'))
     const results = [makeSearchResult('cluster-a', 'default')]
     const mcms: MultiClusterMesh[] = [{
       apiVersion: 'mesh.open-cluster-management.io/v1alpha1',
@@ -166,7 +164,7 @@ describe('useEnrichedControlPlanes', () => {
   })
 
   it('correlates using default istio-system when MCM has no explicit controlPlane.namespace', async () => {
-    mockFleetK8sGet.mockResolvedValue(makeIstio('istio-system'))
+    rstest.mocked(fleetK8sGet).mockResolvedValue(makeIstio('istio-system'))
     const results = [makeSearchResult('cluster-a', 'default')]
     const mcms: MultiClusterMesh[] = [{
       apiVersion: 'mesh.open-cluster-management.io/v1alpha1',
@@ -184,7 +182,7 @@ describe('useEnrichedControlPlanes', () => {
   })
 
   it('correlates using default istio-system when Istio CR controlPlaneNamespace is undefined', async () => {
-    mockFleetK8sGet.mockResolvedValue(makeIstio(undefined as any))
+    rstest.mocked(fleetK8sGet).mockResolvedValue(makeIstio(undefined as any))
     const results = [makeSearchResult('cluster-a', 'default')]
     const mcms: MultiClusterMesh[] = [{
       apiVersion: 'mesh.open-cluster-management.io/v1alpha1',
@@ -202,7 +200,7 @@ describe('useEnrichedControlPlanes', () => {
   })
 
   it('does not correlate when MCM has empty clusterStatus', async () => {
-    mockFleetK8sGet.mockResolvedValue(makeIstio('istio-system'))
+    rstest.mocked(fleetK8sGet).mockResolvedValue(makeIstio('istio-system'))
     const results = [makeSearchResult('cluster-a', 'default')]
     const mcms: MultiClusterMesh[] = [{
       apiVersion: 'mesh.open-cluster-management.io/v1alpha1',
@@ -220,7 +218,7 @@ describe('useEnrichedControlPlanes', () => {
   })
 
   it('does not correlate when namespace does not match', async () => {
-    mockFleetK8sGet.mockResolvedValue(makeIstio('istio-other'))
+    rstest.mocked(fleetK8sGet).mockResolvedValue(makeIstio('istio-other'))
     const results = [makeSearchResult('cluster-a', 'default')]
     const mcms: MultiClusterMesh[] = [{
       apiVersion: 'mesh.open-cluster-management.io/v1alpha1',

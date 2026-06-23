@@ -15,20 +15,21 @@ Related links:
 
 - `console-extensions.ts` — Declares perspective, nav items, page routes
 - `console-plugin-metadata.ts` — Plugin name, version, exposed modules
-- `webpack.config.ts` — Build config (ConsoleRemotePlugin + CopyPlugin for locales)
-- `jest.config.cjs` / `tsconfig.jest.json` — Test runner config
+- `webpack.config.ts` — Build config (ConsoleRemotePlugin + CopyPlugin for locales, swc-loader for TS transpilation)
+- `rstest.config.ts` — Rstest test runner config (jsdom environment, module aliases, setup files, SWC JSX transform)
 - `deploy/` — Kubernetes manifests (ConsolePlugin CR, Deployment/Service, nginx config)
 - `src/types/` — TypeScript types for K8s resources (MultiClusterMesh, Certificate, ManifestWork, Istio)
 - `src/components/` — React page and card components (ServiceMeshPage, MeshDetailPage, ControlPlanesPage, ControlPlaneDetailPage, MeshStatus, TrustStatusCard)
 - `src/hooks/` — Data fetching hooks (useMultiClusterMeshes, useDiscoveredControlPlanes, useEnrichedControlPlanes)
 - `src/utils/i18nUtils.ts` — i18n hook (`useMeshTranslation`) and namespace constant
 - `src/locales/en/plugin__ossm-acm.json` — English translation strings
-- `src/__mocks__/` — Jest mocks for Console SDK, multicluster-sdk, react-router, and static assets
-- `src/setupTests.tsx` — Jest global setup (jest-dom, i18n mock, jsdom stubs)
+- `src/__mocks__/` — Rstest mocks for Console SDK, multicluster-sdk, react-router, and static assets
+- `src/setupTests.tsx` — Rstest setup (jest-dom matchers via expect.extend, i18n mock, jsdom stubs, cleanup)
+- `src/rstest-globals.d.ts` — Type declarations for rstest globals (`describe`, `it`, `expect`, `rstest`, etc.)
 
 ## Build & Deploy
 
-Requires Node.js 20+ and `podman` or `docker` for container image builds.
+Requires Node.js `^20.19.0 || >=22.12.0` and `podman` or `docker` for container image builds.
 
 Run `make help` to see all available targets.
 
@@ -95,7 +96,7 @@ All user-facing strings must be wrapped with `t()` from `useMeshTranslation()`. 
 ```typescript
 import { useMeshTranslation } from '../utils/i18nUtils'
 
-const MyComponent: React.FC = () => {
+const MyComponent: FC = () => {
   const { t } = useMeshTranslation()
   return <span>{t('My string')}</span>
 }
@@ -112,20 +113,39 @@ When adding new user-facing strings, also add them to `src/locales/en/plugin__os
 
 The Console provides react-i18next at runtime; this plugin never initializes i18next itself.
 
+### Build toolchain
+
+The build uses **SWC** (`swc-loader` + `@swc/core`) for TypeScript transpilation instead of `ts-loader`/tsc. SWC is the same Rust-based transpiler that Rspack uses internally via `builtin:swc-loader`. The SWC options in `webpack.config.ts` are configured to match Rspack's API, so a future migration to Rspack (once the Console SDK supports it) is minimal. SWC does not type-check — run `tsc --noEmit` separately if needed.
+
 ### Testing
 
-Run tests with `make test`. Tests live in `__tests__/` subdirectories alongside source, using `*.test.tsx` naming.
+Run tests with `make test`. Tests use **Rstest** (`@rstest/core`) — an Rspack-powered test runner with Jest-compatible APIs. Tests live in `__tests__/` subdirectories alongside source, using `*.test.tsx` naming.
 
-- `@openshift-console/dynamic-plugin-sdk` is mocked in `src/__mocks__/consoleSdkMock.tsx`. Override hook return values with `mockReturnValue()` in individual tests.
-- `react-router-dom-v5-compat` is mocked in `src/__mocks__/routerMock.tsx` (`Link` renders `<a>`, `useParams` returns `{}`).
-- `react-i18next` is mocked globally in `src/setupTests.tsx` — `t(key)` returns the English key string with `{{variable}}` interpolations substituted. Tests can assert directly on English source strings.
+- `@openshift-console/dynamic-plugin-sdk` is mocked via `resolve.alias` in `rstest.config.ts`, pointing to `src/__mocks__/consoleSdkMock.tsx`. Override hook return values with `mockReturnValue()` in individual tests.
+- `react-router-dom-v5-compat` is mocked via `resolve.alias` in `rstest.config.ts`, pointing to `src/__mocks__/routerMock.tsx` (`Link` renders `<a>`, `useParams` returns `{}`).
+- `react-i18next` is mocked globally in `src/setupTests.tsx` via `rs.mock()` — `t(key)` returns the English key string with `{{variable}}` interpolations substituted. Tests can assert directly on English source strings.
 
-When mocking `useK8sWatchResource` in a test:
+When mocking a hook in a test, use `rstest.mocked()` (preferred) or `import type { Mock }`:
 ```typescript
 import { useK8sWatchResource } from '@openshift-console/dynamic-plugin-sdk'
-const mockWatch = useK8sWatchResource as jest.Mock
-mockWatch.mockReturnValue([data, true, null])  // [data, loaded, error]
+
+// Option A — inline (preferred for one-off usage):
+rstest.mocked(useK8sWatchResource).mockReturnValue([data, true, null])
+
+// Option B — variable for repeated use:
+import type { Mock } from '@rstest/core'
+const mockWatch = useK8sWatchResource as unknown as Mock
+mockWatch.mockReturnValue([data, true, null])
 ```
+
+When mocking a local module (not aliased via `resolve.alias`), pass `{ mock: true }` to enable auto-mocking:
+```typescript
+rstest.mock('../../hooks/useMultiClusterMeshes', { mock: true })
+```
+
+Mock files and setup files are regular modules, not test files — rstest globals are not injected. They must `import { rs } from '@rstest/core'` and use `rs.fn()` / `rs.mock()` explicitly.
+
+Rstest uses `>` as snapshot separator vs Jest's `:` — relevant if snapshot tests are added in the future.
 
 ## Conventions
 
