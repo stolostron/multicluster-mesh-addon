@@ -11,7 +11,7 @@ REGISTRY = $(shell $(OC) get image.config.openshift.io/cluster -o jsonpath='{.st
 IMG ?= $(REGISTRY)/$(PLUGIN_NAMESPACE)/ossm-acm-console-plugin:latest
 INTERNAL_IMG = $(INTERNAL_REGISTRY)/$(PLUGIN_NAMESPACE)/ossm-acm-console-plugin:latest
 
-.PHONY: help build clean deploy install-deps push teardown test typecheck
+.PHONY: help build clean deploy install-deps push teardown test typecheck prepare-dev-env start start-console .ensure-oc-exists .ensure-oc-login
 
 ##@ Testing
 
@@ -36,10 +36,11 @@ build: ## Build the container image (includes npm ci + webpack inside the contai
 	@if [ -z "$(CONTAINER_ENGINE)" ]; then echo "Error: no container engine found (podman or docker)"; exit 1; fi
 	$(CONTAINER_ENGINE) build -t $(IMG) .
 
-push: ## Push the container image to the registry (default: OpenShift internal registry)
 ifeq ($(origin IMG),command line)
+push: ## Push the container image to the registry (IMG set on command line)
 	$(CONTAINER_ENGINE) push $(IMG)
 else
+push: .ensure-oc-login ## Push the container image to the OpenShift internal registry
 	@if [ -z "$(REGISTRY)" ] || [ "$(REGISTRY)" = "<none>" ]; then \
 		echo "Error: cannot detect OpenShift registry. Ensure you are logged in via 'oc login' and the registry is exposed."; \
 		echo "To push to an external registry, override IMG: make push IMG=quay.io/myorg/ossm-acm-console-plugin:v1"; \
@@ -49,7 +50,7 @@ else
 	$(CONTAINER_ENGINE) push --tls-verify=false $(IMG)
 endif
 
-deploy: push ## Push the image and deploy the plugin to the cluster
+deploy: .ensure-oc-login push ## Push the image and deploy the plugin to the cluster
 ifeq ($(origin IMG),command line)
 	@$(OC) create namespace $(PLUGIN_NAMESPACE) --dry-run=client -o yaml | $(OC) apply -f -
 	@sed 's|IMAGE_PLACEHOLDER|$(IMG)|g' deploy/prod-deployment.yaml | $(OC) apply -f -
@@ -72,7 +73,7 @@ endif
 	@$(OC) rollout restart deployment/console -n openshift-console
 	@$(OC) rollout status deployment/console -n openshift-console --timeout=120s
 
-teardown: ## Remove the plugin deployment from the cluster
+teardown: .ensure-oc-login ## Remove the plugin deployment from the cluster
 	@$(OC) get console.operator.openshift.io cluster -o json | \
 		jq '.spec.plugins |= (. // [] | map(select(. != "$(PLUGIN_NAME)")))' | \
 		$(OC) apply -f -
@@ -81,6 +82,31 @@ teardown: ## Remove the plugin deployment from the cluster
 	@$(OC) delete namespace $(PLUGIN_NAMESPACE) --ignore-not-found
 	@$(OC) rollout restart deployment/console -n openshift-console
 	@$(OC) rollout status deployment/console -n openshift-console --timeout=120s
+
+##@ Local Development
+
+.ensure-oc-exists:
+	@if [ ! -x "$(OC)" ] && ! command -v $(OC) >/dev/null 2>&1; then echo "Error: 'oc' not found in PATH"; exit 1; fi
+
+.ensure-oc-login: .ensure-oc-exists
+	@if ! $(OC) whoami >/dev/null 2>&1; then echo "Error: not logged into an OpenShift cluster. Run 'oc login' before continuing."; exit 1; fi
+
+prepare-dev-env: install-deps ## Install deps and print local dev instructions
+	@echo
+	@echo "Local frontend development (fast iteration):"
+	@echo "  Terminal 1: make start"
+	@echo "  Terminal 2: make start-console  (auto port-forwards ACM/MCE; cleaned up on exit)"
+	@echo "  Browser:    http://localhost:9000 (Fleet Service Mesh perspective)"
+	@echo
+	@echo "Cluster deploy (production-like validation):"
+	@echo "  make build deploy"
+	@echo
+
+start: node_modules ## Run webpack dev server on localhost:9001
+	npm start
+
+start-console: .ensure-oc-login ## Run local OpenShift Console on localhost:9000 (requires 'make start' in another terminal)
+	npm run start-console
 
 ##@ Help
 

@@ -17,6 +17,7 @@ Related links:
 - `console-plugin-metadata.ts` — Plugin name, version, exposed modules
 - `webpack.config.ts` — Build config (ConsoleRemotePlugin + CopyPlugin for locales, swc-loader for TS transpilation)
 - `rstest.config.ts` — Rstest test runner config (jsdom environment, module aliases, setup files, SWC JSX transform)
+- `hack/start-console.sh` — Runs local OpenShift Console (`origin-console`) pointed at webpack dev server
 - `deploy/` — Kubernetes manifests (ConsolePlugin CR, Deployment/Service, nginx config)
 - `src/types/` — TypeScript types for K8s resources (MultiClusterMesh, Certificate, ManifestWork, Istio)
 - `src/components/` — React page and card components (ServiceMeshPage, MeshDetailPage, ControlPlanesPage, ControlPlaneDetailPage, MeshStatus, TrustStatusCard)
@@ -33,11 +34,19 @@ Requires Node.js `^20.19.0 || >=22.12.0` and `podman` or `docker` for container 
 
 Run `make help` to see all available targets.
 
+**Local development (fast iteration):**
+
+- `make prepare-dev-env` — Install npm deps and print local dev instructions
+- `make start` — Webpack dev server on localhost:9001 (run in one terminal)
+- `make start-console` — Local OpenShift Console on localhost:9000; auto port-forwards ACM/MCE plugins for Fleet Management links (requires `oc login` and `make start` in another terminal)
+
+**Cluster deploy (production-like validation):**
+
 - `make build` — Build the container image (npm ci + webpack inside the container)
 - `make deploy` — Push image to registry and deploy to cluster (includes console restart)
 - `make teardown` — Remove the plugin from the cluster
 - `make test` — Run unit tests
-- `make build deploy` — The standard workflow for iterating on changes
+- `make build deploy` — Full cluster deploy workflow
 
 Override `IMG` to push to an external registry: `make build IMG=quay.io/myorg/ossm-acm-console-plugin:v1`
 
