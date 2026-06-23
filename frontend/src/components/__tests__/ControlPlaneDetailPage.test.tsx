@@ -58,7 +58,7 @@ describe('ControlPlaneDetailPage', () => {
       render(<ControlPlaneDetailPage />)
       await waitFor(() => {
         expect(screen.getByText('Error loading control plane')).toBeInTheDocument()
-        expect(screen.getByText('network timeout')).toBeInTheDocument()
+        expect(screen.getByText('An unexpected error occurred. Check the browser console for details.')).toBeInTheDocument()
       })
     })
 

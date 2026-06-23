@@ -4,6 +4,7 @@ import { istioGroupVersionKind } from '../types/istio'
 
 type FleetIstio = Istio & { cluster?: string }
 
+/** Discovers Istio CRs across all managed clusters via ACM Search polling. */
 export function useDiscoveredControlPlanes() {
   const isFleetAvailable = useIsFleetAvailable()
 

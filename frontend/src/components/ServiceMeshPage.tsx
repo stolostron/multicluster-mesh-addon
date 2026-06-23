@@ -144,4 +144,5 @@ const ServiceMeshPage: FC = () => {
   )
 }
 
+/** List page showing all MultiClusterMesh resources on the hub cluster. */
 export default ServiceMeshPage

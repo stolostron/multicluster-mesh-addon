@@ -1,6 +1,7 @@
 {
   "Age": "Age",
   "All ({{count}})": "All ({{count}})",
+  "An unexpected error occurred. Check the browser console for details.": "An unexpected error occurred. Check the browser console for details.",
   "Applied": "Applied",
   "Certificate": "Certificate",
   "cert-manager Issuer": "cert-manager Issuer",

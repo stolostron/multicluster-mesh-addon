@@ -14,7 +14,9 @@ const PerspectiveIcon: FC = () => (
   </svg>
 )
 
-// The console.perspective icon CodeRef expects LazyComponent = { default: React.ComponentType }.
-// The SDK's CodeRef resolver unwraps module.default, so the default export must itself
-// be a { default: Component } object for the NavHeader's icon().then(m => m.default) to work.
+/**
+ * SVG icon for the Fleet Service Mesh perspective sidebar entry.
+ * Wrapped as { default: Component } because the Console's CodeRef resolver
+ * unwraps module.default, so the default export must itself be an object.
+ */
 export default { default: PerspectiveIcon }

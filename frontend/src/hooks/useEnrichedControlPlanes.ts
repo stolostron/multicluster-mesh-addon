@@ -48,6 +48,7 @@ async function fetchInChunks(
   }
 }
 
+/** Enriches discovered Istio CRs with full spec/status via per-cluster GET and correlates each with its managing MultiClusterMesh. */
 export function useEnrichedControlPlanes(
   searchResults: FleetIstio[],
   mcms: MultiClusterMesh[],

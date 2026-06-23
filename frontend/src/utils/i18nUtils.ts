@@ -6,4 +6,5 @@ import { useTranslation } from 'react-i18next'
 // by the Console host, so this plugin never initializes i18next itself.
 export const PLUGIN_I18N_NAMESPACE = 'plugin__ossm-acm'
 
+/** Returns the react-i18next translation function scoped to this plugin's namespace. */
 export const useMeshTranslation = () => useTranslation(PLUGIN_I18N_NAMESPACE)

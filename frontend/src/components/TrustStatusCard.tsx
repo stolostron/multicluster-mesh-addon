@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { FC, ReactNode } from 'react'
 import { Link } from 'react-router-dom-v5-compat'
 import { Trans } from 'react-i18next'
@@ -85,6 +85,7 @@ interface TrustStatusCardProps {
   meshNamespace: string
 }
 
+/** Card displaying per-cluster certificate and ManifestWork trust distribution status for a mesh. */
 export const TrustStatusCard: FC<TrustStatusCardProps> = ({
   clusterStatuses,
   issuerName,
@@ -123,6 +124,10 @@ export const TrustStatusCard: FC<TrustStatusCardProps> = ({
         }
       : null,
   )
+
+  useEffect(() => {
+    if (certsError) console.error('Failed to load certificate data:', certsError)
+  }, [certsError])
 
   const certsByCluster = useMemo(() => {
     const map = new Map<string, Certificate>()
@@ -184,7 +189,7 @@ export const TrustStatusCard: FC<TrustStatusCardProps> = ({
           <EmptyState variant="xs">
             <Title headingLevel="h4" size="md">{t('Unable to load certificate data')}</Title>
             <EmptyStateBody>
-              {certsError instanceof Error ? certsError.message : String(certsError)}
+              {t('An unexpected error occurred. Check the browser console for details.')}
             </EmptyStateBody>
           </EmptyState>
         </CardBody>

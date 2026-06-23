@@ -54,7 +54,7 @@ const ControlPlaneDetailContent: FC<{ cluster: string; name: string }> = ({ clus
     setIstio(null)
     fleetK8sGet<Istio>({ model: istioModel, name, cluster })
       .then((r) => { if (!cancelled) { setIstio(r); setLoaded(true) } })
-      .catch((e) => { if (!cancelled) { setError(e); setLoaded(true) } })
+      .catch((e) => { if (!cancelled) { console.error('Failed to load control plane:', e); setError(e); setLoaded(true) } })
     return () => { cancelled = true }
   }, [cluster, name])
 
@@ -78,7 +78,7 @@ const ControlPlaneDetailContent: FC<{ cluster: string; name: string }> = ({ clus
           <EmptyStateBody>
             {is404
               ? t('Istio "{{name}}" was not found on cluster "{{cluster}}".', { name, cluster })
-              : (error instanceof Error ? error.message : String(error))}
+              : t('An unexpected error occurred. Check the browser console for details.')}
           </EmptyStateBody>
         </EmptyState>
       </PageSection>
@@ -243,4 +243,5 @@ const ControlPlaneDetailPage: FC = () => {
   return <ControlPlaneDetailContent cluster={cluster} name={name} />
 }
 
+/** Detail page for a single Istio control plane, reached via /control-planes/:cluster/:name. */
 export default ControlPlaneDetailPage

@@ -16,10 +16,12 @@ export interface McmInfo {
 // Note: this is a best-effort correlation — an independently created Istio CR
 // that happens to be on the same cluster+namespace as an MCM will also match.
 
-// Builds a lookup index from MultiClusterMesh objects for O(1) correlation.
-// Key: "clusterName/controlPlaneNamespace" → MCM identity.
-// Callers should memoize the result (e.g. via useMemo keyed on the MCMs array)
-// to avoid rebuilding the index on every render.
+/**
+ * Builds a lookup index from MultiClusterMesh objects for O(1) correlation.
+ * Key: "clusterName/controlPlaneNamespace" -> MCM identity.
+ * Callers should memoize the result (e.g. via useMemo keyed on the MCMs array)
+ * to avoid rebuilding the index on every render.
+ */
 export function buildMcmIndex(mcms: MultiClusterMesh[]): Map<string, McmInfo> {
   const map = new Map<string, McmInfo>()
   for (const mcm of mcms) {
@@ -34,7 +36,7 @@ export function buildMcmIndex(mcms: MultiClusterMesh[]): Map<string, McmInfo> {
   return map
 }
 
-// Looks up a control plane's managing MCM from a pre-built index.
+/** Looks up a control plane's managing MCM from a pre-built index. */
 export function lookupMcm(
   index: Map<string, McmInfo>,
   clusterName: string,

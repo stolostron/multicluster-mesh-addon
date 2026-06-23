@@ -70,7 +70,7 @@ describe('MeshDetailPage', () => {
       rstest.mocked(useK8sWatchResource).mockReturnValue([null, true, new Error('watch exploded')])
       render(<MeshDetailPage />)
       expect(screen.getByText('Error loading mesh')).toBeInTheDocument()
-      expect(screen.getByText('watch exploded')).toBeInTheDocument()
+      expect(screen.getByText('An unexpected error occurred. Check the browser console for details.')).toBeInTheDocument()
     })
 
     it('shows mesh not found when loaded but mesh is null', () => {

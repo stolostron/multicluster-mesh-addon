@@ -136,7 +136,7 @@ describe('TrustStatusCard — errors', () => {
     setupWatches([], [], { certsError: new Error('cert watch failed') })
     render(<TrustStatusCard {...defaultProps} />)
     expect(screen.getByText('Unable to load certificate data')).toBeInTheDocument()
-    expect(screen.getByText('cert watch failed')).toBeInTheDocument()
+    expect(screen.getByText('An unexpected error occurred. Check the browser console for details.')).toBeInTheDocument()
   })
 
   it('renders the full table when mwError is set but certs are loaded', () => {

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { FC, ReactNode } from 'react'
 import { useParams, Link } from 'react-router-dom-v5-compat'
 import {
@@ -58,6 +58,7 @@ function categorizeCluster(cs: ClusterMeshStatus): ClusterStatusCategory {
 
 const CONFLICT_REASONS = ['OperatorConfigConflict', 'NamespaceConflict']
 
+/** Per-cluster operator status table with filter toggles and search for a single mesh. */
 export const ClusterStatusSection: FC<{ clusterStatuses: ClusterMeshStatus[]; meshConditions?: K8sCondition[] }> = ({
   clusterStatuses,
   meshConditions,
@@ -214,13 +215,17 @@ const MeshDetailContent: FC<{ ns: string; name: string }> = ({ ns, name }) => {
     namespace: ns,
   })
 
+  useEffect(() => {
+    if (loadError) console.error('Failed to load mesh:', loadError)
+  }, [loadError])
+
   if (loadError) {
     return (
       <PageSection>
         <EmptyState>
           <Title headingLevel="h2" size="lg">{t('Error loading mesh')}</Title>
           <EmptyStateBody>
-            {loadError instanceof Error ? loadError.message : String(loadError)}
+            {t('An unexpected error occurred. Check the browser console for details.')}
           </EmptyStateBody>
         </EmptyState>
       </PageSection>
@@ -418,4 +423,5 @@ const MeshDetailPage: FC = () => {
   return <MeshDetailContent ns={ns} name={name} />
 }
 
+/** Detail page for a single MultiClusterMesh, reached via /service-mesh/:ns/:name. */
 export default MeshDetailPage

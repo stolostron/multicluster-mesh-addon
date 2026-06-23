@@ -177,4 +177,5 @@ const ControlPlanesPage: FC = () => {
   )
 }
 
+/** Fleet-wide list page showing all discovered Istio control planes across managed clusters. */
 export default ControlPlanesPage
