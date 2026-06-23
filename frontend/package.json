@@ -4,7 +4,8 @@
   "private": true,
   "scripts": {
     "build": "ts-node -O '{\"module\":\"commonjs\"}' node_modules/.bin/webpack --mode production",
-    "start": "webpack serve --mode development",
+    "start": "ts-node -O '{\"module\":\"commonjs\"}' node_modules/.bin/webpack serve --mode development",
+    "start-console": "./hack/start-console.sh",
     "test": "rstest",
     "typecheck": "tsc --noEmit"
   },

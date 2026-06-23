@@ -293,9 +293,34 @@ oc delete csv ${CSV} -n openshift-operators
 oc get crd -o name | grep -E 'sailoperator\.io|istio\.io' | xargs oc delete
 ```
 
-## Iterating on frontend changes
+## Local frontend development (fast iteration)
 
-After modifying frontend source files, rebuild and redeploy:
+For day-to-day UI work, run the plugin locally with webpack and a local OpenShift Console bridge.
+
+**Prerequisites:** `oc login`, ACM and backend controller deployed on the cluster, Node.js 20+, `podman` or `docker`, and npm dependencies installed.
+
+```bash
+cd <multicluster-mesh-addon-repo>/frontend
+make prepare-dev-env   # one-time, or after package.json changes
+```
+
+Run in **two terminals**:
+
+```bash
+# Terminal 1 — webpack dev server on localhost:9001
+make start
+
+# Terminal 2 — local OpenShift Console on localhost:9000
+make start-console
+```
+
+`start-console` automatically port-forwards the in-cluster ACM and MCE console plugins (ports 9002 and 9003) so Fleet Management perspective and cross-plugin links work. The console bridge forwards your `oc` bearer token to those backends (`authorize: true`). Port-forwards are stopped when you exit `start-console` (Ctrl+C). Set `LOAD_ACM_PLUGINS=false` to skip ACM/MCE if you do not need Fleet Management links.
+
+Open http://localhost:9000 and switch to the **Fleet Service Mesh** perspective. After editing source files, wait for webpack to rebuild and refresh the browser. The cluster plugin deploy is not required for this workflow — the local console loads the plugin from webpack.
+
+## Iterating on frontend changes (cluster deploy)
+
+For production-like testing (nginx/TLS packaging, in-cluster ConsolePlugin), rebuild and redeploy to the cluster:
 
 ```bash
 cd <multicluster-mesh-addon-repo>/frontend
