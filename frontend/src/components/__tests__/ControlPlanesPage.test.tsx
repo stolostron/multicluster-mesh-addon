@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import ControlPlanesPage from '../ControlPlanesPage'
 import { useFleetSearchPoll, useIsFleetAvailable } from '@stolostron/multicluster-sdk'
 import { useK8sWatchResource } from '@openshift-console/dynamic-plugin-sdk'
@@ -84,8 +84,9 @@ describe('ControlPlanesPage', () => {
     mockUseFleetSearchPoll.mockReturnValue([results, true, undefined, jest.fn()])
     render(<ControlPlanesPage />)
     await waitFor(() => {
-      const cells = screen.getAllByText('-')
-      expect(cells.length).toBeGreaterThanOrEqual(4)
+      const nameLink = screen.getByRole('link', { name: 'default' })
+      const row = nameLink.closest('tr') as HTMLTableRowElement
+      expect(within(row).getAllByText('-').length).toBeGreaterThanOrEqual(4)
     })
   })
 

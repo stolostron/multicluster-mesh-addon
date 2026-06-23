@@ -11,7 +11,7 @@ REGISTRY = $(shell $(OC) get image.config.openshift.io/cluster -o jsonpath='{.st
 IMG ?= $(REGISTRY)/$(PLUGIN_NAMESPACE)/ossm-acm-console-plugin:latest
 INTERNAL_IMG = $(INTERNAL_REGISTRY)/$(PLUGIN_NAMESPACE)/ossm-acm-console-plugin:latest
 
-.PHONY: help build deploy teardown test
+.PHONY: help build deploy push teardown test
 
 ##@ Testing
 

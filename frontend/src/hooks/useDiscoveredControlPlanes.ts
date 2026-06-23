@@ -13,7 +13,9 @@ export function useDiscoveredControlPlanes() {
     namespaced: false,
   })
 
-  const results = (data ?? []).filter((r): r is FleetIstio & { cluster: string } => !!r.cluster)
+  const results = (data ?? []).filter(
+    (r): r is FleetIstio & { cluster: string } => Boolean(r.cluster && r.metadata?.name),
+  )
 
   return { error, isFleetAvailable, loaded, refetch, results } as const
 }

@@ -18,9 +18,11 @@ const CONCURRENCY_LIMIT = 10
 async function fetchInChunks(
   pending: { cluster: string; name: string }[],
   cache: Map<string, CacheEntry>,
-  setEnrichmentCount: React.Dispatch<React.SetStateAction<number>>,
+  onChunkProcessed: (n: number) => void,
+  isCancelled: () => boolean,
 ) {
   for (let i = 0; i < pending.length; i += CONCURRENCY_LIMIT) {
+    if (isCancelled()) return
     const chunk = pending.slice(i, i + CONCURRENCY_LIMIT)
     const results = await Promise.allSettled(
       chunk.map(({ cluster, name }) =>
@@ -28,13 +30,14 @@ async function fetchInChunks(
           .then((r) => ({ cluster, name, data: r }))
       ),
     )
+    if (isCancelled()) return
     for (const result of results) {
       if (result.status === 'fulfilled') {
         const { cluster, name, data } = result.value
         cache.set(`${cluster}/${name}`, { data, fetchedAt: Date.now() })
       }
     }
-    setEnrichmentCount((c) => c + chunk.length)
+    onChunkProcessed(chunk.length)
   }
 }
 
@@ -60,6 +63,7 @@ export function useEnrichedControlPlanes(
     let cancelled = false
     const cache = cacheRef.current
     const now = Date.now()
+    setError(null)
 
     const pending = stableResults
       .filter((r) => {
@@ -74,7 +78,12 @@ export function useEnrichedControlPlanes(
       return
     }
 
-    fetchInChunks(pending, cache, setEnrichmentCount)
+    fetchInChunks(
+      pending,
+      cache,
+      (n) => { if (!cancelled) setEnrichmentCount((c) => c + n) },
+      () => cancelled,
+    )
       .then(() => {
         if (!cancelled) setEnrichmentLoaded(true)
       })
