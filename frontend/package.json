@@ -5,7 +5,8 @@
   "scripts": {
     "build": "ts-node -O '{\"module\":\"commonjs\"}' node_modules/.bin/webpack --mode production",
     "start": "webpack serve --mode development",
-    "test": "rstest"
+    "test": "rstest",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@patternfly/react-core": "^6.4.3",

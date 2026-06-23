@@ -16,5 +16,6 @@
     "noFallthroughCasesInSwitch": true,
     "skipLibCheck": true
   },
-  "include": ["src", "console-extensions.ts", "console-plugin-metadata.ts", "webpack.config.ts"]
+  "include": ["src", "console-extensions.ts", "console-plugin-metadata.ts", "webpack.config.ts"],
+  "exclude": ["src/**/__tests__", "src/**/__mocks__", "src/setupTests.tsx"]
 }

@@ -11,12 +11,15 @@ REGISTRY = $(shell $(OC) get image.config.openshift.io/cluster -o jsonpath='{.st
 IMG ?= $(REGISTRY)/$(PLUGIN_NAMESPACE)/ossm-acm-console-plugin:latest
 INTERNAL_IMG = $(INTERNAL_REGISTRY)/$(PLUGIN_NAMESPACE)/ossm-acm-console-plugin:latest
 
-.PHONY: help build clean deploy install-deps push teardown test
+.PHONY: help build clean deploy install-deps push teardown test typecheck
 
 ##@ Testing
 
-test: node_modules ## Run unit tests
+test: typecheck ## Run type checking and unit tests
 	npm test
+
+typecheck: node_modules ## Run TypeScript type checking (no emit)
+	npm run typecheck
 
 ##@ Build & Deploy
 
