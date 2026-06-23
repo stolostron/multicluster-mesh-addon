@@ -156,6 +156,11 @@ This approach scales to hundreds of clusters because:
 - Enrichment is concurrency-limited, cached, and incrementally updated
 - Failed enrichment degrades gracefully without breaking the page
 
+**Exit ramp from N+1 enrichment:** The per-cluster `fleetK8sGet` pattern exists because ACM Search doesn't index `spec`/`status` for custom resources. If any of the following change, enrichment can be eliminated:
+- ACM Search gains spec/status indexing for CRDs (no search-collector change needed on our side)
+- The sail-operator adds standardized labels (e.g. `istio.io/mesh-id`, `istio.io/version`) to `Istio` CRs — labels are always indexed by Search
+Note: operators generally don't mutate the `metadata` of CRs they reconcile (they only update `status`), so label-based solutions would require upstream sail-operator changes.
+
 ## Correlation
 
 Matching `Istio` CRs to `MultiClusterMesh` CRs uses the composite key: **cluster name + control plane namespace**.

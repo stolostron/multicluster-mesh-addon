@@ -66,22 +66,25 @@ export const ClusterStatusSection: FC<{ clusterStatuses: ClusterMeshStatus[]; me
   const [filter, setFilter] = useState<ClusterStatusCategory>('all')
   const [search, setSearch] = useState('')
 
+  const categoryMap = useMemo(() => {
+    const map = new Map<string, ClusterStatusCategory>()
+    clusterStatuses.forEach((cs) => map.set(cs.clusterName, categorizeCluster(cs)))
+    return map
+  }, [clusterStatuses])
+
   const counts = useMemo(() => {
     const result = { ready: 0, notReady: 0, unknown: 0 }
-    clusterStatuses.forEach((cs) => {
-      const cat = categorizeCluster(cs)
-      if (cat !== 'all') result[cat]++
-    })
+    categoryMap.forEach((cat) => { if (cat !== 'all') result[cat]++ })
     return result
-  }, [clusterStatuses])
+  }, [categoryMap])
 
   const filtered = useMemo(() => {
     return clusterStatuses.filter((cs) => {
-      if (filter !== 'all' && categorizeCluster(cs) !== filter) return false
+      if (filter !== 'all' && categoryMap.get(cs.clusterName) !== filter) return false
       if (search && !cs.clusterName.toLowerCase().includes(search.toLowerCase())) return false
       return true
     })
-  }, [clusterStatuses, filter, search])
+  }, [clusterStatuses, categoryMap, filter, search])
 
   if (clusterStatuses.length === 0) {
     const readyCondition = meshConditions?.find((c) => c.type === 'Ready')

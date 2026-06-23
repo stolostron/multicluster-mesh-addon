@@ -3,7 +3,7 @@ import { fleetK8sGet } from '@stolostron/multicluster-sdk'
 import type { Istio, EnrichedControlPlane } from '../types/istio'
 import { istioModel } from '../types/istio'
 import type { MultiClusterMesh } from '../types/multiClusterMesh'
-import { findManagingMCM } from '../utils/correlateMCM'
+import { buildMcmIndex, lookupMcm } from '../utils/correlateMCM'
 
 type FleetIstio = Istio & { cluster: string }
 
@@ -12,6 +12,13 @@ interface CacheEntry {
   fetchedAt: number
 }
 
+// N+1 enrichment pattern: ACM Search only indexes common K8s metadata for the
+// Istio CR (kind, name, namespace, labels, created). Fields needed for display
+// (meshID, version, status) are in spec/status which Search doesn't index.
+// We fetch the full CR per cluster via fleetK8sGet. This is a known architectural
+// tradeoff — see docs/DISCOVERY-OPTIONS.md for the design rationale.
+// Exit ramp: if ACM Search gains spec/status indexing for custom resources, or
+// if Istio CRs gain standardized labels for key fields, enrichment can be eliminated.
 const CACHE_TTL_MS = 150_000
 const CONCURRENCY_LIMIT = 10
 
@@ -46,14 +53,20 @@ export function useEnrichedControlPlanes(
   mcms: MultiClusterMesh[],
 ): [EnrichedControlPlane[], boolean, boolean, unknown] {
   const cacheRef = useRef<Map<string, CacheEntry>>(new Map())
-  const [enrichmentCount, setEnrichmentCount] = useState(0)
+  const [enrichmentVersion, setEnrichmentVersion] = useState(0)
   const [enrichmentLoaded, setEnrichmentLoaded] = useState(false)
   const [error, setError] = useState<unknown>(null)
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  const searchKey = useMemo(
-    () => searchResults.map((r) => `${r.cluster}/${r.metadata?.name}`).sort().join(','),
-    [searchResults],
-  )
+  const searchKey = useMemo(() => {
+    if (searchResults.length === 0) return 0
+    let hash = searchResults.length
+    for (const r of searchResults) {
+      const s = `${r.cluster}/${r.metadata?.name}`
+      for (let i = 0; i < s.length; i++) hash = (hash * 31 + s.charCodeAt(i)) | 0
+    }
+    return hash
+  }, [searchResults])
 
   // Stabilize the search results reference so downstream memos don't fire on
   // every 30s poll when the actual data hasn't changed.
@@ -81,17 +94,35 @@ export function useEnrichedControlPlanes(
     fetchInChunks(
       pending,
       cache,
-      (n) => { if (!cancelled) setEnrichmentCount((c) => c + n) },
+      () => {
+        if (!cancelled) {
+          if (debounceRef.current) clearTimeout(debounceRef.current)
+          debounceRef.current = setTimeout(() => {
+            if (!cancelled) setEnrichmentVersion((v) => v + 1)
+          }, 1000)
+        }
+      },
       () => cancelled,
     )
       .then(() => {
-        if (!cancelled) setEnrichmentLoaded(true)
+        if (!cancelled) {
+          if (debounceRef.current) clearTimeout(debounceRef.current)
+          const currentKeys = new Set(stableResults.map((r) => `${r.cluster}/${r.metadata?.name}`))
+          for (const key of cache.keys()) {
+            if (!currentKeys.has(key)) cache.delete(key)
+          }
+          setEnrichmentVersion((v) => v + 1)
+          setEnrichmentLoaded(true)
+        }
       })
       .catch((e) => {
         if (!cancelled) { setEnrichmentLoaded(true); setError(e) }
       })
 
-    return () => { cancelled = true }
+    return () => {
+      cancelled = true
+      if (debounceRef.current) clearTimeout(debounceRef.current)
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchKey])
 
@@ -116,14 +147,16 @@ export function useEnrichedControlPlanes(
         version: spec?.version,
       }
     })
-  }, [stableResults, enrichmentCount])
+  }, [stableResults, enrichmentVersion])
+
+  const mcmIndex = useMemo(() => buildMcmIndex(mcms), [mcms])
 
   const enrichedPlanes = useMemo(
     () => enrichedBeforeCorrelation.map((plane) => ({
       ...plane,
-      managedBy: findManagingMCM(plane.clusterName, plane.controlPlaneNamespace, mcms),
+      managedBy: lookupMcm(mcmIndex, plane.clusterName, plane.controlPlaneNamespace),
     })),
-    [enrichedBeforeCorrelation, mcms],
+    [enrichedBeforeCorrelation, mcmIndex],
   )
 
   return [enrichedPlanes, searchResults.length > 0 || enrichmentLoaded, enrichmentLoaded, error]

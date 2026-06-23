@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import type { FC, ReactNode } from 'react'
 import { Link } from 'react-router-dom-v5-compat'
 import { Trans } from 'react-i18next'
@@ -124,6 +124,43 @@ export const TrustStatusCard: FC<TrustStatusCardProps> = ({
       : null,
   )
 
+  const certsByCluster = useMemo(() => {
+    const map = new Map<string, Certificate>()
+    for (const cert of certs ?? []) {
+      const clusterName = cert.metadata?.labels?.[CLUSTER_NAME_LABEL]
+      if (clusterName) map.set(clusterName, cert)
+    }
+    return map
+  }, [certs])
+
+  const mwByCluster = useMemo(() => {
+    const map = new Map<string, ManifestWork>()
+    for (const mw of manifestWorks ?? []) {
+      const clusterName = mw.metadata?.labels?.[CLUSTER_NAME_LABEL]
+      if (clusterName) map.set(clusterName, mw)
+    }
+    return map
+  }, [manifestWorks])
+
+  const { categoryByCluster, counts } = useMemo(() => {
+    const catMap = new Map<string, TrustCategory>()
+    const c = { ready: 0, pending: 0, failed: 0 }
+    clusterStatuses.forEach((cs) => {
+      const cat = categorizeTrust(certsByCluster.get(cs.clusterName), mwByCluster.get(cs.clusterName))
+      catMap.set(cs.clusterName, cat)
+      if (cat !== 'all') c[cat]++
+    })
+    return { categoryByCluster: catMap, counts: c }
+  }, [clusterStatuses, certsByCluster, mwByCluster])
+
+  const filtered = useMemo(() => {
+    return clusterStatuses.filter((cs) => {
+      if (filter !== 'all' && categoryByCluster.get(cs.clusterName) !== filter) return false
+      if (search && !cs.clusterName.toLowerCase().includes(search.toLowerCase())) return false
+      return true
+    })
+  }, [clusterStatuses, categoryByCluster, filter, search])
+
   if (!hasIssuer) {
     return (
       <Card isCompact>
@@ -179,18 +216,6 @@ export const TrustStatusCard: FC<TrustStatusCardProps> = ({
     )
   }
 
-  const certsByCluster = new Map<string, Certificate>()
-  for (const cert of certs ?? []) {
-    const clusterName = cert.metadata?.labels?.[CLUSTER_NAME_LABEL]
-    if (clusterName) certsByCluster.set(clusterName, cert)
-  }
-
-  const mwByCluster = new Map<string, ManifestWork>()
-  for (const mw of manifestWorks ?? []) {
-    const clusterName = mw.metadata?.labels?.[CLUSTER_NAME_LABEL]
-    if (clusterName) mwByCluster.set(clusterName, mw)
-  }
-
   const noCertsAtAll = certsByCluster.size === 0 && mwByCluster.size === 0
   if (noCertsAtAll) {
     return (
@@ -206,20 +231,6 @@ export const TrustStatusCard: FC<TrustStatusCardProps> = ({
       </Card>
     )
   }
-
-  const categoryByCluster = new Map<string, TrustCategory>()
-  const counts = { ready: 0, pending: 0, failed: 0 }
-  clusterStatuses.forEach((cs) => {
-    const cat = categorizeTrust(certsByCluster.get(cs.clusterName), mwByCluster.get(cs.clusterName))
-    categoryByCluster.set(cs.clusterName, cat)
-    if (cat !== 'all') counts[cat]++
-  })
-
-  const filtered = clusterStatuses.filter((cs) => {
-    if (filter !== 'all' && categoryByCluster.get(cs.clusterName) !== filter) return false
-    if (search && !cs.clusterName.toLowerCase().includes(search.toLowerCase())) return false
-    return true
-  })
 
   return (
     <Card isCompact>

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { FC, ReactNode } from 'react'
 import { useParams, Link } from 'react-router-dom-v5-compat'
 import { fleetK8sGet } from '@stolostron/multicluster-sdk'
@@ -30,7 +30,7 @@ import type { Istio } from '../types/istio'
 import { istioModel } from '../types/istio'
 import type { K8sCondition } from '../types/common'
 import { useMultiClusterMeshes } from '../hooks/useMultiClusterMeshes'
-import { findManagingMCM } from '../utils/correlateMCM'
+import { buildMcmIndex, lookupMcm } from '../utils/correlateMCM'
 import { MeshStatus } from './MeshStatus'
 import { useMeshTranslation } from '../utils/i18nUtils'
 
@@ -45,6 +45,7 @@ const ControlPlaneDetailContent: FC<{ cluster: string; name: string }> = ({ clus
   const [loaded, setLoaded] = useState(false)
   const [error, setError] = useState<unknown>(null)
   const [mcms] = useMultiClusterMeshes()
+  const mcmIndex = useMemo(() => buildMcmIndex(mcms ?? []), [mcms])
 
   useEffect(() => {
     let cancelled = false
@@ -90,7 +91,7 @@ const ControlPlaneDetailContent: FC<{ cluster: string; name: string }> = ({ clus
   const meshID = spec.values?.global?.meshID
   const network = spec.values?.global?.network
   const multiClusterName = spec.values?.global?.multiCluster?.clusterName
-  const matchedMCM = findManagingMCM(cluster, spec.namespace, mcms ?? [])
+  const matchedMCM = lookupMcm(mcmIndex, cluster, spec.namespace)
 
   return (
     <>
