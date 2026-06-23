@@ -7,7 +7,7 @@
 - **Cross-perspective links** — cluster names link to ACM cluster detail pages; cluster set names link to ACM cluster set detail pages.
 - **Conflict mesh UX** — friendly labels for backend condition reasons, and blocked meshes show an explanatory message instead of "No clusters."
 - **Production packaging** — Dockerfile (UBI9 nodejs-24 + nginx-126), Makefile with `build`, `deploy`, `teardown`, and `test` targets.
-- **Automated tests** — Jest + Testing Library unit test framework (`make test`), with mocks for the Console SDK, multicluster-sdk, and react-router. Tests cover `MeshStatus`, `ServiceMeshPage`, `MeshDetailPage`, `ClusterStatusSection`, `TrustStatusCard`, `ControlPlanesPage`, `ControlPlaneDetailPage`, and `useEnrichedControlPlanes`.
+- **Automated tests** — Rstest + Testing Library unit test framework (`make test`), with mocks for the Console SDK, multicluster-sdk, and react-router. Tests cover `MeshStatus`, `ServiceMeshPage`, `MeshDetailPage`, `ClusterStatusSection`, `TrustStatusCard`, `ControlPlanesPage`, `ControlPlaneDetailPage`, and `useEnrichedControlPlanes`.
 - **Internationalization (i18n)** — All user-facing strings externalized via react-i18next under the `plugin__ossm-acm` namespace. Locale bundle served from `dist/locales/en/plugin__ossm-acm.json`.
 - **Control Planes page** — Discovers all sail-operator `Istio` CRs across managed clusters via ACM Search (`useFleetSearchPoll`), enriches with full CR data via `fleetK8sGet` (version, meshID, status), and correlates with `MultiClusterMesh` CRs for fleet management context. See [DISCOVERY-OPTIONS.md](./DISCOVERY-OPTIONS.md) for the design rationale.
 

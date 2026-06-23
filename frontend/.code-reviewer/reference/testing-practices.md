@@ -6,12 +6,12 @@ format_version: 1
 
 ## Framework & Configuration
 
-- **Jest 30** with `ts-jest` transformer, `jsdom` environment
+- **Rstest** (`@rstest/core`) with SWC transpilation, `jsdom` environment
 - **@testing-library/react** for component rendering and queries
 - **@testing-library/user-event** for user interaction simulation
-- **@testing-library/jest-dom** for DOM assertions
-- Config: `jest.config.cjs` with `tsconfig.jest.json`
-- Global setup: `src/setupTests.tsx` (react-i18next mock, ResizeObserver polyfill, matchMedia polyfill)
+- **@testing-library/jest-dom** for DOM assertions (matchers extended via `expect.extend` in setup)
+- Config: `rstest.config.ts` with `tools.swc` for automatic JSX runtime
+- Global setup: `src/setupTests.tsx` (jest-dom matchers, cleanup, react-i18next mock, ResizeObserver polyfill, matchMedia polyfill)
 
 ## Enforced Conventions
 
@@ -26,8 +26,8 @@ format_version: 1
 
 - Use `describe/it` nesting pattern
 - Use `test.each` for parameterized/table-driven tests
-- Every test file must include `afterEach(() => jest.clearAllMocks())`
-- When using fake timers, include `jest.useRealTimers()` in `afterEach`
+- Every test file must include `afterEach(() => rstest.clearAllMocks())`
+- When using fake timers, include `rstest.useRealTimers()` in `afterEach`
 
 ### Assertions
 
@@ -38,13 +38,13 @@ format_version: 1
 
 ### Mocking
 
-- **Global module mocks** via `moduleNameMapper` in `jest.config.cjs`, implemented in `src/__mocks__/`:
+- **Global module mocks** via `resolve.alias` in `rstest.config.ts`, implemented in `src/__mocks__/`:
   - `consoleSdkMock.tsx` — `@openshift-console/dynamic-plugin-sdk`
   - `multiclusterSdkMock.tsx` — `@stolostron/multicluster-sdk`
   - `routerMock.tsx` — `react-router-dom-v5-compat`
-  - `fileMock.ts` — static assets (svg, png, jpg, gif)
-  - `styleMock.ts` — CSS files
-- **Per-test mocks** via `jest.mock('../../hooks/...')` + type-cast: `const mockHook = hook as jest.Mock`
+- Mock files are regular modules (not test files) — they must `import { rs } from '@rstest/core'` and use `rs.fn()`
+- **Per-test mocks** via `rstest.mock('../../hooks/...', { mock: true })` + `rstest.mocked(hook).mockReturnValue(...)`
+- **Factory mocks** via `rstest.mock('...', () => ({ ... }))` for replacing a module with a custom implementation
 - Override return values with `mockReturnValue()`, `mockResolvedValue()`, `mockRejectedValue()`, or `mockImplementation()` for conditional returns
 
 ### Test Data
@@ -56,7 +56,7 @@ format_version: 1
 
 - Use `renderHook` from `@testing-library/react`
 - Use `waitFor` for async state updates
-- Use `jest.useFakeTimers()` + `act(async () => { await jest.runAllTimersAsync() })` for timer-based behavior
+- Use `rstest.useFakeTimers()` + `act(async () => { await rstest.runAllTimersAsync() })` for timer-based behavior
 - Use `rerender()` from `renderHook` result to test re-render scenarios
 
 ### User Interaction
@@ -68,4 +68,5 @@ format_version: 1
 
 | Date | Change | Trigger |
 |------|--------|---------|
+| 2026-06-23 | Migrate from Jest to Rstest | Rstack toolchain alignment |
 | 2026-06-23 | Initial generation | /code-reviewer:setup |
