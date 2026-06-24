@@ -98,7 +98,7 @@ const ControlPlaneDetailContent: FC<{ cluster: string; name: string }> = ({ clus
       <PageSection>
         <Breadcrumb>
           <BreadcrumbItem>
-            <Link to="/control-planes">{t('Control Planes')}</Link>
+            <Link to="/mesh-control-planes">{t('Control Planes')}</Link>
           </BreadcrumbItem>
           <BreadcrumbItem isActive>{`${cluster} / ${name}`}</BreadcrumbItem>
         </Breadcrumb>
@@ -192,11 +192,11 @@ const ControlPlaneDetailContent: FC<{ cluster: string; name: string }> = ({ clus
                   <table className="pf-v6-c-table pf-m-grid-md pf-m-compact" role="grid">
                     <thead className="pf-v6-c-table__thead">
                       <tr className="pf-v6-c-table__tr">
-                        <th className="pf-v6-c-table__th">{t('Type')}</th>
-                        <th className="pf-v6-c-table__th">{t('Status')}</th>
-                        <th className="pf-v6-c-table__th">{t('Reason')}</th>
-                        <th className="pf-v6-c-table__th">{t('Message')}</th>
-                        <th className="pf-v6-c-table__th">{t('Last Transition')}</th>
+                        <th className="pf-v6-c-table__th" scope="col">{t('Type')}</th>
+                        <th className="pf-v6-c-table__th" scope="col">{t('Status')}</th>
+                        <th className="pf-v6-c-table__th" scope="col">{t('Reason')}</th>
+                        <th className="pf-v6-c-table__th" scope="col">{t('Message')}</th>
+                        <th className="pf-v6-c-table__th" scope="col">{t('Last Transition')}</th>
                       </tr>
                     </thead>
                     <tbody className="pf-v6-c-table__tbody">
@@ -233,7 +233,7 @@ const ControlPlaneDetailPage: FC = () => {
         <EmptyState>
           <Title headingLevel="h2" size="lg">{t('Not Found')}</Title>
           <EmptyStateBody>
-            {t('Invalid control plane URL. Expected /control-planes/:cluster/:name.')}
+            {t('Invalid control plane URL. Expected /mesh-control-planes/:cluster/:name.')}
           </EmptyStateBody>
         </EmptyState>
       </PageSection>
@@ -243,5 +243,5 @@ const ControlPlaneDetailPage: FC = () => {
   return <ControlPlaneDetailContent cluster={cluster} name={name} />
 }
 
-/** Detail page for a single Istio control plane, reached via /control-planes/:cluster/:name. */
+/** Detail page for a single Istio control plane, reached via /mesh-control-planes/:cluster/:name. */
 export default ControlPlaneDetailPage

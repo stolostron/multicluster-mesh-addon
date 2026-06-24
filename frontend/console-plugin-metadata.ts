@@ -9,6 +9,7 @@ export const pluginMetadata: ConsolePluginBuildMetadata = {
     controlPlaneDetailPage: './src/components/ControlPlaneDetailPage',
     controlPlanesPage: './src/components/ControlPlanesPage',
     meshDetailPage: './src/components/MeshDetailPage',
+    overviewPage: './src/components/OverviewPage',
     serviceMeshPage: './src/components/ServiceMeshPage',
     perspective: './src/perspective',
     perspectiveIcon: './src/perspectiveIcon',

@@ -11,6 +11,7 @@
 - **Internationalization (i18n)** — All user-facing strings externalized via react-i18next under the `plugin__ossm-acm` namespace. Locale bundle served from `dist/locales/en/plugin__ossm-acm.json`.
 - **Control Planes page** — Discovers all sail-operator `Istio` CRs across managed clusters via ACM Search (`useFleetSearchPoll`), enriches with full CR data via `fleetK8sGet` (version, meshID, status), and correlates with `MultiClusterMesh` CRs for fleet management context. See [DISCOVERY-OPTIONS.md](./DISCOVERY-OPTIONS.md) for the design rationale.
 - **Local dev server** — `make start` runs webpack-dev-server on localhost:9001; `make start-console` runs a local OpenShift Console (`origin-console`) on localhost:9000 via `hack/start-console.sh`, automatically port-forwarding in-cluster ACM and MCE plugins so Fleet Management links work. Additive to the existing `make build deploy` cluster workflow.
+- **Overview page** — Dashboard-style landing page (`/fleet-mesh-overview`, nav label "Overview") showing fleet-wide health at a glance: count cards (meshes, control planes, clusters), health breakdowns (Ready / Not Ready / Unknown) for meshes and control planes, and a recent issues panel surfacing the latest non-True conditions. Mesh and control plane sections load independently (partial-success rendering). This is the perspective's `landingPageURL`.
 
 ## What's next (not blocked)
 - **Create / delete mesh actions** — Add a "Create Mesh" button to the list page and "Delete Mesh" on the detail page.

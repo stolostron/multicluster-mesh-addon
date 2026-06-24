@@ -165,9 +165,9 @@ export const ClusterStatusSection: FC<{ clusterStatuses: ClusterMeshStatus[]; me
               <table className="pf-v6-c-table pf-m-grid-md pf-m-compact" role="grid">
                 <thead className="pf-v6-c-table__thead" style={{ position: 'sticky', top: 0, zIndex: 1 }}>
                   <tr className="pf-v6-c-table__tr">
-                    <th className="pf-v6-c-table__th">{t('Cluster')}</th>
-                    <th className="pf-v6-c-table__th">{t('Operator Status')}</th>
-                    <th className="pf-v6-c-table__th">{t('Message')}</th>
+                    <th className="pf-v6-c-table__th" scope="col">{t('Cluster')}</th>
+                    <th className="pf-v6-c-table__th" scope="col">{t('Operator Status')}</th>
+                    <th className="pf-v6-c-table__th" scope="col">{t('Message')}</th>
                   </tr>
                 </thead>
                 <tbody className="pf-v6-c-table__tbody">
@@ -372,11 +372,11 @@ const MeshDetailContent: FC<{ ns: string; name: string }> = ({ ns, name }) => {
                   <table className="pf-v6-c-table pf-m-grid-md pf-m-compact" role="grid">
                     <thead className="pf-v6-c-table__thead">
                       <tr className="pf-v6-c-table__tr">
-                        <th className="pf-v6-c-table__th">{t('Type')}</th>
-                        <th className="pf-v6-c-table__th">{t('Status')}</th>
-                        <th className="pf-v6-c-table__th">{t('Reason')}</th>
-                        <th className="pf-v6-c-table__th">{t('Message')}</th>
-                        <th className="pf-v6-c-table__th">{t('Last Transition')}</th>
+                        <th className="pf-v6-c-table__th" scope="col">{t('Type')}</th>
+                        <th className="pf-v6-c-table__th" scope="col">{t('Status')}</th>
+                        <th className="pf-v6-c-table__th" scope="col">{t('Reason')}</th>
+                        <th className="pf-v6-c-table__th" scope="col">{t('Message')}</th>
+                        <th className="pf-v6-c-table__th" scope="col">{t('Last Transition')}</th>
                       </tr>
                     </thead>
                     <tbody className="pf-v6-c-table__tbody">

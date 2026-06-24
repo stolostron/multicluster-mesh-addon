@@ -292,11 +292,11 @@ export const TrustStatusCard: FC<TrustStatusCardProps> = ({
           <table className="pf-v6-c-table pf-m-grid-md pf-m-compact" role="grid">
             <thead className="pf-v6-c-table__thead" style={{ position: 'sticky', top: 0, zIndex: 1 }}>
               <tr className="pf-v6-c-table__tr">
-                <th className="pf-v6-c-table__th">{t('Cluster')}</th>
-                <th className="pf-v6-c-table__th">{t('Certificate')}</th>
-                <th className="pf-v6-c-table__th">{t('Expires')}</th>
-                <th className="pf-v6-c-table__th">{t('Renews')}</th>
-                <th className="pf-v6-c-table__th">{t('Distribution')}</th>
+                <th className="pf-v6-c-table__th" scope="col">{t('Cluster')}</th>
+                <th className="pf-v6-c-table__th" scope="col">{t('Certificate')}</th>
+                <th className="pf-v6-c-table__th" scope="col">{t('Expires')}</th>
+                <th className="pf-v6-c-table__th" scope="col">{t('Renews')}</th>
+                <th className="pf-v6-c-table__th" scope="col">{t('Distribution')}</th>
               </tr>
             </thead>
             <tbody className="pf-v6-c-table__tbody">
