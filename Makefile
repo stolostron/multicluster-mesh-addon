@@ -136,6 +136,7 @@ update-test-crds: deps ## Update test CRDs from OCM API, managed-serviceaccount 
 	mkdir -p $(TEST_CRD_DIR)/ocm; \
 	echo "Copying CRDs from $$OCM_API_PATH..."; \
 	cp -v $$OCM_API_PATH/cluster/v1/*.crd.yaml $(TEST_CRD_DIR)/ocm/ 2>/dev/null || true; \
+	cp -v $$OCM_API_PATH/cluster/v1beta1/*.crd.yaml $(TEST_CRD_DIR)/ocm/ 2>/dev/null || true; \
 	cp -v $$OCM_API_PATH/cluster/v1beta2/*.crd.yaml $(TEST_CRD_DIR)/ocm/ 2>/dev/null || true; \
 	cp -v $$OCM_API_PATH/work/v1/*.crd.yaml $(TEST_CRD_DIR)/ocm/ 2>/dev/null || true; \
 	echo "Test CRDs updated successfully in $(TEST_CRD_DIR)/ocm/"
@@ -145,6 +146,13 @@ update-test-crds: deps ## Update test CRDs from OCM API, managed-serviceaccount 
 	echo "Copying CRDs from $$OCM_MSA_PATH..."; \
 	cp -v $$OCM_MSA_PATH/charts/managed-serviceaccount/crds/*.yaml $(TEST_CRD_DIR)/ocm/; \
 	echo "Test CRDs for MSA updated successfully in $(TEST_CRD_DIR)/ocm/"
+	@echo "Updating test CRDs from governance-policy-propagator..."
+	@set -e; \
+	POLICY_PATH=$$(go list -m -f '{{.Dir}}' open-cluster-management.io/governance-policy-propagator); \
+	echo "Copying CRDs from $$POLICY_PATH..."; \
+	cp -v $$POLICY_PATH/deploy/crds/policy.open-cluster-management.io_policies.yaml $(TEST_CRD_DIR)/ocm/; \
+	cp -v $$POLICY_PATH/deploy/crds/policy.open-cluster-management.io_placementbindings.yaml $(TEST_CRD_DIR)/ocm/; \
+	echo "Test CRDs for policy framework updated successfully in $(TEST_CRD_DIR)/ocm/"
 	@echo "Updating test CRDs from cert-manager..."
 	@set -e; \
 	CERTMANAGER_PATH=$$(go list -m -f '{{.Dir}}' github.com/cert-manager/cert-manager); \
@@ -252,7 +260,7 @@ export DEV_KUBE_DIR K8S_VERSION OLM_VERSION CERT_MANAGER_VERSION
 export KIND CLUSTERADM
 
 .PHONY: dev-env
-dev-env: create-clusters install-olm install-cert-manager init-ocm join-clusters deploy-addon ## Provision full dev environment (Kind + OCM + addon)
+dev-env: create-clusters install-olm install-cert-manager init-ocm join-clusters install-policy-framework deploy-addon ## Provision full dev environment (Kind + OCM + addon)
 
 .PHONY: create-clusters
 create-clusters: $(KIND) ## Create 3 Kind clusters (hub, cluster1, cluster2)
@@ -273,6 +281,10 @@ init-ocm: $(CLUSTERADM) ## Initialize hub as OCM control plane
 .PHONY: join-clusters
 join-clusters: $(CLUSTERADM) ## Register managed clusters and create ManagedClusterSet
 	$(DEV_ENV_SCRIPT) join-clusters
+
+.PHONY: install-policy-framework
+install-policy-framework: $(CLUSTERADM) ## Install governance policy framework and enable OperatorPolicy
+	$(DEV_ENV_SCRIPT) install-policy-framework
 
 .PHONY: deploy-addon
 deploy-addon: $(KIND) $(HELM_BIN) gen images ## Build and deploy addon to the hub Kind cluster

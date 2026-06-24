@@ -16,8 +16,10 @@ import (
 	operatorsv1alpha1 "github.com/operator-framework/api/pkg/operators/v1alpha1"
 	"k8s.io/client-go/kubernetes/scheme"
 	clusterv1 "open-cluster-management.io/api/cluster/v1"
+	clusterv1beta1 "open-cluster-management.io/api/cluster/v1beta1"
 	clusterv1beta2 "open-cluster-management.io/api/cluster/v1beta2"
 	workv1 "open-cluster-management.io/api/work/v1"
+	policyv1 "open-cluster-management.io/governance-policy-propagator/api/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
@@ -66,12 +68,14 @@ var _ = BeforeSuite(func() {
 	util.MustAddToScheme(
 		meshv1alpha1.Install,
 		clusterv1.Install,
+		clusterv1beta1.Install,
 		clusterv1beta2.Install,
 		workv1.Install,
 		operatorsv1.AddToScheme,
 		operatorsv1alpha1.AddToScheme,
 		certmanagerv1.AddToScheme,
 		msav1beta1.AddToScheme,
+		policyv1.AddToScheme,
 	)
 
 	k8sClient, err = client.New(cfg, client.Options{Scheme: scheme.Scheme})

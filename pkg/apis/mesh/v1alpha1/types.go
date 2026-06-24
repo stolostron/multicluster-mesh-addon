@@ -193,14 +193,14 @@ const (
 	// ReasonClustersNotReady indicates that not all clusters have confirmed operator installation
 	ReasonClustersNotReady = "ClustersNotReady"
 
-	// ReasonManifestWorkCreated indicates the operator ManifestWork has been created
-	ReasonManifestWorkCreated = "ManifestWorkCreated"
+	// ReasonPolicyCreated indicates the operator policy has been created but compliance is pending
+	ReasonPolicyCreated = "PolicyCreated"
 
-	// ReasonOperatorInstalled indicates the operator CSV has been successfully installed
+	// ReasonPolicyNonCompliant indicates the operator policy is non-compliant
+	ReasonPolicyNonCompliant = "PolicyNonCompliant"
+
+	// ReasonOperatorInstalled indicates the operator has been successfully installed
 	ReasonOperatorInstalled = "Installed"
-
-	// ReasonMissingProductClaim indicates the cluster is missing its product claim
-	ReasonMissingProductClaim = "MissingProductClaim"
 
 	// ReasonReconcileError indicates an error occurred during reconciliation
 	ReasonReconcileError = "ReconcileError"
