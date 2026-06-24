@@ -80,7 +80,7 @@ function collectRecentIssues(meshes: MultiClusterMesh[], controlPlanes: Enriched
   for (const mesh of meshes) {
     const meshName = mesh.metadata?.name ?? ''
     const meshNamespace = mesh.metadata?.namespace ?? ''
-    const meshLink = `/service-mesh/${meshNamespace}/${meshName}`
+    const meshLink = `/service-mesh/${encodeURIComponent(meshNamespace)}/${encodeURIComponent(meshName)}`
 
     for (const c of mesh.status?.conditions ?? []) {
       if (c.status === 'True') continue
@@ -325,7 +325,7 @@ const OverviewPage: FC = () => {
                         </thead>
                         <tbody className="pf-v6-c-table__tbody">
                           {recentIssues.map((issue, i) => (
-                            <tr className="pf-v6-c-table__tr" key={i}>
+                            <tr className="pf-v6-c-table__tr" key={`${issue.kind}-${issue.source}-${issue.label}`}>
                               <td className="pf-v6-c-table__td">
                                 <Tooltip content={issue.kind === 'mesh' ? t('Fleet Mesh') : t('Control Plane')}>
                                   {issue.kind === 'mesh'

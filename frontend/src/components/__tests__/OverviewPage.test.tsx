@@ -29,6 +29,7 @@ function mockDefaults(opts: {
   meshesLoaded?: boolean
   meshesError?: unknown
   enrichedPlanes?: EnrichedControlPlane[]
+  enrichmentError?: unknown
   cpLoaded?: boolean
   cpError?: unknown
   isFleetAvailable?: boolean
@@ -38,6 +39,7 @@ function mockDefaults(opts: {
     meshesLoaded = true,
     meshesError = null,
     enrichedPlanes = [],
+    enrichmentError = null,
     cpLoaded = true,
     cpError = null,
     isFleetAvailable = true,
@@ -51,7 +53,7 @@ function mockDefaults(opts: {
     isFleetAvailable,
     refetch: rstest.fn(),
   } as any)
-  rstest.mocked(useEnrichedControlPlanes).mockReturnValue([enrichedPlanes, true, true, null])
+  rstest.mocked(useEnrichedControlPlanes).mockReturnValue([enrichedPlanes, true, true, enrichmentError])
 }
 
 afterEach(() => rstest.clearAllMocks())
@@ -328,5 +330,53 @@ describe('OverviewPage', () => {
     render(<OverviewPage />)
     expect(screen.getByText('Unable to load mesh data. Some issues may not be shown.')).toBeInTheDocument()
     expect(screen.getByText('Reconcile Error')).toBeInTheDocument()
+  })
+
+  it('shows CP error in issues card when enrichmentError is set but cpError is null', () => {
+    mockDefaults({ enrichmentError: new Error('enrichment failed') })
+    render(<OverviewPage />)
+    expect(screen.getByText('Unable to load control plane data. Some issues may not be shown.')).toBeInTheDocument()
+    expect(screen.queryByText('No issues detected.')).not.toBeInTheDocument()
+  })
+
+  it('limits recent issues to 5 most recent entries', () => {
+    const meshes = [
+      makeMesh({
+        status: {
+          conditions: [
+            { type: 'Ready', status: 'False', reason: 'ClustersNotReady', lastTransitionTime: '2026-06-24T01:00:00Z' },
+          ],
+          clusterStatus: [
+            {
+              clusterName: 'c1',
+              conditions: [{ type: 'OperatorInstalled', status: 'False', reason: 'ReconcileError', lastTransitionTime: '2026-06-24T02:00:00Z' }],
+            },
+            {
+              clusterName: 'c2',
+              conditions: [{ type: 'OperatorInstalled', status: 'False', reason: 'ReconcileError', lastTransitionTime: '2026-06-24T03:00:00Z' }],
+            },
+            {
+              clusterName: 'c3',
+              conditions: [{ type: 'OperatorInstalled', status: 'False', reason: 'ReconcileError', lastTransitionTime: '2026-06-24T04:00:00Z' }],
+            },
+            {
+              clusterName: 'c4',
+              conditions: [{ type: 'OperatorInstalled', status: 'False', reason: 'ReconcileError', lastTransitionTime: '2026-06-24T05:00:00Z' }],
+            },
+            {
+              clusterName: 'c5',
+              conditions: [{ type: 'OperatorInstalled', status: 'False', reason: 'ReconcileError', lastTransitionTime: '2026-06-24T06:00:00Z' }],
+            },
+          ],
+        },
+      }),
+    ]
+    mockDefaults({ meshes })
+    render(<OverviewPage />)
+    const rows = screen.getAllByRole('row')
+    const dataRows = rows.filter((r) => r.querySelector('td'))
+    expect(dataRows).toHaveLength(5)
+    expect(dataRows[0]).toHaveTextContent('c5')
+    expect(dataRows[4]).toHaveTextContent('c1')
   })
 })
