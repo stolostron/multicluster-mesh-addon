@@ -25,7 +25,7 @@ Contact existing maintainers (listed in the [OWNERS](OWNERS) file)
 ### PR Requirements
 
 - **Approval**: Pull requests require approval from a repository owner (see [OWNERS](OWNERS))
-- **DCO Sign-off**: All commits must be signed
+- **DCO Sign-off**: All commits must be signed off (`git commit -s`)
 - **Tests**: Include unit tests for new functionality
 - **Documentation**: Update docs if changing user-facing behavior
 
@@ -37,10 +37,9 @@ Contact existing maintainers (listed in the [OWNERS](OWNERS) file)
 
 ## Developer Certificate of Origin
 
-All contributions must be submitted under the **Apache Public License 2.0** terms.
+All contributions must be submitted under the **Apache License, Version 2.0** terms.
 
 You must sign off your commits to certify that you have the right to submit the code under the project's license. This is done using the Developer Certificate of Origin (DCO).
-
 ## Development Workflow
 
 1. **Fork the repository** to your GitHub account
