@@ -8,6 +8,9 @@ on:
       - "**.md"
       - "docs/**"
       - "frontend/docs/**"
+      - "LICENSE"
+      - ".gitignore"
+      - "OWNERS"
 
 jobs:
   e2e:
