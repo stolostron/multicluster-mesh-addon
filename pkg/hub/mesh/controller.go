@@ -424,10 +424,7 @@ func (r *Reconciler) cleanupManifestWorks(ctx context.Context, clusterSet string
 // are removed (e.g. when the issuer is cleared). Otherwise, only Certificates for clusters no longer in the
 // ClusterSet are removed.
 func (r *Reconciler) cleanupCertificates(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, clusters []clusterv1.ManagedCluster, forceCleanupAll bool) error {
-	labelValues := make(map[string]bool, len(clusters))
-	for _, c := range clusters {
-		labelValues[formatLabelValue(c.Name)] = true
-	}
+	clusterNames := clusterNameSet(clusters)
 
 	certList := &certmanagerv1.CertificateList{}
 	if err := r.List(ctx, certList,
@@ -439,7 +436,7 @@ func (r *Reconciler) cleanupCertificates(ctx context.Context, mesh *meshv1alpha1
 
 	for _, cert := range certList.Items {
 		clusterName := cert.Labels[ClusterNameLabel]
-		if !forceCleanupAll && labelValues[clusterName] {
+		if !forceCleanupAll && clusterNames[clusterName] {
 			continue
 		}
 
@@ -792,8 +789,8 @@ func (r *Reconciler) ensureCertificateForCluster(ctx context.Context, mesh *mesh
 			WithCommonName("Istio CA").
 			WithSubject(certmanagerapply.X509Subject().
 				WithOrganizations(mesh.GetTrustDomain()).
-				WithOrganizationalUnits(formatOU(cluster.Name))).
-			WithURIs(certURI(cluster.Name, mesh.GetTrustDomain())).
+				WithOrganizationalUnits(cluster.Name)).
+			WithURIs("spiffe://"+mesh.GetTrustDomain()+"/cluster/"+cluster.Name+"/ca/istio-ca").
 			WithIsCA(true).
 			WithUsages(
 				certmanagerv1.UsageDigitalSignature,
@@ -883,6 +880,6 @@ func meshOwnedLabels(mesh *meshv1alpha1.MultiClusterMesh, clusterName string) ma
 		ClusterSetLabel:    mesh.Spec.ClusterSet,
 		MeshNameLabel:      mesh.Name,
 		MeshNamespaceLabel: mesh.Namespace,
-		ClusterNameLabel:   formatLabelValue(clusterName),
+		ClusterNameLabel:   clusterName,
 	}
 }

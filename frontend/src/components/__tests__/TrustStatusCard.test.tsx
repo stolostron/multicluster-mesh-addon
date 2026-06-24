@@ -6,8 +6,6 @@ import type { Certificate } from '../../types/certManager'
 import type { ManifestWork } from '../../types/manifestWork'
 import type { ClusterMeshStatus, K8sCondition } from '../../types/multiClusterMesh'
 
-const mockUseK8sWatchResource = useK8sWatchResource as jest.Mock
-
 const CLUSTER_NAME_LABEL = 'mesh.open-cluster-management.io/cluster-name'
 const MESH_NAME_LABEL = 'mesh.open-cluster-management.io/mesh-name'
 const MESH_NAMESPACE_LABEL = 'mesh.open-cluster-management.io/mesh-namespace'
@@ -79,7 +77,7 @@ const setupWatches = (certs: Certificate[], mws: ManifestWork[], opts?: {
   mwError?: unknown
 }) => {
   const { certsLoaded = true, certsError = null, mwLoaded = true, mwError = null } = opts ?? {}
-  mockUseK8sWatchResource.mockImplementation((params: { groupVersionKind?: { kind?: string } } | null) => {
+  rstest.mocked(useK8sWatchResource).mockImplementation((params: { groupVersionKind?: { kind?: string } } | null) => {
     if (params?.groupVersionKind?.kind === 'Certificate') return [certs, certsLoaded, certsError]
     if (params?.groupVersionKind?.kind === 'ManifestWork') return [mws, mwLoaded, mwError]
     return [null, false, null]
@@ -93,7 +91,7 @@ const defaultProps = {
   clusterStatuses: [makeCluster('cluster-a')],
 }
 
-afterEach(() => jest.clearAllMocks())
+afterEach(() => rstest.clearAllMocks())
 
 // ---------------------------------------------------------------------------
 // No issuer configured
@@ -105,7 +103,7 @@ describe('TrustStatusCard — no issuer', () => {
     expect(screen.getByText('Trust Status')).toBeInTheDocument()
     expect(screen.getByText('trustNotConfiguredMessage')).toBeInTheDocument()
     // Hooks must always be called (rules of hooks), but both are passed null — no real watch started.
-    expect(mockUseK8sWatchResource).not.toHaveBeenCalledWith(
+    expect(rstest.mocked(useK8sWatchResource)).not.toHaveBeenCalledWith(
       expect.objectContaining({ groupVersionKind: expect.anything() }),
     )
   })
@@ -138,7 +136,7 @@ describe('TrustStatusCard — errors', () => {
     setupWatches([], [], { certsError: new Error('cert watch failed') })
     render(<TrustStatusCard {...defaultProps} />)
     expect(screen.getByText('Unable to load certificate data')).toBeInTheDocument()
-    expect(screen.getByText('cert watch failed')).toBeInTheDocument()
+    expect(screen.getByText('An unexpected error occurred. Check the browser console for details.')).toBeInTheDocument()
   })
 
   it('renders the full table when mwError is set but certs are loaded', () => {

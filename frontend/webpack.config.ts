@@ -1,11 +1,17 @@
 import { ConsoleRemotePlugin } from '@openshift-console/dynamic-plugin-sdk-webpack'
 import CopyPlugin from 'copy-webpack-plugin'
+import path from 'path'
 import { extensions } from './console-extensions'
 import { pluginMetadata } from './console-plugin-metadata'
 
-export default function (_env: unknown, _argv: unknown) {
+export default function (_env: unknown, argv: { mode?: string }) {
+  const isProduction = argv.mode === 'production'
+
   return {
     entry: {},
+    output: {
+      path: path.resolve(__dirname, 'dist'),
+    },
     resolve: {
       extensions: ['.ts', '.tsx', '.js', '.jsx'],
     },
@@ -14,8 +20,14 @@ export default function (_env: unknown, _argv: unknown) {
         {
           test: /\.(ts|tsx)$/,
           exclude: /node_modules/,
-          loader: 'ts-loader',
-          options: { transpileOnly: true },
+          loader: 'swc-loader',
+          options: {
+            jsc: {
+              parser: { syntax: 'typescript', tsx: true },
+              transform: { react: { runtime: 'automatic' } },
+              target: 'es2022',
+            },
+          },
         },
       ],
     },
@@ -41,6 +53,15 @@ export default function (_env: unknown, _argv: unknown) {
         'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, PATCH, OPTIONS',
         'Access-Control-Allow-Headers': 'X-Requested-With, Content-Type, Authorization',
       },
+      devMiddleware: {
+        writeToDisk: true,
+      },
     },
+    ...(isProduction
+      ? {}
+      : {
+          devtool: 'source-map',
+          optimization: { minimize: false },
+        }),
   }
 }

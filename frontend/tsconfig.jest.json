@@ -1,9 +1,0 @@
-{
-  "extends": "./tsconfig.json",
-  "compilerOptions": {
-    "jsx": "react-jsx",
-    "module": "CommonJS",
-    "moduleResolution": "node",
-    "types": ["jest", "@testing-library/jest-dom"]
-  }
-}

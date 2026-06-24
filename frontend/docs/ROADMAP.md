@@ -6,15 +6,16 @@
 - **Mesh detail page** — Overview and OSSM Operator config cards, Trust Status card (watches cert-manager Certificates + ManifestWorks), Cluster Status card with per-cluster operator install status, Conditions table. Designed for 1 to hundreds of clusters with filters, search, and scroll.
 - **Cross-perspective links** — cluster names link to ACM cluster detail pages; cluster set names link to ACM cluster set detail pages.
 - **Conflict mesh UX** — friendly labels for backend condition reasons, and blocked meshes show an explanatory message instead of "No clusters."
-- **Production packaging** — Dockerfile (UBI9 nodejs-24 + nginx-126), Makefile with `dev-*`, `prod-*`, and `test` targets.
-- **Automated tests** — Jest + Testing Library unit test framework (`make test`), with mocks for the Console SDK and react-router. Tests cover `MeshStatus`, `ServiceMeshPage`, `MeshDetailPage`, `ClusterStatusSection`, and `TrustStatusCard`.
+- **Production packaging** — Dockerfile (UBI9 nodejs-24 + nginx-126), Makefile with `build`, `deploy`, `teardown`, and `test` targets.
+- **Automated tests** — Rstest + Testing Library unit test framework (`make test`), with TypeScript type checking (`tsc --noEmit`) and mocks for the Console SDK, multicluster-sdk, and react-router. Tests cover `MeshStatus`, `ServiceMeshPage`, `MeshDetailPage`, `ClusterStatusSection`, `TrustStatusCard`, `ControlPlanesPage`, `ControlPlaneDetailPage`, and `useEnrichedControlPlanes`.
 - **Internationalization (i18n)** — All user-facing strings externalized via react-i18next under the `plugin__ossm-acm` namespace. Locale bundle served from `dist/locales/en/plugin__ossm-acm.json`.
+- **Control Planes page** — Discovers all sail-operator `Istio` CRs across managed clusters via ACM Search (`useFleetSearchPoll`), enriches with full CR data via `fleetK8sGet` (version, meshID, status), and correlates with `MultiClusterMesh` CRs for fleet management context. See [DISCOVERY-OPTIONS.md](./DISCOVERY-OPTIONS.md) for the design rationale.
+- **Local dev server** — `make start` runs webpack-dev-server on localhost:9001; `make start-console` runs a local OpenShift Console (`origin-console`) on localhost:9000 via `hack/start-console.sh`, automatically port-forwarding in-cluster ACM and MCE plugins so Fleet Management links work. Additive to the existing `make build deploy` cluster workflow.
 
 ## What's next (not blocked)
-
 - **Create / delete mesh actions** — Add a "Create Mesh" button to the list page and "Delete Mesh" on the detail page.
 - **Edit mesh** — Edit issuer, operator config, etc. from the detail page.
-- **CI workflow** — Add a GitHub Actions workflow to the parent repo (`.github/workflows/frontend-ci.yml`) that runs `make test dev-build` on PRs touching `frontend/**`, using Node 20 and two parallel jobs (test and build).
+- **CI workflow** — Add a GitHub Actions workflow to the parent repo (`.github/workflows/frontend-ci.yml`) that runs `make test build` on PRs touching `frontend/**`, using two parallel jobs (test — which includes type checking — and build).
 
 ## Blocked on backend
 
@@ -25,4 +26,4 @@
 
 - [OSSM-12887](https://redhat.atlassian.net/browse/OSSM-12887) — Epic: OSSM/Kiali ACM console integration developer preview
 - [OCPSTRAT-2989](https://redhat.atlassian.net/browse/OCPSTRAT-2989) — Feature: Fleet-wide service mesh console integration with ACM
-- [SPIKE.md](SPIKE.md) — Original spike research by Nick Fox
+- [INITIAL-SPIKE.md](./INITIAL-SPIKE.md) — Original spike research by Nick Fox

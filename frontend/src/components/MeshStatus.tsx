@@ -1,4 +1,4 @@
-import * as React from 'react'
+import type { FC } from 'react'
 import { Label } from '@patternfly/react-core'
 import type { K8sCondition } from '../types/multiClusterMesh'
 import { useMeshTranslation } from '../utils/i18nUtils'
@@ -41,6 +41,7 @@ function deriveStatus(conditions?: K8sCondition[], conditionType?: string): { la
   return { label: 'Healthy', color: 'green' }
 }
 
+/** Returns a numeric rank for sorting: 0 (green/healthy) through 3 (red/degraded). */
 export function getStatusRank(conditions?: K8sCondition[], conditionType?: string): number {
   const { color } = deriveStatus(conditions, conditionType)
   if (color === 'green') return 0
@@ -54,7 +55,8 @@ interface MeshStatusProps {
   conditionType?: string
 }
 
-export const MeshStatus: React.FC<MeshStatusProps> = ({ conditions, conditionType }) => {
+/** Renders a colored PatternFly Label reflecting the status of a K8s condition (default: "Ready"). */
+export const MeshStatus: FC<MeshStatusProps> = ({ conditions, conditionType }) => {
   const { t } = useMeshTranslation()
   const { label, color } = deriveStatus(conditions, conditionType)
   return <Label color={color}>{t(label)}</Label>
