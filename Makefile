@@ -168,7 +168,7 @@ test-e2e: ## Run e2e tests against dev-env clusters (requires make dev-env)
 
 .PHONY: build
 build: $(BIN_DIR) ## Build addon binary
-	CGO_ENABLED=0 go build -buildvcs=false -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/multicluster-mesh-addon .
+	CGO_ENABLED=0 go build $(GO_BUILD_FLAGS) -buildvcs=false -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/multicluster-mesh-addon .
 
 .PHONY: all
 all: build test
