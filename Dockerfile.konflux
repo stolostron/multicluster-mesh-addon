@@ -1,8 +1,10 @@
-# using registry.ci.openshift.org instead of brew.registry.redhat.io to avoid authorization
-FROM registry.ci.openshift.org/stolostron/builder:go1.25-linux AS builder
+FROM brew.registry.redhat.io/rh-osbs/openshift-golang-builder:v1.25 AS builder
+
 WORKDIR /go/src/github.com/stolostron/multicluster-mesh-addon
 COPY . .
-RUN make build
+# openshift-golang-builder sets GOFLAGS=-mod=vendor by default, but this repo doesn't use vendoring.
+# Override with -mod=mod to use Go modules from the module cache instead.
+RUN make GO_BUILD_FLAGS=-mod=mod build
 
 FROM registry.access.redhat.com/ubi9/ubi-minimal:latest
 
