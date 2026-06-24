@@ -86,7 +86,7 @@ const ControlPlaneRow: FC<RowProps<EnrichedControlPlane>> = ({ obj, activeColumn
         </Link>
       </TableData>
       <TableData id="name" activeColumnIDs={activeColumnIDs}>
-        <Link to={`/control-planes/${encodeURIComponent(obj.clusterName)}/${encodeURIComponent(obj.metadata.name)}`}>
+        <Link to={`/mesh-control-planes/${encodeURIComponent(obj.clusterName)}/${encodeURIComponent(obj.metadata.name)}`}>
           {obj.metadata.name}
         </Link>
       </TableData>

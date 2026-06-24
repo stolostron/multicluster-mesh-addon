@@ -3,7 +3,7 @@ import { Label } from '@patternfly/react-core'
 import type { K8sCondition } from '../types/multiClusterMesh'
 import { useMeshTranslation } from '../utils/i18nUtils'
 
-type StatusColor = 'green' | 'red' | 'orange' | 'grey'
+export type StatusColor = 'green' | 'red' | 'orange' | 'grey'
 
 // Maps K8s condition reason codes to user-friendly English strings (also the i18n keys).
 const friendlyReasons: Record<string, string> = {
@@ -15,7 +15,7 @@ const friendlyReasons: Record<string, string> = {
   ReconcileError: 'Reconcile Error',
 }
 
-function deriveStatus(conditions?: K8sCondition[], conditionType?: string): { label: string; color: StatusColor } {
+export function deriveStatus(conditions?: K8sCondition[], conditionType?: string): { label: string; color: StatusColor } {
   if (!conditions || conditions.length === 0) {
     return { label: 'Unknown', color: 'grey' }
   }

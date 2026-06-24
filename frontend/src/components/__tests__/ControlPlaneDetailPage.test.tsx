@@ -38,7 +38,7 @@ describe('ControlPlaneDetailPage', () => {
       rstest.mocked(useParams).mockReturnValue({})
       render(<ControlPlaneDetailPage />)
       expect(screen.getByText('Not Found')).toBeInTheDocument()
-      expect(screen.getByText('Invalid control plane URL. Expected /control-planes/:cluster/:name.')).toBeInTheDocument()
+      expect(screen.getByText('Invalid control plane URL. Expected /mesh-control-planes/:cluster/:name.')).toBeInTheDocument()
     })
   })
 

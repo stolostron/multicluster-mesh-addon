@@ -70,7 +70,7 @@ describe('ControlPlanesPage', () => {
     await waitFor(() => {
       expect(screen.getByRole('link', { name: 'myistio' })).toHaveAttribute(
         'href',
-        '/control-planes/cluster-a/myistio',
+        '/mesh-control-planes/cluster-a/myistio',
       )
     })
   })
