@@ -36,6 +36,25 @@ rules:
   - list
   - watch
 - apiGroups:
+  - cluster.open-cluster-management.io
+  resources:
+  - managedclustersetbindings
+  - placements
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - cluster.open-cluster-management.io
+  resources:
+  - managedclustersets/bind
+  verbs:
+  - create
+- apiGroups:
   - mesh.open-cluster-management.io
   resources:
   - multiclustermeshes
@@ -61,6 +80,25 @@ rules:
   - get
   - patch
   - update
+- apiGroups:
+  - policy.open-cluster-management.io
+  resources:
+  - placementbindings
+  - policies
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - policy.open-cluster-management.io
+  resources:
+  - policies/status
+  verbs:
+  - get
 - apiGroups:
   - work.open-cluster-management.io
   resources:

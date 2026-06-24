@@ -303,6 +303,41 @@ setup_mesh() {
     log "Monitor progress: $(on "${HUB}" echo kubectl get multiclustermesh -n mesh-system)"
 }
 
+install_policy_framework() {
+    require_clusters "${HUB}" "${CLUSTER1}" "${CLUSTER2}"
+
+    log "Installing governance policy framework on hub..."
+    on "${HUB}" "${CLUSTERADM}" install hub-addon --names governance-policy-framework
+
+    log "Waiting for policy framework hub components..."
+    on "${HUB}" kubectl wait --for=condition=Available \
+        deployment/governance-policy-propagator \
+        deployment/governance-policy-addon-controller \
+        -n open-cluster-management --timeout=120s
+
+    for cluster in "${CLUSTER1}" "${CLUSTER2}"; do
+        log "Enabling governance-policy-framework on ${cluster}"
+        on "${HUB}" "${CLUSTERADM}" addon enable --names governance-policy-framework --clusters "${cluster}"
+
+        log "Enabling config-policy-controller on ${cluster}"
+        on "${HUB}" "${CLUSTERADM}" addon enable --names config-policy-controller --clusters "${cluster}"
+
+        log "Enabling OperatorPolicy on ${cluster}"
+        on "${HUB}" kubectl annotate -n "${cluster}" managedclusteraddon config-policy-controller \
+            operator-policy-disabled=false --overwrite
+    done
+
+    for cluster in "${CLUSTER1}" "${CLUSTER2}"; do
+        log "Waiting for policy addons on ${cluster}..."
+        on "${HUB}" kubectl wait managedclusteraddon/governance-policy-framework \
+            -n "${cluster}" --for=condition=Available --timeout=180s
+        on "${HUB}" kubectl wait managedclusteraddon/config-policy-controller \
+            -n "${cluster}" --for=condition=Available --timeout=180s
+    done
+
+    log "Policy framework installed"
+}
+
 clean() {
     log "Deleting Kind clusters..."
     for cluster in "${HUB}" "${CLUSTER1}" "${CLUSTER2}"; do
@@ -320,13 +355,14 @@ clean() {
 
 ACTION="${1:-}"
 case "${ACTION}" in
-    create-clusters)       create_clusters ;;
-    install-olm)           install_olm ;;
-    install-cert-manager)  install_cert_manager ;;
-    init-ocm)              init_ocm ;;
-    join-clusters)         join_clusters ;;
-    setup-mesh)            setup_mesh ;;
-    clean)                 clean ;;
+    create-clusters)            create_clusters ;;
+    install-olm)                install_olm ;;
+    install-cert-manager)       install_cert_manager ;;
+    install-policy-framework)   install_policy_framework ;;
+    init-ocm)                   init_ocm ;;
+    join-clusters)              join_clusters ;;
+    setup-mesh)                 setup_mesh ;;
+    clean)                      clean ;;
     *)
-        err "Unknown action: '${ACTION}'. Valid: create-clusters, install-olm, install-cert-manager, init-ocm, join-clusters, setup-mesh, clean" ;;
+        err "Unknown action: '${ACTION}'. Valid: create-clusters, install-olm, install-cert-manager, install-policy-framework, init-ocm, join-clusters, setup-mesh, clean" ;;
 esac

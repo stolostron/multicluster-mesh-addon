@@ -9,19 +9,19 @@ import (
 	certmanagerv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	operatorsv1 "github.com/operator-framework/api/pkg/operators/v1"
 	operatorsv1alpha1 "github.com/operator-framework/api/pkg/operators/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	clusterv1 "open-cluster-management.io/api/cluster/v1"
 
 	"github.com/stolostron/multicluster-mesh-addon/pkg/key"
+	clusterv1beta1 "open-cluster-management.io/api/cluster/v1beta1"
 	clusterv1beta2 "open-cluster-management.io/api/cluster/v1beta2"
 	workv1 "open-cluster-management.io/api/work/v1"
+	policyv1 "open-cluster-management.io/governance-policy-propagator/api/v1"
 
 	meshv1alpha1 "github.com/stolostron/multicluster-mesh-addon/pkg/apis/mesh/v1alpha1"
 	meshcontroller "github.com/stolostron/multicluster-mesh-addon/pkg/hub/mesh"
@@ -46,8 +46,6 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 		util.CreateManagedClusterSet(ctx, k8sClient, testClusterSet)
 	})
 
-	// Delete test resources (envtest won't fully delete namespaces, but we clean up anyway)
-	// More info: https://book.kubebuilder.io/reference/envtest.html#testing-considerations
 	AfterEach(func() {
 		meshList := &meshv1alpha1.MultiClusterMeshList{}
 		_ = k8sClient.List(ctx, meshList)
@@ -59,6 +57,30 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 		_ = k8sClient.List(ctx, workList)
 		for i := range workList.Items {
 			_ = k8sClient.Delete(ctx, &workList.Items[i])
+		}
+
+		policyList := &policyv1.PolicyList{}
+		_ = k8sClient.List(ctx, policyList)
+		for i := range policyList.Items {
+			_ = k8sClient.Delete(ctx, &policyList.Items[i])
+		}
+
+		bindingList := &policyv1.PlacementBindingList{}
+		_ = k8sClient.List(ctx, bindingList)
+		for i := range bindingList.Items {
+			_ = k8sClient.Delete(ctx, &bindingList.Items[i])
+		}
+
+		placementList := &clusterv1beta1.PlacementList{}
+		_ = k8sClient.List(ctx, placementList)
+		for i := range placementList.Items {
+			_ = k8sClient.Delete(ctx, &placementList.Items[i])
+		}
+
+		clusterSetBindingList := &clusterv1beta2.ManagedClusterSetBindingList{}
+		_ = k8sClient.List(ctx, clusterSetBindingList)
+		for i := range clusterSetBindingList.Items {
+			_ = k8sClient.Delete(ctx, &clusterSetBindingList.Items[i])
 		}
 
 		clusterList := &clusterv1.ManagedClusterList{}
@@ -91,46 +113,43 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 				util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet)
 			})
 
-			It("should create ManifestWorks for each cluster", func() {
-				work1 := expectOperatorManifestWork(clusterName)
-				work2 := expectOperatorManifestWork(cluster2Name)
+			It("should create operator Policy with correct labels", func() {
+				policy := expectOperatorPolicy(meshName, testNs)
 
-				Expect(work1.Labels[meshcontroller.ManagedByLabel]).To(Equal(meshcontroller.ManagedByValue))
-				Expect(work2.Labels[meshcontroller.ManagedByLabel]).To(Equal(meshcontroller.ManagedByValue))
+				Expect(policy.Labels[meshcontroller.ManagedByLabel]).To(Equal(meshcontroller.ManagedByValue))
+				Expect(policy.Labels[meshcontroller.ClusterSetLabel]).To(Equal(testClusterSet))
+				Expect(policy.Labels[meshcontroller.ClusterSetLabel]).To(Equal(testClusterSet))
 
 				expectMeshNotReady(meshName, testNs)
-				expectClusterOperatorConditionReason(meshName, testNs, clusterName, meshv1alpha1.ReasonManifestWorkCreated)
-				expectClusterOperatorConditionReason(meshName, testNs, cluster2Name, meshv1alpha1.ReasonManifestWorkCreated)
+				expectClusterOperatorConditionReason(meshName, testNs, clusterName, meshv1alpha1.ReasonPolicyCreated)
+				expectClusterOperatorConditionReason(meshName, testNs, cluster2Name, meshv1alpha1.ReasonPolicyCreated)
 			})
 
-			It("should include feedback rules for the Operator Subscription status", func() {
-				for _, cluster := range []string{clusterName, cluster2Name} {
-					work := expectOperatorManifestWork(cluster)
-
-					Expect(work.Spec.ManifestConfigs).To(HaveLen(1))
-					Expect(work.Spec.ManifestConfigs[0].ResourceIdentifier.Resource).To(Equal("subscriptions"))
-					Expect(work.Spec.ManifestConfigs[0].FeedbackRules).To(HaveLen(1))
-					Expect(work.Spec.ManifestConfigs[0].FeedbackRules[0].Type).To(Equal(workv1.JSONPathsType))
-					Expect(work.Spec.ManifestConfigs[0].FeedbackRules[0].JsonPaths[0].Path).To(Equal(".status.installedCSV"))
-				}
+			It("should create Placement, PlacementBinding, and ManagedClusterSetBinding", func() {
+				expectOperatorPlacement(meshName, testNs, testClusterSet)
+				expectOperatorPlacementBinding(testNs)
+				expectManagedClusterSetBinding(testNs, testClusterSet)
 			})
 
-			It("should become ready after all clusters confirm operator installation", func() {
+			It("should become ready after all clusters are compliant", func() {
 				expectMeshNotReady(meshName, testNs)
 
-				By("setting feedback on one cluster, mesh should stay not-ready")
-				util.SetManifestWorkFeedback(ctx, k8sClient,
-					meshcontroller.OperatorManifestWorkName, clusterName,
-					meshcontroller.FeedbackInstalledCSV, "sailoperator.v1.0.0")
+				By("setting compliance on one cluster, mesh should stay not-ready")
+				util.SetOperatorPolicyCompliance(ctx, k8sClient,
+					meshcontroller.OperatorPolicyName, testNs,
+					map[string]policyv1.ComplianceState{clusterName: policyv1.Compliant})
 
 				expectClusterOperatorConditionReason(meshName, testNs, clusterName, meshv1alpha1.ReasonOperatorInstalled)
-				expectClusterOperatorConditionReason(meshName, testNs, cluster2Name, meshv1alpha1.ReasonManifestWorkCreated)
+				expectClusterOperatorConditionReason(meshName, testNs, cluster2Name, meshv1alpha1.ReasonPolicyCreated)
 				expectMeshNotReady(meshName, testNs)
 
-				By("setting feedback on all clusters, mesh should become ready")
-				util.SetManifestWorkFeedback(ctx, k8sClient,
-					meshcontroller.OperatorManifestWorkName, cluster2Name,
-					meshcontroller.FeedbackInstalledCSV, "servicemeshoperator3.v3.0.0")
+				By("setting compliance on all clusters, mesh should become ready")
+				util.SetOperatorPolicyCompliance(ctx, k8sClient,
+					meshcontroller.OperatorPolicyName, testNs,
+					map[string]policyv1.ComplianceState{
+						clusterName:  policyv1.Compliant,
+						cluster2Name: policyv1.Compliant,
+					})
 
 				expectClusterOperatorConditionReason(meshName, testNs, clusterName, meshv1alpha1.ReasonOperatorInstalled)
 				expectClusterOperatorConditionReason(meshName, testNs, cluster2Name, meshv1alpha1.ReasonOperatorInstalled)
@@ -138,7 +157,7 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 			})
 		})
 
-		It("should use custom operator configuration on K8s when specified", func() {
+		It("should use custom operator configuration when specified", func() {
 			customConfig := meshv1alpha1.OperatorConfig{
 				Namespace:           "custom-ns",
 				Channel:             "1.23",
@@ -151,55 +170,13 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 			util.CreateK8sManagedCluster(ctx, k8sClient, clusterName, testClusterSet)
 			util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet, meshv1alpha1.MultiClusterMeshSpec{Operator: customConfig})
 
-			work := expectOperatorManifestWork(clusterName)
+			policy := expectOperatorPolicy(meshName, testNs)
+			sub := extractSubscriptionFromPolicy(policy)
 
-			Expect(work.Spec.Workload.Manifests).To(HaveLen(3))
-			expectNamespace(work, 0, customConfig.Namespace)
-			expectOperatorGroup(work, 1, "operator-group", customConfig.Namespace)
-			expectSubscription(work, 2, false, operatorsv1alpha1.Subscription{
-				ObjectMeta: metav1.ObjectMeta{
-					Namespace: customConfig.Namespace,
-				},
-				Spec: &operatorsv1alpha1.SubscriptionSpec{
-					Channel:                customConfig.Channel,
-					CatalogSource:          customConfig.Source,
-					CatalogSourceNamespace: customConfig.SourceNamespace,
-					StartingCSV:            customConfig.StartingCSV,
-					InstallPlanApproval:    customConfig.InstallPlanApproval,
-				},
-			})
-		})
-
-		It("should use custom operator configuration on OpenShift when specified", func() {
-			customConfig := meshv1alpha1.OperatorConfig{
-				Namespace:           "custom-ossm-ns",
-				Channel:             "tech-preview",
-				Source:              "custom-catalog",
-				SourceNamespace:     "custom-catalog-ns",
-				StartingCSV:         "servicemeshoperator3.v3.0.0",
-				InstallPlanApproval: operatorsv1alpha1.ApprovalManual,
-			}
-
-			util.CreateOCPManagedCluster(ctx, k8sClient, clusterName, testClusterSet, meshcontroller.ProductOCP)
-			util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet, meshv1alpha1.MultiClusterMeshSpec{Operator: customConfig})
-
-			work := expectOperatorManifestWork(clusterName)
-
-			Expect(work.Spec.Workload.Manifests).To(HaveLen(3))
-			expectNamespace(work, 0, customConfig.Namespace)
-			expectOperatorGroup(work, 1, "operator-group", customConfig.Namespace)
-			expectSubscription(work, 2, true, operatorsv1alpha1.Subscription{
-				ObjectMeta: metav1.ObjectMeta{
-					Namespace: customConfig.Namespace,
-				},
-				Spec: &operatorsv1alpha1.SubscriptionSpec{
-					Channel:                customConfig.Channel,
-					CatalogSource:          customConfig.Source,
-					CatalogSourceNamespace: customConfig.SourceNamespace,
-					StartingCSV:            customConfig.StartingCSV,
-					InstallPlanApproval:    customConfig.InstallPlanApproval,
-				},
-			})
+			Expect(sub["namespace"]).To(Equal(customConfig.Namespace))
+			Expect(sub["channel"]).To(Equal(customConfig.Channel))
+			Expect(sub["source"]).To(Equal(customConfig.Source))
+			Expect(sub["sourceNamespace"]).To(Equal(customConfig.SourceNamespace))
 		})
 
 		When("referencing a non-existent ClusterSet", func() {
@@ -210,18 +187,18 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 				util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, otherClusterSet)
 			})
 
-			It("should not create ManifestWorks", func() {
+			It("should create operator Policy even without clusters", func() {
 				expectMeshNotReady(meshName, testNs)
-				expectNoManifestWorks()
+				expectOperatorPolicy(meshName, testNs)
 			})
 
 			It("should reconcile when the ClusterSet is created", func() {
 				expectMeshNotReady(meshName, testNs)
 				util.CreateK8sManagedCluster(ctx, k8sClient, clusterName, otherClusterSet)
 				util.CreateManagedClusterSet(ctx, k8sClient, otherClusterSet)
-				expectOperatorManifestWork(clusterName)
+				expectOperatorPolicy(meshName, testNs)
 				expectMeshNotReady(meshName, testNs)
-				expectClusterOperatorConditionReason(meshName, testNs, clusterName, meshv1alpha1.ReasonManifestWorkCreated)
+				expectClusterOperatorConditionReason(meshName, testNs, clusterName, meshv1alpha1.ReasonPolicyCreated)
 			})
 		})
 
@@ -230,42 +207,16 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 				util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet)
 			})
 
-			It("should not process it", func() {
+			It("should create operator Policy but stay not-ready", func() {
 				expectMeshNotReady(meshName, testNs)
-				expectNoManifestWorks()
-			})
-
-			It("shouldn't process a cluster without clusterset label", func() {
-				util.CreateK8sManagedCluster(ctx, k8sClient, clusterName, "")
-				expectMeshNotReady(meshName, testNs)
-				expectNoManifestWorks()
+				expectOperatorPolicy(meshName, testNs)
 			})
 
 			It("should process a cluster when it's added", func() {
 				util.CreateK8sManagedCluster(ctx, k8sClient, clusterName, testClusterSet)
-				expectOperatorManifestWork(clusterName)
+				expectOperatorPolicy(meshName, testNs)
 				expectMeshNotReady(meshName, testNs)
-				expectClusterOperatorConditionReason(meshName, testNs, clusterName, meshv1alpha1.ReasonManifestWorkCreated)
-			})
-		})
-
-		When("referencing a cluster with no product claim", func() {
-			BeforeEach(func() {
-				util.CreateManagedCluster(ctx, k8sClient, clusterName, testClusterSet)
-				util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet)
-			})
-
-			It("should skip it and report missing product claim", func() {
-				expectMeshNotReady(meshName, testNs)
-				expectNoManifestWorks()
-				expectClusterOperatorConditionReason(meshName, testNs, clusterName, meshv1alpha1.ReasonMissingProductClaim)
-			})
-
-			It("should process it when a claim is set", func() {
-				expectMeshNotReady(meshName, testNs)
-				util.SetProductClaim(ctx, k8sClient, clusterName, "Other")
-				expectOperatorManifestWork(clusterName)
-				expectClusterOperatorConditionReason(meshName, testNs, clusterName, meshv1alpha1.ReasonManifestWorkCreated)
+				expectClusterOperatorConditionReason(meshName, testNs, clusterName, meshv1alpha1.ReasonPolicyCreated)
 			})
 		})
 
@@ -275,131 +226,97 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 		})
 
 		When("referencing a set with a cluster", func() {
-			var work *workv1.ManifestWork
-
 			BeforeEach(func() {
 				util.CreateK8sManagedCluster(ctx, k8sClient, clusterName, testClusterSet)
 				util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet)
-				work = expectOperatorManifestWork(clusterName)
+				expectOperatorPolicy(meshName, testNs)
 			})
 
-			It("should not update operator ManifestWork when operator config hasn't changed", func() {
-				originalVersion := work.ResourceVersion
+			It("should not update operator Policy spec when non-operator config changes", func() {
+				policy := expectOperatorPolicy(meshName, testNs)
+				originalVersion := policy.ResourceVersion
 
 				updateMesh(meshName, testNs, func(mesh *meshv1alpha1.MultiClusterMesh) {
 					mesh.Spec.ControlPlane.Namespace = "different-ns"
 				})
 
 				Consistently(func() string {
-					return expectOperatorManifestWork(clusterName).ResourceVersion
+					return expectOperatorPolicy(meshName, testNs).ResourceVersion
 				}).Should(Equal(originalVersion))
 			})
 
-			It("should update ManifestWork when operator config changes", func() {
+			It("should update Policy spec when operator config changes", func() {
 				updateMesh(meshName, testNs, func(mesh *meshv1alpha1.MultiClusterMesh) {
 					mesh.Spec.Operator.Channel = "tech-preview"
 				})
 
 				Eventually(func() string {
-					work := expectOperatorManifestWork(clusterName)
-					sub := &operatorsv1alpha1.Subscription{}
-					Expect(unmarshalManifest(work.Spec.Workload.Manifests[2], sub)).To(Succeed())
-					return sub.Spec.Channel
+					policy := expectOperatorPolicy(meshName, testNs)
+					sub := extractSubscriptionFromPolicy(policy)
+					channel, _ := sub["channel"].(string)
+					return channel
 				}).Should(Equal("tech-preview"))
 			})
 
-			It("should restore ManifestWork spec when externally modified", func() {
-				sub := &operatorsv1alpha1.Subscription{}
-				Expect(unmarshalManifest(work.Spec.Workload.Manifests[2], sub)).To(Succeed())
-				originalChannel := sub.Spec.Channel
+			It("should restore Policy spec when externally modified", func() {
+				policy := expectOperatorPolicy(meshName, testNs)
+				sub := extractSubscriptionFromPolicy(policy)
+				originalChannel, _ := sub["channel"].(string)
 
-				sub.Spec.Channel = "tampered"
-				work.Spec.Workload.Manifests[2] = workv1.Manifest{
-					RawExtension: runtime.RawExtension{Object: sub},
-				}
-				Expect(k8sClient.Update(ctx, work)).To(Succeed())
+				// Tamper with the policy spec
+				tamperedSpec := policy.Spec.DeepCopy()
+				tamperedTemplate := modifySubscriptionChannel(tamperedSpec, "tampered")
+				policy.Spec.PolicyTemplates = tamperedTemplate
+				Expect(k8sClient.Update(ctx, policy)).To(Succeed())
 
-				// Ensure reconciliation after tamper (dual-cache race, #109).
 				triggerReconcile(meshName, testNs)
 
 				Eventually(func() string {
-					work := expectOperatorManifestWork(clusterName)
-					sub := &operatorsv1alpha1.Subscription{}
-					Expect(unmarshalManifest(work.Spec.Workload.Manifests[2], sub)).To(Succeed())
-					return sub.Spec.Channel
+					p := expectOperatorPolicy(meshName, testNs)
+					s := extractSubscriptionFromPolicy(p)
+					ch, _ := s["channel"].(string)
+					return ch
 				}).Should(Equal(originalChannel))
 			})
 
-			// TODO(mkolesnik): Enable once sdk-go WorkApplier cache fix is released
-			// https://github.com/open-cluster-management-io/sdk-go/issues/223
-			PIt("should restore ManifestWork labels when externally modified", func() {
-				work.Labels[meshcontroller.ManagedByLabel] = "someone-else"
-				Expect(k8sClient.Update(ctx, work)).To(Succeed())
+			It("should restore Policy labels when externally modified", func() {
+				policy := expectOperatorPolicy(meshName, testNs)
+				policy.Labels[meshcontroller.ManagedByLabel] = "someone-else"
+				Expect(k8sClient.Update(ctx, policy)).To(Succeed())
+
+				triggerReconcile(meshName, testNs)
 
 				Eventually(func() string {
-					work := expectOperatorManifestWork(clusterName)
-					return work.Labels[meshcontroller.ManagedByLabel]
+					p := expectOperatorPolicy(meshName, testNs)
+					return p.Labels[meshcontroller.ManagedByLabel]
 				}).Should(Equal(meshcontroller.ManagedByValue))
 			})
 
-			It("should cleanup ManifestWork when the cluster is removed from ClusterSet", func() {
-				updateClusterSetLabel(clusterName, "")
-				expectAllManifestWorksDeleted()
-				expectNoClusterStatus(meshName, testNs, clusterName)
-			})
-
-			It("should cleanup ManifestWork when the cluster is deleted", func() {
-				util.DeleteResource(ctx, k8sClient, &clusterv1.ManagedCluster{}, clusterName, "")
-				expectAllManifestWorksDeleted()
-				expectNoClusterStatus(meshName, testNs, clusterName)
-			})
-
-			It("should cleanup ManifestWork when the ClusterSet is deleted", func() {
-				util.DeleteResource(ctx, k8sClient, &clusterv1beta2.ManagedClusterSet{}, testClusterSet, "")
-				expectAllManifestWorksDeleted()
-				expectNoClusterStatus(meshName, testNs, clusterName)
-			})
-
-			It("should recreate ManifestWork when it is externally deleted", func() {
-				work := expectOperatorManifestWork(clusterName)
-				originalUID := work.UID
-				Expect(k8sClient.Delete(ctx, work)).To(Succeed())
+			It("should recreate Policy when it is externally deleted", func() {
+				policy := expectOperatorPolicy(meshName, testNs)
+				originalUID := policy.UID
+				Expect(k8sClient.Delete(ctx, policy)).To(Succeed())
 				Eventually(func() types.UID {
-					return expectOperatorManifestWork(clusterName).UID
+					return expectOperatorPolicy(meshName, testNs).UID
 				}).ShouldNot(Equal(originalUID))
 			})
 
-			When("moving the cluster between sets", func() {
-				var otherClusterSet string
-
-				BeforeEach(func() {
-					otherClusterSet = util.UniqueName("other-set")
-					util.CreateManagedClusterSet(ctx, k8sClient, otherClusterSet)
-				})
-
-				It("should cleanup ManifestWork when no mesh targets the new set", func() {
-					updateClusterSetLabel(clusterName, otherClusterSet)
-					expectAllManifestWorksDeleted()
-					expectNoClusterStatus(meshName, testNs, clusterName)
-				})
-
-				It("should recreate ManifestWork for the new mesh when cluster moves to a new set", func() {
-					originalUID := work.UID
-
-					otherMesh := util.UniqueName("other-mesh")
-					util.CreateMultiClusterMesh(ctx, k8sClient, otherMesh, testNs, otherClusterSet)
-					expectMeshNotReady(otherMesh, testNs)
-					updateClusterSetLabel(clusterName, otherClusterSet)
-
-					Eventually(func(g Gomega) {
-						w := expectOperatorManifestWork(clusterName)
-						g.Expect(w.Labels[meshcontroller.ClusterSetLabel]).To(Equal(otherClusterSet))
-						g.Expect(w.UID).NotTo(Equal(originalUID))
-					}).Should(Succeed())
-				})
+			It("should cleanup cluster status when the cluster is removed from ClusterSet", func() {
+				updateClusterSetLabel(clusterName, "")
+				expectNoClusterStatus(meshName, testNs, clusterName)
 			})
 
-			When("two meshes target the same cluster", func() {
+			It("should cleanup cluster status when the cluster is deleted", func() {
+				util.DeleteResource(ctx, k8sClient, &clusterv1.ManagedCluster{}, clusterName, "")
+				expectNoClusterStatus(meshName, testNs, clusterName)
+			})
+
+			It("should cleanup cluster status when the ClusterSet is deleted", func() {
+				util.DeleteResource(ctx, k8sClient, &clusterv1beta2.ManagedClusterSet{}, testClusterSet, "")
+				expectNoClusterStatus(meshName, testNs, clusterName)
+			})
+
+			When("two meshes target the same ClusterSet", func() {
 				var otherNs, otherMesh string
 
 				BeforeEach(func() {
@@ -409,17 +326,29 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 					util.CreateMultiClusterMesh(ctx, k8sClient, otherMesh, otherNs, testClusterSet)
 				})
 
-				It("should keep the ManifestWork when one mesh is deleted", func() {
+				It("should keep one Policy when one mesh is deleted", func() {
 					expectMeshNotReady(otherMesh, otherNs)
+					expectOperatorPolicy(otherMesh, otherNs)
+
+					util.SimulatePolicyFrameworkDeletion(ctx, k8sClient, meshcontroller.OperatorPolicyName, otherNs, []string{clusterName})
 					util.DeleteResource(ctx, k8sClient, &meshv1alpha1.MultiClusterMesh{}, otherMesh, otherNs)
-					expectOperatorManifestWork(clusterName)
+
+					// The first mesh's Policy should remain
+					expectOperatorPolicy(meshName, testNs)
 				})
 
-				It("should delete the ManifestWork when both meshes are deleted", func() {
+				It("should delete Policy only when the last mesh is deleted", func() {
 					expectMeshNotReady(otherMesh, otherNs)
+					expectOperatorPolicy(otherMesh, otherNs)
+
+					// Delete first mesh (not last): Policy stays since the other mesh still needs it
 					util.DeleteResource(ctx, k8sClient, &meshv1alpha1.MultiClusterMesh{}, meshName, testNs)
+					expectOperatorPolicy(otherMesh, otherNs)
+
+					// Delete second mesh (last): operator gets removed, Policy gets deleted
+					util.SimulatePolicyFrameworkDeletion(ctx, k8sClient, meshcontroller.OperatorPolicyName, otherNs, []string{clusterName})
 					util.DeleteResource(ctx, k8sClient, &meshv1alpha1.MultiClusterMesh{}, otherMesh, otherNs)
-					expectAllManifestWorksDeleted()
+					expectOperatorPolicyDeleted(otherNs)
 				})
 			})
 		})
@@ -434,7 +363,7 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 
 			util.CreateK8sManagedCluster(ctx, k8sClient, clusterName, testClusterSet)
 			util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet)
-			expectOperatorManifestWork(clusterName)
+			expectOperatorPolicy(meshName, testNs)
 		})
 
 		When("spec.clusterSet is empty", func() {
@@ -466,7 +395,7 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 			})
 
 			expectMeshNotReady(otherMesh, testNs)
-			expectClusterOperatorConditionReason(otherMesh, testNs, clusterName, meshv1alpha1.ReasonManifestWorkCreated)
+			expectClusterOperatorConditionReason(otherMesh, testNs, clusterName, meshv1alpha1.ReasonPolicyCreated)
 		})
 
 		When("a newer mesh has a conflicting operator config", func() {
@@ -484,8 +413,9 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 			It("should unblock the newer mesh when the older mesh is deleted", func() {
 				expectMeshConditionReason(otherMesh, testNs, meshv1alpha1.ConditionReady, meshv1alpha1.ReasonOperatorConfigConflict)
 
+				util.SimulatePolicyFrameworkDeletion(ctx, k8sClient, meshcontroller.OperatorPolicyName, testNs, []string{clusterName})
 				util.DeleteResource(ctx, k8sClient, &meshv1alpha1.MultiClusterMesh{}, meshName, testNs)
-				expectClusterOperatorConditionReason(otherMesh, testNs, clusterName, meshv1alpha1.ReasonManifestWorkCreated)
+				expectClusterOperatorConditionReason(otherMesh, testNs, clusterName, meshv1alpha1.ReasonPolicyCreated)
 			})
 		})
 
@@ -510,25 +440,27 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 			It("should unblock the newer mesh when the older mesh is deleted", func() {
 				expectMeshConditionReason(otherMesh, testNs, meshv1alpha1.ConditionReady, meshv1alpha1.ReasonNamespaceConflict)
 
+				util.SimulatePolicyFrameworkDeletion(ctx, k8sClient, meshcontroller.OperatorPolicyName, testNs, []string{clusterName})
 				util.DeleteResource(ctx, k8sClient, &meshv1alpha1.MultiClusterMesh{}, meshName, testNs)
-				expectClusterOperatorConditionReason(otherMesh, testNs, clusterName, meshv1alpha1.ReasonManifestWorkCreated)
+				expectClusterOperatorConditionReason(otherMesh, testNs, clusterName, meshv1alpha1.ReasonPolicyCreated)
 			})
 		})
 	})
 
 	Context("Deleting MultiClusterMesh", func() {
-		It("should delete related ManifestWorks", func() {
+		It("should delete operator Policy and related resources", func() {
 			cluster2 := util.UniqueName("cluster2")
 			util.CreateK8sManagedCluster(ctx, k8sClient, clusterName, testClusterSet)
 			util.CreateOCPManagedCluster(ctx, k8sClient, cluster2, testClusterSet, meshcontroller.ProductOCP)
 			util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet)
 			expectFinalizer(meshName, testNs)
-			expectOperatorManifestWork(clusterName)
-			expectOperatorManifestWork(cluster2)
+			expectOperatorPolicy(meshName, testNs)
 
+			util.SimulatePolicyFrameworkDeletion(ctx, k8sClient, meshcontroller.OperatorPolicyName, testNs, []string{clusterName, cluster2})
 			util.DeleteResource(ctx, k8sClient, &meshv1alpha1.MultiClusterMesh{}, meshName, testNs)
-			util.ExpectResourceDeleted(ctx, k8sClient, &workv1.ManifestWork{}, meshcontroller.OperatorManifestWorkName, clusterName)
-			util.ExpectResourceDeleted(ctx, k8sClient, &workv1.ManifestWork{}, meshcontroller.OperatorManifestWorkName, cluster2)
+			expectOperatorPolicyDeleted(testNs)
+			util.ExpectResourceDeleted(ctx, k8sClient, &policyv1.PlacementBinding{}, meshcontroller.OperatorPolicyName, testNs)
+			util.ExpectResourceDeleted(ctx, k8sClient, &clusterv1beta1.Placement{}, meshcontroller.OperatorPolicyName, testNs)
 		})
 
 		It("should work when ClusterSet doesn't exist", func() {
@@ -599,7 +531,6 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 			})
 
 			It("should create ManifestWork when cacerts secret is created", func() {
-				// simulate creating the cacerts secret by cert-manager
 				util.CreateCacertsSecret(ctx, k8sClient, testNs, clusterName, meshName, testNs)
 
 				work := expectCacertsManifestWork(clusterName)
@@ -698,41 +629,6 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 			})
 		})
 	})
-
-	Context("Platform detection", func() {
-		DescribeTable("should detect OpenShift variants and use OSSM operator",
-			func(productClaim string) {
-				util.CreateOCPManagedCluster(ctx, k8sClient, clusterName, testClusterSet, productClaim)
-				util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet)
-
-				work := expectOperatorManifestWork(clusterName)
-
-				// OpenShift: expect only Subscription (openshift-operators namespace/OperatorGroup exist by default)
-				Expect(work.Spec.Workload.Manifests).To(HaveLen(1))
-
-				expectSubscription(work, 0, true, operatorsv1alpha1.Subscription{})
-			},
-			Entry(meshcontroller.ProductOCP, meshcontroller.ProductOCP),
-			Entry(meshcontroller.ProductROSA, meshcontroller.ProductROSA),
-			Entry(meshcontroller.ProductARO, meshcontroller.ProductARO),
-			Entry(meshcontroller.ProductROKS, meshcontroller.ProductROKS),
-			Entry(meshcontroller.ProductOSD, meshcontroller.ProductOSD),
-		)
-
-		It("should detect vanilla Kubernetes and use Sail operator", func() {
-			util.CreateK8sManagedCluster(ctx, k8sClient, clusterName, testClusterSet)
-			util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet)
-
-			work := expectOperatorManifestWork(clusterName)
-
-			// Kubernetes: Namespace + OperatorGroup + Subscription (unlike OpenShift)
-			Expect(work.Spec.Workload.Manifests).To(HaveLen(3))
-
-			expectNamespace(work, 0, meshcontroller.DefaultOperatorNs)
-			expectOperatorGroup(work, 1, "operator-group", meshcontroller.DefaultOperatorNs)
-			expectSubscription(work, 2, false, operatorsv1alpha1.Subscription{})
-		})
-	})
 })
 
 func expectFinalizer(name, namespace string) {
@@ -752,20 +648,7 @@ func updateClusterSetLabel(clusterName, newClusterSet string) {
 	Expect(k8sClient.Update(ctx, cluster)).To(Succeed())
 }
 
-// expectNoManifestWorks makes sure that no ManifestWorks are created, checking consistently
-func expectNoManifestWorks() {
-	Consistently(func() []workv1.ManifestWork {
-		workList := &workv1.ManifestWorkList{}
-		Expect(k8sClient.List(ctx, workList)).To(Succeed())
-		return workList.Items
-	}).Should(BeEmpty())
-}
-
 // triggerReconcile forces a reconciliation by touching the mesh CR's annotations.
-// Workaround for the dual-cache race (#109): the controller-runtime MW watch may
-// trigger a reconcile before the WorkApplier's work informer lister syncs the update,
-// causing safeToSkipApply to read stale generation and skip the patch.
-// TODO(mkolesnik): Remove once WorkApplier uses the CR cache (sdk-go#226).
 func triggerReconcile(meshName, namespace string) {
 	updateMesh(meshName, namespace, func(mesh *meshv1alpha1.MultiClusterMesh) {
 		if mesh.Annotations == nil {
@@ -788,29 +671,96 @@ func updateMesh(meshName, namespace string, mutate func(*meshv1alpha1.MultiClust
 	return mesh
 }
 
-// expectAllManifestWorksDeleted makes sure ManifestWorks are deleted and none remain
-func expectAllManifestWorksDeleted() {
-	Eventually(func() []workv1.ManifestWork {
-		workList := &workv1.ManifestWorkList{}
-		Expect(k8sClient.List(ctx, workList)).To(Succeed())
-		return workList.Items
-	}).Should(BeEmpty())
-}
-
-func expectManifestWork(name, namespace string) *workv1.ManifestWork {
-	work := &workv1.ManifestWork{}
+// expectOperatorPolicy waits for the operator Policy to exist in the mesh namespace and returns it.
+func expectOperatorPolicy(meshName, namespace string) *policyv1.Policy {
+	policy := &policyv1.Policy{}
 	Eventually(func() error {
-		return k8sClient.Get(ctx, key.Of(name, namespace), work)
+		return k8sClient.Get(ctx, key.Of(meshcontroller.OperatorPolicyName, namespace), policy)
 	}).Should(Succeed())
-	return work
+	return policy
 }
 
-func expectOperatorManifestWork(clusterNamespace string) *workv1.ManifestWork {
-	return expectManifestWork(meshcontroller.OperatorManifestWorkName, clusterNamespace)
+// expectOperatorPolicyDeleted waits for the operator Policy to be deleted from the given namespace.
+func expectOperatorPolicyDeleted(namespace string) {
+	util.ExpectResourceDeleted(ctx, k8sClient, &policyv1.Policy{}, meshcontroller.OperatorPolicyName, namespace)
+}
+
+// expectOperatorPlacement waits for the operator Placement to exist and validates its ClusterSet.
+func expectOperatorPlacement(meshName, namespace, clusterSet string) *clusterv1beta1.Placement {
+	placement := &clusterv1beta1.Placement{}
+	Eventually(func() error {
+		return k8sClient.Get(ctx, key.Of(meshcontroller.OperatorPolicyName, namespace), placement)
+	}).Should(Succeed())
+	Expect(placement.Spec.ClusterSets).To(ContainElement(clusterSet))
+	Expect(placement.Labels[meshcontroller.ManagedByLabel]).To(Equal(meshcontroller.ManagedByValue))
+	return placement
+}
+
+// expectOperatorPlacementBinding waits for the operator PlacementBinding to exist.
+func expectOperatorPlacementBinding(namespace string) *policyv1.PlacementBinding {
+	binding := &policyv1.PlacementBinding{}
+	Eventually(func() error {
+		return k8sClient.Get(ctx, key.Of(meshcontroller.OperatorPolicyName, namespace), binding)
+	}).Should(Succeed())
+	Expect(binding.PlacementRef.Name).To(Equal(meshcontroller.OperatorPolicyName))
+	Expect(binding.PlacementRef.Kind).To(Equal("Placement"))
+	Expect(binding.Subjects).To(HaveLen(1))
+	Expect(binding.Subjects[0].Name).To(Equal(meshcontroller.OperatorPolicyName))
+	Expect(binding.Subjects[0].Kind).To(Equal("Policy"))
+	Expect(binding.Labels[meshcontroller.ManagedByLabel]).To(Equal(meshcontroller.ManagedByValue))
+	return binding
+}
+
+// expectManagedClusterSetBinding waits for the ManagedClusterSetBinding to exist.
+func expectManagedClusterSetBinding(namespace, clusterSet string) *clusterv1beta2.ManagedClusterSetBinding {
+	binding := &clusterv1beta2.ManagedClusterSetBinding{}
+	Eventually(func() error {
+		return k8sClient.Get(ctx, key.Of(clusterSet, namespace), binding)
+	}).Should(Succeed())
+	Expect(binding.Spec.ClusterSet).To(Equal(clusterSet))
+	return binding
+}
+
+// extractSubscriptionFromPolicy extracts the subscription map from the OperatorPolicy embedded in the Policy.
+func extractSubscriptionFromPolicy(policy *policyv1.Policy) map[string]interface{} {
+	Expect(policy.Spec.PolicyTemplates).To(HaveLen(1))
+
+	var opPolicy map[string]interface{}
+	Expect(json.Unmarshal(policy.Spec.PolicyTemplates[0].ObjectDefinition.Raw, &opPolicy)).To(Succeed())
+
+	spec, ok := opPolicy["spec"].(map[string]interface{})
+	Expect(ok).To(BeTrue(), "expected spec in OperatorPolicy")
+
+	sub, ok := spec["subscription"].(map[string]interface{})
+	Expect(ok).To(BeTrue(), "expected subscription in OperatorPolicy spec")
+
+	return sub
+}
+
+// modifySubscriptionChannel modifies the channel in the Policy spec to produce a tampered spec.
+func modifySubscriptionChannel(spec *policyv1.PolicySpec, channel string) []*policyv1.PolicyTemplate {
+	if len(spec.PolicyTemplates) == 0 {
+		return spec.PolicyTemplates
+	}
+
+	var opPolicy map[string]interface{}
+	_ = json.Unmarshal(spec.PolicyTemplates[0].ObjectDefinition.Raw, &opPolicy)
+	if s, ok := opPolicy["spec"].(map[string]interface{}); ok {
+		if sub, ok := s["subscription"].(map[string]interface{}); ok {
+			sub["channel"] = channel
+		}
+	}
+	rawBytes, _ := json.Marshal(opPolicy)
+	spec.PolicyTemplates[0].ObjectDefinition.Raw = rawBytes
+	return spec.PolicyTemplates
 }
 
 func expectCacertsManifestWork(clusterNamespace string) *workv1.ManifestWork {
-	return expectManifestWork(meshcontroller.ManifestWorkNameCacerts, clusterNamespace)
+	work := &workv1.ManifestWork{}
+	Eventually(func() error {
+		return k8sClient.Get(ctx, key.Of(meshcontroller.ManifestWorkNameCacerts, clusterNamespace), work)
+	}).Should(Succeed())
+	return work
 }
 
 func expectNoCacertsManifestWork(clusterNamespace string) {
@@ -849,83 +799,6 @@ func expectCacertsSecret(work *workv1.ManifestWork) {
 
 func unmarshalManifest(manifest workv1.Manifest, into interface{}) error {
 	return json.Unmarshal(manifest.Raw, into)
-}
-
-func expectNamespace(work *workv1.ManifestWork, index int, expectedName string) {
-	ns := &corev1.Namespace{}
-	Expect(unmarshalManifest(work.Spec.Workload.Manifests[index], ns)).To(Succeed())
-	Expect(ns.Name).To(Equal(expectedName))
-}
-
-func expectOperatorGroup(work *workv1.ManifestWork, index int, expectedName, expectedNamespace string) {
-	og := &operatorsv1.OperatorGroup{}
-	Expect(unmarshalManifest(work.Spec.Workload.Manifests[index], og)).To(Succeed())
-	Expect(og.Name).To(Equal(expectedName))
-	Expect(og.Namespace).To(Equal(expectedNamespace))
-}
-
-func expectSubscription(work *workv1.ManifestWork, index int, isOCP bool, expected operatorsv1alpha1.Subscription) {
-	sub := &operatorsv1alpha1.Subscription{}
-	Expect(unmarshalManifest(work.Spec.Workload.Manifests[index], sub)).To(Succeed())
-
-	expectedNamespace := expected.Namespace
-	if expectedNamespace == "" {
-		if isOCP {
-			expectedNamespace = meshcontroller.DefaultOCPOperatorNs
-		} else {
-			expectedNamespace = meshcontroller.DefaultOperatorNs
-		}
-	}
-
-	var expectedName, expectedPackage, expectedCatalogSource, expectedCatalogSourceNamespace, expectedChannel string
-	var expectedInstallPlanApproval operatorsv1alpha1.Approval
-
-	if expected.Spec != nil {
-		expectedCatalogSource = expected.Spec.CatalogSource
-		expectedCatalogSourceNamespace = expected.Spec.CatalogSourceNamespace
-		expectedChannel = expected.Spec.Channel
-		expectedInstallPlanApproval = expected.Spec.InstallPlanApproval
-	}
-
-	if isOCP {
-		expectedName = meshcontroller.OperatorNameOSSM
-		expectedPackage = meshcontroller.OperatorNameOSSM
-	} else {
-		expectedName = meshcontroller.OperatorNameSail
-		expectedPackage = meshcontroller.OperatorNameSail
-	}
-
-	if expectedCatalogSource == "" {
-		if isOCP {
-			expectedCatalogSource = meshcontroller.DefaultOCPCatalogSource
-		} else {
-			expectedCatalogSource = meshcontroller.DefaultCatalogSource
-		}
-	}
-
-	if expectedCatalogSourceNamespace == "" {
-		if isOCP {
-			expectedCatalogSourceNamespace = meshcontroller.DefaultOCPCatalogNs
-		} else {
-			expectedCatalogSourceNamespace = meshcontroller.DefaultCatalogNs
-		}
-	}
-
-	if expectedChannel == "" {
-		expectedChannel = meshcontroller.DefaultChannel
-	}
-
-	if expectedInstallPlanApproval == "" {
-		expectedInstallPlanApproval = operatorsv1alpha1.ApprovalAutomatic
-	}
-
-	Expect(sub.Name).To(Equal(expectedName))
-	Expect(sub.Namespace).To(Equal(expectedNamespace))
-	Expect(sub.Spec.Package).To(Equal(expectedPackage))
-	Expect(sub.Spec.CatalogSource).To(Equal(expectedCatalogSource))
-	Expect(sub.Spec.CatalogSourceNamespace).To(Equal(expectedCatalogSourceNamespace))
-	Expect(sub.Spec.Channel).To(Equal(expectedChannel))
-	Expect(sub.Spec.InstallPlanApproval).To(Equal(expectedInstallPlanApproval))
 }
 
 func findCondition(g Gomega, conditions []metav1.Condition, conditionType string) *metav1.Condition {
