@@ -249,10 +249,10 @@ $(CLUSTERADM): | $(BIN_DIR)
 DEV_ENV_SCRIPT := $(CURDIR)/hack/dev-env.sh
 
 export DEV_KUBE_DIR K8S_VERSION OLM_VERSION CERT_MANAGER_VERSION
-export KIND CLUSTERADM
+export KIND CLUSTERADM HELM
 
 .PHONY: dev-env
-dev-env: create-clusters install-olm install-cert-manager init-ocm join-clusters deploy-addon ## Provision full dev environment (Kind + OCM + addon)
+dev-env: create-clusters install-olm install-cert-manager init-ocm join-clusters install-managed-serviceaccount deploy-addon ## Provision full dev environment (Kind + OCM + addon)
 
 .PHONY: create-clusters
 create-clusters: $(KIND) ## Create 3 Kind clusters (hub, cluster1, cluster2)
@@ -273,6 +273,10 @@ init-ocm: $(CLUSTERADM) ## Initialize hub as OCM control plane
 .PHONY: join-clusters
 join-clusters: $(CLUSTERADM) ## Register managed clusters and create ManagedClusterSet
 	$(DEV_ENV_SCRIPT) join-clusters
+
+.PHONY: install-managed-serviceaccount
+install-managed-serviceaccount: $(HELM_BIN) ## Install managed-serviceaccount addon to the hub cluster
+	$(DEV_ENV_SCRIPT) install-managed-serviceaccount
 
 .PHONY: deploy-addon
 deploy-addon: $(KIND) $(HELM_BIN) gen images ## Build and deploy addon to the hub Kind cluster

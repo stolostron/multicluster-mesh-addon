@@ -3,7 +3,7 @@
 # This file is invoked by Makefile targets with an action argument.
 #
 # Usage: hack/dev-env.sh <action>
-# Actions: create-clusters, install-olm, install-cert-manager, init-ocm, join-clusters, setup-mesh, clean
+# Actions: create-clusters, install-olm, install-cert-manager, install-managed-serviceaccount, init-ocm, join-clusters, setup-mesh, clean
 
 set -euo pipefail
 
@@ -297,6 +297,29 @@ join_clusters() {
     kubectl --kubeconfig="${hub_kubeconfig}" get managedclustersets
 }
 
+install_managed_serviceaccount() {
+    local hub_kubeconfig
+    hub_kubeconfig="$(kubeconfig_for "${HUB}")"
+
+    if [[ ! -f "${hub_kubeconfig}" ]]; then
+        err "Hub kubeconfig not found at ${hub_kubeconfig}. Run 'make create-clusters' first."
+    fi
+
+    local ocm_repo_url
+    ocm_repo_url="https://open-cluster-management.io/helm-charts/"
+
+    log "Installing manged-serviceaccount addon on hub..."
+    ${HELM} repo add ocm "${ocm_repo_url}"
+    ${HELM} upgrade --install managed-serviceaccount ocm/managed-serviceaccount \
+        --kubeconfig="${hub_kubeconfig}" \
+        --create-namespace \
+        --namespace open-cluster-management-addon \
+        --wait --timeout 180s
+
+    log "managed-serviceaccount addon installed on hub"
+    kubectl --kubeconfig="${hub_kubeconfig}" get managedclusteraddon -A | grep managed-serviceaccount
+}
+
 setup_mesh() {
     local hub_kubeconfig
     hub_kubeconfig="$(kubeconfig_for "${HUB}")"
@@ -355,13 +378,14 @@ clean() {
 
 ACTION="${1:-}"
 case "${ACTION}" in
-    create-clusters)       create_clusters ;;
-    install-olm)           install_olm ;;
-    install-cert-manager)  install_cert_manager ;;
-    init-ocm)              init_ocm ;;
-    join-clusters)         join_clusters ;;
-    setup-mesh)            setup_mesh ;;
-    clean)                 clean ;;
+    create-clusters)                 create_clusters ;;
+    install-olm)                     install_olm ;;
+    install-cert-manager)            install_cert_manager ;;
+    install-managed-serviceaccount)  install_managed_serviceaccount ;;
+    init-ocm)                        init_ocm ;;
+    join-clusters)                   join_clusters ;;
+    setup-mesh)                      setup_mesh ;;
+    clean)                           clean ;;
     *)
-        err "Unknown action: '${ACTION}'. Valid: create-clusters, install-olm, install-cert-manager, init-ocm, join-clusters, setup-mesh, clean" ;;
+        err "Unknown action: '${ACTION}'. Valid: create-clusters, install-olm, install-cert-manager, install-managed-serviceaccount, init-ocm, join-clusters, setup-mesh, clean" ;;
 esac
