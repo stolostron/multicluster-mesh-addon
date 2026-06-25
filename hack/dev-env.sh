@@ -299,7 +299,7 @@ join_clusters() {
 
 install_managed_serviceaccount() {
     local hub_kubeconfig
-    hub_kubeconfig="$(echo "${DEV_KUBE_DIR}/${HUB}.config")"
+    hub_kubeconfig="$(kubeconfig_for "${HUB}")"
 
     if [[ ! -f "${hub_kubeconfig}" ]]; then
         err "Hub kubeconfig not found at ${hub_kubeconfig}. Run 'make init-ocm' first."
