@@ -36,6 +36,7 @@ Contact existing maintainers (listed in the [OWNERS](OWNERS) file)
 
 - Approvers will respond to pull requests promptly
 - Address review feedback by pushing new commits (don't force-push during review)
+- don't force-push during review at all if possible
 - `okay to merge` label is required for a PR to be merged. This allows for better control in cases where multiple reviews are needed.
 
 ## Developer Certificate of Origin
