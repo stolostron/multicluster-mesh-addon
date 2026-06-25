@@ -269,11 +269,10 @@ join_clusters() {
 }
 
 install_managed_serviceaccount() {
-    local hub_kubeconfig
-    hub_kubeconfig="$(kubeconfig_for "${HUB}")"
-
-    if [[ ! -f "${hub_kubeconfig}" ]]; then
-        err "Hub kubeconfig not found at ${hub_kubeconfig}. Run 'make init-ocm' first."
+    require_clusters "${HUB}"
+    if on "${HUB}" kubectl get deployment managed-serviceaccount-addon-manager -n open-cluster-management-addon &>/dev/null; then
+        log "managed-serviceaccount addon already installed on hub, skipping"
+        return
     fi
 
     local ocm_repo_url
@@ -281,15 +280,22 @@ install_managed_serviceaccount() {
 
     log "Installing managed-serviceaccount addon on hub..."
     ${HELM} repo add ocm "${ocm_repo_url}"
-    ${HELM} upgrade --install managed-serviceaccount ocm/managed-serviceaccount \
+    on "${HUB}" ${HELM} upgrade --install managed-serviceaccount ocm/managed-serviceaccount \
         --version "${MSA_VERSION}" \
-        --kubeconfig="${hub_kubeconfig}" \
         --create-namespace \
         --namespace open-cluster-management-addon \
         --wait --timeout 180s
 
+    log "Waiting for managed-serviceaccount addon to be ready..."
+    for cluster in "${CLUSTER1}" "${CLUSTER2}"; do
+        on "${HUB}" retry kubectl wait managedclusteraddon/managed-serviceaccount \
+            -n "${cluster}" \
+            --for='jsonpath={.status.conditions[?(@.type=="Available")].status}=True' \
+            --timeout=60s
+    done
+
     log "managed-serviceaccount addon installed on hub"
-    kubectl --kubeconfig="${hub_kubeconfig}" get managedclusteraddon -A
+    on "${HUB}" kubectl get managedclusteraddon -A
 }
 
 setup_mesh() {
