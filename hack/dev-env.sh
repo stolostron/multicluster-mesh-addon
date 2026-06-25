@@ -311,13 +311,14 @@ install_managed_serviceaccount() {
     log "Installing managed-serviceaccount addon on hub..."
     ${HELM} repo add ocm "${ocm_repo_url}"
     ${HELM} upgrade --install managed-serviceaccount ocm/managed-serviceaccount \
+        --version "${MSA_VERSION}" \
         --kubeconfig="${hub_kubeconfig}" \
         --create-namespace \
         --namespace open-cluster-management-addon \
         --wait --timeout 180s
 
     log "managed-serviceaccount addon installed on hub"
-    kubectl --kubeconfig="${hub_kubeconfig}" get managedclusteraddon -A | grep managed-serviceaccount || true
+    kubectl --kubeconfig="${hub_kubeconfig}" get managedclusteraddon -A
 }
 
 setup_mesh() {
