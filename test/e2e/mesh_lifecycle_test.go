@@ -13,6 +13,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	addonv1beta1 "open-cluster-management.io/api/addon/v1beta1"
 	workv1 "open-cluster-management.io/api/work/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -28,6 +29,17 @@ const (
 )
 
 var clusters = []string{"cluster1", "cluster2"}
+
+var _ = Describe("Addon registration", func() {
+	It("should have ClusterManagementAddOn registered", func(ctx SpecContext) {
+		cmao := &addonv1beta1.ClusterManagementAddOn{}
+		err := hubClient.Get(ctx, key.Of("multicluster-mesh-addon"), cmao)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(cmao.Spec.AddOnMeta.DisplayName).To(Equal("Multi-Cluster Mesh Add-on"))
+		Expect(cmao.Spec.AddOnMeta.Description).To(Equal("Hub-side controller for orchestrating multi-cluster Istio service mesh deployments"))
+		Expect(cmao.Spec.InstallStrategy.Type).To(Equal(addonv1beta1.AddonInstallStrategyManual))
+	})
+})
 
 var _ = Describe("Controller health", func() {
 	It("should have the controller deployment available", func(ctx SpecContext) {
