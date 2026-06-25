@@ -275,8 +275,7 @@ install_managed_serviceaccount() {
         return
     fi
 
-    local ocm_repo_url
-    ocm_repo_url="https://open-cluster-management.io/helm-charts/"
+    local ocm_repo_url="https://open-cluster-management.io/helm-charts/"
 
     log "Installing managed-serviceaccount addon on hub..."
     ${HELM} repo add ocm "${ocm_repo_url}"
@@ -289,9 +288,7 @@ install_managed_serviceaccount() {
     log "Waiting for managed-serviceaccount addon to be ready..."
     for cluster in "${CLUSTER1}" "${CLUSTER2}"; do
         on "${HUB}" retry kubectl wait managedclusteraddon/managed-serviceaccount \
-            -n "${cluster}" \
-            --for='jsonpath={.status.conditions[?(@.type=="Available")].status}=True' \
-            --timeout=60s
+            -n "${cluster}" --for=condition=Available --timeout=60s
     done
 
     log "managed-serviceaccount addon installed on hub"
