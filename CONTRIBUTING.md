@@ -26,7 +26,7 @@ Contact existing maintainers (listed in the [OWNERS](OWNERS) file)
 
 ### PR Requirements
 
-- **Approval**: Pull requests require approval from a repository owner (see [OWNERS](OWNERS))
+- **Approval**: Pull requests require approval from an approver (see [OWNERS](OWNERS))
 - **DCO Sign-off**: All commits must be signed off (`git commit -s`)
 - **Tests**: Include unit tests for new functionality
 - **Documentation**: Update docs if changing user-facing behavior
