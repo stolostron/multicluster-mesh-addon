@@ -20,7 +20,7 @@ Before contributing, please:
 
 ## Joining the Stolostron Organization
 
-Contact existing maintainers (listed in the [OWNERS](OWNERS) file)
+Contact org [owners](https://github.com/orgs/stolostron/people?query=role%3Aowner)
 
 ## Pull Request Guidelines
 
