@@ -1,4 +1,5 @@
-import * as React from 'react'
+import { useMemo } from 'react'
+import type { FC } from 'react'
 import { Link } from 'react-router-dom-v5-compat'
 import {
   ListPageHeader,
@@ -51,7 +52,7 @@ function buildColumns(t: (key: string) => string): TableColumn<MultiClusterMesh>
   ]
 }
 
-const NoMeshesMsg: React.FC = () => {
+const NoMeshesMsg: FC = () => {
   const { t } = useMeshTranslation()
   return (
     <EmptyState variant="xs">
@@ -60,7 +61,7 @@ const NoMeshesMsg: React.FC = () => {
   )
 }
 
-const NoMatchMsg: React.FC = () => {
+const NoMatchMsg: FC = () => {
   const { t } = useMeshTranslation()
   return (
     <EmptyState variant="xs">
@@ -69,7 +70,7 @@ const NoMatchMsg: React.FC = () => {
   )
 }
 
-const MeshRow: React.FC<RowProps<MultiClusterMesh>> = ({ obj, activeColumnIDs }) => {
+const MeshRow: FC<RowProps<MultiClusterMesh>> = ({ obj, activeColumnIDs }) => {
   const { t } = useMeshTranslation()
   const issuerName = obj.spec.security?.trust?.certManager?.issuerRef?.name
   return (
@@ -105,10 +106,10 @@ const MeshRow: React.FC<RowProps<MultiClusterMesh>> = ({ obj, activeColumnIDs })
   )
 }
 
-const ServiceMeshPage: React.FC = () => {
+const ServiceMeshPage: FC = () => {
   const [meshes, loaded, error] = useMultiClusterMeshes()
   const { t } = useMeshTranslation()
-  const columns = React.useMemo(() => buildColumns(t), [t])
+  const columns = useMemo(() => buildColumns(t), [t])
   const [staticData, filteredData, onFilterChange] = useListPageFilter(meshes)
   const [activeColumns, userSettingsLoaded] = useActiveColumns({
     columns,
@@ -118,7 +119,7 @@ const ServiceMeshPage: React.FC = () => {
 
   return (
     <>
-      <ListPageHeader title={t('Meshes')} />
+      <ListPageHeader title={t('Fleet Meshes')} />
       <ListPageBody>
         <ListPageFilter
           data={staticData}
@@ -143,4 +144,5 @@ const ServiceMeshPage: React.FC = () => {
   )
 }
 
+/** List page showing all MultiClusterMesh resources on the hub cluster. */
 export default ServiceMeshPage

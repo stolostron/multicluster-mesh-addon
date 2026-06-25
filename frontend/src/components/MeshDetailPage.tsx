@@ -1,4 +1,5 @@
-import * as React from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import type { FC, ReactNode } from 'react'
 import { useParams, Link } from 'react-router-dom-v5-compat'
 import {
   useK8sWatchResource,
@@ -40,7 +41,7 @@ function conditionMessage(condition: K8sCondition): string {
   return condition.status
 }
 
-function statusIcon(status: string): React.ReactNode {
+function statusIcon(status: string): ReactNode {
   const color = status === 'True' ? 'green' : status === 'Unknown' ? 'grey' : 'red'
   return <Label color={color}>{status}</Label>
 }
@@ -57,30 +58,34 @@ function categorizeCluster(cs: ClusterMeshStatus): ClusterStatusCategory {
 
 const CONFLICT_REASONS = ['OperatorConfigConflict', 'NamespaceConflict']
 
-export const ClusterStatusSection: React.FC<{ clusterStatuses: ClusterMeshStatus[]; meshConditions?: K8sCondition[] }> = ({
+/** Per-cluster operator status table with filter toggles and search for a single mesh. */
+export const ClusterStatusSection: FC<{ clusterStatuses: ClusterMeshStatus[]; meshConditions?: K8sCondition[] }> = ({
   clusterStatuses,
   meshConditions,
 }) => {
   const { t } = useMeshTranslation()
-  const [filter, setFilter] = React.useState<ClusterStatusCategory>('all')
-  const [search, setSearch] = React.useState('')
+  const [filter, setFilter] = useState<ClusterStatusCategory>('all')
+  const [search, setSearch] = useState('')
 
-  const counts = React.useMemo(() => {
-    const result = { ready: 0, notReady: 0, unknown: 0 }
-    clusterStatuses.forEach((cs) => {
-      const cat = categorizeCluster(cs)
-      if (cat !== 'all') result[cat]++
-    })
-    return result
+  const categoryMap = useMemo(() => {
+    const map = new Map<string, ClusterStatusCategory>()
+    clusterStatuses.forEach((cs) => map.set(cs.clusterName, categorizeCluster(cs)))
+    return map
   }, [clusterStatuses])
 
-  const filtered = React.useMemo(() => {
+  const counts = useMemo(() => {
+    const result = { ready: 0, notReady: 0, unknown: 0 }
+    categoryMap.forEach((cat) => { if (cat !== 'all') result[cat]++ })
+    return result
+  }, [categoryMap])
+
+  const filtered = useMemo(() => {
     return clusterStatuses.filter((cs) => {
-      if (filter !== 'all' && categorizeCluster(cs) !== filter) return false
+      if (filter !== 'all' && categoryMap.get(cs.clusterName) !== filter) return false
       if (search && !cs.clusterName.toLowerCase().includes(search.toLowerCase())) return false
       return true
     })
-  }, [clusterStatuses, filter, search])
+  }, [clusterStatuses, categoryMap, filter, search])
 
   if (clusterStatuses.length === 0) {
     const readyCondition = meshConditions?.find((c) => c.type === 'Ready')
@@ -160,9 +165,9 @@ export const ClusterStatusSection: React.FC<{ clusterStatuses: ClusterMeshStatus
               <table className="pf-v6-c-table pf-m-grid-md pf-m-compact" role="grid">
                 <thead className="pf-v6-c-table__thead" style={{ position: 'sticky', top: 0, zIndex: 1 }}>
                   <tr className="pf-v6-c-table__tr">
-                    <th className="pf-v6-c-table__th">{t('Cluster')}</th>
-                    <th className="pf-v6-c-table__th">{t('Operator Status')}</th>
-                    <th className="pf-v6-c-table__th">{t('Message')}</th>
+                    <th className="pf-v6-c-table__th" scope="col">{t('Cluster')}</th>
+                    <th className="pf-v6-c-table__th" scope="col">{t('Operator Status')}</th>
+                    <th className="pf-v6-c-table__th" scope="col">{t('Message')}</th>
                   </tr>
                 </thead>
                 <tbody className="pf-v6-c-table__tbody">
@@ -202,7 +207,7 @@ export const ClusterStatusSection: React.FC<{ clusterStatuses: ClusterMeshStatus
   )
 }
 
-const MeshDetailContent: React.FC<{ ns: string; name: string }> = ({ ns, name }) => {
+const MeshDetailContent: FC<{ ns: string; name: string }> = ({ ns, name }) => {
   const { t } = useMeshTranslation()
   const [mesh, loaded, loadError] = useK8sWatchResource<MultiClusterMesh>({
     groupVersionKind: multiClusterMeshGroupVersionKind,
@@ -210,13 +215,17 @@ const MeshDetailContent: React.FC<{ ns: string; name: string }> = ({ ns, name })
     namespace: ns,
   })
 
+  useEffect(() => {
+    if (loadError) console.error('Failed to load mesh:', loadError)
+  }, [loadError])
+
   if (loadError) {
     return (
       <PageSection>
         <EmptyState>
           <Title headingLevel="h2" size="lg">{t('Error loading mesh')}</Title>
           <EmptyStateBody>
-            {loadError instanceof Error ? loadError.message : String(loadError)}
+            {t('An unexpected error occurred. Check the browser console for details.')}
           </EmptyStateBody>
         </EmptyState>
       </PageSection>
@@ -256,7 +265,7 @@ const MeshDetailContent: React.FC<{ ns: string; name: string }> = ({ ns, name })
       <PageSection>
         <Breadcrumb>
           <BreadcrumbItem>
-            <Link to="/service-mesh">{t('Meshes')}</Link>
+            <Link to="/service-mesh">{t('Fleet Meshes')}</Link>
           </BreadcrumbItem>
           <BreadcrumbItem isActive>{mesh.metadata?.name}</BreadcrumbItem>
         </Breadcrumb>
@@ -363,11 +372,11 @@ const MeshDetailContent: React.FC<{ ns: string; name: string }> = ({ ns, name })
                   <table className="pf-v6-c-table pf-m-grid-md pf-m-compact" role="grid">
                     <thead className="pf-v6-c-table__thead">
                       <tr className="pf-v6-c-table__tr">
-                        <th className="pf-v6-c-table__th">{t('Type')}</th>
-                        <th className="pf-v6-c-table__th">{t('Status')}</th>
-                        <th className="pf-v6-c-table__th">{t('Reason')}</th>
-                        <th className="pf-v6-c-table__th">{t('Message')}</th>
-                        <th className="pf-v6-c-table__th">{t('Last Transition')}</th>
+                        <th className="pf-v6-c-table__th" scope="col">{t('Type')}</th>
+                        <th className="pf-v6-c-table__th" scope="col">{t('Status')}</th>
+                        <th className="pf-v6-c-table__th" scope="col">{t('Reason')}</th>
+                        <th className="pf-v6-c-table__th" scope="col">{t('Message')}</th>
+                        <th className="pf-v6-c-table__th" scope="col">{t('Last Transition')}</th>
                       </tr>
                     </thead>
                     <tbody className="pf-v6-c-table__tbody">
@@ -394,7 +403,7 @@ const MeshDetailContent: React.FC<{ ns: string; name: string }> = ({ ns, name })
   )
 }
 
-const MeshDetailPage: React.FC = () => {
+const MeshDetailPage: FC = () => {
   const { t } = useMeshTranslation()
   const { ns, name } = useParams<{ ns: string; name: string }>()
 
@@ -414,4 +423,5 @@ const MeshDetailPage: React.FC = () => {
   return <MeshDetailContent ns={ns} name={name} />
 }
 
+/** Detail page for a single MultiClusterMesh, reached via /service-mesh/:ns/:name. */
 export default MeshDetailPage

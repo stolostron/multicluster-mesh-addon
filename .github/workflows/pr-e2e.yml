@@ -4,6 +4,13 @@ on:
   pull_request:
     branches:
       - main
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+      - "frontend/docs/**"
+      - "LICENSE"
+      - ".gitignore"
+      - "OWNERS"
 
 jobs:
   e2e:

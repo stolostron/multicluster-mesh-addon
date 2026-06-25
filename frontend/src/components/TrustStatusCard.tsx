@@ -1,4 +1,5 @@
-import * as React from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import type { FC, ReactNode } from 'react'
 import { Link } from 'react-router-dom-v5-compat'
 import { Trans } from 'react-i18next'
 import {
@@ -50,7 +51,7 @@ function categorizeTrust(cert: Certificate | undefined, mw: ManifestWork | undef
   return 'failed'
 }
 
-function certStatusLabel(cert: Certificate | undefined, t: (key: string) => string): React.ReactNode {
+function certStatusLabel(cert: Certificate | undefined, t: (key: string) => string): ReactNode {
   if (!cert) return <Label color="grey" isCompact>{t('Pending')}</Label>
   const ready = findCondition(cert.status?.conditions, 'Ready')
   if (!ready) return <Label color="grey" isCompact>{t('Unknown')}</Label>
@@ -62,7 +63,7 @@ function distributionStatusLabel(
   mw: ManifestWork | undefined,
   mwError: unknown,
   t: (key: string) => string,
-): React.ReactNode {
+): ReactNode {
   if (mwError) return <Label color="grey" isCompact>{t('Unavailable')}</Label>
   if (!mw) return <Label color="grey" isCompact>{t('Pending')}</Label>
   const applied = findCondition(mw.status?.conditions, 'Applied')
@@ -84,7 +85,8 @@ interface TrustStatusCardProps {
   meshNamespace: string
 }
 
-export const TrustStatusCard: React.FC<TrustStatusCardProps> = ({
+/** Card displaying per-cluster certificate and ManifestWork trust distribution status for a mesh. */
+export const TrustStatusCard: FC<TrustStatusCardProps> = ({
   clusterStatuses,
   issuerName,
   meshName,
@@ -92,8 +94,8 @@ export const TrustStatusCard: React.FC<TrustStatusCardProps> = ({
 }) => {
   const { t } = useMeshTranslation()
   const hasIssuer = !!issuerName
-  const [filter, setFilter] = React.useState<TrustCategory>('all')
-  const [search, setSearch] = React.useState('')
+  const [filter, setFilter] = useState<TrustCategory>('all')
+  const [search, setSearch] = useState('')
 
   const [certs, certsLoaded, certsError] = useK8sWatchResource<Certificate[]>(
     hasIssuer
@@ -123,6 +125,47 @@ export const TrustStatusCard: React.FC<TrustStatusCardProps> = ({
       : null,
   )
 
+  useEffect(() => {
+    if (certsError) console.error('Failed to load certificate data:', certsError)
+  }, [certsError])
+
+  const certsByCluster = useMemo(() => {
+    const map = new Map<string, Certificate>()
+    for (const cert of certs ?? []) {
+      const clusterName = cert.metadata?.labels?.[CLUSTER_NAME_LABEL]
+      if (clusterName) map.set(clusterName, cert)
+    }
+    return map
+  }, [certs])
+
+  const mwByCluster = useMemo(() => {
+    const map = new Map<string, ManifestWork>()
+    for (const mw of manifestWorks ?? []) {
+      const clusterName = mw.metadata?.labels?.[CLUSTER_NAME_LABEL]
+      if (clusterName) map.set(clusterName, mw)
+    }
+    return map
+  }, [manifestWorks])
+
+  const { categoryByCluster, counts } = useMemo(() => {
+    const catMap = new Map<string, TrustCategory>()
+    const c = { ready: 0, pending: 0, failed: 0 }
+    clusterStatuses.forEach((cs) => {
+      const cat = categorizeTrust(certsByCluster.get(cs.clusterName), mwByCluster.get(cs.clusterName))
+      catMap.set(cs.clusterName, cat)
+      if (cat !== 'all') c[cat]++
+    })
+    return { categoryByCluster: catMap, counts: c }
+  }, [clusterStatuses, certsByCluster, mwByCluster])
+
+  const filtered = useMemo(() => {
+    return clusterStatuses.filter((cs) => {
+      if (filter !== 'all' && categoryByCluster.get(cs.clusterName) !== filter) return false
+      if (search && !cs.clusterName.toLowerCase().includes(search.toLowerCase())) return false
+      return true
+    })
+  }, [clusterStatuses, categoryByCluster, filter, search])
+
   if (!hasIssuer) {
     return (
       <Card isCompact>
@@ -146,7 +189,7 @@ export const TrustStatusCard: React.FC<TrustStatusCardProps> = ({
           <EmptyState variant="xs">
             <Title headingLevel="h4" size="md">{t('Unable to load certificate data')}</Title>
             <EmptyStateBody>
-              {certsError instanceof Error ? certsError.message : String(certsError)}
+              {t('An unexpected error occurred. Check the browser console for details.')}
             </EmptyStateBody>
           </EmptyState>
         </CardBody>
@@ -178,18 +221,6 @@ export const TrustStatusCard: React.FC<TrustStatusCardProps> = ({
     )
   }
 
-  const certsByCluster = new Map<string, Certificate>()
-  for (const cert of certs ?? []) {
-    const clusterName = cert.metadata?.labels?.[CLUSTER_NAME_LABEL]
-    if (clusterName) certsByCluster.set(clusterName, cert)
-  }
-
-  const mwByCluster = new Map<string, ManifestWork>()
-  for (const mw of manifestWorks ?? []) {
-    const clusterName = mw.metadata?.labels?.[CLUSTER_NAME_LABEL]
-    if (clusterName) mwByCluster.set(clusterName, mw)
-  }
-
   const noCertsAtAll = certsByCluster.size === 0 && mwByCluster.size === 0
   if (noCertsAtAll) {
     return (
@@ -205,20 +236,6 @@ export const TrustStatusCard: React.FC<TrustStatusCardProps> = ({
       </Card>
     )
   }
-
-  const categoryByCluster = new Map<string, TrustCategory>()
-  const counts = { ready: 0, pending: 0, failed: 0 }
-  clusterStatuses.forEach((cs) => {
-    const cat = categorizeTrust(certsByCluster.get(cs.clusterName), mwByCluster.get(cs.clusterName))
-    categoryByCluster.set(cs.clusterName, cat)
-    if (cat !== 'all') counts[cat]++
-  })
-
-  const filtered = clusterStatuses.filter((cs) => {
-    if (filter !== 'all' && categoryByCluster.get(cs.clusterName) !== filter) return false
-    if (search && !cs.clusterName.toLowerCase().includes(search.toLowerCase())) return false
-    return true
-  })
 
   return (
     <Card isCompact>
@@ -275,11 +292,11 @@ export const TrustStatusCard: React.FC<TrustStatusCardProps> = ({
           <table className="pf-v6-c-table pf-m-grid-md pf-m-compact" role="grid">
             <thead className="pf-v6-c-table__thead" style={{ position: 'sticky', top: 0, zIndex: 1 }}>
               <tr className="pf-v6-c-table__tr">
-                <th className="pf-v6-c-table__th">{t('Cluster')}</th>
-                <th className="pf-v6-c-table__th">{t('Certificate')}</th>
-                <th className="pf-v6-c-table__th">{t('Expires')}</th>
-                <th className="pf-v6-c-table__th">{t('Renews')}</th>
-                <th className="pf-v6-c-table__th">{t('Distribution')}</th>
+                <th className="pf-v6-c-table__th" scope="col">{t('Cluster')}</th>
+                <th className="pf-v6-c-table__th" scope="col">{t('Certificate')}</th>
+                <th className="pf-v6-c-table__th" scope="col">{t('Expires')}</th>
+                <th className="pf-v6-c-table__th" scope="col">{t('Renews')}</th>
+                <th className="pf-v6-c-table__th" scope="col">{t('Distribution')}</th>
               </tr>
             </thead>
             <tbody className="pf-v6-c-table__tbody">

@@ -19,12 +19,13 @@ const fleetServiceMeshPerspective: EncodedExtension = {
   },
 }
 
-const fleetMeshNavSection: EncodedExtension = {
-  type: 'console.navigation/section',
+const overviewNavItem: EncodedExtension = {
+  type: 'console.navigation/href',
   properties: {
     perspective: 'fleet-service-mesh',
-    id: 'fleet-service-mesh-main',
-    name: consoleName('Service Mesh'),
+    id: 'fleet-mesh-overview',
+    name: consoleName('Overview'),
+    href: '/fleet-mesh-overview',
   },
 }
 
@@ -32,10 +33,19 @@ const fleetMeshesNavItem: EncodedExtension = {
   type: 'console.navigation/href',
   properties: {
     perspective: 'fleet-service-mesh',
-    section: 'fleet-service-mesh-main',
     id: 'fleet-meshes',
-    name: consoleName('Meshes'),
+    name: consoleName('Fleet Meshes'),
     href: '/service-mesh',
+  },
+}
+
+const controlPlanesNavItem: EncodedExtension = {
+  type: 'console.navigation/href',
+  properties: {
+    perspective: 'fleet-service-mesh',
+    id: 'fleet-control-planes',
+    name: consoleName('Control Planes'),
+    href: '/mesh-control-planes',
   },
 }
 
@@ -57,12 +67,43 @@ const fleetMeshOverviewRoute: EncodedExtension = {
   },
 }
 
-// Detail route must be registered before the list route because React Router v5
+const controlPlaneDetailRoute: EncodedExtension = {
+  type: 'console.page/route',
+  properties: {
+    perspective: 'fleet-service-mesh',
+    path: '/mesh-control-planes/:cluster/:name',
+    component: { $codeRef: 'controlPlaneDetailPage.default' },
+  },
+}
+
+const controlPlanesRoute: EncodedExtension = {
+  type: 'console.page/route',
+  properties: {
+    perspective: 'fleet-service-mesh',
+    path: '/mesh-control-planes',
+    component: { $codeRef: 'controlPlanesPage.default' },
+  },
+}
+
+const overviewRoute: EncodedExtension = {
+  type: 'console.page/route',
+  properties: {
+    perspective: 'fleet-service-mesh',
+    path: '/fleet-mesh-overview',
+    component: { $codeRef: 'overviewPage.default' },
+  },
+}
+
+// Detail routes must be registered before their list routes because React Router v5
 // matches the first route whose path prefix matches the URL.
 export const extensions: EncodedExtension[] = [
   fleetServiceMeshPerspective,
-  fleetMeshNavSection,
+  overviewNavItem,
   fleetMeshesNavItem,
+  controlPlanesNavItem,
+  overviewRoute,
   fleetMeshDetailRoute,
   fleetMeshOverviewRoute,
+  controlPlaneDetailRoute,
+  controlPlanesRoute,
 ]
