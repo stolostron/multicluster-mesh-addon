@@ -269,7 +269,7 @@ join_clusters() {
 }
 
 install_managed_serviceaccount() {
-    require_clusters "${HUB}"
+    require_clusters "${HUB}" "${CLUSTER1}" "${CLUSTER2}"
     if on "${HUB}" kubectl get deployment managed-serviceaccount-addon-manager -n open-cluster-management-addon &>/dev/null; then
         log "managed-serviceaccount addon already installed on hub, skipping"
         return
