@@ -8,6 +8,8 @@ Thank you for your interest in contributing to the OCM Service Mesh Add-on! This
 - [Joining the Stolostron Organization](#joining-the-stolostron-organization)
 - [Pull Request Guidelines](#pull-request-guidelines)
 - [Developer Certificate of Origin](#developer-certificate-of-origin)
+- [Development Workflow](#development-workflow)
+- [License](#license)
 
 ## Getting Started
 
