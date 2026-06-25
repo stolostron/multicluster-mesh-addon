@@ -302,13 +302,13 @@ install_managed_serviceaccount() {
     hub_kubeconfig="$(kubeconfig_for "${HUB}")"
 
     if [[ ! -f "${hub_kubeconfig}" ]]; then
-        err "Hub kubeconfig not found at ${hub_kubeconfig}. Run 'make create-clusters' first."
+        err "Hub kubeconfig not found at ${hub_kubeconfig}. Run 'make init-ocm' first."
     fi
 
     local ocm_repo_url
     ocm_repo_url="https://open-cluster-management.io/helm-charts/"
 
-    log "Installing manged-serviceaccount addon on hub..."
+    log "Installing managed-serviceaccount addon on hub..."
     ${HELM} repo add ocm "${ocm_repo_url}"
     ${HELM} upgrade --install managed-serviceaccount ocm/managed-serviceaccount \
         --kubeconfig="${hub_kubeconfig}" \
@@ -317,7 +317,7 @@ install_managed_serviceaccount() {
         --wait --timeout 180s
 
     log "managed-serviceaccount addon installed on hub"
-    kubectl --kubeconfig="${hub_kubeconfig}" get managedclusteraddon -A | grep managed-serviceaccount
+    kubectl --kubeconfig="${hub_kubeconfig}" get managedclusteraddon -A | grep managed-serviceaccount || true
 }
 
 setup_mesh() {
