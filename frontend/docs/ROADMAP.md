@@ -5,6 +5,9 @@
 - **Data plane visibility** — Meshes have control planes but also data planes — the namespaces within clusters where application workloads run with sidecar proxies. The UI needs a way to discover and visualize data planes (which clusters, which namespaces, how many workloads). The discovery mechanism and UI design are TBD.
 - **Create / delete mesh actions** — Add a "Create Mesh" button to the list page and "Delete Mesh" on the detail page.
 - **Edit mesh** — Edit issuer, operator config, etc. from the detail page.
+- **CI workflow** — Add a GitHub Actions workflow to the parent repo (`.github/workflows/frontend-ci.yml`) that runs `make test build` on PRs touching `frontend/**`, using two parallel jobs (test — which includes type checking — and build).
+- **Address backend issues that may affect the frontend** — Several open backend controller issues impact the frontend UI. See [BACKEND-ISSUES.md](./BACKEND-ISSUES.md) for the full analysis. That file should be regenerated periodically (e.g. when new backend issues are filed or before sprint planning) using the AI prompt embedded at the top of that file.
+- **Review performance monitoring checklist** — [PERFORMANCE.md](./PERFORMANCE.md) has a monitoring checklist with items to watch as cluster scale increases (enrichment latency, DOM size, cache memory, etc.). Periodically review it against current usage to determine if any thresholds are being hit and optimizations are needed.
 
 ## Blocked on backend
 
