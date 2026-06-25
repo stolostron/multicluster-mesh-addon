@@ -41,8 +41,5 @@ jobs:
       - name: Set up dev environment
         run: make dev-env
 
-      - name: Update test crds
-        run: make update-test-crds
-
       - name: Run e2e tests
         run: make test-e2e

@@ -6,7 +6,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -21,24 +20,16 @@ import (
 	clusterv1beta2 "open-cluster-management.io/api/cluster/v1beta2"
 	workv1 "open-cluster-management.io/api/work/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/envtest"
 
 	meshv1alpha1 "github.com/stolostron/multicluster-mesh-addon/pkg/apis/mesh/v1alpha1"
 	meshcontroller "github.com/stolostron/multicluster-mesh-addon/pkg/hub/mesh"
 	"github.com/stolostron/multicluster-mesh-addon/test/util"
-	msav1beta1 "open-cluster-management.io/managed-serviceaccount/apis/authentication/v1beta1"
 )
 
 var (
 	hubClient    client.Client
 	spokeClients map[string]client.Client
 )
-
-var CRDDirectoryPaths = []string{
-	filepath.Join("..", "..", "chart", "crds"),                               // Custom MultiClusterMesh CRD
-	filepath.Join("..", "..", "test", "integration", "crds", "ocm"),          // OCM CRDs
-	filepath.Join("..", "..", "test", "integration", "crds", "cert-manager"), // cert-manager CRDs
-}
 
 func TestE2E(t *testing.T) {
 	RegisterFailHandler(Fail)
@@ -56,7 +47,6 @@ var _ = BeforeSuite(func(ctx context.Context) {
 		workv1.Install,
 		operatorsv1.AddToScheme,
 		operatorsv1alpha1.AddToScheme,
-		msav1beta1.AddToScheme,
 	)
 
 	hubKubeconfig := env("HUB_KUBECONFIG", ".kube/hub.config")
@@ -89,9 +79,6 @@ func env(key, def string) string {
 func clientFrom(kubeconfig string) client.Client {
 	cfg, err := clientcmd.BuildConfigFromFlags("", kubeconfig)
 	Expect(err).NotTo(HaveOccurred(), "failed to load kubeconfig from %s", kubeconfig)
-
-	// installing CRDs
-	envtest.InstallCRDs(cfg, envtest.CRDInstallOptions{Paths: CRDDirectoryPaths})
 
 	c, err := client.New(cfg, client.Options{Scheme: scheme.Scheme})
 	Expect(err).NotTo(HaveOccurred(), "failed to create client from %s", kubeconfig)
