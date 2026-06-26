@@ -20,7 +20,9 @@ Before contributing, please:
 
 ## Joining the Stolostron Organization
 
-Contact org [owners](https://github.com/orgs/stolostron/people?query=role%3Aowner)
+To have CI run automatically on your pull requests, you need to be a member of the stolostron GitHub organization.
+
+Contact the org [owners](https://github.com/orgs/stolostron/people?query=role%3Aowner) to request access.
 
 ## Pull Request Guidelines
 
