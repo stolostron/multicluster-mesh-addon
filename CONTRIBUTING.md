@@ -37,8 +37,8 @@ Contact the org [owners](https://github.com/orgs/stolostron/people?query=role%3A
 ### Review Process
 
 - Approvers will respond to pull requests promptly
-- Address review feedback by pushing new commits (don't force-push during review)
-- don't force-push during review at all if possible
+- Address review feedback by pushing new commits
+- Avoid force-pushing during review if possible. Use merge commits to resolve conflicts.
 - `okay to merge` label is required for a PR to be merged. This allows for better control in cases where multiple reviews are needed.
 
 ## Developer Certificate of Origin
