@@ -1,0 +1,21 @@
+{
+  "ts-node": {
+    "compilerOptions": {
+      "module": "CommonJS"
+    }
+  },
+  "compilerOptions": {
+    "target": "es2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "strict": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "noEmit": true,
+    "noFallthroughCasesInSwitch": true,
+    "skipLibCheck": true
+  },
+  "include": ["src", "console-extensions.ts", "console-plugin-metadata.ts", "webpack.config.ts"],
+  "exclude": ["src/**/__tests__", "src/**/__mocks__", "src/setupTests.tsx"]
+}

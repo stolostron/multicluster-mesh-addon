@@ -16,5 +16,39 @@ reviews:
         - Skip repetition — if a pattern repeats, mention it once at a summary level only.
         - Do not post comments on code style, formatting, or non-critical improvements.
         - Before flagging a deviation from best practices, check if the PR follows an existing pattern in the codebase. If the same approach is used elsewhere in the repo, it's intentional, not a bug.
+    - path: '**/*.go'
+      instructions: >
+        - This project uses klog (printf-style); do not suggest structured
+          logging just because fmt-style logging is used.
+        - Do not require copyright headers.
+    - path: '**/*_test.go'
+      instructions: >
+        - This project sets default Eventually/Consistently timeouts in suite
+          setup; do not require per-assertion timeouts unless a test is
+          genuinely ambiguous or flaky.
+        - Do not require failure messages on every Expect(); only flag them
+          when an assertion would otherwise be unclear.
+    - path: '**/*.sh'
+      instructions: >
+        - Focus on shell behavior, portability, quoting, set -euo pipefail
+          interactions, retries, timeouts, and exit-code handling.
+        - In local dev scripts, do not treat local file paths such as
+          kubeconfig paths as sensitive data by themselves.
+  finishing_touches:
+    docstrings:
+      enabled: false
+  pre_merge_checks:
+    docstrings:
+      mode: off
+    custom_checks:
+      - name: Test Structure and Quality
+        mode: off
+      - name: no-sensitive-data-in-logs
+        mode: error
+        instructions: |
+          Flag logging of actual secrets or secret-bearing values such as
+          passwords, tokens, API keys, session IDs, private keys, raw
+          Authorization headers, PII, secret data, or credentials embedded in
+          URLs.
 chat:
   auto_reply: false

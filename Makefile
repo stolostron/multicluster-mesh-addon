@@ -129,14 +129,10 @@ test: ## Run unit tests
 	go test -short ./pkg/...
 
 .PHONY: update-test-crds
-update-test-crds: ## Update test CRDs from OCM API, managed-serviceaccount and cert-manager dependencies
+update-test-crds: deps ## Update test CRDs from OCM API, managed-serviceaccount and cert-manager dependencies
 	@echo "Updating test CRDs from open-cluster-management.io/api..."
-	@OCM_API_PATH=$$(go list -mod=mod -m -f '{{.Dir}}' open-cluster-management.io/api 2>/dev/null); \
-	if [ -z "$$OCM_API_PATH" ]; then \
-		echo "Error: open-cluster-management.io/api not found in go.mod"; \
-		echo "Run: go mod download open-cluster-management.io/api"; \
-		exit 1; \
-	fi; \
+	@set -e; \
+	OCM_API_PATH=$$(go list -m -f '{{.Dir}}' open-cluster-management.io/api); \
 	mkdir -p $(TEST_CRD_DIR)/ocm; \
 	echo "Copying CRDs from $$OCM_API_PATH..."; \
 	cp -v $$OCM_API_PATH/cluster/v1/*.crd.yaml $(TEST_CRD_DIR)/ocm/ 2>/dev/null || true; \
@@ -144,22 +140,14 @@ update-test-crds: ## Update test CRDs from OCM API, managed-serviceaccount and c
 	cp -v $$OCM_API_PATH/work/v1/*.crd.yaml $(TEST_CRD_DIR)/ocm/ 2>/dev/null || true; \
 	echo "Test CRDs updated successfully in $(TEST_CRD_DIR)/ocm/"
 	@echo "Updating test CRDs from open-cluster-management.io/managed-serviceaccount..."
-	@OCM_MSA_PATH=$$(go list -mod=mod -m -f '{{.Dir}}' open-cluster-management.io/managed-serviceaccount 2>/dev/null); \
-	if [ -z "$$OCM_MSA_PATH" ]; then \
-		echo "Error: open-cluster-management.io/managed-serviceaccount not found in go.mod"; \
-		echo "Run: go mod download open-cluster-management.io/managed-serviceaccount"; \
-		exit 1; \
-	fi; \
+	@set -e; \
+	OCM_MSA_PATH=$$(go list -m -f '{{.Dir}}' open-cluster-management.io/managed-serviceaccount); \
 	echo "Copying CRDs from $$OCM_MSA_PATH..."; \
 	cp -v $$OCM_MSA_PATH/charts/managed-serviceaccount/crds/*.yaml $(TEST_CRD_DIR)/ocm/; \
 	echo "Test CRDs for MSA updated successfully in $(TEST_CRD_DIR)/ocm/"
 	@echo "Updating test CRDs from cert-manager..."
-	@CERTMANAGER_PATH=$$(go list -mod=mod -m -f '{{.Dir}}' github.com/cert-manager/cert-manager 2>/dev/null); \
-	if [ -z "$$CERTMANAGER_PATH" ]; then \
-		echo "Error: github.com/cert-manager/cert-manager not found in go.mod"; \
-		echo "Run: go mod download github.com/cert-manager/cert-manager"; \
-		exit 1; \
-	fi; \
+	@set -e; \
+	CERTMANAGER_PATH=$$(go list -m -f '{{.Dir}}' github.com/cert-manager/cert-manager); \
 	mkdir -p $(TEST_CRD_DIR)/cert-manager; \
 	echo "Copying CRDs from $$CERTMANAGER_PATH..."; \
 	cp -v $$CERTMANAGER_PATH/deploy/crds/cert-manager.io_certificates.yaml $(TEST_CRD_DIR)/cert-manager/ 2>/dev/null || true; \
@@ -180,7 +168,7 @@ test-e2e: ## Run e2e tests against dev-env clusters (requires make dev-env)
 
 .PHONY: build
 build: $(BIN_DIR) ## Build addon binary
-	CGO_ENABLED=0 go build -buildvcs=false -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/multicluster-mesh-addon .
+	CGO_ENABLED=0 go build $(GO_BUILD_FLAGS) -buildvcs=false -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/multicluster-mesh-addon .
 
 .PHONY: all
 all: build test
@@ -229,6 +217,7 @@ CLUSTERADM_VERSION ?= v1.3.1
 K8S_VERSION ?= v1.35.0
 OLM_VERSION ?= v0.43.0
 CERT_MANAGER_VERSION ?= v1.20.2
+MSA_VERSION ?= 0.10.0
 
 DEV_KUBE_DIR := $(CURDIR)/.kube
 HUB_KUBECONFIG := $(DEV_KUBE_DIR)/hub.config
@@ -260,11 +249,11 @@ $(CLUSTERADM): | $(BIN_DIR)
 
 DEV_ENV_SCRIPT := $(CURDIR)/hack/dev-env.sh
 
-export DEV_KUBE_DIR K8S_VERSION OLM_VERSION CERT_MANAGER_VERSION
-export KIND CLUSTERADM
+export DEV_KUBE_DIR K8S_VERSION OLM_VERSION CERT_MANAGER_VERSION MSA_VERSION
+export KIND CLUSTERADM HELM
 
 .PHONY: dev-env
-dev-env: create-clusters install-olm install-cert-manager init-ocm join-clusters deploy-addon ## Provision full dev environment (Kind + OCM + addon)
+dev-env: create-clusters install-olm install-cert-manager init-ocm join-clusters install-managed-serviceaccount deploy-addon ## Provision full dev environment (Kind + OCM + addon)
 
 .PHONY: create-clusters
 create-clusters: $(KIND) ## Create 3 Kind clusters (hub, cluster1, cluster2)
@@ -285,6 +274,10 @@ init-ocm: $(CLUSTERADM) ## Initialize hub as OCM control plane
 .PHONY: join-clusters
 join-clusters: $(CLUSTERADM) ## Register managed clusters and create ManagedClusterSet
 	$(DEV_ENV_SCRIPT) join-clusters
+
+.PHONY: install-managed-serviceaccount
+install-managed-serviceaccount: $(HELM_BIN) ## Install managed-serviceaccount addon to the hub cluster
+	$(DEV_ENV_SCRIPT) install-managed-serviceaccount
 
 .PHONY: deploy-addon
 deploy-addon: $(KIND) $(HELM_BIN) gen images ## Build and deploy addon to the hub Kind cluster
@@ -314,9 +307,6 @@ setup-mesh: ## Create cert-manager trust chain, mesh-system namespace, and Multi
 dev-clean-meshes: ## Delete all mesh resources, cert-manager trust chain, and mesh-system namespace
 	kubectl --kubeconfig=$(HUB_KUBECONFIG) delete multiclustermeshes -A --all --ignore-not-found=true
 	kubectl --kubeconfig=$(HUB_KUBECONFIG) delete manifestwork -A -l app.kubernetes.io/managed-by=multicluster-mesh-addon --ignore-not-found=true
-	kubectl --kubeconfig=$(HUB_KUBECONFIG) delete issuer mesh-root-ca -n mesh-system --ignore-not-found=true
-	kubectl --kubeconfig=$(HUB_KUBECONFIG) delete certificate mesh-root-ca -n mesh-system --ignore-not-found=true
-	kubectl --kubeconfig=$(HUB_KUBECONFIG) delete clusterissuer mesh-selfsigned-issuer --ignore-not-found=true
 	kubectl --kubeconfig=$(HUB_KUBECONFIG) delete namespace mesh-system --ignore-not-found=true
 
 .PHONY: dev-clean

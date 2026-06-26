@@ -11,6 +11,7 @@
 - [Operator Lifecycle](#operator-lifecycle)
 - [Trust Distribution](#trust-distribution)
 - [Endpoint Discovery](#endpoint-discovery)
+- [Lifecycle Events](#lifecycle-events)
 - [Phased Approach](#phased-approach)
 
 ## Overview
@@ -110,7 +111,7 @@ flowchart TD
 - Does not deploy monitoring, observability, or application workloads
 - Does not create AuthorizationPolicies or other application-level security config
 - Does not integrate with ACM addon lifecycle (enable/disable via `ManagedClusterAddOn` and such)
-- Does not adopt pre-existing mesh deployments (brownfield)
+- Does not adopt pre-existing mesh deployments (brownfield). Note: the add-on *does* adopt pre-existing operator installations (see [Collision Handling](#collision-handling)). This non-goal refers specifically to adopting an existing mesh configuration and trust root.
 
 ## Supported Topologies
 
@@ -119,12 +120,13 @@ The MVP supports the [Multi-Primary Multi-Network] mesh topology. This aligns wi
 ## Custom Resource
 
 `MultiClusterMesh` is a namespaced resource. The namespace provides tenant isolation on the hub.
+The resource name (`metadata.name`) is limited to 63 characters because it is used in X.509 certificate subject fields and Kubernetes label values.
 
 ### Key Fields
 
 | Field | Required | Description |
 |-------|----------|-------------|
-| `spec.clusterSet` | Yes | Name of the [ManagedClusterSet] defining cluster membership |
+| `spec.clusterSet` | Yes | Name of the [ManagedClusterSet] defining cluster membership (immutable after creation) |
 | `spec.controlPlane.namespace` | No | Namespace where Istio is installed on each cluster (default: `istio-system`) |
 | `spec.operator.namespace` | No | Namespace where the operator is installed (default: `openshift-operators` on OCP, `sail-operator` on K8s) |
 | `spec.operator.channel` | No | OLM subscription channel (default: `stable`) |
@@ -133,6 +135,7 @@ The MVP supports the [Multi-Primary Multi-Network] mesh topology. This aligns wi
 | `spec.operator.startingCSV` | No | Pin to a specific operator version |
 | `spec.operator.installPlanApproval` | No | `Automatic` or `Manual` (default: `Automatic`) |
 | `spec.security.trust.certManager.issuerRef.name` | No | cert-manager Issuer name for Root CA |
+| `spec.security.trust.certManager.issuerRef.kind` | No | Kind of the cert-manager issuer (`Issuer` or `ClusterIssuer`, default: `Issuer`) |
 | `spec.security.discovery.tokenValidity` | No | ManagedServiceAccount token lifetime (default: `360h`, minimum value: `10m`) |
 
 ### Example
@@ -156,6 +159,7 @@ spec:
       certManager:
         issuerRef:
           name: mesh-root-issuer
+          kind: Issuer
     discovery:
       tokenValidity: "168h"
 ```
@@ -164,9 +168,13 @@ spec:
 
 The add-on uses OCM [ManagedClusterSet] with `ExclusiveClusterSetLabel` as the unit of mesh membership. A cluster can only belong to one ClusterSet at a time.
 
-`MultiClusterMesh` is namespace-scoped, enabling tenant isolation on the hub. Each mesh operates independently - its certificates, discovery tokens, and operator configuration are scoped to its namespace. No two meshes may manage the same control plane namespace on the same ClusterSet. If a conflict is detected, the older resource (by creation timestamp) wins and the newer one is rejected.
+The `spec.clusterSet` field is immutable after creation. With exclusive ClusterSets, changing the reference means an entirely different set of clusters. All plumbing is cluster-specific, so nothing carries over, making migration equivalent to deleting and recreating the mesh. Users who need a different ClusterSet should delete the mesh CR and create a new one.
+
+`MultiClusterMesh` is namespace-scoped, enabling tenant isolation on the hub. Each mesh operates independently - its certificates, discovery tokens, and operator configuration are scoped to its namespace. Multiple meshes can target the same ClusterSet, provided they use different control plane namespaces. For example, Mesh A targets ClusterSet X with namespace `istio-system-a`, while Mesh B targets the same ClusterSet X with namespace `istio-system-b`. Each mesh gets its own trust domain, certificates, and discovery tokens. If two meshes target the same control plane namespace on the same ClusterSet, the older resource (by creation timestamp) wins and the newer one is rejected.
 
 The add-on detects the cluster platform via [OCM cluster claims][ClusterClaim]. OpenShift variants (OCP, ROSA, ARO, ROKS, OSD) get OSSM with OCP-specific defaults. Vanilla Kubernetes gets the Sail operator with upstream defaults. Detection happens per-cluster, so mixed ClusterSets work correctly.
+
+Plumbing resources (ManifestWorks, ManagedServiceAccounts) must use a deterministic naming strategy scoped to the owning mesh, so that multiple meshes on the same cluster don't collide. The operator ManifestWork is an exception - it is shared across meshes since the operator is a cluster-wide singleton. See [#72] for the naming convention discussion.
 
 ## Operator Lifecycle
 
@@ -174,20 +182,35 @@ The Sail/OSSM operator is a cluster-scoped singleton - only one instance can run
 
 The add-on follows a **Do No Harm** strategy: it never forcibly uninstalls or downgrades an existing operator. If the operator is already present with a compatible configuration, the add-on adopts it. If there's a conflict (e.g., different channel), the add-on reports an error and halts reconciliation for that cluster.
 
+### Installation Workflow
+
+1. **Pre-existing operator detection**: The controller creates a [ManagedClusterView] to check if a Sail/OSSM Subscription already exists on the managed cluster. This is necessary because ManifestWork claims ownership of any resource it applies, and deleting the ManifestWork would remove a pre-existing Subscription, potentially disrupting other components that depend on it (e.g., OpenShift Gateway API).
+2. **Adoption (operator already present)**: If a compatible Subscription is found, the add-on skips ManifestWork creation. If the configuration is incompatible, the add-on reports a conflict.
+3. **Installation (operator missing)**: If no Subscription is found, the controller creates a [ManifestWork] containing the OLM objects (Namespace, OperatorGroup, Subscription) with platform-specific defaults.
+
+### Collision Handling
+
+The controller handles two types of collisions:
+
+1. **Hub-side (between meshes)**: If two `MultiClusterMesh` resources target the same cluster but request different operator configurations (e.g., different channels or catalog sources), the oldest mesh (by creation timestamp) takes precedence. Newer meshes with conflicting configs are halted with a `ConfigurationConflict` status.
+2. **Spoke-side (pre-existing operator)**: If the ManagedClusterView detects an existing Subscription not created by the add-on, the controller compares the installed configuration against the resolved defaults for the requesting mesh. If compatible, the operator is adopted. If incompatible, the controller halts and reports a `ConfigurationConflict`.
+
+In both cases, the add-on will never forcibly uninstall, downgrade, or overwrite an existing operator. The user must resolve conflicts manually.
+
 The add-on does not validate OpenShift version compatibility with the requested operator channel. It delegates this to OLM - if a cluster's OCP version is incompatible with the requested operator version, the OLM installation will stall, preventing the cluster from joining the mesh with an unsupported control plane.
 
 ## Trust Distribution
 
-Trust distribution requires [cert-manager] to be installed on the hub cluster. The user is responsible for setting up cert-manager and creating the `Issuer` resource that acts as the Root CA.
+Trust distribution requires [cert-manager] to be installed on the hub cluster. The user is responsible for setting up cert-manager and creating the `Issuer` or `ClusterIssuer` resource that acts as the Root CA.
 
 The add-on implements Istio's [Plug-in CA] pattern:
 
-1. A cert-manager `Issuer` in the mesh namespace acts as the Root CA (user-provisioned)
+1. A cert-manager `Issuer` or `ClusterIssuer` acts as the Root CA (user-provisioned)
 2. The add-on creates per-cluster `Certificate` resources, yielding intermediate CAs
 3. Intermediate CAs are distributed to managed clusters as `cacerts` secrets in the control plane namespace
 4. The root CA private key never leaves the hub
 
-The trust domain is derived from the mesh name (one trust domain per mesh, not per cluster). This simplifies multi-cluster mTLS - all clusters in a mesh share the same trust domain, so workloads can authenticate across clusters without additional configuration.
+The trust domain is derived from the mesh name (one trust domain per mesh, not per cluster). In Phase 1, this is a naming convention: the controller sets the certificate CN accordingly, but the user must configure the matching `trustDomain` in their Istio CR. This simplifies multi-cluster mTLS - all clusters in a mesh share the same trust domain, so workloads can authenticate across clusters without additional configuration.
 
 Certificate rotation is handled automatically by cert-manager. Updated certificates are propagated to clusters when they change.
 
@@ -195,10 +218,16 @@ Certificate rotation is handled automatically by cert-manager. Updated certifica
 
 For multi-primary mesh topologies, each control plane needs API access to its peers. The add-on automates this using [ManagedServiceAccount]:
 
-1. Creates a `ManagedServiceAccount` per cluster per mesh, yielding short-lived tokens
+1. Creates a `ManagedServiceAccount` per cluster per mesh, yielding short-lived tokens. See [#72] for the naming convention discussion.
 2. Constructs kubeconfig-style remote secrets from these tokens
 3. Distributes remote secrets to all peer clusters in the mesh
 4. Token rotation is handled automatically by the OCM platform
+5. When a cluster is removed from the mesh, its MSA is deleted and its remote secrets are removed from all peers
+
+## Lifecycle Events
+
+- **Scale Up**: When a new cluster joins the ClusterSet, the controller automatically provisions the mesh plumbing for it: installs the operator, mints an intermediate CA, and distributes discovery tokens to all peers. This is the same process as the initial mesh bootstrap, applied incrementally to the new cluster.
+- **Scale Down**: When a cluster is removed from a set, the controller immediately revokes its access by removing the remote secrets from all peer clusters and cleaning up the local CA bundles.
 
 ## Phased Approach
 
@@ -225,5 +254,7 @@ Potential additions include ACM addon lifecycle integration (i.e. via `ClusterMa
 [ManifestWork]: https://open-cluster-management.io/docs/concepts/work-distribution/manifestwork/
 [ManagedClusterSet]: https://open-cluster-management.io/docs/concepts/cluster-inventory/managedclusterset/
 [ClusterClaim]: https://open-cluster-management.io/docs/concepts/cluster-inventory/clusterclaim/
+[ManagedClusterView]: https://github.com/stolostron/cluster-lifecycle-api
 [Plug-in CA]: https://istio.io/latest/docs/tasks/security/cert-management/plugin-ca-cert/
 [Multi-Primary Multi-Network]: https://istio.io/latest/docs/setup/install/multicluster/multi-primary_multi-network/
+[#72]: https://github.com/stolostron/multicluster-mesh-addon/issues/72

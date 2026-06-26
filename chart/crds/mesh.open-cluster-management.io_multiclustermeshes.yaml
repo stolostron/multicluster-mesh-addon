@@ -43,7 +43,11 @@ spec:
               clusterSet:
                 description: ClusterSet references the ACM ManagedClusterSet that
                   defines cluster membership
+                minLength: 1
                 type: string
+                x-kubernetes-validations:
+                - message: spec.clusterSet is immutable
+                  rule: self == oldSelf
               controlPlane:
                 description: ControlPlane defines the target configuration for the
                   mesh control plane
@@ -117,8 +121,15 @@ spec:
                             description: IssuerRef references the cert-manager Issuer
                               to use as Root CA
                             properties:
+                              kind:
+                                default: Issuer
+                                description: Kind of the issuer (Issuer or ClusterIssuer)
+                                enum:
+                                - Issuer
+                                - ClusterIssuer
+                                type: string
                               name:
-                                description: Name of the Issuer
+                                description: Name of the Issuer or ClusterIssuer
                                 type: string
                             required:
                             - name
@@ -276,6 +287,9 @@ spec:
                 x-kubernetes-list-type: map
             type: object
         type: object
+        x-kubernetes-validations:
+        - message: metadata.name must not exceed 63 characters
+          rule: size(self.metadata.name) <= 63
     served: true
     storage: true
     subresources:

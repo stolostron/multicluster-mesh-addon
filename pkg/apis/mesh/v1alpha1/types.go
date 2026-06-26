@@ -1,7 +1,10 @@
 package v1alpha1
 
 import (
+	"fmt"
+
 	operatorsv1alpha1 "github.com/operator-framework/api/pkg/operators/v1alpha1"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -9,6 +12,7 @@ import (
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 // +kubebuilder:resource:scope=Namespaced
 // +kubebuilder:subresource:status
+// +kubebuilder:validation:XValidation:rule="size(self.metadata.name) <= 63",message="metadata.name must not exceed 63 characters"
 
 // MultiClusterMesh represents a multi-cluster service mesh configuration
 type MultiClusterMesh struct {
@@ -32,10 +36,46 @@ func (m *MultiClusterMesh) GetControlPlaneNamespace() string {
 	return m.Spec.ControlPlane.Namespace
 }
 
+// SetReadyCondition sets the mesh-level Ready condition.
+func (m *MultiClusterMesh) SetReadyCondition(status metav1.ConditionStatus, reason string, messageFmt string, args ...any) {
+	meta.SetStatusCondition(&m.Status.Conditions, metav1.Condition{
+		Type:               ConditionReady,
+		Status:             status,
+		Reason:             reason,
+		ObservedGeneration: m.Generation,
+		Message:            fmt.Sprintf(messageFmt, args...),
+	})
+}
+
+// SetClusterCondition sets a per-cluster condition, creating the cluster status entry if needed.
+func (m *MultiClusterMesh) SetClusterCondition(clusterName string, conditionType string, status metav1.ConditionStatus, reason string, messageFmt string, args ...any) {
+	cs := m.getOrCreateClusterStatus(clusterName)
+	meta.SetStatusCondition(&cs.Conditions, metav1.Condition{
+		Type:               conditionType,
+		Status:             status,
+		Reason:             reason,
+		ObservedGeneration: m.Generation,
+		Message:            fmt.Sprintf(messageFmt, args...),
+	})
+}
+
+func (m *MultiClusterMesh) getOrCreateClusterStatus(clusterName string) *ClusterMeshStatus {
+	// Index-based iteration to return a pointer into the slice, not a copy.
+	for i := range m.Status.ClusterStatus {
+		if m.Status.ClusterStatus[i].ClusterName == clusterName {
+			return &m.Status.ClusterStatus[i]
+		}
+	}
+	m.Status.ClusterStatus = append(m.Status.ClusterStatus, ClusterMeshStatus{ClusterName: clusterName})
+	return &m.Status.ClusterStatus[len(m.Status.ClusterStatus)-1]
+}
+
 // MultiClusterMeshSpec defines the desired state of a multi-cluster mesh
 type MultiClusterMeshSpec struct {
 	// ClusterSet references the ACM ManagedClusterSet that defines cluster membership
 	// +required
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="spec.clusterSet is immutable"
 	ClusterSet string `json:"clusterSet"`
 
 	// ControlPlane defines the target configuration for the mesh control plane
@@ -118,11 +158,17 @@ type CertManagerConfig struct {
 	IssuerRef IssuerReference `json:"issuerRef"`
 }
 
-// IssuerReference references a cert-manager Issuer
+// IssuerReference references a cert-manager Issuer or ClusterIssuer
 type IssuerReference struct {
-	// Name of the Issuer
+	// Name of the Issuer or ClusterIssuer
 	// +required
 	Name string `json:"name"`
+
+	// Kind of the issuer (Issuer or ClusterIssuer)
+	// +optional
+	// +kubebuilder:default="Issuer"
+	// +kubebuilder:validation:Enum=Issuer;ClusterIssuer
+	Kind string `json:"kind,omitempty"`
 }
 
 // DiscoveryConfig defines endpoint discovery token configuration
@@ -150,6 +196,9 @@ const (
 
 	// ReasonManifestWorkCreated indicates the operator ManifestWork has been created
 	ReasonManifestWorkCreated = "ManifestWorkCreated"
+
+	// ReasonOperatorInstalled indicates the operator CSV has been successfully installed
+	ReasonOperatorInstalled = "Installed"
 
 	// ReasonMissingProductClaim indicates the cluster is missing its product claim
 	ReasonMissingProductClaim = "MissingProductClaim"
