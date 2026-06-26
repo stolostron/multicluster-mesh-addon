@@ -43,7 +43,7 @@ Contact the org [owners](https://github.com/orgs/stolostron/people?query=role%3A
 
 ## Developer Certificate of Origin
 
-You must sign off your commits to certify that you have the right to submit the code under the project's license. This is done using the Developer Certificate of Origin (DCO).
+You must sign off your commits to certify that you have the right to submit the code under the project's license. This is done using the [Developer Certificate of Origin (DCO)](https://developercertificate.org/).
 
 ## Development Workflow
 
