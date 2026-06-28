@@ -720,10 +720,11 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 
 				work := expectOperatorManifestWork(clusterName)
 
-				// OpenShift: expect only Subscription (openshift-operators namespace/OperatorGroup exist by default)
-				Expect(work.Spec.Workload.Manifests).To(HaveLen(1))
+				Expect(work.Spec.Workload.Manifests).To(HaveLen(3))
 
-				expectSubscription(work, 0, true, operatorsv1alpha1.Subscription{})
+				expectNamespace(work, 0, meshcontroller.DefaultOperatorNs)
+				expectOperatorGroup(work, 1, "operator-group", meshcontroller.DefaultOperatorNs)
+				expectSubscription(work, 2, true, operatorsv1alpha1.Subscription{})
 			},
 			Entry(meshcontroller.ProductOCP, meshcontroller.ProductOCP),
 			Entry(meshcontroller.ProductROSA, meshcontroller.ProductROSA),
@@ -883,11 +884,7 @@ func expectSubscription(work *workv1.ManifestWork, index int, isOCP bool, expect
 
 	expectedNamespace := expected.Namespace
 	if expectedNamespace == "" {
-		if isOCP {
-			expectedNamespace = meshcontroller.DefaultOCPOperatorNs
-		} else {
-			expectedNamespace = meshcontroller.DefaultOperatorNs
-		}
+		expectedNamespace = meshcontroller.DefaultOperatorNs
 	}
 
 	var expectedName, expectedPackage, expectedCatalogSource, expectedCatalogSourceNamespace, expectedChannel string

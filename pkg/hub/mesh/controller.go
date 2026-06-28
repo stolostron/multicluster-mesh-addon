@@ -45,8 +45,7 @@ const (
 	OperatorNameOSSM = "servicemeshoperator3"
 	OperatorNameSail = "sailoperator"
 
-	DefaultOCPOperatorNs = "openshift-operators"
-	DefaultOperatorNs    = "sail-operator"
+	DefaultOperatorNs = "multicluster-mesh-operator"
 
 	DefaultOCPCatalogSource = "redhat-operators"
 	DefaultOCPCatalogNs     = "openshift-marketplace"
@@ -603,36 +602,33 @@ func (r *Reconciler) buildOperatorManifestWork(mesh *meshv1alpha1.MultiClusterMe
 
 	config := r.applyOperatorDefaults(mesh.Spec.Operator, isOCP)
 
-	// openshift-operators exists by default on OCP and already has a global OperatorGroup
-	if config.Namespace != DefaultOCPOperatorNs {
-		manifests = append(manifests, workv1.Manifest{
-			RawExtension: runtime.RawExtension{Object: &corev1.Namespace{
-				TypeMeta: metav1.TypeMeta{
-					APIVersion: "v1",
-					Kind:       "Namespace",
-				},
-				ObjectMeta: metav1.ObjectMeta{
-					Name: config.Namespace,
-				},
-			}},
-		})
+	manifests = append(manifests, workv1.Manifest{
+		RawExtension: runtime.RawExtension{Object: &corev1.Namespace{
+			TypeMeta: metav1.TypeMeta{
+				APIVersion: "v1",
+				Kind:       "Namespace",
+			},
+			ObjectMeta: metav1.ObjectMeta{
+				Name: config.Namespace,
+			},
+		}},
+	})
 
-		manifests = append(manifests, workv1.Manifest{
-			RawExtension: runtime.RawExtension{Object: &operatorsv1.OperatorGroup{
-				TypeMeta: metav1.TypeMeta{
-					APIVersion: "operators.coreos.com/v1",
-					Kind:       "OperatorGroup",
-				},
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "operator-group",
-					Namespace: config.Namespace,
-				},
-				Spec: operatorsv1.OperatorGroupSpec{
-					// Empty spec = "AllNamespaces" scope
-				},
-			}},
-		})
-	}
+	manifests = append(manifests, workv1.Manifest{
+		RawExtension: runtime.RawExtension{Object: &operatorsv1.OperatorGroup{
+			TypeMeta: metav1.TypeMeta{
+				APIVersion: "operators.coreos.com/v1",
+				Kind:       "OperatorGroup",
+			},
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "operator-group",
+				Namespace: config.Namespace,
+			},
+			Spec: operatorsv1.OperatorGroupSpec{
+				// Empty spec = "AllNamespaces" scope
+			},
+		}},
+	})
 
 	packageName := OperatorNameSail
 	if isOCP {
@@ -697,14 +693,6 @@ func (r *Reconciler) buildOperatorManifestWork(mesh *meshv1alpha1.MultiClusterMe
 
 // applyOperatorDefaults applies platform-specific defaults for the given cluster to the operator config
 func (r *Reconciler) applyOperatorDefaults(config meshv1alpha1.OperatorConfig, isOCP bool) meshv1alpha1.OperatorConfig {
-	if config.Namespace == "" {
-		if isOCP {
-			config.Namespace = DefaultOCPOperatorNs
-		} else {
-			config.Namespace = DefaultOperatorNs
-		}
-	}
-
 	if config.Source == "" {
 		if isOCP {
 			config.Source = DefaultOCPCatalogSource
@@ -719,14 +707,6 @@ func (r *Reconciler) applyOperatorDefaults(config meshv1alpha1.OperatorConfig, i
 		} else {
 			config.SourceNamespace = DefaultCatalogNs
 		}
-	}
-
-	if config.Channel == "" {
-		config.Channel = DefaultChannel
-	}
-
-	if config.InstallPlanApproval == "" {
-		config.InstallPlanApproval = operatorsv1alpha1.ApprovalAutomatic
 	}
 
 	return config

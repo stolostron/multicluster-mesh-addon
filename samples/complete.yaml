@@ -15,9 +15,9 @@ spec:
 
   # Sail Operator installation configuration
   operator:
-    # Namespace where the Sail Operator will be installed
-    # Defaults to "openshift-operators" on OpenShift, "sail-operator" on vanilla Kubernetes
-    namespace: sail-operator
+    # Namespace where the Mesh Operator will be installed (default: multicluster-mesh-operator)
+    # This namespace may be deleted when the mesh is removed
+    namespace: multicluster-mesh-operator
 
     # OLM subscription channel
     channel: stable
