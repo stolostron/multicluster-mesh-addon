@@ -194,8 +194,8 @@ const (
 	// ReasonClustersNotReady indicates that not all clusters have confirmed operator installation
 	ReasonClustersNotReady = "ClustersNotReady"
 
-	// ReasonManifestWorkCreated indicates the operator ManifestWork has been created
-	ReasonManifestWorkCreated = "ManifestWorkCreated"
+	// ReasonInstallationPending indicates the operator installation has been requested
+	ReasonInstallationPending = "InstallationPending"
 
 	// ReasonOperatorInstalled indicates the operator CSV has been successfully installed
 	ReasonOperatorInstalled = "Installed"

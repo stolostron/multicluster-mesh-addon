@@ -492,7 +492,7 @@ func (r *Reconciler) determineStatus(ctx context.Context, mesh *meshv1alpha1.Mul
 		} else {
 			allReady = false
 			mesh.SetClusterCondition(cluster.Name, meshv1alpha1.ConditionOperatorInstalled, metav1.ConditionFalse,
-				meshv1alpha1.ReasonManifestWorkCreated, "Operator ManifestWork has been created, awaiting installation confirmation")
+				meshv1alpha1.ReasonInstallationPending, "Operator installation is pending")
 		}
 	}
 
