@@ -3,7 +3,6 @@ package mesh
 import (
 	"context"
 	"fmt"
-	"time"
 
 	meshv1alpha1 "github.com/stolostron/multicluster-mesh-addon/pkg/apis/mesh/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
@@ -21,53 +20,38 @@ const (
 	msaRootWord             = "istio-reader"
 )
 
-// createManagedServiceAccounts creates ManagedServiceAccount resources for each cluster.
+// ensureManagedServiceAccountCreated creates ManagedServiceAccount resources for a cluster.
 // It checks and uses the mesh.Spec.Security.Discovery.TokenValidity value.
 // If there is an existing ManagedServiceAccount, it skips creation.
-func (r *Reconciler) createManagedServiceAccounts(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, clusters []clusterv1.ManagedCluster) error {
-	if len(clusters) == 0 {
-		klog.V(4).Info("The ClusterSet has no managed cluster")
-		return nil
-	}
-
+func (r *Reconciler) ensureManagedServiceAccountCreated(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, cluster *clusterv1.ManagedCluster) error {
 	msaName := fmt.Sprintf("%s-%s-%s", mesh.Namespace, msaRootWord, mesh.Name)
-
-	var validity metav1.Duration
-	if mesh.Spec.Security.Discovery.TokenValidity == nil {
-		validity = metav1.Duration{Duration: 360 * time.Hour}
-	} else {
-		validity = *mesh.Spec.Security.Discovery.TokenValidity
+	existing := &msav1beta1.ManagedServiceAccount{}
+	if err := r.Get(ctx, types.NamespacedName{Name: msaName, Namespace: cluster.Name}, existing); err == nil {
+		klog.V(4).Infof("Cluster %s has an existing ManagedServiceAccount resource %s, skipping ensureManagedServiceAccountCreated", cluster.Name, msaName)
+		return nil
+	} else if !errors.IsNotFound(err) {
+		return fmt.Errorf("failed to get ManagedServiceAccount %s/%s: %w", cluster.Name, msaName, err)
 	}
 
-	for _, cluster := range clusters {
-		existing := &msav1beta1.ManagedServiceAccount{}
-		if err := r.Get(ctx, types.NamespacedName{Name: msaName, Namespace: cluster.Name}, existing); err == nil {
-			klog.V(4).Infof("Cluster %s has an existing ManagedServiceAccount resource %s, skipping createManagedServiceAccount", cluster.Name, msaName)
-			continue
-		} else if !errors.IsNotFound(err) {
-			return fmt.Errorf("failed to get ManagedServiceAccount %s/%s: %w", cluster.Name, msaName, err)
-		}
-
-		msa := &msav1beta1.ManagedServiceAccount{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      msaName,
-				Namespace: cluster.Name,
-				Labels:    meshOwnedLabels(mesh, cluster.Name),
+	msa := &msav1beta1.ManagedServiceAccount{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      msaName,
+			Namespace: cluster.Name,
+			Labels:    meshOwnedLabels(mesh, cluster.Name),
+		},
+		Spec: msav1beta1.ManagedServiceAccountSpec{
+			Rotation: msav1beta1.ManagedServiceAccountRotation{
+				Enabled:  true,
+				Validity: *mesh.Spec.Security.Discovery.TokenValidity,
 			},
-			Spec: msav1beta1.ManagedServiceAccountSpec{
-				Rotation: msav1beta1.ManagedServiceAccountRotation{
-					Enabled:  true,
-					Validity: validity,
-				},
-			},
-		}
-
-		if err := r.Create(ctx, msa); err != nil {
-			return fmt.Errorf("failed to create a ManagedServiceAccount %s/%s: %w", cluster.Name, msaName, err)
-		}
-
-		klog.Infof("Successfully created a ManagedServiceAccount %s/%s", cluster.Name, msaName)
+		},
 	}
+
+	if err := r.Create(ctx, msa); err != nil {
+		return fmt.Errorf("failed to create a ManagedServiceAccount %s/%s: %w", cluster.Name, msaName, err)
+	}
+
+	klog.Infof("Successfully created a ManagedServiceAccount %s/%s", cluster.Name, msaName)
 	return nil
 }
 

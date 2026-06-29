@@ -286,6 +286,11 @@ func (r *Reconciler) doReconcile(ctx context.Context, mesh *meshv1alpha1.MultiCl
 			return reconcile.Result{}, fmt.Errorf("failed to apply operator ManifestWork on cluster %s: %w", cluster.Name, err)
 		}
 		klog.V(4).Infof("Applied operator ManifestWork %s/%s", work.Namespace, work.Name)
+
+		// Create ManagedServiceAccount resources for each cluster.
+		if err := r.ensureManagedServiceAccountCreated(ctx, mesh, &cluster); err != nil {
+			return reconcile.Result{}, fmt.Errorf("failed to create ManagedServiceAccounts: %w", err)
+		}
 	}
 
 	// Create certificates for each cluster if cert-manager is configured
@@ -297,11 +302,6 @@ func (r *Reconciler) doReconcile(ctx context.Context, mesh *meshv1alpha1.MultiCl
 		if err := r.ensureCacertsDistributed(ctx, mesh, clusters); err != nil {
 			return reconcile.Result{}, err
 		}
-	}
-
-	// Create ManagedServiceAccount resources for each cluster.
-	if err := r.createManagedServiceAccounts(ctx, mesh, clusters); err != nil {
-		return reconcile.Result{}, fmt.Errorf("failed to create ManagedServiceAccounts: %w", err)
 	}
 
 	forceCleanupAll := mesh.Spec.Security.Trust.CertManager.IssuerRef.Name == ""
@@ -392,7 +392,6 @@ func (r *Reconciler) handleDeletion(ctx context.Context, mesh *meshv1alpha1.Mult
 		return reconcile.Result{}, fmt.Errorf("failed to cleanup ManifestWorks: %w", err)
 	}
 
-	klog.Infof("Handling deletion for ManagedServiceAccount resources managed by mesh %s/%s", mesh.Namespace, mesh.Name)
 	if err := r.deleteAllManagedServiceAccounts(ctx, mesh); err != nil {
 		return reconcile.Result{}, fmt.Errorf("failed to cleanup ManagedServiceAccount resources: %w", err)
 	}
