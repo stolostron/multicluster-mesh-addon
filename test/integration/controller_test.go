@@ -832,8 +832,20 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 					expectedManagedServiceAccountName(testNs, meshName), cluster2)
 
 				// Verify the other mesh's MSAs remain
-				expectManagedServiceAccount(otherNs, otherMesh, cluster1)
-				expectManagedServiceAccount(otherNs, otherMesh, cluster2)
+				Consistently(func() error {
+					msa := &msav1beta1.ManagedServiceAccount{}
+					return k8sClient.Get(ctx, types.NamespacedName{
+						Name:      expectedManagedServiceAccountName(otherNs, otherMesh),
+						Namespace: cluster1,
+					}, msa)
+				}).Should(Succeed())
+				Consistently(func() error {
+					msa := &msav1beta1.ManagedServiceAccount{}
+					return k8sClient.Get(ctx, types.NamespacedName{
+						Name:      expectedManagedServiceAccountName(otherNs, otherMesh),
+						Namespace: cluster2,
+					}, msa)
+				}).Should(Succeed())
 			})
 		})
 	})
@@ -992,13 +1004,12 @@ func expectedManagedServiceAccountName(meshNamespace, meshName string) string {
 
 func expectManagedServiceAccount(meshNamespace, meshName, clusterNamespace string) *msav1beta1.ManagedServiceAccount {
 	msa := &msav1beta1.ManagedServiceAccount{}
-	Consistently(func() bool {
-		err := k8sClient.Get(ctx, types.NamespacedName{
+	Eventually(func() error {
+		return k8sClient.Get(ctx, types.NamespacedName{
 			Name:      expectedManagedServiceAccountName(meshNamespace, meshName),
 			Namespace: clusterNamespace,
 		}, msa)
-		return errors.IsNotFound(err)
-	}).Should(BeTrue())
+	}).Should(Succeed())
 	return msa
 }
 
