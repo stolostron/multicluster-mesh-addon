@@ -869,7 +869,7 @@ func expectNoCacertsManifestWork(clusterNamespace string) {
 
 func expectCertificate(namespace, clusterName, meshName, issuerName, issuerKind string) *certmanagerv1.Certificate {
 	certList := &certmanagerv1.CertificateList{}
-	Eventually(func() int {
+	Eventually(func() []certmanagerv1.Certificate {
 		Expect(k8sClient.List(ctx, certList,
 			client.InNamespace(namespace),
 			client.MatchingLabels{
@@ -877,8 +877,8 @@ func expectCertificate(namespace, clusterName, meshName, issuerName, issuerKind 
 				meshcontroller.ClusterNameLabel: clusterName,
 			},
 		)).To(Succeed())
-		return len(certList.Items)
-	}).Should(Equal(1), "expected exactly one Certificate for cluster %s", clusterName)
+		return certList.Items
+	}).Should(HaveLen(1), "expected exactly one Certificate for cluster %s", clusterName)
 
 	cert := &certList.Items[0]
 	Expect(cert.Labels[meshcontroller.ManagedByLabel]).To(Equal(meshcontroller.ManagedByValue))
