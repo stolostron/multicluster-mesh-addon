@@ -4,6 +4,7 @@ package e2e
 
 import (
 	"context"
+	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -144,7 +145,10 @@ var _ = Describe("MultiClusterMesh lifecycle", Ordered, func() {
 
 		Step("Verifying Subscriptions are removed from spoke clusters")
 		for _, spokeClient := range spokeClients {
-			util.ExpectResourceDeleted(ctx, spokeClient, &operatorsv1alpha1.Subscription{}, meshcontroller.OperatorNameSail, meshcontroller.DefaultOperatorNs)
+			// Spoke-side cleanup depends on the OCM work agent processing the
+			// ManifestWork deletion and OLM processing any Subscription finalizers,
+			// which can take longer than the default timeout in CI.
+			util.ExpectResourceDeleted(ctx, spokeClient, &operatorsv1alpha1.Subscription{}, meshcontroller.OperatorNameSail, meshcontroller.DefaultOperatorNs, 2*time.Minute)
 		}
 	})
 })
