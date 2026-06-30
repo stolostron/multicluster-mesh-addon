@@ -24,7 +24,6 @@ import (
 	meshv1alpha1 "github.com/stolostron/multicluster-mesh-addon/pkg/apis/mesh/v1alpha1"
 	meshcontroller "github.com/stolostron/multicluster-mesh-addon/pkg/hub/mesh"
 	"github.com/stolostron/multicluster-mesh-addon/test/util"
-	msav1beta1 "open-cluster-management.io/managed-serviceaccount/apis/authentication/v1beta1"
 )
 
 var (
@@ -48,7 +47,6 @@ var _ = BeforeSuite(func(ctx context.Context) {
 		workv1.Install,
 		operatorsv1.AddToScheme,
 		operatorsv1alpha1.AddToScheme,
-		msav1beta1.AddToScheme,
 	)
 
 	hubKubeconfig := env("HUB_KUBECONFIG", ".kube/hub.config")

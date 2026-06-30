@@ -5,30 +5,25 @@ import (
 	"fmt"
 
 	meshv1alpha1 "github.com/stolostron/multicluster-mesh-addon/pkg/apis/mesh/v1alpha1"
-	corev1 "k8s.io/api/core/v1"
+	"github.com/stolostron/multicluster-mesh-addon/pkg/key"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/klog/v2"
 	clusterv1 "open-cluster-management.io/api/cluster/v1"
 	msav1beta1 "open-cluster-management.io/managed-serviceaccount/apis/authentication/v1beta1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-const (
-	multiClusterSecretLabel = "istio/multiCluster"
-	msaRootWord             = "istio-reader"
-)
-
 // ensureManagedServiceAccountCreated creates ManagedServiceAccount resources for a cluster.
 // It checks and uses the mesh.Spec.Security.Discovery.TokenValidity value.
-// If there is an existing ManagedServiceAccount, it skips creation.
 func (r *Reconciler) ensureManagedServiceAccountCreated(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, cluster *clusterv1.ManagedCluster) error {
-	msaName := fmt.Sprintf("%s-%s-%s", mesh.Namespace, msaRootWord, mesh.Name)
+	msaName := fmt.Sprintf("%s-%s-%s", mesh.Namespace, "istio-reader", mesh.Name)
 	existing := &msav1beta1.ManagedServiceAccount{}
-	if err := r.Get(ctx, types.NamespacedName{Name: msaName, Namespace: cluster.Name}, existing); err == nil {
-		klog.V(4).Infof("Cluster %s has an existing ManagedServiceAccount resource %s, skipping ensureManagedServiceAccountCreated", cluster.Name, msaName)
-		return nil
+	if err := r.Get(ctx, key.Of(msaName, cluster.Name), existing); err == nil {
+		if existing.Labels[MeshNameLabel] == mesh.Name || existing.Labels[MeshNamespaceLabel] == mesh.Namespace {
+			return r.ensureManagedServiceAccountUpdated(ctx, mesh, existing)
+		}
+		// when labels are not matching, the existing msa is not owned by the mesh, skipping update and continue creation
 	} else if !errors.IsNotFound(err) {
 		return fmt.Errorf("failed to get ManagedServiceAccount %s/%s: %w", cluster.Name, msaName, err)
 	}
@@ -55,10 +50,18 @@ func (r *Reconciler) ensureManagedServiceAccountCreated(ctx context.Context, mes
 	return nil
 }
 
-// TODO(yxun): (#120) Update existing ManagedServiceAccount resources when the user changes the tokenValidity on the mesh
+// ensureManagedServiceAccountUpdated updates an existing ManagedServiceAccount with the mesh's spec.Security.Discovery.TokenValidity value
+func (r *Reconciler) ensureManagedServiceAccountUpdated(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, existing *msav1beta1.ManagedServiceAccount) error {
+	existing.Spec.Rotation.Validity = *mesh.Spec.Security.Discovery.TokenValidity
+	if err := r.Update(ctx, existing); err != nil {
+		return fmt.Errorf("failed to update a ManagedServiceAccount %s/%s: %w", existing.Namespace, existing.Name, err)
+	} else {
+		klog.V(4).Infof("Successfully updated a ManagedServiceAccount %s/%s", existing.Namespace, existing.Name)
+	}
+	return nil
+}
 
-// cleanupManagedServiceAccounts deletes ManagedServiceAccount and istio-remote secret,
-// when the cluster(s) are removed from the given mesh's ClusterSet.
+// cleanupManagedServiceAccounts deletes ManagedServiceAccount when the cluster(s) are removed from the given mesh's ClusterSet.
 func (r *Reconciler) cleanupManagedServiceAccounts(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, clusters []clusterv1.ManagedCluster) error {
 	clusterNames := clusterNameSet(clusters)
 
@@ -66,13 +69,6 @@ func (r *Reconciler) cleanupManagedServiceAccounts(ctx context.Context, mesh *me
 	if err := r.List(ctx, msaList,
 		client.MatchingLabels{MeshNameLabel: mesh.Name, MeshNamespaceLabel: mesh.Namespace}); err != nil {
 		return fmt.Errorf("failed to list ManagedServiceAccounts: %w", err)
-	}
-
-	secretList := &corev1.SecretList{}
-	if err := r.List(ctx, secretList, client.InNamespace(mesh.Namespace), client.MatchingLabels{
-		multiClusterSecretLabel: "true", MeshNameLabel: mesh.Name, MeshNamespaceLabel: mesh.Namespace,
-	}); err != nil {
-		return fmt.Errorf("failed to list istio-remote secrets managed by mesh %s: %w", mesh.Name, err)
 	}
 
 	for _, msa := range msaList.Items {
@@ -87,18 +83,6 @@ func (r *Reconciler) cleanupManagedServiceAccounts(ctx context.Context, mesh *me
 		}
 	}
 
-	for _, sec := range secretList.Items {
-		clusterName := sec.Labels[ClusterNameLabel]
-		if clusterNames[clusterName] {
-			continue
-		}
-
-		klog.Infof("Deleting istio remote secret %s/%s (cluster %s no longer in ClusterSet %s)", sec.Namespace, sec.Name, clusterName, mesh.Spec.ClusterSet)
-		if err := client.IgnoreNotFound(r.Delete(ctx, &sec)); err != nil {
-			return fmt.Errorf("failed to delete istio remote secret %s/%s: %w", sec.Namespace, sec.Name, err)
-		}
-	}
-
 	return nil
 }
 
@@ -109,24 +93,10 @@ func (r *Reconciler) deleteAllManagedServiceAccounts(ctx context.Context, mesh *
 		return fmt.Errorf("failed to list ManagedServiceAccount resources managed by mesh %s: %w", mesh.Name, err)
 	}
 
-	secretList := &corev1.SecretList{}
-	if err := r.List(ctx, secretList, client.InNamespace(mesh.Namespace), client.MatchingLabels{
-		multiClusterSecretLabel: "true", MeshNameLabel: mesh.Name, MeshNamespaceLabel: mesh.Namespace,
-	}); err != nil {
-		return fmt.Errorf("failed to list istio-remote secrets managed by mesh %s: %w", mesh.Name, err)
-	}
-
 	for _, msa := range msaList.Items {
 		klog.Infof("Deleting ManagedServiceAccount %s/%s", msa.Namespace, msa.Name)
 		if err := client.IgnoreNotFound(r.Delete(ctx, &msa)); err != nil {
 			return fmt.Errorf("failed to delete ManagedServiceAccount %s/%s: %w", msa.Namespace, msa.Name, err)
-		}
-	}
-
-	for _, sec := range secretList.Items {
-		klog.Infof("Deleting an istio remote secret %s", sec.Name)
-		if err := client.IgnoreNotFound(r.Delete(ctx, &sec)); err != nil {
-			return fmt.Errorf("failed to delete an istio remote secret %s: %w", sec.Name, err)
 		}
 	}
 
