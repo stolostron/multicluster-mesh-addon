@@ -151,7 +151,6 @@ var _ = Describe("MultiClusterMesh lifecycle", Ordered, func() {
 			util.ExpectResourceDeleted(ctx, spokeClient, &operatorsv1alpha1.Subscription{}, meshcontroller.OperatorNameSail, meshcontroller.DefaultOperatorNs, 2*time.Minute)
 		}
 	})
-	// TODO(yxun): (#133) Implement e2e tests for ManagedServiceAccount, istio remote secret and endpoint discovery testing
 })
 
 func getMesh(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh) error {

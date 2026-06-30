@@ -14,8 +14,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-// ensureManagedServiceAccountCreated creates ManagedServiceAccount resources for a cluster.
-// It checks and uses the mesh.Spec.Security.Discovery.TokenValidity value.
+// ensureManagedServiceAccountCreated creates ManagedServiceAccount resources using the mesh.Spec.Security.Discovery.TokenValidity value.
 func (r *Reconciler) ensureManagedServiceAccountCreated(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, cluster *clusterv1.ManagedCluster) error {
 	msaName := fmt.Sprintf("%s-%s-%s", mesh.Namespace, "istio-reader", mesh.Name)
 	existing := &msav1beta1.ManagedServiceAccount{}
@@ -36,7 +35,6 @@ func (r *Reconciler) ensureManagedServiceAccountCreated(ctx context.Context, mes
 		},
 		Spec: msav1beta1.ManagedServiceAccountSpec{
 			Rotation: msav1beta1.ManagedServiceAccountRotation{
-				Enabled:  true,
 				Validity: *mesh.Spec.Security.Discovery.TokenValidity,
 			},
 		},
@@ -72,7 +70,7 @@ func (r *Reconciler) cleanupManagedServiceAccounts(ctx context.Context, mesh *me
 	}
 
 	for _, msa := range msaList.Items {
-		clusterName := msa.Labels[ClusterNameLabel]
+		clusterName := msa.Namespace
 		if clusterNames[clusterName] {
 			continue
 		}
