@@ -120,7 +120,29 @@ If either check finds a match, that is the existing tracking issue —
 update it rather than creating a duplicate. Log which match method was
 used.
 
-### 6. Create or update frontend tracking issues
+### 6. Present the plan for review
+
+Before creating or modifying any GitHub issues, present a summary of all
+planned actions to the user for approval. The summary should include:
+
+**New issues to create:**
+
+For each, show the title, severity, labels, and the full issue body.
+
+**Existing issues to update:**
+
+For each, show the issue number, what changed, and the updated body.
+
+**Closed backend issues with pending frontend work:**
+
+For each, show the issue number and the comment that would be posted.
+
+Ask the user to confirm before proceeding. Do NOT create, update, or
+comment on any GitHub issues until the user explicitly approves.
+
+### 7. Create or update frontend tracking issues
+
+After the user confirms, execute the planned actions.
 
 **For new HIGH/MEDIUM/LOW issues with no existing tracking issue:**
 
@@ -220,7 +242,7 @@ gh issue comment <ISSUE_NUMBER> --body "Backend issue #NNN has been closed. The 
 In either case, do NOT auto-close the tracking issue — only a human
 closes it after verifying.
 
-### 7. Report a summary
+### 8. Report a summary
 
 After processing all issues, report:
 
