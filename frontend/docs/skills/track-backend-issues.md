@@ -73,7 +73,8 @@ Apply the same filter: `frontend` label OR title starts with
 
 ### 3. Analyze each backend issue for frontend impact
 
-For each backend issue (no `frontend` label), determine:
+For each backend issue (not identified as a frontend tracking issue in
+step 2), determine:
 
 a. Does the frontend have a workaround for this issue that will need
    updating when the issue is fixed?
