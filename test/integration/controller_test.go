@@ -819,13 +819,13 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 			var otherNs, otherMesh string
 
 			BeforeEach(func() {
-				otherNs = util.UniqueName("other-ns")
-				otherMesh = util.UniqueName("other-mesh")
-				util.CreateNamespace(ctx, k8sClient, otherNs)
 				cluster1 = util.UniqueName("cluster1")
 				util.CreateK8sManagedCluster(ctx, k8sClient, cluster1, testClusterSet)
 				util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet)
 				expectMeshNotReady(meshName, testNs)
+				otherNs = util.UniqueName("other-ns")
+				otherMesh = util.UniqueName("other-mesh")
+				util.CreateNamespace(ctx, k8sClient, otherNs)
 				util.CreateMultiClusterMesh(ctx, k8sClient, otherMesh, otherNs, testClusterSet)
 				expectMeshNotReady(otherMesh, otherNs)
 			})
