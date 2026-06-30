@@ -17,7 +17,7 @@
 - **Create / delete mesh actions** — Add a "Create Mesh" button to the list page and "Delete Mesh" on the detail page.
 - **Edit mesh** — Edit issuer, operator config, etc. from the detail page.
 - **CI workflow** — Add a GitHub Actions workflow to the parent repo (`.github/workflows/frontend-ci.yml`) that runs `make test build` on PRs touching `frontend/**`, using two parallel jobs (test — which includes type checking — and build).
-- **Address backend issues that may affect the frontend** — Several open backend controller issues impact the frontend UI. See [BACKEND-ISSUES.md](./BACKEND-ISSUES.md) for the full analysis. That file should be regenerated periodically (e.g. when new backend issues are filed or before sprint planning) using the AI prompt embedded at the top of that file.
+- **Address backend issues that may affect the frontend** — Backend controller issues that impact the frontend are tracked as GitHub issues with the [`frontend` label](https://github.com/stolostron/multicluster-mesh-addon/issues?q=is%3Aissue+label%3Afrontend). Run the [track-backend-issues skill](./skills/track-backend-issues.md) periodically (e.g., when new backend issues are filed or before sprint planning) to analyze new backend issues and create or update tracking issues.
 - **Review performance monitoring checklist** — [PERFORMANCE.md](./PERFORMANCE.md) has a monitoring checklist with items to watch as cluster scale increases (enrichment latency, DOM size, cache memory, etc.). Periodically review it against current usage to determine if any thresholds are being hit and optimizations are needed.
 
 ## Blocked on backend
