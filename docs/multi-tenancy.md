@@ -12,7 +12,7 @@
 
 Multiple `MultiClusterMesh` resources can target the same [ManagedClusterSet], running independent meshes on the same pool of clusters. Isolation between meshes is achieved through:
 
-1. **Separate control plane namespaces** - Each mesh installs its Istio control plane in a distinct namespace on spoke clusters
+1. **Separate control plane namespaces** - Each mesh uses a separate control plane namespace on spoke clusters (users create the `Istio` CRs themselves; the add-on manages operator installation and mesh plumbing)
 2. **Namespace-scoped CRD** - `MultiClusterMesh` is namespace-scoped on the hub, enabling RBAC-based tenant boundaries
 3. **Per-mesh plumbing** - Each mesh gets its own trust domain, intermediate CA certificates, and discovery tokens
 
@@ -26,24 +26,16 @@ Multiple meshes on the same ClusterSet must use different `controlPlane.namespac
 
 A [ManagedClusterSet] with clusters labeled to join it:
 
-```yaml
-apiVersion: cluster.open-cluster-management.io/v1beta2
-kind: ManagedClusterSet
-metadata:
-  name: shared-cluster-set
-spec:
-  clusterSelector:
-    selectorType: ExclusiveClusterSetLabel
-```
-
 ```bash
-kubectl label managedcluster cluster1 cluster.open-cluster-management.io/clusterset=shared-cluster-set
-kubectl label managedcluster cluster2 cluster.open-cluster-management.io/clusterset=shared-cluster-set
+clusteradm create clusterset shared-cluster-set
+clusteradm clusterset set shared-cluster-set --clusters cluster1,cluster2
 ```
 
 ### Hub namespaces
 
-Each team gets a dedicated hub namespace:
+Each team gets a dedicated hub namespace.
+
+> **Note:** The add-on controller lists clusters by their ClusterSet label directly. A `ManagedClusterSetBinding` is not required for the add-on to function, though you may want one if using Placements alongside the mesh.
 
 ```bash
 kubectl create namespace mesh-team-a
@@ -52,54 +44,18 @@ kubectl create namespace mesh-team-b
 
 ### cert-manager trust chain
 
-Each namespace needs its own trust chain (self-signed issuer → root CA certificate → CA-backed issuer). The add-on uses the CA-backed issuer to mint intermediate CAs per cluster.
+Each namespace needs its own trust chain (self-signed issuer -> root CA certificate -> CA-backed issuer). The add-on uses the CA-backed issuer to mint intermediate CAs per cluster.
 
-Team A (`mesh-team-a`):
+Apply the trust chain from [`samples/cert-manager-issuer.yaml`](../samples/cert-manager-issuer.yaml) in each team namespace, adjusting the `namespace` and `commonName` fields:
 
-```yaml
----
-apiVersion: cert-manager.io/v1
-kind: Issuer
-metadata:
-  name: selfsigned-issuer
-  namespace: mesh-team-a
-spec:
-  selfSigned: {}
----
-apiVersion: cert-manager.io/v1
-kind: Certificate
-metadata:
-  name: mesh-root-ca
-  namespace: mesh-team-a
-spec:
-  isCA: true
-  commonName: Team A Mesh Root CA
-  secretName: mesh-root-ca-secret
-  duration: 87600h
-  renewBefore: 720h
-  privateKey:
-    algorithm: ECDSA
-    size: 256
-  issuerRef:
-    name: selfsigned-issuer
-    kind: Issuer
-    group: cert-manager.io
----
-apiVersion: cert-manager.io/v1
-kind: Issuer
-metadata:
-  name: mesh-root-ca
-  namespace: mesh-team-a
-spec:
-  ca:
-    secretName: mesh-root-ca-secret
+```bash
+kubectl apply -f samples/cert-manager-issuer.yaml -n mesh-team-a
+kubectl apply -f samples/cert-manager-issuer.yaml -n mesh-team-b
 ```
-
-Repeat for `mesh-team-b`.
 
 ### MultiClusterMesh resources
 
-Team A — control plane in `istio-system-team-a`:
+Team A, control plane in `istio-system-team-a`:
 
 ```yaml
 apiVersion: mesh.open-cluster-management.io/v1alpha1
@@ -118,7 +74,7 @@ spec:
           name: mesh-root-ca
 ```
 
-Team B — control plane in `istio-system-team-b`:
+Team B, control plane in `istio-system-team-b`:
 
 ```yaml
 apiVersion: mesh.open-cluster-management.io/v1alpha1
@@ -137,21 +93,20 @@ spec:
           name: mesh-root-ca
 ```
 
-Both meshes share the operator installation on each cluster. Trust domains (`team-a-mesh`, `team-b-mesh`) and discovery tokens are independent.
+Both meshes share the operator installation on each cluster. Trust domains (`team-a-mesh`, `team-b-mesh`) and discovery tokens are independent. Although both meshes reference `issuerRef.name: mesh-root-ca`, the issuerRef resolves in each mesh's hub namespace, so each team's `mesh-root-ca` is a different issuer backed by a different root CA.
 
 ## Hub Namespace Isolation
 
 Since `MultiClusterMesh` is namespace-scoped, standard Kubernetes RBAC restricts which teams can create or modify mesh resources. The controller reconciles meshes across all namespaces and enforces conflict rules globally.
 
-Example RBAC for Team A:
+Define a `ClusterRole` once and bind it per namespace via `RoleBinding`:
 
 ```yaml
 ---
 apiVersion: rbac.authorization.k8s.io/v1
-kind: Role
+kind: ClusterRole
 metadata:
   name: mesh-admin
-  namespace: mesh-team-a
 rules:
 - apiGroups: ["mesh.open-cluster-management.io"]
   resources: ["multiclustermeshes"]
@@ -167,20 +122,24 @@ subjects:
   name: team-a
   apiGroup: rbac.authorization.k8s.io
 roleRef:
-  kind: Role
+  kind: ClusterRole
   name: mesh-admin
   apiGroup: rbac.authorization.k8s.io
 ```
 
-Repeat for `mesh-team-b` with the appropriate subject.
+Repeat the `RoleBinding` for `mesh-team-b` with the appropriate subject.
+
+> In practice, scope full CRUD access to platform engineers and grant the rest of the team read-only (`get`, `list`, `watch`) access.
 
 ## Data-Plane Isolation
 
 The add-on handles control-plane plumbing. Data-plane isolation between co-located meshes requires user-side configuration on each spoke cluster.
 
+> The following configuration is applied directly on each spoke cluster (not on the hub).
+
 ### `discoverySelectors`
 
-Each Istio control plane discovers services across all namespaces by default. Configure `discoverySelectors` to restrict visibility to the mesh's own application namespaces:
+Each Istio control plane discovers services across all namespaces by default. Configure `discoverySelectors` on each spoke cluster to restrict visibility to the mesh's own application namespaces:
 
 ```yaml
 apiVersion: sailoperator.io/v1
@@ -196,7 +155,9 @@ spec:
           mesh: team-a
 ```
 
-Label application namespaces to match:
+Repeat for Team B with `mesh: team-b`.
+
+Label application namespaces on each spoke cluster to match:
 
 ```bash
 kubectl label namespace app-frontend mesh=team-a
@@ -255,7 +216,7 @@ spec:
   controlPlane:
     namespace: istio-system-team-b
   operator:
-    channel: "3.0"  # conflicts with team-a-mesh using "stable"
+    channel: "3.0"  # conflicts with team-a-mesh (defaults to "stable")
   security:
     trust:
       certManager:
