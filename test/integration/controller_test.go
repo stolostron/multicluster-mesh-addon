@@ -439,26 +439,18 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 
 		When("metadata.name exceeds 63 characters", func() {
 			It("should reject creation", func() {
-				longName := "a-mesh-name-that-is-way-too-long-and-exceeds-the-sixty-three-character-limit"
-				mesh := &meshv1alpha1.MultiClusterMesh{
-					ObjectMeta: metav1.ObjectMeta{Name: longName, Namespace: testNs},
-					Spec:       meshv1alpha1.MultiClusterMeshSpec{ClusterSet: testClusterSet},
-				}
-				err := k8sClient.Create(ctx, mesh)
-				Expect(err).To(HaveOccurred(), "expected validation error for long name")
-				Expect(errors.IsInvalid(err)).To(BeTrue())
+				expectInvalidCreateMeshFailure(
+					"a-mesh-name-that-is-way-too-long-and-exceeds-the-sixty-three-character-limit", testNs,
+					meshv1alpha1.MultiClusterMeshSpec{ClusterSet: testClusterSet},
+					"metadata.name must not exceed 63 characters")
 			})
 		})
 
 		When("spec.clusterSet is empty", func() {
 			It("should reject creation", func() {
-				mesh := &meshv1alpha1.MultiClusterMesh{
-					ObjectMeta: metav1.ObjectMeta{Name: meshName + "-empty", Namespace: testNs},
-					Spec:       meshv1alpha1.MultiClusterMeshSpec{ClusterSet: ""},
-				}
-				err := k8sClient.Create(ctx, mesh)
-				Expect(err).To(HaveOccurred(), "expected validation error for empty clusterSet")
-				Expect(errors.IsInvalid(err)).To(BeTrue())
+				expectInvalidCreateMeshFailure(meshName+"-empty", testNs,
+					meshv1alpha1.MultiClusterMeshSpec{ClusterSet: ""},
+					"spec.clusterSet")
 			})
 		})
 
@@ -472,6 +464,21 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 				Expect(errors.IsInvalid(err)).To(BeTrue())
 			})
 		})
+
+		DescribeTable("should reject reserved operator namespace",
+			func(ns, expectedMessage string) {
+				expectInvalidCreateMeshFailure(meshName+"-ns", testNs,
+					meshv1alpha1.MultiClusterMeshSpec{
+						ClusterSet: testClusterSet,
+						Operator:   meshv1alpha1.OperatorConfig{Namespace: ns},
+					}, expectedMessage)
+			},
+			Entry("openshift-operators", "openshift-operators", "openshift-"),
+			Entry("openshift-monitoring", "openshift-monitoring", "openshift-"),
+			Entry("kube-system", "kube-system", "kube-"),
+			Entry("kube-public", "kube-public", "kube-"),
+			Entry("default", "default", "'default'"),
+		)
 
 		It("should allow two meshes with different control plane namespaces", func() {
 			util.CreateMultiClusterMesh(ctx, k8sClient, otherMesh, testNs, testClusterSet, meshv1alpha1.MultiClusterMeshSpec{
@@ -859,6 +866,17 @@ func expectCacertsSecret(work *workv1.ManifestWork) {
 	Expect(secret.Data).To(HaveKey("tls.crt"))
 	Expect(secret.Data).To(HaveKey("tls.key"))
 	Expect(secret.Data).To(HaveKey("ca.crt"))
+}
+
+func expectInvalidCreateMeshFailure(name, namespace string, spec meshv1alpha1.MultiClusterMeshSpec, messageSubstring string) {
+	mesh := &meshv1alpha1.MultiClusterMesh{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
+		Spec:       spec,
+	}
+	err := k8sClient.Create(ctx, mesh)
+	Expect(err).To(HaveOccurred())
+	Expect(errors.IsInvalid(err)).To(BeTrue())
+	Expect(err.Error()).To(ContainSubstring(messageSubstring))
 }
 
 func unmarshalManifest(manifest workv1.Manifest, into interface{}) error {

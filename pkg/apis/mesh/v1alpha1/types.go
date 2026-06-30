@@ -106,6 +106,9 @@ type OperatorConfig struct {
 	// using a namespace that contains other resources.
 	// +optional
 	// +kubebuilder:default="multicluster-mesh-operator"
+	// +kubebuilder:validation:XValidation:rule="!self.startsWith('openshift-')",message="namespace must not use the reserved 'openshift-' prefix"
+	// +kubebuilder:validation:XValidation:rule="!self.startsWith('kube-')",message="namespace must not use the reserved 'kube-' prefix"
+	// +kubebuilder:validation:XValidation:rule="self != 'default'",message="namespace must not be 'default'"
 	Namespace string `json:"namespace,omitempty"`
 
 	// Channel is the OLM subscription channel (e.g., "stable", "1.23")

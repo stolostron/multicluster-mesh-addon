@@ -81,6 +81,13 @@ spec:
                       This namespace may be deleted when the mesh is removed, so avoid
                       using a namespace that contains other resources.
                     type: string
+                    x-kubernetes-validations:
+                    - message: namespace must not use the reserved 'openshift-' prefix
+                      rule: '!self.startsWith(''openshift-'')'
+                    - message: namespace must not use the reserved 'kube-' prefix
+                      rule: '!self.startsWith(''kube-'')'
+                    - message: namespace must not be 'default'
+                      rule: self != 'default'
                   source:
                     description: |-
                       Source is the CatalogSource name
