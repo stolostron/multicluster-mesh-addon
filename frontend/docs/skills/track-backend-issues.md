@@ -78,14 +78,22 @@ f. Is the frontend actually broken due to this issue without us
 
 ### 4. Classify each issue's frontend impact
 
-- **HIGH:** Frontend has a workaround that must be updated, or the UI is
-  actively misleading users.
-- **MEDIUM:** Frontend will need changes when fixed, or displays subtly
-  incorrect information.
-- **LOW:** Minor impact, frontend handles it gracefully or needs trivial
-  updates.
-- **NONE:** No frontend impact (test infra, CI, controller internals,
-  documentation). Skip these — do not create a tracking issue.
+- **HIGH:** Frontend has a workaround that must be updated, or the
+  frontend code must change when the backend issue is fixed.
+- **MEDIUM:** Frontend will need non-trivial changes when fixed (new
+  code paths, type updates, new UI elements).
+- **LOW:** Frontend needs trivial updates when fixed (e.g., adding a
+  reason string to a map, minor display tweak).
+- **NONE:** No frontend code changes needed — even if the backend bug
+  causes suboptimal UX, the frontend displays whatever the backend
+  reports and will automatically benefit from the fix. Also includes
+  test infra, CI, controller internals, and documentation issues.
+  Skip these — do not create a tracking issue.
+
+The key test: **will the frontend need code changes when this backend
+issue is fixed?** If not, classify as NONE regardless of current UX
+impact. The purpose of tracking issues is to flag frontend work that
+needs doing, not to document backend bugs.
 
 ### 5. Check for existing tracking issues (deduplication)
 
