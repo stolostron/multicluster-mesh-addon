@@ -14,8 +14,12 @@ times will not create duplicate issues.
 
 ## Prerequisites
 
-- `gh` CLI authenticated with push access to the repo.
+- `gh` CLI authenticated with access to the repo.
 - All commands run from the `multicluster-mesh-addon` repository root.
+- **Labeling requires `triage` or higher permission.** If you only have
+  `pull` access, `gh issue create --label` silently fails to apply
+  labels. The skill handles this by including a "Labels" line in the
+  issue body as a fallback so a maintainer can apply them later.
 
 ## Instructions
 
@@ -124,6 +128,7 @@ gh issue create \
   --label "<other relevant labels>" \
   --body "$(cat <<'EOF'
 Backend issue: #NNN
+Labels: `frontend`, `<other relevant labels>`
 
 **Impact:** <SEVERITY> — <one-line summary>.
 
@@ -146,6 +151,17 @@ EOF
 
 Additional labels to include when relevant (use the backend issue's own
 labels): `trust`, `operator`, `status`, `api`, `controller`.
+
+After creating each issue, verify labels were applied:
+
+```
+gh issue view <ISSUE_NUMBER> --json labels --jq '.labels[].name'
+```
+
+If labels are missing (empty output), the user lacks `triage` permission.
+The labels are still recorded in the issue body ("Labels:" line) so a
+maintainer can apply them. Warn the user once and continue creating the
+remaining issues.
 
 **For existing tracking issues that need updating:**
 
