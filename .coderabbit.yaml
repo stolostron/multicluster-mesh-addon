@@ -16,6 +16,68 @@ reviews:
         - Skip repetition — if a pattern repeats, mention it once at a summary level only.
         - Do not post comments on code style, formatting, or non-critical improvements.
         - Before flagging a deviation from best practices, check if the PR follows an existing pattern in the codebase. If the same approach is used elsewhere in the repo, it's intentional, not a bug.
+    - path: 'pkg/apis/mesh/v1alpha1/types.go'
+      instructions: >
+        This file defines the CRD types whose Go structs, constants, and
+        default values are mirrored by hand in the frontend console plugin.
+        When ANY of the following change, the PR MUST include matching
+        frontend updates — post a blocking comment if it does not.
+
+
+        Struct / field shape — `MultiClusterMeshSpec`, `MultiClusterMeshStatus`,
+        `ClusterMeshStatus` and their nested types are mirrored in
+        `frontend/src/types/multiClusterMesh.ts`. Adding, removing, renaming,
+        or re-typing a field here requires the same change there.
+
+
+        Condition type constants (`Condition*`) — `ConditionReady`,
+        `ConditionOperatorInstalled`, etc. are referenced as string literals
+        in `frontend/src/components/MeshDetailPage.tsx` (cluster
+        categorization, status display) and `MeshStatus.tsx` (default
+        condition type). A rename or removal breaks those look-ups.
+
+
+        Reason constants (`Reason*`) — every `Reason*` string value has a
+        corresponding key in the `friendlyReasons` map in
+        `frontend/src/components/MeshStatus.tsx` that maps it to a
+        user-friendly label. Adding, renaming, or removing a reason requires
+        updating that map and its tests.
+
+
+        Default values — kubebuilder defaults like `istio-system`,
+        `stable`, `Automatic`, `Issuer`, `360h` have fallback display logic
+        in `frontend/src/components/MeshDetailPage.tsx`. Changing a default
+        here may require updating the frontend fallback.
+
+
+        Enum constraints — kubebuilder `+kubebuilder:validation:Enum` values
+        (e.g., `Automatic|Manual`, `Issuer|ClusterIssuer`) are mirrored as
+        TypeScript union types in `frontend/src/types/multiClusterMesh.ts`.
+    - path: 'pkg/hub/mesh/controller.go'
+      instructions: >
+        This controller defines label keys, ManifestWork names, and
+        behavioral constants that the frontend console plugin depends on.
+        When ANY of the following change, check whether the PR needs
+        matching frontend updates — post a comment if it does not.
+
+
+        Label key constants — `mesh.open-cluster-management.io/cluster-name`,
+        `mesh.open-cluster-management.io/mesh-name`, and
+        `mesh.open-cluster-management.io/mesh-namespace` are used in
+        `frontend/src/components/TrustStatusCard.tsx` as label selectors for
+        Certificate and ManifestWork watches.
+
+
+        Operator status logic — the `determineStatus` function sets
+        condition reasons on `ClusterMeshStatus` entries. The set of possible
+        reason values must stay in sync with the `friendlyReasons` map in
+        `frontend/src/components/MeshStatus.tsx` and the `CONFLICT_REASONS`
+        list in `frontend/src/components/MeshDetailPage.tsx`.
+
+
+        ManifestWork names — `OperatorManifestWorkName` and
+        `ManifestWorkNameCacerts` are used in ManifestWork label selectors;
+        the frontend's TrustStatusCard watches ManifestWorks by those labels.
     - path: '**/*.go'
       instructions: >
         - This project uses klog (printf-style); do not suggest structured
@@ -43,6 +105,30 @@ reviews:
     custom_checks:
       - name: Test Structure and Quality
         mode: off
+      - name: backend-frontend-consistency
+        mode: error
+        instructions: |
+          This repo has a Go backend (pkg/) and a TypeScript frontend
+          (frontend/) that share contract surfaces. When the PR changes any
+          of the Go files below WITHOUT also changing the corresponding
+          frontend files, flag it as an error:
+
+          pkg/apis/mesh/v1alpha1/types.go changes → must check:
+            - frontend/src/types/multiClusterMesh.ts (struct mirror)
+            - frontend/src/components/MeshStatus.tsx (friendlyReasons map)
+            - frontend/src/components/MeshDetailPage.tsx (condition types,
+              conflict reasons, default value fallbacks)
+
+          pkg/hub/mesh/controller.go changes to label key constants,
+          ManifestWork name constants, or status reason logic → must check:
+            - frontend/src/components/TrustStatusCard.tsx (label selectors)
+            - frontend/src/components/MeshStatus.tsx (reason codes)
+            - frontend/src/components/MeshDetailPage.tsx (CONFLICT_REASONS)
+
+          Only flag when the Go change actually modifies a shared surface
+          (struct fields, constants, label keys, reason values, defaults).
+          Do not flag Go-only internal refactors that don't change the
+          values exposed to the frontend.
       - name: no-sensitive-data-in-logs
         mode: error
         instructions: |
