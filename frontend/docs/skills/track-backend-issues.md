@@ -152,16 +152,36 @@ EOF
 Additional labels to include when relevant (use the backend issue's own
 labels): `trust`, `operator`, `status`, `api`, `controller`.
 
-After creating each issue, verify labels were applied:
+After creating each issue, apply labels via a Prow `/label` comment.
+This works even without `triage` permission because Prow's bot applies
+the label using its own credentials:
+
+```
+gh issue comment <ISSUE_NUMBER> --body "/label frontend"
+```
+
+Add additional labels with separate `/label` commands in the same
+comment:
+
+```
+gh issue comment <ISSUE_NUMBER> --body "$(cat <<'EOF'
+/label frontend
+/label trust
+/label status
+EOF
+)"
+```
+
+Verify labels were applied:
 
 ```
 gh issue view <ISSUE_NUMBER> --json labels --jq '.labels[].name'
 ```
 
-If labels are missing (empty output), the user lacks `triage` permission.
-The labels are still recorded in the issue body ("Labels:" line) so a
-maintainer can apply them. Warn the user once and continue creating the
-remaining issues.
+If labels are still missing after the Prow comment, the repo may not
+have the Prow `label` plugin enabled. The labels are recorded in the
+issue body ("Labels:" line) as a fallback so a maintainer can apply
+them manually.
 
 **For existing tracking issues that need updating:**
 
