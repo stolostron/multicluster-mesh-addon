@@ -54,17 +54,22 @@ gh issue list --state open --limit 200 --json number,title,body,labels
 
 Split the results into two sets:
 
-- **Backend issues:** issues that do NOT have the `frontend` label.
-  These are candidates for analysis.
-- **Existing frontend tracking issues:** issues that DO have the
-  `frontend` label. These are already being tracked.
+- **Existing frontend tracking issues:** issues that have the `frontend`
+  label OR whose title starts with `[frontend]`. Either signal
+  identifies a tracking issue (the title prefix is the fallback when
+  labels can't be applied due to permissions).
+- **Backend issues:** all remaining issues. These are candidates for
+  analysis.
 
-Also fetch closed issues that have the `frontend` label — these may need
-updating if their corresponding backend issue was recently closed:
+Also fetch closed frontend tracking issues — these may need updating if
+their corresponding backend issue was recently closed:
 
 ```
 gh issue list --state closed --label frontend --limit 200 --json number,title,body,labels
 ```
+
+Apply the same filter: `frontend` label OR title starts with
+`[frontend]`.
 
 ### 3. Analyze each backend issue for frontend impact
 
