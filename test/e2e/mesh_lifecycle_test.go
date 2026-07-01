@@ -26,6 +26,12 @@ import (
 const (
 	controllerNamespace = "multicluster-mesh-system"
 	controllerName      = "multicluster-mesh-controller"
+
+	testOperatorName      = "sailoperator"
+	testOperatorNamespace = "sail-operator"
+	testCatalogSource     = "operatorhubio-catalog"
+	testCatalogNamespace  = "olm"
+	testDefaultChannel    = "stable"
 )
 
 var clusters = []string{"cluster1", "cluster2"}
@@ -63,7 +69,15 @@ var _ = Describe("MultiClusterMesh lifecycle", Ordered, func() {
 
 	BeforeEach(func(ctx SpecContext) {
 		Step("Creating test mesh")
-		mesh = util.CreateMultiClusterMesh(ctx, hubClient, util.UniqueName("test-mesh"), ns, "mesh-cluster-set")
+		// Kind clusters don't have the OSSM catalog, so we override to use Sail from upstream.
+		mesh = util.CreateMultiClusterMesh(ctx, hubClient, util.UniqueName("test-mesh"), ns, "mesh-cluster-set",
+			meshv1alpha1.MultiClusterMeshSpec{
+				Operator: meshv1alpha1.OperatorConfig{
+					Name:            testOperatorName,
+					Namespace:       testOperatorNamespace,
+					Source:          testCatalogSource,
+					SourceNamespace: testCatalogNamespace,
+				}})
 
 		Step("Waiting for controller to reconcile")
 		Eventually(func(g Gomega) {
@@ -101,21 +115,21 @@ var _ = Describe("MultiClusterMesh lifecycle", Ordered, func() {
 			}).Should(Succeed())
 
 			Step("Verifying operator namespace exists on %s", cluster)
-			err := spokeClient.Get(ctx, key.Of(meshcontroller.DefaultOperatorNs), &corev1.Namespace{})
+			err := spokeClient.Get(ctx, key.Of(testOperatorNamespace), &corev1.Namespace{})
 			Expect(err).NotTo(HaveOccurred())
 
 			Step("Verifying OperatorGroup exists on %s", cluster)
 			ogList := &operatorsv1.OperatorGroupList{}
-			err = spokeClient.List(ctx, ogList, client.InNamespace(meshcontroller.DefaultOperatorNs))
+			err = spokeClient.List(ctx, ogList, client.InNamespace(testOperatorNamespace))
 			Expect(err).NotTo(HaveOccurred())
 			Expect(ogList.Items).To(HaveLen(1))
 
 			Step("Verifying Subscription content on %s", cluster)
 			sub, err := getSubscription(ctx, spokeClient)
 			Expect(err).NotTo(HaveOccurred())
-			Expect(sub.Spec.Package).To(Equal(meshcontroller.OperatorNameSail))
-			Expect(sub.Spec.Channel).To(Equal(meshcontroller.DefaultChannel))
-			Expect(sub.Spec.CatalogSource).To(Equal(meshcontroller.DefaultCatalogSource))
+			Expect(sub.Spec.Package).To(Equal(testOperatorName))
+			Expect(sub.Spec.Channel).To(Equal(testDefaultChannel))
+			Expect(sub.Spec.CatalogSource).To(Equal(testCatalogSource))
 		}
 	})
 
@@ -148,7 +162,7 @@ var _ = Describe("MultiClusterMesh lifecycle", Ordered, func() {
 			// Spoke-side cleanup depends on the OCM work agent processing the
 			// ManifestWork deletion and OLM processing any Subscription finalizers,
 			// which can take longer than the default timeout in CI.
-			util.ExpectResourceDeleted(ctx, spokeClient, &operatorsv1alpha1.Subscription{}, meshcontroller.OperatorNameSail, meshcontroller.DefaultOperatorNs, 2*time.Minute)
+			util.ExpectResourceDeleted(ctx, spokeClient, &operatorsv1alpha1.Subscription{}, testOperatorName, testOperatorNamespace, 2*time.Minute)
 		}
 	})
 })
@@ -165,6 +179,6 @@ func getOperatorMW(ctx context.Context, cluster string) (*workv1.ManifestWork, e
 
 func getSubscription(ctx context.Context, spokeClient client.Client) (*operatorsv1alpha1.Subscription, error) {
 	sub := &operatorsv1alpha1.Subscription{}
-	err := spokeClient.Get(ctx, key.Of(meshcontroller.OperatorNameSail, meshcontroller.DefaultOperatorNs), sub)
+	err := spokeClient.Get(ctx, key.Of(testOperatorName, testOperatorNamespace), sub)
 	return sub, err
 }

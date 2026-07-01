@@ -82,7 +82,7 @@ type MultiClusterMeshSpec struct {
 	// +optional
 	ControlPlane ControlPlaneConfig `json:"controlPlane,omitempty"`
 
-	// Operator defines the Sail Operator installation configuration
+	// Operator defines the service mesh operator installation configuration
 	// +optional
 	Operator OperatorConfig `json:"operator,omitempty"`
 
@@ -99,11 +99,17 @@ type ControlPlaneConfig struct {
 	Namespace string `json:"namespace,omitempty"`
 }
 
-// OperatorConfig defines the Sail Operator installation settings
+// OperatorConfig defines the service mesh operator installation settings.
+// Defaults target OSSM on OpenShift. Override fields to use a different operator variant (e.g. Sail).
 type OperatorConfig struct {
-	// Namespace is the namespace where the Sail Operator will be installed
-	// Defaults to "openshift-operators" on OpenShift, "sail-operator" on vanilla Kubernetes
+	// Name is the OLM package name of the operator
 	// +optional
+	// +kubebuilder:default="servicemeshoperator3"
+	Name string `json:"name,omitempty"`
+
+	// Namespace is the namespace where the operator will be installed
+	// +optional
+	// +kubebuilder:default="openshift-operators"
 	Namespace string `json:"namespace,omitempty"`
 
 	// Channel is the OLM subscription channel (e.g., "stable", "1.23")
@@ -112,13 +118,13 @@ type OperatorConfig struct {
 	Channel string `json:"channel,omitempty"`
 
 	// Source is the CatalogSource name
-	// Defaults to "redhat-operators" on OpenShift, "operatorhubio-catalog" on vanilla Kubernetes
 	// +optional
+	// +kubebuilder:default="redhat-operators"
 	Source string `json:"source,omitempty"`
 
 	// SourceNamespace is the namespace of the CatalogSource
-	// Defaults to "openshift-marketplace" on OpenShift, "olm" on vanilla Kubernetes
 	// +optional
+	// +kubebuilder:default="openshift-marketplace"
 	SourceNamespace string `json:"sourceNamespace,omitempty"`
 
 	// StartingCSV is the specific operator version to install
@@ -199,9 +205,6 @@ const (
 
 	// ReasonOperatorInstalled indicates the operator CSV has been successfully installed
 	ReasonOperatorInstalled = "Installed"
-
-	// ReasonMissingProductClaim indicates the cluster is missing its product claim
-	ReasonMissingProductClaim = "MissingProductClaim"
 
 	// ReasonReconcileError indicates an error occurred during reconciliation
 	ReasonReconcileError = "ReconcileError"
