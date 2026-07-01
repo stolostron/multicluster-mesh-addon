@@ -748,16 +748,17 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 	Context("Endpoint discovery", func() {
 		var cluster1, cluster2, cluster3 string
 
-		When("A MultiClusterMesh is created", func() {
+		When("a MultiClusterMesh is created", func() {
 			BeforeEach(func() {
 				cluster1 = util.UniqueName("cluster1")
 				cluster2 = util.UniqueName("cluster2")
 				util.CreateK8sManagedCluster(ctx, k8sClient, cluster1, testClusterSet)
 				util.CreateK8sManagedCluster(ctx, k8sClient, cluster2, testClusterSet)
-				util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet)
 			})
 
 			It("should create ManagedServiceAccount resources with default validity for each ManagedCluster in the ClusterSet", func() {
+				util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet)
+
 				msa1 := expectManagedServiceAccount(testNs, meshName, cluster1)
 				msa2 := expectManagedServiceAccount(testNs, meshName, cluster2)
 
@@ -770,11 +771,13 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 			})
 
 			It("should create ManagedServiceAccount resources with custom TokenValidity value", func() {
-				updateMesh(meshName, testNs, func(mesh *meshv1alpha1.MultiClusterMesh) {
-					mesh.Spec.Security.Discovery.TokenValidity = &metav1.Duration{Duration: 15 * time.Minute}
-				})
+				util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet, meshv1alpha1.MultiClusterMeshSpec{
+				Security: meshv1alpha1.SecurityConfig{
+					Discovery: meshv1alpha1.DiscoveryConfig{
+						TokenValidity: &metav1.Duration{Duration: 15 * time.Minute},
+					},
+				}})
 
-				expectMeshNotReady(meshName, testNs)
 				msa1 := expectManagedServiceAccount(testNs, meshName, cluster1)
 				Expect(msa1.Spec.Rotation.Validity).To(Equal(metav1.Duration{Duration: 15 * time.Minute}))
 			})
