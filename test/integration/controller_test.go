@@ -783,12 +783,14 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 			})
 
 			It("should create a ManagedServiceAccount after adding a cluster to the ClusterSet", func() {
+				util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet)
 				cluster3 = util.UniqueName("cluster3")
 				util.CreateK8sManagedCluster(ctx, k8sClient, cluster3, testClusterSet)
 				expectManagedServiceAccount(testNs, meshName, cluster3)
 			})
 
 			It("should cleanup a ManagedServiceAccount after removing a cluster from the ClusterSet", func() {
+				util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet)
 				updateClusterSetLabel(cluster2, "")
 				util.ExpectResourceDeleted(ctx, k8sClient, &msav1beta1.ManagedServiceAccount{},
 					expectedManagedServiceAccountName(testNs, meshName), cluster2)
