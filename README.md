@@ -164,12 +164,12 @@ kubectl create namespace mesh-system
 
 2. Create the cert-manager trust chain (self-signed Issuer, root CA Certificate, and CA-backed Issuer):
 ```bash
-kubectl apply -f samples/cert-manager-issuer.yaml
+kubectl apply -n mesh-system -f samples/cert-manager-issuer.yaml
 ```
 
 3. Deploy a basic MultiClusterMesh:
 ```bash
-kubectl apply -f samples/basic.yaml
+kubectl apply -n mesh-system -f samples/basic.yaml
 ```
 
 > **Note:** The `basic.yaml` sample uses `clusterSet: mesh-cluster-set`. Update this field to match your actual ManagedClusterSet name as needed.

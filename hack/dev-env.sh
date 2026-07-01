@@ -307,7 +307,7 @@ setup_mesh() {
         -n cert-manager --timeout=120s
 
     log "Applying cert-manager trust chain (self-signed Issuer, root CA Certificate, CA-backed Issuer)"
-    on "${HUB}" kubectl apply -f "${SCRIPT_DIR}/samples/cert-manager-issuer.yaml"
+    on "${HUB}" kubectl apply -n mesh-system -f "${SCRIPT_DIR}/samples/cert-manager-issuer.yaml"
 
     log "Waiting for bootstrap Issuer to be ready..."
     on "${HUB}" retry kubectl wait issuer/mesh-selfsigned-issuer \
@@ -322,7 +322,7 @@ setup_mesh() {
         -n mesh-system --for=condition=Ready --timeout=60s
 
     log "Creating MultiClusterMesh CR"
-    on "${HUB}" kubectl apply -f "${SCRIPT_DIR}/samples/basic.yaml"
+    on "${HUB}" kubectl apply -n mesh-system -f "${SCRIPT_DIR}/samples/basic.yaml"
 
     log "Mesh setup complete. The controller will now reconcile the mesh."
     log "Monitor progress: $(on "${HUB}" echo kubectl get multiclustermesh -n mesh-system)"

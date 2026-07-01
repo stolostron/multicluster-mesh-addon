@@ -135,23 +135,23 @@ update-test-crds: deps ## Update test CRDs from OCM API, managed-serviceaccount 
 	OCM_API_PATH=$$(go list -m -f '{{.Dir}}' open-cluster-management.io/api); \
 	mkdir -p $(TEST_CRD_DIR)/ocm; \
 	echo "Copying CRDs from $$OCM_API_PATH..."; \
-	cp -v $$OCM_API_PATH/cluster/v1/*.crd.yaml $(TEST_CRD_DIR)/ocm/ 2>/dev/null || true; \
-	cp -v $$OCM_API_PATH/cluster/v1beta2/*.crd.yaml $(TEST_CRD_DIR)/ocm/ 2>/dev/null || true; \
-	cp -v $$OCM_API_PATH/work/v1/*.crd.yaml $(TEST_CRD_DIR)/ocm/ 2>/dev/null || true; \
+	cp -fv $$OCM_API_PATH/cluster/v1/*.crd.yaml $(TEST_CRD_DIR)/ocm/ 2>/dev/null || true; \
+	cp -fv $$OCM_API_PATH/cluster/v1beta2/*.crd.yaml $(TEST_CRD_DIR)/ocm/ 2>/dev/null || true; \
+	cp -fv $$OCM_API_PATH/work/v1/*.crd.yaml $(TEST_CRD_DIR)/ocm/ 2>/dev/null || true; \
 	echo "Test CRDs updated successfully in $(TEST_CRD_DIR)/ocm/"
 	@echo "Updating test CRDs from open-cluster-management.io/managed-serviceaccount..."
 	@set -e; \
 	OCM_MSA_PATH=$$(go list -m -f '{{.Dir}}' open-cluster-management.io/managed-serviceaccount); \
 	echo "Copying CRDs from $$OCM_MSA_PATH..."; \
-	cp -v $$OCM_MSA_PATH/charts/managed-serviceaccount/crds/*.yaml $(TEST_CRD_DIR)/ocm/; \
+	cp -fv $$OCM_MSA_PATH/charts/managed-serviceaccount/crds/*.yaml $(TEST_CRD_DIR)/ocm/; \
 	echo "Test CRDs for MSA updated successfully in $(TEST_CRD_DIR)/ocm/"
 	@echo "Updating test CRDs from cert-manager..."
 	@set -e; \
 	CERTMANAGER_PATH=$$(go list -m -f '{{.Dir}}' github.com/cert-manager/cert-manager); \
 	mkdir -p $(TEST_CRD_DIR)/cert-manager; \
 	echo "Copying CRDs from $$CERTMANAGER_PATH..."; \
-	cp -v $$CERTMANAGER_PATH/deploy/crds/cert-manager.io_certificates.yaml $(TEST_CRD_DIR)/cert-manager/ 2>/dev/null || true; \
-	cp -v $$CERTMANAGER_PATH/deploy/crds/cert-manager.io_issuers.yaml $(TEST_CRD_DIR)/cert-manager/ 2>/dev/null || true; \
+	cp -fv $$CERTMANAGER_PATH/deploy/crds/cert-manager.io_certificates.yaml $(TEST_CRD_DIR)/cert-manager/ 2>/dev/null || true; \
+	cp -fv $$CERTMANAGER_PATH/deploy/crds/cert-manager.io_issuers.yaml $(TEST_CRD_DIR)/cert-manager/ 2>/dev/null || true; \
 	echo "Test CRDs updated successfully in $(TEST_CRD_DIR)/cert-manager/"
 
 .PHONY: test-integration
