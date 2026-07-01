@@ -19,7 +19,7 @@ func (r *Reconciler) ensureManagedServiceAccountCreated(ctx context.Context, mes
 	msaName := fmt.Sprintf("%s-%s-%s", mesh.Namespace, "istio-reader", mesh.Name)
 	existing := &msav1beta1.ManagedServiceAccount{}
 	if err := r.Get(ctx, key.Of(msaName, cluster.Name), existing); err == nil {
-		klog.V(4).Infof("Cluster %s has an existing ManagedServiceAccount resource %s, skipping ensureManagedServiceAccountCreated", cluster.Name, msaName)
+		klog.V(4).Infof("Cluster %s already has ManagedServiceAccount %s, skipping", cluster.Name, msaName)
 		return nil
 	} else if !errors.IsNotFound(err) {
 		return fmt.Errorf("failed to get ManagedServiceAccount %s/%s: %w", cluster.Name, msaName, err)
