@@ -135,7 +135,7 @@ To test certificate and trust distribution, create a cert-manager Issuer and con
 cd <multicluster-mesh-addon-repo>
 
 # Create a cert-manager trust chain (ClusterIssuer -> root CA Certificate -> CA-backed Issuer)
-oc apply -f samples/cert-manager-issuer.yaml
+oc apply -n mesh-system -f samples/cert-manager-issuer.yaml
 
 # Configure the mesh to use it
 oc patch multiclustermesh my-mesh -n mesh-system --type=merge \

@@ -199,7 +199,7 @@ EOF
     || die "Failed to create mesh-system namespace"
 
   echo "=== Creating cert-manager trust chain ==="
-  oc apply -f "${REPO_ROOT}/samples/cert-manager-issuer.yaml" \
+  oc apply -n mesh-system -f "${REPO_ROOT}/samples/cert-manager-issuer.yaml" \
     || die "Failed to create cert-manager trust chain"
 
   echo "=== Creating my-mesh MCM (with trust) ==="
@@ -331,7 +331,7 @@ uninstall() {
   oc delete multiclustermesh my-mesh staging-mesh -n mesh-system --ignore-not-found 2>/dev/null || true
 
   echo "=== Removing cert-manager trust chain ==="
-  oc delete -f "${REPO_ROOT}/samples/cert-manager-issuer.yaml" --ignore-not-found 2>/dev/null || true
+  oc delete -n mesh-system -f "${REPO_ROOT}/samples/cert-manager-issuer.yaml" --ignore-not-found 2>/dev/null || true
 
   echo "=== Removing mesh-system namespace ==="
   oc delete namespace mesh-system --ignore-not-found 2>/dev/null || true

@@ -14,7 +14,6 @@ apiVersion: cert-manager.io/v1
 kind: Issuer
 metadata:
   name: mesh-selfsigned-issuer
-  namespace: mesh-system
 spec:
   selfSigned: {}
 
@@ -24,7 +23,6 @@ apiVersion: cert-manager.io/v1
 kind: Certificate
 metadata:
   name: mesh-root-ca
-  namespace: mesh-system
 spec:
   isCA: true
   commonName: Mesh Root CA
@@ -46,7 +44,6 @@ apiVersion: cert-manager.io/v1
 kind: Issuer
 metadata:
   name: mesh-root-ca
-  namespace: mesh-system
 spec:
   ca:
     secretName: mesh-root-ca-secret
