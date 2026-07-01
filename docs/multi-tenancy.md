@@ -46,7 +46,7 @@ kubectl create namespace mesh-team-b
 
 Each namespace needs its own trust chain (self-signed issuer -> root CA certificate -> CA-backed issuer). The add-on uses the CA-backed issuer to mint intermediate CAs per cluster.
 
-Apply the trust chain from [`samples/cert-manager-issuer.yaml`](../samples/cert-manager-issuer.yaml) in each team namespace, adjusting the `namespace` and `commonName` fields:
+Apply the trust chain from [`samples/cert-manager-issuer.yaml`](../samples/cert-manager-issuer.yaml) in each team namespace.  Optionally adjust the `commonName` to distinguish each team's root CA (e.g., `Mesh Root CA - Team A`):
 
 ```bash
 kubectl apply -f samples/cert-manager-issuer.yaml -n mesh-team-a
