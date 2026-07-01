@@ -2,8 +2,8 @@
 
 Analyze open backend controller issues in the
 [stolostron/multicluster-mesh-addon](https://github.com/stolostron/multicluster-mesh-addon)
-repository and create or update GitHub tracking issues with the `frontend`
-label for any that affect the frontend console plugin.
+repository and create or update GitHub tracking issues with the
+`area/frontend` label for any that affect the frontend console plugin.
 
 ## When to use
 
@@ -16,10 +16,12 @@ times will not create duplicate issues.
 
 - `gh` CLI authenticated with access to the repo.
 - All commands run from the `multicluster-mesh-addon` repository root.
-- **Labeling requires `triage` or higher permission.** If you only have
-  `pull` access, `gh issue create --label` silently fails to apply
-  labels. The skill handles this by including a "Labels" line in the
-  issue body as a fallback so a maintainer can apply them later.
+- **Labeling:** The skill uses Prow's `/area` command to apply labels
+  (e.g., `/area frontend` applies `area/frontend`). This works for
+  anyone who can comment — no special permissions needed. The
+  `--label` flag on `gh issue create` is also passed but may silently
+  fail without `triage` permission. The skill includes a "Labels" line
+  in the issue body as a final fallback.
 
 ## Instructions
 
@@ -54,10 +56,10 @@ gh issue list --state open --limit 200 --json number,title,body,labels
 
 Split the results into two sets:
 
-- **Existing frontend tracking issues:** issues that have the `frontend`
-  label OR whose title starts with `[frontend]`. Either signal
-  identifies a tracking issue (the title prefix is the fallback when
-  labels can't be applied due to permissions).
+- **Existing frontend tracking issues:** issues that have the
+  `area/frontend` label OR whose title starts with `[frontend]`. Either
+  signal identifies a tracking issue (the title prefix is the fallback
+  when labels can't be applied due to permissions).
 - **Backend issues:** all remaining issues. These are candidates for
   analysis.
 
@@ -65,10 +67,10 @@ Also fetch closed frontend tracking issues — these may need updating if
 their corresponding backend issue was recently closed:
 
 ```
-gh issue list --state closed --label frontend --limit 200 --json number,title,body,labels
+gh issue list --state closed --label "area/frontend" --limit 200 --json number,title,body,labels
 ```
 
-Apply the same filter: `frontend` label OR title starts with
+Apply the same filter: `area/frontend` label OR title starts with
 `[frontend]`.
 
 ### 3. Analyze each backend issue for frontend impact
@@ -108,12 +110,12 @@ needs doing, not to document backend bugs.
 ### 5. Check for existing tracking issues (deduplication)
 
 Before creating a frontend tracking issue for backend issue #NNN, check
-whether one already exists using the set of `frontend`-labeled issues
+whether one already exists using the set of frontend tracking issues
 (both open and closed). Use a two-pass approach:
 
-1. **Title match:** Does any `frontend`-labeled issue have a title
+1. **Title match:** Does any frontend tracking issue have a title
    containing `#NNN` (e.g., `[frontend] Backend #118: ...`)?
-2. **Body match:** If no title match, does any `frontend`-labeled issue
+2. **Body match:** If no title match, does any frontend tracking issue
    body contain the pattern `Backend issue: #NNN` or the full URL
    `https://github.com/stolostron/multicluster-mesh-addon/issues/NNN`?
 
@@ -152,11 +154,11 @@ Create a new issue:
 ```
 gh issue create \
   --title "[frontend] Backend #NNN: <short title>" \
-  --label "frontend" \
-  --label "<other relevant labels>" \
+  --label "area/frontend" \
+  --label "area/<other relevant labels>" \
   --body "$(cat <<'EOF'
 Backend issue: #NNN
-Labels: `frontend`, `<other relevant labels>`
+Labels: `area/frontend`, `area/<other relevant labels>`
 
 **Impact:** <SEVERITY> — <one-line summary>.
 
@@ -178,24 +180,25 @@ EOF
 ```
 
 Additional labels to include when relevant (use the backend issue's own
-labels): `trust`, `operator`, `status`, `api`, `controller`.
+labels): `area/trust`, `area/operator`, `area/status`, `area/api`,
+`area/controller`.
 
-After creating each issue, apply labels via a Prow `/label` comment.
-This works even without `triage` permission because Prow's bot applies
-the label using its own credentials:
+After creating each issue, apply labels via a Prow `/area` comment.
+Prow recognizes `area/` as a built-in prefix, so `/area` works for
+anyone who can comment — no special permissions needed:
 
 ```
-gh issue comment <ISSUE_NUMBER> --body "/label frontend"
+gh issue comment <ISSUE_NUMBER> --body "/area frontend"
 ```
 
-Add additional labels with separate `/label` commands in the same
+Add additional labels with separate `/area` commands in the same
 comment:
 
 ```
 gh issue comment <ISSUE_NUMBER> --body "$(cat <<'EOF'
-/label frontend
-/label trust
-/label status
+/area frontend
+/area trust
+/area status
 EOF
 )"
 ```
@@ -206,10 +209,9 @@ Verify labels were applied:
 gh issue view <ISSUE_NUMBER> --json labels --jq '.labels[].name'
 ```
 
-If labels are still missing after the Prow comment, the repo may not
-have the Prow `label` plugin enabled. The labels are recorded in the
-issue body ("Labels:" line) as a fallback so a maintainer can apply
-them manually.
+If labels are still missing after the Prow comment, the labels are
+recorded in the issue body ("Labels:" line) as a fallback so a
+maintainer can apply them manually.
 
 **For existing tracking issues that need updating:**
 
