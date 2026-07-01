@@ -195,7 +195,7 @@ Rstest uses `>` as snapshot separator vs Jest's `:` — relevant if snapshot tes
 
 ## Skills
 
-- **[Track Backend Issues](docs/skills/track-backend-issues.md)** — Analyze open backend controller issues for frontend impact and create/update GitHub tracking issues with the `frontend` label. Run periodically (e.g., when new backend issues are filed or before sprint planning).
+- **[Track Backend Issues](docs/skills/track-backend-issues.md)** — Analyze open backend controller issues for frontend impact and create/update GitHub tracking issues with the `area/frontend` label. Run periodically (e.g., when new backend issues are filed or before sprint planning).
 
 ## Backend CRD Reference
 
