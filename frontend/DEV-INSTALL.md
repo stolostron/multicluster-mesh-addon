@@ -216,7 +216,7 @@ This builds a container image with the compiled plugin assets baked in (UBI9 ngi
 2. Log in as `kubeadmin`
 3. Click the perspective switcher (top-left dropdown)
 4. Select **Fleet Service Mesh**
-5. The **Fleet Meshes** table should show `my-mesh` with its status
+5. The **Meshes** table should show `my-mesh` with its status
 6. Click **Control Planes** in the left nav — it shows Istio CRs discovered across managed clusters
 
 ## 6a. (Optional) Create Istio CRs for the Control Planes page

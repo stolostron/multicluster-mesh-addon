@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-OpenShift ConsolePlugin that adds a "Fleet Service Mesh" perspective to the OpenShift Console. Provides fleet-wide visibility into `MultiClusterMesh` resources managed by the [multicluster-mesh-addon](https://github.com/stolostron/multicluster-mesh-addon) backend controller.
+OpenShift ConsolePlugin that adds a "Fleet Service Mesh" perspective to the OpenShift Console. Provides fleet-wide visibility into both managed (`MultiClusterMesh`) and discovered (unmanaged) service meshes across managed clusters via the [multicluster-mesh-addon](https://github.com/stolostron/multicluster-mesh-addon) backend controller.
 
 Related links:
 - [OSSM-12887](https://redhat.atlassian.net/browse/OSSM-12887) — Epic: OSSM/Kiali ACM console integration developer preview
@@ -20,11 +20,13 @@ Related links:
 - `hack/start-console.sh` — Runs local OpenShift Console (`origin-console`) pointed at webpack dev server
 - `deploy/` — Kubernetes manifests (ConsolePlugin CR, Deployment/Service, nginx config)
 - `src/types/` — TypeScript types for K8s resources (MultiClusterMesh, Certificate, ManifestWork, Istio)
-- `src/components/` — React page and card components (ServiceMeshPage, MeshDetailPage, ControlPlanesPage, ControlPlaneDetailPage, MeshStatus, TrustStatusCard)
-- `src/hooks/` — Data fetching hooks (useMultiClusterMeshes, useDiscoveredControlPlanes, useEnrichedControlPlanes)
+- `src/types/fleetMesh.ts` — FleetMeshItem type for the unified mesh list (managed + discovered)
+- `src/components/` — React page and card components (ServiceMeshPage, MeshDetailPage, DiscoveredMeshDetailPage, ControlPlanesPage, ControlPlaneDetailPage, MeshStatus, StatusDonutChart, TrustStatusCard)
+- `src/hooks/` — Data fetching hooks (useMultiClusterMeshes, useFleetMeshItems, useDiscoveredControlPlanes, useEnrichedControlPlanes)
+- `src/utils/filterUtils.ts` — Case-insensitive filter utility for multi-field list filtering
 - `src/utils/i18nUtils.ts` — i18n hook (`useMeshTranslation`) and namespace constant
 - `src/locales/en/plugin__ossm-acm.json` — English translation strings
-- `src/__mocks__/` — Rstest mocks for Console SDK, multicluster-sdk, react-router, and static assets
+- `src/__mocks__/` — Rstest mocks for Console SDK, multicluster-sdk, react-router, react-charts, and static assets
 - `src/setupTests.tsx` — Rstest setup (jest-dom matchers via expect.extend, i18n mock, jsdom stubs, cleanup)
 - `src/rstest-globals.d.ts` — Type declarations for rstest globals (`describe`, `it`, `expect`, `rstest`, etc.)
 
@@ -92,7 +94,7 @@ The Control Planes page uses `@stolostron/multicluster-sdk` for cross-cluster da
 |----------|---------|---------------|
 | `Istio` (sailoperator.io/v1) | `useFleetSearchPoll` (discovery) + `fleetK8sGet` (enrichment) | Per-cluster control plane version, meshID, health |
 
-The enrichment hook (`useEnrichedControlPlanes`) caches `fleetK8sGet` results in a `useRef<Map>` with a 2.5-minute TTL, fetches in batches of 10, and correlates with `MultiClusterMesh` CRs from `useMultiClusterMeshes`. See [docs/DISCOVERY-OPTIONS.md](docs/DISCOVERY-OPTIONS.md) for the full architecture.
+The enrichment hook (`useEnrichedControlPlanes`) caches `fleetK8sGet` results in a module-level `Map` with a 2.5-minute TTL, fetches in batches of 10, and correlates with `MultiClusterMesh` CRs from `useMultiClusterMeshes`. See [docs/DISCOVERY-OPTIONS.md](docs/DISCOVERY-OPTIONS.md) for the full architecture.
 
 ### MeshStatus component
 
@@ -132,6 +134,7 @@ Run tests with `make test`. Tests use **Rstest** (`@rstest/core`) — an Rspack-
 
 - `@openshift-console/dynamic-plugin-sdk` is mocked via `resolve.alias` in `rstest.config.ts`, pointing to `src/__mocks__/consoleSdkMock.tsx`. Override hook return values with `mockReturnValue()` in individual tests.
 - `react-router-dom-v5-compat` is mocked via `resolve.alias` in `rstest.config.ts`, pointing to `src/__mocks__/routerMock.tsx` (`Link` renders `<a>`, `useParams` returns `{}`).
+- `@patternfly/react-charts/victory` is mocked via `resolve.alias` in `rstest.config.ts`, pointing to `src/__mocks__/chartsMock.tsx`.
 - `react-i18next` is mocked globally in `src/setupTests.tsx` via `rs.mock()` — `t(key)` returns the English key string with `{{variable}}` interpolations substituted. Tests can assert directly on English source strings.
 
 When mocking a hook in a test, use `rstest.mocked()` (preferred) or `import type { Mock }`:
@@ -162,7 +165,7 @@ Rstest uses `>` as snapshot separator vs Jest's `:` — relevant if snapshot tes
 - Use PatternFly components for all UI — `Card`, `DescriptionList`, `Label`, `Grid`, `Flex`, `PageSection`, etc.
 - Tables in scrollable containers (max 400px) use sticky `<thead>` for column visibility
 - Cards showing per-cluster data should include summary labels, toggle filters, search, and scroll for scale (5-500 clusters)
-- Condition status uses three colors: green (True), red (False), grey (Unknown)
+- Condition status uses four colors: green (True/Ready), orange (Degraded — Ready but secondary conditions failing), red (False), grey (Unknown)
 - Trust distribution status uses: green "Distributed", orange "Applied", red with reason, grey "Pending"
 - Empty states should distinguish "no data exists" from "filter matched nothing"
 - Sign commits with `-s` flag
@@ -188,10 +191,11 @@ Rstest uses `>` as snapshot separator vs Jest's `:` — relevant if snapshot tes
 ### Adding a column to the list page
 
 1. Add entry to `buildColumns()` in `ServiceMeshPage.tsx` with `title: t('...')`, `id`, and optionally `sort`
-2. `sort` can be a dot-path string or a function — if using a function, add explicit types: `(data: MultiClusterMesh[], sortDirection: string) => MultiClusterMesh[]`
+2. `sort` can be a dot-path string or a function — if using a function, add explicit types: `(data: FleetMeshItem[], sortDirection: string) => FleetMeshItem[]`
 3. Add the new string key to `src/locales/en/plugin__ossm-acm.json`
 4. Add a `<TableData id="..." activeColumnIDs={activeColumnIDs}>` cell to `MeshRow`
 5. Cell order doesn't need to match column order (matched by `id`), but keep them aligned for readability
+6. `ServiceMeshPage.tsx` operates on `FleetMeshItem` (not `MultiClusterMesh`) — the unified type covering both managed and discovered meshes
 
 ## Backend CRD Reference
 

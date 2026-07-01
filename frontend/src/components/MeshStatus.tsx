@@ -24,6 +24,14 @@ export function deriveStatus(conditions?: K8sCondition[], conditionType?: string
   const target = conditions.find((c) => c.type === targetType)
   if (target) {
     if (target.status === 'True') {
+      if (targetType === 'Ready') {
+        const hasDegradedSecondary = conditions.some(
+          (c) => c.type !== targetType && c.status === 'False',
+        )
+        if (hasDegradedSecondary) {
+          return { label: 'Degraded', color: 'orange' }
+        }
+      }
       return { label: targetType, color: 'green' }
     }
     if (target.status === 'Unknown') {

@@ -101,7 +101,7 @@ describe('ControlPlaneDetailPage', () => {
       rstest.mocked(fleetK8sGet).mockResolvedValue(makeIstio())
       render(<ControlPlaneDetailPage />)
       await waitFor(() => {
-        expect(screen.getByText('mesh1')).toBeInTheDocument()
+        expect(screen.getAllByText('mesh1').length).toBeGreaterThanOrEqual(1)
       })
     })
 
@@ -156,6 +156,45 @@ describe('ControlPlaneDetailPage', () => {
       await waitFor(() => {
         expect(screen.getByText('Overview')).toBeInTheDocument()
       })
+      expect(screen.queryByText('Managed By')).not.toBeInTheDocument()
+    })
+
+    it('shows Discovered Mesh card with link when CP has meshID but no MCM', async () => {
+      rstest.mocked(fleetK8sGet).mockResolvedValue(makeIstio())
+      render(<ControlPlaneDetailPage />)
+      await waitFor(() => {
+        expect(screen.getByText('Discovered Mesh')).toBeInTheDocument()
+        expect(screen.getByRole('link', { name: 'mesh1' })).toHaveAttribute(
+          'href',
+          '/fleet-mesh-discovered/mesh1',
+        )
+      })
+    })
+
+    it('does not show Discovered Mesh card when CP is managed by MCM', async () => {
+      const mcm = {
+        metadata: { name: 'my-mesh', namespace: 'mesh-system' },
+        spec: { clusterSet: 'global', controlPlane: { namespace: 'istio-system' } },
+        status: { clusterStatus: [{ clusterName: 'cluster-a' }] },
+      }
+      rstest.mocked(useK8sWatchResource).mockReturnValue([[mcm], true, null])
+      rstest.mocked(fleetK8sGet).mockResolvedValue(makeIstio())
+      render(<ControlPlaneDetailPage />)
+      await waitFor(() => {
+        expect(screen.getByText('Managed By')).toBeInTheDocument()
+      })
+      expect(screen.queryByText('Discovered Mesh')).not.toBeInTheDocument()
+    })
+
+    it('does not show Discovered Mesh card when CP has no meshID', async () => {
+      rstest.mocked(fleetK8sGet).mockResolvedValue(makeIstio({
+        spec: { namespace: 'istio-system' },
+      }))
+      render(<ControlPlaneDetailPage />)
+      await waitFor(() => {
+        expect(screen.getByText('Overview')).toBeInTheDocument()
+      })
+      expect(screen.queryByText('Discovered Mesh')).not.toBeInTheDocument()
       expect(screen.queryByText('Managed By')).not.toBeInTheDocument()
     })
   })

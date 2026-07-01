@@ -18,13 +18,26 @@ import {
   Label,
   PageSection,
   Title,
+  Tooltip,
 } from '@patternfly/react-core'
 import { useMultiClusterMeshes } from '../hooks/useMultiClusterMeshes'
 import { useDiscoveredControlPlanes } from '../hooks/useDiscoveredControlPlanes'
 import { useEnrichedControlPlanes } from '../hooks/useEnrichedControlPlanes'
 import type { EnrichedControlPlane } from '../types/istio'
 import { MeshStatus, getStatusRank } from './MeshStatus'
+import { fuzzyCaseInsensitive } from '../utils/filterUtils'
 import { useMeshTranslation } from '../utils/i18nUtils'
+
+interface FilterValue {
+  selected?: string[]
+}
+
+interface RowSearchFilter<R> {
+  filter: (input: FilterValue, obj: R) => boolean
+  filterGroupName: string
+  placeholder?: string
+  type: string
+}
 
 function buildColumns(t: (key: string) => string): TableColumn<EnrichedControlPlane>[] {
   return [
@@ -32,19 +45,18 @@ function buildColumns(t: (key: string) => string): TableColumn<EnrichedControlPl
     { title: t('Name'), id: 'name', sort: 'metadata.name' },
     { title: t('Namespace'), id: 'namespace', sort: 'controlPlaneNamespace' },
     { title: t('Version'), id: 'version', sort: 'version' },
-    { title: t('Mesh ID'), id: 'meshID', sort: 'meshID' },
-    { title: t('Network'), id: 'network', sort: 'network' },
     {
-      title: t('Managed By'),
-      id: 'managedBy',
+      title: t('Mesh ID'),
+      id: 'meshID',
       sort: (data: EnrichedControlPlane[], sortDirection: string) => {
         const dir = sortDirection === 'asc' ? 1 : -1
         return [...data].sort((a, b) =>
-          dir * ((a.managedBy?.name ?? '').localeCompare(b.managedBy?.name ?? '')),
+          dir * (a.meshID ?? '').localeCompare(b.meshID ?? ''),
         )
       },
     },
-    { title: t('Age'), id: 'age', sort: 'metadata.creationTimestamp' },
+    { title: t('Network'), id: 'network', sort: 'network' },
+    { title: t('Created'), id: 'created', sort: 'metadata.creationTimestamp' },
     {
       title: t('Status'),
       id: 'status',
@@ -97,19 +109,28 @@ const ControlPlaneRow: FC<RowProps<EnrichedControlPlane>> = ({ obj, activeColumn
         {obj.version ?? '-'}
       </TableData>
       <TableData id="meshID" activeColumnIDs={activeColumnIDs}>
-        {obj.meshID ?? '-'}
+        {obj.managedBy ? (
+          <Tooltip content={t('Managed by {{name}}', { name: obj.managedBy.name })}>
+            <Link to={`/service-mesh/${obj.managedBy.namespace}/${obj.managedBy.name}`}>
+              <Label color="blue" isCompact>{obj.meshID ?? '-'}</Label>
+            </Link>
+          </Tooltip>
+        ) : obj.meshID ? (
+          <Tooltip content={t('Discovered mesh — not managed by a MultiClusterMesh CR')}>
+            <Link to={`/fleet-mesh-discovered/${encodeURIComponent(obj.meshID)}`}>
+              <Label color="purple" isCompact>{obj.meshID}</Label>
+            </Link>
+          </Tooltip>
+        ) : (
+          <Tooltip content={t('Standalone control plane — no mesh ID or managing resource')}>
+            <Label color="grey" isCompact>-</Label>
+          </Tooltip>
+        )}
       </TableData>
       <TableData id="network" activeColumnIDs={activeColumnIDs}>
         {obj.network ?? '-'}
       </TableData>
-      <TableData id="managedBy" activeColumnIDs={activeColumnIDs}>
-        {obj.managedBy ? (
-          <Link to={`/service-mesh/${obj.managedBy.namespace}/${obj.managedBy.name}`}>
-            <Label color="blue" isCompact>{obj.managedBy.name}</Label>
-          </Link>
-        ) : '-'}
-      </TableData>
-      <TableData id="age" activeColumnIDs={activeColumnIDs}>
+      <TableData id="created" activeColumnIDs={activeColumnIDs}>
         {obj.metadata.creationTimestamp ? <Timestamp timestamp={obj.metadata.creationTimestamp} /> : '-'}
       </TableData>
       <TableData id="status" activeColumnIDs={activeColumnIDs}>
@@ -123,6 +144,41 @@ const ControlPlaneRow: FC<RowProps<EnrichedControlPlane>> = ({ obj, activeColumn
   )
 }
 
+function buildSearchFilters(t: (key: string) => string): RowSearchFilter<EnrichedControlPlane>[] {
+  return [
+    {
+      filter: (input, obj) => fuzzyCaseInsensitive(input.selected?.[0], obj.clusterName),
+      filterGroupName: t('Cluster'),
+      placeholder: t('Filter by cluster...'),
+      type: 'cluster',
+    },
+    {
+      filter: (input, obj) => fuzzyCaseInsensitive(input.selected?.[0], obj.controlPlaneNamespace ?? ''),
+      filterGroupName: t('Namespace'),
+      placeholder: t('Filter by namespace...'),
+      type: 'namespace',
+    },
+    {
+      filter: (input, obj) => fuzzyCaseInsensitive(input.selected?.[0], obj.version ?? ''),
+      filterGroupName: t('Version'),
+      placeholder: t('Filter by version...'),
+      type: 'version',
+    },
+    {
+      filter: (input, obj) => fuzzyCaseInsensitive(input.selected?.[0], obj.meshID ?? ''),
+      filterGroupName: t('Mesh ID'),
+      placeholder: t('Filter by mesh ID...'),
+      type: 'meshID',
+    },
+    {
+      filter: (input, obj) => fuzzyCaseInsensitive(input.selected?.[0], obj.network ?? ''),
+      filterGroupName: t('Network'),
+      placeholder: t('Filter by network...'),
+      type: 'network',
+    },
+  ]
+}
+
 const ControlPlanesPage: FC = () => {
   const { t } = useMeshTranslation()
   const { results: searchResults, loaded: searchLoaded, error: searchError, isFleetAvailable } = useDiscoveredControlPlanes()
@@ -130,7 +186,8 @@ const ControlPlanesPage: FC = () => {
   const [enrichedPlanes, , , enrichmentError] = useEnrichedControlPlanes(searchResults, mcms ?? [])
 
   const columns = useMemo(() => buildColumns(t), [t])
-  const [staticData, filteredData, onFilterChange] = useListPageFilter(enrichedPlanes)
+  const searchFilters = useMemo(() => buildSearchFilters(t), [t])
+  const [staticData, filteredData, onFilterChange] = useListPageFilter(enrichedPlanes, searchFilters as any)
   const [activeColumns, userSettingsLoaded] = useActiveColumns({
     columns,
     showNamespaceOverride: false,
@@ -158,6 +215,7 @@ const ControlPlanesPage: FC = () => {
           data={staticData}
           loaded={searchLoaded}
           onFilterChange={onFilterChange}
+          rowSearchFilters={searchFilters as any}
           hideLabelFilter
         />
         {userSettingsLoaded && (

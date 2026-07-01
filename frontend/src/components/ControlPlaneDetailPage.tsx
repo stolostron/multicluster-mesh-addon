@@ -171,10 +171,30 @@ const ControlPlaneDetailContent: FC<{ cluster: string; name: string }> = ({ clus
                 <CardBody>
                   <DescriptionList isHorizontal isCompact>
                     <DescriptionListGroup>
-                      <DescriptionListTerm>{t('Fleet Mesh')}</DescriptionListTerm>
+                      <DescriptionListTerm>{t('Mesh')}</DescriptionListTerm>
                       <DescriptionListDescription>
                         <Link to={`/service-mesh/${matchedMCM.namespace}/${matchedMCM.name}`}>
                           {matchedMCM.name}
+                        </Link>
+                      </DescriptionListDescription>
+                    </DescriptionListGroup>
+                  </DescriptionList>
+                </CardBody>
+              </Card>
+            </GridItem>
+          )}
+
+          {!matchedMCM && meshID && (
+            <GridItem span={6}>
+              <Card isCompact>
+                <CardTitle>{t('Discovered Mesh')}</CardTitle>
+                <CardBody>
+                  <DescriptionList isHorizontal isCompact>
+                    <DescriptionListGroup>
+                      <DescriptionListTerm>{t('Mesh ID')}</DescriptionListTerm>
+                      <DescriptionListDescription>
+                        <Link to={`/fleet-mesh-discovered/${encodeURIComponent(meshID)}`}>
+                          {meshID}
                         </Link>
                       </DescriptionListDescription>
                     </DescriptionListGroup>

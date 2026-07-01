@@ -22,6 +22,7 @@ export default defineConfig({
   resolve: {
     alias: {
       '@openshift-console/dynamic-plugin-sdk': './src/__mocks__/consoleSdkMock.tsx',
+      '@patternfly/react-charts/victory': './src/__mocks__/chartsMock.tsx',
       '@stolostron/multicluster-sdk': './src/__mocks__/multiclusterSdkMock.tsx',
       'react-router-dom-v5-compat': './src/__mocks__/routerMock.tsx',
     },

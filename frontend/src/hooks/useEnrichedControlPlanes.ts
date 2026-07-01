@@ -22,6 +22,20 @@ interface CacheEntry {
 const CACHE_TTL_MS = 150_000
 const CONCURRENCY_LIMIT = 10
 
+// Module-level cache so enrichment data survives component unmounts. When a user
+// navigates from the list page to a detail page, the new component instance reads
+// from the same warm cache instead of triggering a full fleet-wide re-fetch.
+// The cache is read-only from useMemo's perspective (it reads cache.get(key)?.data).
+// The per-instance enrichmentVersion state forces memo re-evaluation after fetches
+// update the cache. Stale-key cleanup is safe because only one page is mounted at
+// a time in the Console plugin (route-based rendering).
+const enrichmentCache = new Map<string, CacheEntry>()
+
+/** Clears the module-level enrichment cache. Only for use in tests. */
+export function __resetEnrichmentCache() {
+  enrichmentCache.clear()
+}
+
 async function fetchInChunks(
   pending: { cluster: string; name: string }[],
   cache: Map<string, CacheEntry>,
@@ -53,11 +67,15 @@ export function useEnrichedControlPlanes(
   searchResults: FleetIstio[],
   mcms: MultiClusterMesh[],
 ): [EnrichedControlPlane[], boolean, boolean, unknown] {
-  const cacheRef = useRef<Map<string, CacheEntry>>(new Map())
   const [enrichmentVersion, setEnrichmentVersion] = useState(0)
   const [enrichmentLoaded, setEnrichmentLoaded] = useState(false)
   const [error, setError] = useState<unknown>(null)
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // Only reset enrichmentLoaded on the first enrichment cycle. After initial
+  // enrichment completes, subsequent search poll updates skip the reset so the
+  // table never flashes a spinner — new CRs briefly appear as standalone (~1s)
+  // before enrichment reveals their meshID and the next rebuild regroups them.
+  const initialEnrichmentDone = useRef(false)
 
   const searchKey = useMemo(() => {
     if (searchResults.length === 0) return 0
@@ -75,26 +93,30 @@ export function useEnrichedControlPlanes(
 
   useEffect(() => {
     let cancelled = false
-    const cache = cacheRef.current
     const now = Date.now()
     setError(null)
+
+    if (stableResults.length > 0 && !initialEnrichmentDone.current) {
+      setEnrichmentLoaded(false)
+    }
 
     const pending = stableResults
       .filter((r) => {
         const key = `${r.cluster}/${r.metadata?.name}`
-        const entry = cache.get(key)
+        const entry = enrichmentCache.get(key)
         return !entry || (now - entry.fetchedAt > CACHE_TTL_MS)
       })
       .map((r) => ({ cluster: r.cluster, name: r.metadata?.name ?? '' }))
 
     if (pending.length === 0) {
       setEnrichmentLoaded(true)
+      if (stableResults.length > 0) initialEnrichmentDone.current = true
       return
     }
 
     fetchInChunks(
       pending,
-      cache,
+      enrichmentCache,
       () => {
         if (!cancelled) {
           if (debounceRef.current) clearTimeout(debounceRef.current)
@@ -109,15 +131,20 @@ export function useEnrichedControlPlanes(
         if (!cancelled) {
           if (debounceRef.current) clearTimeout(debounceRef.current)
           const currentKeys = new Set(stableResults.map((r) => `${r.cluster}/${r.metadata?.name}`))
-          for (const key of cache.keys()) {
-            if (!currentKeys.has(key)) cache.delete(key)
+          for (const key of enrichmentCache.keys()) {
+            if (!currentKeys.has(key)) enrichmentCache.delete(key)
           }
           setEnrichmentVersion((v) => v + 1)
           setEnrichmentLoaded(true)
+          initialEnrichmentDone.current = true
         }
       })
       .catch((e) => {
-        if (!cancelled) { setEnrichmentLoaded(true); setError(e) }
+        if (!cancelled) {
+          setEnrichmentLoaded(true)
+          initialEnrichmentDone.current = true
+          setError(e)
+        }
       })
 
     return () => {
@@ -128,10 +155,9 @@ export function useEnrichedControlPlanes(
   }, [searchKey])
 
   const enrichedBeforeCorrelation = useMemo(() => {
-    const cache = cacheRef.current
     return stableResults.map((r): EnrichedControlPlane => {
       const key = `${r.cluster}/${r.metadata?.name}`
-      const cached = cache.get(key)?.data
+      const cached = enrichmentCache.get(key)?.data
       const spec = cached?.spec
       return {
         metadata: {
