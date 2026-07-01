@@ -772,11 +772,11 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 
 			It("should create ManagedServiceAccount resources with custom TokenValidity value", func() {
 				util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet, meshv1alpha1.MultiClusterMeshSpec{
-				Security: meshv1alpha1.SecurityConfig{
-					Discovery: meshv1alpha1.DiscoveryConfig{
-						TokenValidity: &metav1.Duration{Duration: 15 * time.Minute},
-					},
-				}})
+					Security: meshv1alpha1.SecurityConfig{
+						Discovery: meshv1alpha1.DiscoveryConfig{
+							TokenValidity: &metav1.Duration{Duration: 15 * time.Minute},
+						},
+					}})
 
 				msa1 := expectManagedServiceAccount(testNs, meshName, cluster1)
 				Expect(msa1.Spec.Rotation.Validity).To(Equal(metav1.Duration{Duration: 15 * time.Minute}))
