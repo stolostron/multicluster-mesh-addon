@@ -31,6 +31,8 @@ The add-on follows OCM's hub-and-spoke model:
 - **Hub**: The Mesh Add-on controller watches `MultiClusterMesh` resources and creates [ManifestWorks][ManifestWork], orchestrates cert-manager and ManagedServiceAccount
 - **Spoke** (managed clusters): Receives ManifestWorks from the hub, runs the Sail/OSSM operator and Istio control plane
 
+A [ClusterManagementAddOn] resource is deployed to register this addon with OCM's addon manager, but the addon uses manual installation strategy and does not leverage the framework's lifecycle management features (auto-deployment, per-cluster enable/disable via `ManagedClusterAddOn`).
+
 ```mermaid
 flowchart TD
     subgraph Hub Cluster
@@ -243,7 +245,7 @@ ArgoCD with ApplicationSets is the recommended approach for managing Istio confi
 
 **Phase 2 (Future)**: "Full" approach - the add-on also manages Istio custom resources centrally, automating topology configuration and enforcing consistency.
 
-Potential additions include ACM addon lifecycle integration (i.e. via `ClusterManagementAddOn` / `ManagedClusterAddOn`) and observability stack management.
+Potential additions include observability stack management and full addon framework integration (leveraging `ManagedClusterAddOn` for per-cluster enable/disable).
 
 <!-- Reference links -->
 [OCM]: https://open-cluster-management.io/
@@ -254,6 +256,7 @@ Potential additions include ACM addon lifecycle integration (i.e. via `ClusterMa
 [ManagedClusterSet]: https://open-cluster-management.io/docs/concepts/cluster-inventory/managedclusterset/
 [ClusterClaim]: https://open-cluster-management.io/docs/concepts/cluster-inventory/clusterclaim/
 [ManagedClusterView]: https://github.com/stolostron/cluster-lifecycle-api
+[ClusterManagementAddOn]: https://open-cluster-management.io/docs/concepts/addon/#clustermanagementaddon
 [Plug-in CA]: https://istio.io/latest/docs/tasks/security/cert-management/plugin-ca-cert/
 [Multi-Primary Multi-Network]: https://istio.io/latest/docs/setup/install/multicluster/multi-primary_multi-network/
 [#72]: https://github.com/stolostron/multicluster-mesh-addon/issues/72
