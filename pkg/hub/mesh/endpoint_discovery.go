@@ -3,6 +3,7 @@ package mesh
 import (
 	"context"
 	"fmt"
+	"time"
 
 	meshv1alpha1 "github.com/stolostron/multicluster-mesh-addon/pkg/apis/mesh/v1alpha1"
 	"github.com/stolostron/multicluster-mesh-addon/pkg/key"
@@ -25,6 +26,11 @@ func (r *Reconciler) ensureManagedServiceAccountCreated(ctx context.Context, mes
 		return fmt.Errorf("failed to get ManagedServiceAccount %s/%s: %w", cluster.Name, msaName, err)
 	}
 
+	validity := mesh.Spec.Security.Discovery.TokenValidity
+	if validity == nil {
+		validity = &metav1.Duration{Duration: 360 * time.Hour}
+	}
+
 	msa := &msav1beta1.ManagedServiceAccount{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      msaName,
@@ -33,7 +39,7 @@ func (r *Reconciler) ensureManagedServiceAccountCreated(ctx context.Context, mes
 		},
 		Spec: msav1beta1.ManagedServiceAccountSpec{
 			Rotation: msav1beta1.ManagedServiceAccountRotation{
-				Validity: *mesh.Spec.Security.Discovery.TokenValidity,
+				Validity: *validity,
 			},
 		},
 	}
