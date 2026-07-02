@@ -200,7 +200,18 @@ const OverviewPage: FC = () => {
                     <EmptyStateBody>{t('No managed or discovered meshes found.')}</EmptyStateBody>
                   </EmptyState>
                 ) : (
-                  <StatusDonutChart counts={meshStatusCounts} subtitle={t('total')} />
+                  <>
+                    {!!cpSectionError && enrichmentLoaded && (
+                      <Alert
+                        variant="warning"
+                        isInline
+                        isPlain
+                        title={t('Unable to load control plane data. Some meshes may not be shown.')}
+                        style={{ marginBottom: '0.5rem' }}
+                      />
+                    )}
+                    <StatusDonutChart counts={meshStatusCounts} subtitle={t('total')} />
+                  </>
                 )}
               </CardBody>
             </Card>

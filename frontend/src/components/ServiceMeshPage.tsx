@@ -23,18 +23,8 @@ import { useFleetMeshItems } from '../hooks/useFleetMeshItems'
 import type { FleetMeshItem } from '../types/fleetMesh'
 import { MeshStatus } from './MeshStatus'
 import { fuzzyCaseInsensitive } from '../utils/filterUtils'
+import type { RowSearchFilter } from '../utils/filterUtils'
 import { useMeshTranslation } from '../utils/i18nUtils'
-
-interface FilterValue {
-  selected?: string[]
-}
-
-interface RowSearchFilter<R> {
-  filter: (input: FilterValue, obj: R) => boolean
-  filterGroupName: string
-  placeholder?: string
-  type: string
-}
 
 function buildColumns(t: (key: string) => string): TableColumn<FleetMeshItem>[] {
   return [

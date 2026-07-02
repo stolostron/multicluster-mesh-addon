@@ -1,4 +1,3 @@
-import { rs } from '@rstest/core'
 import type { FC } from 'react'
 
 export const ChartDonut: FC<{

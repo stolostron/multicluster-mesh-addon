@@ -33,10 +33,10 @@ export const StatusDonutChart: FC<StatusDonutChartProps> = ({ counts, subtitle }
   ]
 
   const legendData = [
-    { name: `${counts.ready} ${t('Ready')}` },
-    { name: `${counts.degraded} ${t('Degraded')}` },
-    { name: `${counts.notReady} ${t('Not Ready')}` },
-    { name: `${counts.unknown} ${t('Unknown')}` },
+    { name: t('{{count}} Ready', { count: counts.ready }) },
+    { name: t('{{count}} Degraded', { count: counts.degraded }) },
+    { name: t('{{count}} Not Ready', { count: counts.notReady }) },
+    { name: t('{{count}} Unknown', { count: counts.unknown }) },
   ]
 
   return (

@@ -1,4 +1,4 @@
-import type { FC } from 'react'
+import type { FC, ReactNode } from 'react'
 import { Label } from '@patternfly/react-core'
 import type { K8sCondition } from '../types/multiClusterMesh'
 import { useMeshTranslation } from '../utils/i18nUtils'
@@ -56,6 +56,11 @@ export function getStatusRank(conditions?: K8sCondition[], conditionType?: strin
   if (color === 'grey') return 1
   if (color === 'orange') return 2
   return 3
+}
+
+export function statusIcon(status: string): ReactNode {
+  const color = status === 'True' ? 'green' : status === 'Unknown' ? 'grey' : 'red'
+  return <Label color={color}>{status}</Label>
 }
 
 interface MeshStatusProps {

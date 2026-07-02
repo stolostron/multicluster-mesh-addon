@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import type { FC, ReactNode } from 'react'
+import type { FC } from 'react'
 import { useParams, Link } from 'react-router-dom-v5-compat'
 import { fleetK8sGet } from '@stolostron/multicluster-sdk'
 import {
@@ -31,13 +31,8 @@ import { istioModel } from '../types/istio'
 import type { K8sCondition } from '../types/common'
 import { useMultiClusterMeshes } from '../hooks/useMultiClusterMeshes'
 import { buildMcmIndex, lookupMcm } from '../utils/correlateMCM'
-import { MeshStatus } from './MeshStatus'
+import { MeshStatus, statusIcon } from './MeshStatus'
 import { useMeshTranslation } from '../utils/i18nUtils'
-
-function statusIcon(status: string): ReactNode {
-  const color = status === 'True' ? 'green' : status === 'Unknown' ? 'grey' : 'red'
-  return <Label color={color}>{status}</Label>
-}
 
 const ControlPlaneDetailContent: FC<{ cluster: string; name: string }> = ({ cluster, name }) => {
   const { t } = useMeshTranslation()

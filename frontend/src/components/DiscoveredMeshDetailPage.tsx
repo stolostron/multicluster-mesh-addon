@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import type { FC, ReactNode } from 'react'
+import type { FC } from 'react'
 import { useParams, Link } from 'react-router-dom-v5-compat'
 import {
   Timestamp,
@@ -33,13 +33,8 @@ import { useDiscoveredControlPlanes } from '../hooks/useDiscoveredControlPlanes'
 import { useEnrichedControlPlanes } from '../hooks/useEnrichedControlPlanes'
 import type { EnrichedControlPlane } from '../types/istio'
 import type { K8sCondition } from '../types/common'
-import { MeshStatus, getStatusRank } from './MeshStatus'
+import { MeshStatus, getStatusRank, statusIcon } from './MeshStatus'
 import { useMeshTranslation } from '../utils/i18nUtils'
-
-function statusIcon(status: string): ReactNode {
-  const color = status === 'True' ? 'green' : status === 'Unknown' ? 'grey' : 'red'
-  return <Label color={color}>{status}</Label>
-}
 
 function aggregateStatus(planes: EnrichedControlPlane[]): K8sCondition[] | undefined {
   let worstRank = -1

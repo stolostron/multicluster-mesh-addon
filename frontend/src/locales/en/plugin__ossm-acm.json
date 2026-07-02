@@ -127,6 +127,7 @@
   "Unknown ({{count}})": "Unknown ({{count}})",
   "Version": "Version",
   "View all": "View all",
+  "{{count}} Degraded": "{{count}} Degraded",
   "{{count}} Distributed": "{{count}} Distributed",
   "{{count}} Failed": "{{count}} Failed",
   "{{count}} Not Ready": "{{count}} Not Ready",

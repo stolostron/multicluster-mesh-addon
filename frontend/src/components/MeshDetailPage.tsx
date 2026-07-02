@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import type { FC, ReactNode } from 'react'
+import type { FC } from 'react'
 import { useParams, Link } from 'react-router-dom-v5-compat'
 import {
   useK8sWatchResource,
@@ -31,7 +31,7 @@ import {
 } from '@patternfly/react-core'
 import type { MultiClusterMesh, K8sCondition, ClusterMeshStatus } from '../types/multiClusterMesh'
 import { multiClusterMeshGroupVersionKind } from '../types/multiClusterMesh'
-import { MeshStatus } from './MeshStatus'
+import { MeshStatus, statusIcon } from './MeshStatus'
 import { TrustStatusCard } from './TrustStatusCard'
 import { useMeshTranslation } from '../utils/i18nUtils'
 
@@ -39,11 +39,6 @@ function conditionMessage(condition: K8sCondition): string {
   if (condition.message) return condition.message
   if (condition.reason) return condition.reason
   return condition.status
-}
-
-function statusIcon(status: string): ReactNode {
-  const color = status === 'True' ? 'green' : status === 'Unknown' ? 'grey' : 'red'
-  return <Label color={color}>{status}</Label>
 }
 
 type ClusterStatusCategory = 'all' | 'ready' | 'notReady' | 'unknown'
