@@ -120,7 +120,7 @@ const ControlPlaneDetailContent: FC<{ cluster: string; name: string }> = ({ clus
 
       <PageSection>
         <Grid hasGutter>
-          <GridItem span={6}>
+          <GridItem span={5}>
             <Card isCompact>
               <CardTitle><strong>{t('Overview')}</strong></CardTitle>
               <CardBody>
@@ -143,8 +143,24 @@ const ControlPlaneDetailContent: FC<{ cluster: string; name: string }> = ({ clus
                   </DescriptionListGroup>
                   <DescriptionListGroup>
                     <DescriptionListTerm>{t('Mesh ID')}</DescriptionListTerm>
-                    <DescriptionListDescription>{meshID ?? '-'}</DescriptionListDescription>
+                    <DescriptionListDescription>
+                      {meshID
+                        ? (matchedMCM
+                            ? meshID
+                            : <Link to={`/fleet-mesh-discovered/${encodeURIComponent(meshID)}`}>{meshID}</Link>)
+                        : '-'}
+                    </DescriptionListDescription>
                   </DescriptionListGroup>
+                  {matchedMCM && (
+                    <DescriptionListGroup>
+                      <DescriptionListTerm>{t('Managed Mesh')}</DescriptionListTerm>
+                      <DescriptionListDescription>
+                        <Link to={`/service-mesh/${matchedMCM.namespace}/${matchedMCM.name}`}>
+                          {matchedMCM.name}
+                        </Link>
+                      </DescriptionListDescription>
+                    </DescriptionListGroup>
+                  )}
                   <DescriptionListGroup>
                     <DescriptionListTerm>{t('Network')}</DescriptionListTerm>
                     <DescriptionListDescription>{network ?? '-'}</DescriptionListDescription>
@@ -165,46 +181,6 @@ const ControlPlaneDetailContent: FC<{ cluster: string; name: string }> = ({ clus
               </CardBody>
             </Card>
           </GridItem>
-
-          {matchedMCM && (
-            <GridItem span={6}>
-              <Card isCompact>
-                <CardTitle><strong>{t('Managed By')}</strong></CardTitle>
-                <CardBody>
-                  <DescriptionList isCompact>
-                    <DescriptionListGroup>
-                      <DescriptionListTerm>{t('Mesh')}</DescriptionListTerm>
-                      <DescriptionListDescription>
-                        <Link to={`/service-mesh/${matchedMCM.namespace}/${matchedMCM.name}`}>
-                          {matchedMCM.name}
-                        </Link>
-                      </DescriptionListDescription>
-                    </DescriptionListGroup>
-                  </DescriptionList>
-                </CardBody>
-              </Card>
-            </GridItem>
-          )}
-
-          {!matchedMCM && meshID && (
-            <GridItem span={6}>
-              <Card isCompact>
-                <CardTitle><strong>{t('Discovered Mesh')}</strong></CardTitle>
-                <CardBody>
-                  <DescriptionList isCompact>
-                    <DescriptionListGroup>
-                      <DescriptionListTerm>{t('Mesh ID')}</DescriptionListTerm>
-                      <DescriptionListDescription>
-                        <Link to={`/fleet-mesh-discovered/${encodeURIComponent(meshID)}`}>
-                          {meshID}
-                        </Link>
-                      </DescriptionListDescription>
-                    </DescriptionListGroup>
-                  </DescriptionList>
-                </CardBody>
-              </Card>
-            </GridItem>
-          )}
 
           {conditions.length > 0 && (
             <GridItem span={12}>

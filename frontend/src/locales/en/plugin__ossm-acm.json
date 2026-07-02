@@ -60,6 +60,7 @@
   "Loading trust status": "Loading trust status",
   "Managed": "Managed",
   "Managed By": "Managed By",
+  "Managed Mesh": "Managed Mesh",
   "Managed by {{name}}": "Managed by {{name}}",
   "Mesh": "Mesh",
   "Mesh ID": "Mesh ID",

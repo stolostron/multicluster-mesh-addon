@@ -187,7 +187,7 @@ const DiscoveredMeshDetailContent: FC<{ meshID: string }> = ({ meshID }) => {
             </GridItem>
           )}
 
-          <GridItem span={6}>
+          <GridItem span={5}>
             <Card isCompact>
               <CardTitle><strong>{t('Overview')}</strong></CardTitle>
               <CardBody>
