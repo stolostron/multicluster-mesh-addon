@@ -19,8 +19,7 @@ func (r *Reconciler) ensureManagedServiceAccountCreated(ctx context.Context, mes
 	msaName := fmt.Sprintf("%s-%s-%s", mesh.Namespace, "istio-reader", mesh.Name)
 	existing := &msav1beta1.ManagedServiceAccount{}
 	if err := r.Get(ctx, key.Of(msaName, cluster.Name), existing); err == nil {
-		klog.V(4).Infof("Cluster %s already has ManagedServiceAccount %s, skipping", cluster.Name, msaName)
-		return nil
+		return r.ensureManagedServiceAccountUpdated(ctx, mesh, existing)
 	} else if !errors.IsNotFound(err) {
 		return fmt.Errorf("failed to get ManagedServiceAccount %s/%s: %w", cluster.Name, msaName, err)
 	}
@@ -85,5 +84,24 @@ func (r *Reconciler) deleteAllManagedServiceAccounts(ctx context.Context, mesh *
 		}
 	}
 
+	return nil
+}
+
+// ensureManagedServiceAccountUpdated updates an existing ManagedServiceAccount with the mesh's spec.Security.Discovery.TokenValidity value
+func (r *Reconciler) ensureManagedServiceAccountUpdated(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, existing *msav1beta1.ManagedServiceAccount) error {
+	if existing.Labels[MeshNameLabel] != mesh.Name || existing.Labels[MeshNamespaceLabel] != mesh.Namespace {
+		return fmt.Errorf("ManagedServiceAccount %s/%s exists but is not owned by mesh %s/%s", existing.Namespace, existing.Name, mesh.Namespace, mesh.Name)
+	}
+
+	if existing.Spec.Rotation.Validity == *mesh.Spec.Security.Discovery.TokenValidity {
+		return nil
+	}
+	existing.Spec.Rotation.Validity = *mesh.Spec.Security.Discovery.TokenValidity
+
+	if err := r.Update(ctx, existing); err != nil {
+		return fmt.Errorf("failed to update a ManagedServiceAccount %s/%s: %w", existing.Namespace, existing.Name, err)
+	}
+
+	klog.V(4).Infof("Successfully updated a ManagedServiceAccount %s/%s", existing.Namespace, existing.Name)
 	return nil
 }
