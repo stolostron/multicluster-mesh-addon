@@ -126,6 +126,25 @@ const DiscoveredMeshDetailContent: FC<{ meshID: string }> = ({ meshID }) => {
     })
   }, [uniqueClusterNames, clusterAvailabilityMap, clusterFilter, clusterSearch])
 
+  const worstConditions = useMemo(() => aggregateStatus(matchingPlanes), [matchingPlanes])
+  const networks = useMemo(() => uniqueNetworks(matchingPlanes), [matchingPlanes])
+  const created = useMemo(() => oldestTimestamp(matchingPlanes), [matchingPlanes])
+
+  const hasConflict = useMemo(
+    () => enrichedPlanes.some((cp) => cp.managedBy && cp.meshID === meshID),
+    [enrichedPlanes, meshID],
+  )
+
+  const visibleConditions = useMemo(() => {
+    const all: { clusterName: string; cpName: string; condition: K8sCondition }[] = []
+    for (const cp of matchingPlanes) {
+      for (const c of cp.status?.conditions ?? []) {
+        all.push({ clusterName: cp.clusterName, cpName: cp.metadata.name, condition: c })
+      }
+    }
+    return showAllConditions ? all : all.filter((entry) => entry.condition.status !== 'True')
+  }, [matchingPlanes, showAllConditions])
+
   const loaded = searchLoaded && enrichmentLoaded
 
   if (!loaded) {
@@ -161,25 +180,6 @@ const DiscoveredMeshDetailContent: FC<{ meshID: string }> = ({ meshID }) => {
       </PageSection>
     )
   }
-
-  const worstConditions = useMemo(() => aggregateStatus(matchingPlanes), [matchingPlanes])
-  const networks = useMemo(() => uniqueNetworks(matchingPlanes), [matchingPlanes])
-  const created = useMemo(() => oldestTimestamp(matchingPlanes), [matchingPlanes])
-
-  const hasConflict = useMemo(
-    () => enrichedPlanes.some((cp) => cp.managedBy && cp.meshID === meshID),
-    [enrichedPlanes, meshID],
-  )
-
-  const visibleConditions = useMemo(() => {
-    const all: { clusterName: string; cpName: string; condition: K8sCondition }[] = []
-    for (const cp of matchingPlanes) {
-      for (const c of cp.status?.conditions ?? []) {
-        all.push({ clusterName: cp.clusterName, cpName: cp.metadata.name, condition: c })
-      }
-    }
-    return showAllConditions ? all : all.filter((entry) => entry.condition.status !== 'True')
-  }, [matchingPlanes, showAllConditions])
 
   const networkDisplay = networks.length === 0
     ? '-'
