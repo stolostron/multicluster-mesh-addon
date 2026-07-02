@@ -193,6 +193,10 @@ Rstest uses `>` as snapshot separator vs Jest's `:` — relevant if snapshot tes
 4. Add a `<TableData id="..." activeColumnIDs={activeColumnIDs}>` cell to `MeshRow`
 5. Cell order doesn't need to match column order (matched by `id`), but keep them aligned for readability
 
+## Skills
+
+- **[Track Backend Issues](docs/skills/track-backend-issues.md)** — Analyze open backend controller issues for frontend impact and create/update GitHub tracking issues with the `area/frontend` label. Run periodically (e.g., when new backend issues are filed or before sprint planning).
+
 ## Backend CRD Reference
 
 The `MultiClusterMesh` CRD is the primary resource. Key fields:
