@@ -61,7 +61,7 @@ oc label managedcluster local-cluster \
 
 ## 2. Create namespaces
 
-Create 2 MCM namespaces and 4 control plane namespaces:
+Create 2 MCM namespaces, 4 control plane namespaces, and the IstioCNI namespace:
 
 ```bash
 oc create namespace unsecure-mcm-ns
@@ -70,6 +70,7 @@ oc create namespace unsecure-ns
 oc create namespace secure-ns
 oc create namespace discovered-alpha-ns
 oc create namespace discovered-beta-ns
+oc create namespace istio-cni
 ```
 
 ## 3. Deploy cert-manager Issuer chain
@@ -256,7 +257,33 @@ spec:
 EOF
 ```
 
-## 8. Verification
+## 8. Deploy IstioCNI (optional)
+
+Without an IstioCNI resource, control planes whose istiod is running show as **Degraded**
+in the frontend (`Ready: True` but `DependenciesHealthy: False`). Creating the IstioCNI
+moves them to **Healthy**. Skip this step to start the demo in the Degraded state — you
+can create and delete the IstioCNI at any time to toggle between states (see
+[Demo Tips](#demo-tips) below).
+
+```bash
+oc apply -f - <<'EOF'
+apiVersion: sailoperator.io/v1
+kind: IstioCNI
+metadata:
+  name: default
+spec:
+  namespace: istio-cni
+  version: v1.28.8
+EOF
+```
+
+Wait for the CNI to become ready:
+
+```bash
+oc wait istiocni default --for=condition=Ready --timeout=60s
+```
+
+## 9. Verification
 
 ```bash
 # MCM CRs and their status
@@ -283,15 +310,57 @@ oc get multiclustermesh secure-mcm -n secure-mcm-ns -o jsonpath='{.status.cluste
 Expected results:
 
 - 2 MCMs with `OperatorInstalled: True` on `local-cluster`
-- 4 Istio CRs each targeting a unique namespace (may show `IstioCNINotFound` — this is expected without IstioCNI)
+- 4 Istio CRs each targeting a unique namespace
 - cert-manager Certificate in `secure-mcm-ns` with Ready status
 - A `multicluster-mesh-cacerts` ManifestWork in `local-cluster` namespace for trust distribution
+
+Control plane status depends on whether IstioCNI was deployed (step 8):
+
+| Condition | Without IstioCNI | With IstioCNI |
+|-----------|------------------|---------------|
+| istiod running | Degraded (orange) | Healthy (green) |
+| istiod not schedulable | Not Ready (red) | Not Ready (red) |
+
+On resource-constrained environments (e.g. CRC) one or more control planes may remain
+Not Ready because their istiod pod cannot be scheduled due to insufficient memory.
+Which control plane is affected (if any) depends on scheduling order and available
+resources.
+
+## Demo Tips
+
+### Toggling Degraded ↔ Healthy
+
+Delete the IstioCNI to put running control planes into the Degraded state:
+
+```bash
+oc delete istiocni default
+```
+
+Re-create it to move them back to Healthy:
+
+```bash
+oc apply -f - <<'EOF'
+apiVersion: sailoperator.io/v1
+kind: IstioCNI
+metadata:
+  name: default
+spec:
+  namespace: istio-cni
+  version: v1.28.8
+EOF
+```
+
+The transition takes ~30 seconds. The frontend will update automatically via its
+Kubernetes watch.
 
 ## Teardown
 
 To remove everything created by this guide:
 
 ```bash
+# Delete IstioCNI (if deployed)
+oc delete istiocni default 2>/dev/null
+
 # Delete Istio CRs
 oc delete istio unsecure-istio secure-istio discovered-alpha-istio discovered-beta-istio
 
@@ -307,7 +376,7 @@ oc delete managedclusterset demo-cluster-set
 
 # Delete namespaces
 oc delete namespace unsecure-mcm-ns secure-mcm-ns unsecure-ns secure-ns \
-  discovered-alpha-ns discovered-beta-ns
+  discovered-alpha-ns discovered-beta-ns istio-cni
 
 # Wait for the MCM controller to clean up the operator ManifestWork, then
 # remove the Sail operator if it remains
