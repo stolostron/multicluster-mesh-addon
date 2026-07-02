@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import type { FC, ReactNode } from 'react'
+import type { FC } from 'react'
 import { useParams, Link } from 'react-router-dom-v5-compat'
 import { fleetK8sGet } from '@stolostron/multicluster-sdk'
 import {
@@ -31,13 +31,8 @@ import { istioModel } from '../types/istio'
 import type { K8sCondition } from '../types/common'
 import { useMultiClusterMeshes } from '../hooks/useMultiClusterMeshes'
 import { buildMcmIndex, lookupMcm } from '../utils/correlateMCM'
-import { MeshStatus } from './MeshStatus'
+import { MeshStatus, statusIcon } from './MeshStatus'
 import { useMeshTranslation } from '../utils/i18nUtils'
-
-function statusIcon(status: string): ReactNode {
-  const color = status === 'True' ? 'green' : status === 'Unknown' ? 'grey' : 'red'
-  return <Label color={color}>{status}</Label>
-}
 
 const ControlPlaneDetailContent: FC<{ cluster: string; name: string }> = ({ cluster, name }) => {
   const { t } = useMeshTranslation()
@@ -113,16 +108,37 @@ const ControlPlaneDetailContent: FC<{ cluster: string; name: string }> = ({ clus
               <Label color="grey">{t('Unknown')}</Label>
             )}
           </FlexItem>
+          <FlexItem>
+            {matchedMCM
+              ? <Label color="blue">{t('Managed')}</Label>
+              : meshID
+                ? <Label color="purple">{t('Discovered')}</Label>
+                : null}
+          </FlexItem>
         </Flex>
       </PageSection>
 
       <PageSection>
         <Grid hasGutter>
-          <GridItem span={6}>
+          <GridItem span={5}>
             <Card isCompact>
-              <CardTitle>{t('Overview')}</CardTitle>
+              <CardTitle><strong>{t('Overview')}</strong></CardTitle>
               <CardBody>
-                <DescriptionList isHorizontal isCompact>
+                <DescriptionList isCompact columnModifier={{ default: '2Col' }}>
+                  <DescriptionListGroup>
+                    <DescriptionListTerm>{t('Mesh ID')}</DescriptionListTerm>
+                    <DescriptionListDescription>
+                      {meshID
+                        ? (matchedMCM
+                            ? meshID
+                            : <Link to={`/fleet-mesh-discovered/${encodeURIComponent(meshID)}`}>{meshID}</Link>)
+                        : '-'}
+                    </DescriptionListDescription>
+                  </DescriptionListGroup>
+                  <DescriptionListGroup>
+                    <DescriptionListTerm>{t('Network')}</DescriptionListTerm>
+                    <DescriptionListDescription>{network ?? '-'}</DescriptionListDescription>
+                  </DescriptionListGroup>
                   <DescriptionListGroup>
                     <DescriptionListTerm>{t('Cluster')}</DescriptionListTerm>
                     <DescriptionListDescription>
@@ -140,12 +156,10 @@ const ControlPlaneDetailContent: FC<{ cluster: string; name: string }> = ({ clus
                     <DescriptionListDescription>{spec.version ?? '-'}</DescriptionListDescription>
                   </DescriptionListGroup>
                   <DescriptionListGroup>
-                    <DescriptionListTerm>{t('Mesh ID')}</DescriptionListTerm>
-                    <DescriptionListDescription>{meshID ?? '-'}</DescriptionListDescription>
-                  </DescriptionListGroup>
-                  <DescriptionListGroup>
-                    <DescriptionListTerm>{t('Network')}</DescriptionListTerm>
-                    <DescriptionListDescription>{network ?? '-'}</DescriptionListDescription>
+                    <DescriptionListTerm>{t('Created')}</DescriptionListTerm>
+                    <DescriptionListDescription>
+                      <Timestamp timestamp={istio.metadata?.creationTimestamp} />
+                    </DescriptionListDescription>
                   </DescriptionListGroup>
                   {multiClusterName && (
                     <DescriptionListGroup>
@@ -153,41 +167,25 @@ const ControlPlaneDetailContent: FC<{ cluster: string; name: string }> = ({ clus
                       <DescriptionListDescription>{multiClusterName}</DescriptionListDescription>
                     </DescriptionListGroup>
                   )}
-                  <DescriptionListGroup>
-                    <DescriptionListTerm>{t('Created')}</DescriptionListTerm>
-                    <DescriptionListDescription>
-                      <Timestamp timestamp={istio.metadata?.creationTimestamp} />
-                    </DescriptionListDescription>
-                  </DescriptionListGroup>
-                </DescriptionList>
-              </CardBody>
-            </Card>
-          </GridItem>
-
-          {matchedMCM && (
-            <GridItem span={6}>
-              <Card isCompact>
-                <CardTitle>{t('Managed By')}</CardTitle>
-                <CardBody>
-                  <DescriptionList isHorizontal isCompact>
+                  {matchedMCM && (
                     <DescriptionListGroup>
-                      <DescriptionListTerm>{t('Fleet Mesh')}</DescriptionListTerm>
+                      <DescriptionListTerm>{t('Managed Mesh')}</DescriptionListTerm>
                       <DescriptionListDescription>
                         <Link to={`/service-mesh/${matchedMCM.namespace}/${matchedMCM.name}`}>
                           {matchedMCM.name}
                         </Link>
                       </DescriptionListDescription>
                     </DescriptionListGroup>
-                  </DescriptionList>
-                </CardBody>
-              </Card>
-            </GridItem>
-          )}
+                  )}
+                </DescriptionList>
+              </CardBody>
+            </Card>
+          </GridItem>
 
           {conditions.length > 0 && (
             <GridItem span={12}>
-              <Card>
-                <CardTitle>{t('Conditions')}</CardTitle>
+              <Card isCompact>
+                <CardTitle><strong>{t('Conditions')}</strong></CardTitle>
                 <CardBody>
                   <table className="pf-v6-c-table pf-m-grid-md pf-m-compact" role="grid">
                     <thead className="pf-v6-c-table__thead">

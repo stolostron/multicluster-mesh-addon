@@ -6,8 +6,8 @@ This document tracks performance considerations, analysis results, and optimizat
 
 The frontend uses two data fetching patterns:
 
-- **Fleet Meshes page**: `useK8sWatchResource` for `MultiClusterMesh` CRs on the hub — real-time WebSocket watch, standard Console SDK pattern.
-- **Control Planes page**: Two-phase discovery + enrichment. `useFleetSearchPoll` discovers Istio CRs across all clusters via ACM Search (30s poll). `fleetK8sGet` enriches each discovered CR with full spec/status from the individual cluster. Results are cached with a 2.5-minute TTL.
+- **Meshes page**: `useFleetMeshItems` merges `useK8sWatchResource` for `MultiClusterMesh` CRs with ACM Search discovery and enrichment of Istio CRs. The unified list shows both managed and discovered meshes.
+- **Control Planes page**: Two-phase discovery + enrichment. `useFleetSearchPoll` discovers Istio CRs across all clusters via ACM Search (30s poll). `fleetK8sGet` enriches each discovered CR with full spec/status from the individual cluster. Results are stored in a module-level cache (surviving component unmounts during page navigation) with a 2.5-minute TTL. An `initialEnrichmentDone` flag prevents spinner flash on subsequent search poll updates.
 
 ## Known Constraints
 
@@ -23,7 +23,7 @@ This N+1 pattern exists because ACM Search only indexes common K8s metadata (kin
 - Note: operators generally don't mutate `metadata` of CRs they reconcile (only `status`), so label-based solutions require upstream sail-operator changes
 
 **Mitigations in place:**
-- Client-side TTL cache (150s) avoids re-fetching unchanged data
+- Module-level TTL cache (150s) survives page navigation; `initialEnrichmentDone` flag prevents spinner flash on subsequent poll updates
 - Concurrent chunk limit (10 at a time) prevents API server overload
 - Cancellation support prevents stale fetches from updating state
 - Debounced state updates (once per second max) prevent re-render storms during enrichment
@@ -60,6 +60,12 @@ This N+1 pattern exists because ACM Search only indexes common K8s metadata (kin
 **Problem:** The `searchKey` used for effect dependencies was computed by sorting all search result strings and joining with commas — O(n log n) sort producing a ~6KB string at 200 results.
 
 **Solution:** Replaced with a DJB2-style numeric hash that produces a stable integer in O(n) with no allocation.
+
+### Module-Level Enrichment Cache
+
+**Problem:** The enrichment cache was stored in a `useRef` (per-component-instance), so navigating away from the Control Planes page and back would destroy the cache. This caused a full re-enrichment cycle with a table spinner on every page visit, even when the data hadn't changed.
+
+**Solution:** The enrichment cache was moved from `useRef` to a module-level `Map`. This allows the cache to survive component unmounts when navigating between pages. An `initialEnrichmentDone` ref flag gates the `enrichmentLoaded` reset to the first enrichment cycle only, preventing a full table spinner on subsequent search poll updates.
 
 ## Monitoring Checklist
 

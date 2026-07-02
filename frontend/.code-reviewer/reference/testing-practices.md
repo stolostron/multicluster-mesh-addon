@@ -28,6 +28,7 @@ format_version: 1
 - Use `test.each` for parameterized/table-driven tests
 - Every test file must include `afterEach(() => rstest.clearAllMocks())`
 - When using fake timers, include `rstest.useRealTimers()` in `afterEach`
+- When testing hooks/components that use module-level caches, call the corresponding `__reset*()` function in `afterEach` (e.g., `__resetEnrichmentCache()`)
 
 ### Assertions
 
@@ -58,15 +59,26 @@ format_version: 1
 - Use `waitFor` for async state updates
 - Use `rstest.useFakeTimers()` + `act(async () => { await rstest.runAllTimersAsync() })` for timer-based behavior
 - Use `rerender()` from `renderHook` result to test re-render scenarios
+- **Cross-mount cache persistence**: For hooks with module-level caches, test that cached data survives component unmounts: `renderHook → waitFor(loaded) → record fetch count → unmount → renderHook (same inputs) → assert no new fetches → assert data available`. See `useEnrichedControlPlanes.test.ts` "reuses module-level cache across component remounts" for the reference test.
 
 ### User Interaction
 
 - Use `userEvent.setup()` — not `fireEvent`
 - All interaction calls must be awaited: `await user.click(...)`, `await user.type(...)`
 
+### Toggle / Filter State Testing
+
+For UI elements with togglable filter states (e.g., "Show all conditions" / "Show issues only"), test the full cycle:
+1. Render → assert default filtered state (e.g., only non-True conditions visible)
+2. Click toggle → assert unfiltered state (all items visible)
+3. Click toggle again → assert re-filtered state matches step 1
+
+See `DiscoveredMeshDetailPage.test.tsx` "conditions card" tests for the reference pattern.
+
 ## Changelog
 
 | Date | Change | Trigger |
 |------|--------|---------|
+| 2026-07-01 | Add module-level cache cleanup, cross-mount cache testing, toggle testing patterns | /code-reviewer:setup refresh |
 | 2026-06-23 | Migrate from Jest to Rstest | Rstack toolchain alignment |
 | 2026-06-23 | Initial generation | /code-reviewer:setup |

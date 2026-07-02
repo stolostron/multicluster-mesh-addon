@@ -101,7 +101,7 @@ describe('ControlPlaneDetailPage', () => {
       rstest.mocked(fleetK8sGet).mockResolvedValue(makeIstio())
       render(<ControlPlaneDetailPage />)
       await waitFor(() => {
-        expect(screen.getByText('mesh1')).toBeInTheDocument()
+        expect(screen.getAllByText('mesh1').length).toBeGreaterThanOrEqual(1)
       })
     })
 
@@ -132,7 +132,7 @@ describe('ControlPlaneDetailPage', () => {
       })
     })
 
-    it('shows Managed By card when correlated to a MultiClusterMesh', async () => {
+    it('shows Managed Mesh row in overview when correlated to a MultiClusterMesh', async () => {
       const mcm = {
         metadata: { name: 'my-mesh', namespace: 'mesh-system' },
         spec: { clusterSet: 'global', controlPlane: { namespace: 'istio-system' } },
@@ -142,7 +142,7 @@ describe('ControlPlaneDetailPage', () => {
       rstest.mocked(fleetK8sGet).mockResolvedValue(makeIstio())
       render(<ControlPlaneDetailPage />)
       await waitFor(() => {
-        expect(screen.getByText('Managed By')).toBeInTheDocument()
+        expect(screen.getByText('Managed Mesh')).toBeInTheDocument()
         expect(screen.getByRole('link', { name: 'my-mesh' })).toHaveAttribute(
           'href',
           '/service-mesh/mesh-system/my-mesh',
@@ -150,13 +150,85 @@ describe('ControlPlaneDetailPage', () => {
       })
     })
 
-    it('does not show Managed By card when not correlated', async () => {
+    it('does not show Managed Mesh row when not correlated', async () => {
       rstest.mocked(fleetK8sGet).mockResolvedValue(makeIstio())
       render(<ControlPlaneDetailPage />)
       await waitFor(() => {
         expect(screen.getByText('Overview')).toBeInTheDocument()
       })
-      expect(screen.queryByText('Managed By')).not.toBeInTheDocument()
+      expect(screen.queryByText('Managed Mesh')).not.toBeInTheDocument()
+    })
+
+    it('shows blue Managed label when CP is managed by MCM', async () => {
+      const mcm = {
+        metadata: { name: 'my-mesh', namespace: 'mesh-system' },
+        spec: { clusterSet: 'global', controlPlane: { namespace: 'istio-system' } },
+        status: { clusterStatus: [{ clusterName: 'cluster-a' }] },
+      }
+      rstest.mocked(useK8sWatchResource).mockReturnValue([[mcm], true, null])
+      rstest.mocked(fleetK8sGet).mockResolvedValue(makeIstio())
+      render(<ControlPlaneDetailPage />)
+      await waitFor(() => {
+        expect(screen.getByText('Managed')).toBeInTheDocument()
+      })
+    })
+
+    it('shows purple Discovered label when CP has meshID but no MCM', async () => {
+      rstest.mocked(fleetK8sGet).mockResolvedValue(makeIstio())
+      render(<ControlPlaneDetailPage />)
+      await waitFor(() => {
+        expect(screen.getByText('Discovered')).toBeInTheDocument()
+      })
+    })
+
+    it('shows no kind label when CP has no meshID and no MCM', async () => {
+      rstest.mocked(fleetK8sGet).mockResolvedValue(makeIstio({
+        spec: { namespace: 'istio-system' },
+      }))
+      render(<ControlPlaneDetailPage />)
+      await waitFor(() => {
+        expect(screen.getByText('Overview')).toBeInTheDocument()
+      })
+      expect(screen.queryByText('Managed')).not.toBeInTheDocument()
+      expect(screen.queryByText('Discovered')).not.toBeInTheDocument()
+    })
+
+    it('links mesh ID to discovered mesh page when CP has meshID but no MCM', async () => {
+      rstest.mocked(fleetK8sGet).mockResolvedValue(makeIstio())
+      render(<ControlPlaneDetailPage />)
+      await waitFor(() => {
+        expect(screen.getByRole('link', { name: 'mesh1' })).toHaveAttribute(
+          'href',
+          '/fleet-mesh-discovered/mesh1',
+        )
+      })
+    })
+
+    it('shows mesh ID as plain text when CP is managed by MCM', async () => {
+      const mcm = {
+        metadata: { name: 'my-mesh', namespace: 'mesh-system' },
+        spec: { clusterSet: 'global', controlPlane: { namespace: 'istio-system' } },
+        status: { clusterStatus: [{ clusterName: 'cluster-a' }] },
+      }
+      rstest.mocked(useK8sWatchResource).mockReturnValue([[mcm], true, null])
+      rstest.mocked(fleetK8sGet).mockResolvedValue(makeIstio())
+      render(<ControlPlaneDetailPage />)
+      await waitFor(() => {
+        expect(screen.getByText('Managed Mesh')).toBeInTheDocument()
+        expect(screen.getByText('mesh1')).toBeInTheDocument()
+      })
+      expect(screen.queryByRole('link', { name: 'mesh1' })).not.toBeInTheDocument()
+    })
+
+    it('does not show Managed Mesh row when CP has no meshID and no MCM', async () => {
+      rstest.mocked(fleetK8sGet).mockResolvedValue(makeIstio({
+        spec: { namespace: 'istio-system' },
+      }))
+      render(<ControlPlaneDetailPage />)
+      await waitFor(() => {
+        expect(screen.getByText('Overview')).toBeInTheDocument()
+      })
+      expect(screen.queryByText('Managed Mesh')).not.toBeInTheDocument()
     })
   })
 

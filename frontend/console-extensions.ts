@@ -34,7 +34,7 @@ const fleetMeshesNavItem: EncodedExtension = {
   properties: {
     perspective: 'fleet-service-mesh',
     id: 'fleet-meshes',
-    name: consoleName('Fleet Meshes'),
+    name: consoleName('Meshes'),
     href: '/service-mesh',
   },
 }
@@ -64,6 +64,15 @@ const fleetMeshOverviewRoute: EncodedExtension = {
     perspective: 'fleet-service-mesh',
     path: '/service-mesh',
     component: { $codeRef: 'serviceMeshPage.default' },
+  },
+}
+
+const discoveredMeshDetailRoute: EncodedExtension = {
+  type: 'console.page/route',
+  properties: {
+    perspective: 'fleet-service-mesh',
+    path: '/fleet-mesh-discovered/:meshID',
+    component: { $codeRef: 'discoveredMeshDetailPage.default' },
   },
 }
 
@@ -104,6 +113,7 @@ export const extensions: EncodedExtension[] = [
   overviewRoute,
   fleetMeshDetailRoute,
   fleetMeshOverviewRoute,
+  discoveredMeshDetailRoute,
   controlPlaneDetailRoute,
   controlPlanesRoute,
 ]
