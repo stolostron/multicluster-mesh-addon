@@ -36,6 +36,19 @@ For detailed architecture and design decisions, see [docs/design.md](docs/design
 
 ### Installation
 
+#### Using Helm
+
+For installation via Helm, see the [Helm Chart README](chart/README.md).
+
+Quick install:
+```bash
+helm repo add multicluster-mesh-addon https://stolostron.github.io/multicluster-mesh-addon
+helm repo update
+helm install multicluster-mesh-addon multicluster-mesh-addon/multicluster-mesh-addon \
+  --namespace multicluster-mesh-system \
+  --create-namespace
+```
+
 #### Development Deployment
 
 **Prerequisites:**
