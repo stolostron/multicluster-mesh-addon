@@ -39,7 +39,7 @@ Contact the org [owners](https://github.com/orgs/stolostron/people?query=role%3A
 - Approvers will respond to pull requests promptly
 - Address review feedback by pushing new commits
 - Avoid force-pushing during review if possible. Use merge commits to resolve conflicts.
-- Use `/hold` and `/unhold` comments to control when the PR is merged. It can be used to wait for multiple reviews in case of complex change. Otherwise the PR will be merged after first approving review.
+- Use the `/hold` and `/unhold` comments to control when a PR is eligible for merge. Contributors may use `/hold` to prevent a PR from merging while additional review or discussion is in progress. This is particularly useful for complex changes that require multiple approvals. If a PR is not on hold, it becomes eligible for merge after receiving a single approving review from a maintainer.
 
 ## Developer Certificate of Origin
 
