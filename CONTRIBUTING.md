@@ -39,7 +39,7 @@ Contact the org [owners](https://github.com/orgs/stolostron/people?query=role%3A
 - Approvers will respond to pull requests promptly
 - Address review feedback by pushing new commits
 - Avoid force-pushing during review if possible. Use merge commits to resolve conflicts.
-- `okay to merge` label is required for a PR to be merged. This allows for better control in cases where multiple reviews are needed.
+- Use `/hold` and `/unhold` comments to control when the PR is merged. It can be used to wait for multiple reviews in case of complex change. Otherwise the PR will be merged after first approving review.
 
 ## Developer Certificate of Origin
 
