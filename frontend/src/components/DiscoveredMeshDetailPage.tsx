@@ -158,7 +158,7 @@ const DiscoveredMeshDetailContent: FC<{ meshID: string }> = ({ meshID }) => {
             <MeshStatus conditions={worstConditions} conditionType="Ready" />
           </FlexItem>
           <FlexItem>
-            <Label color="purple" isCompact>{t('Discovered')}</Label>
+            <Label color="purple">{t('Discovered')}</Label>
           </FlexItem>
         </Flex>
       </PageSection>
@@ -247,7 +247,7 @@ const DiscoveredMeshDetailContent: FC<{ meshID: string }> = ({ meshID }) => {
                           <td className="pf-v6-c-table__td">{cp.version ?? '-'}</td>
                           <td className="pf-v6-c-table__td">
                             {cp.status?.conditions ? (
-                              <MeshStatus conditions={cp.status.conditions} conditionType="Ready" />
+                              <MeshStatus conditions={cp.status.conditions} conditionType="Ready" isCompact />
                             ) : (
                               <Label color="grey">{t('Unknown')}</Label>
                             )}

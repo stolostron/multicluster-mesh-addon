@@ -183,7 +183,7 @@ export const ClusterStatusSection: FC<{ clusterStatuses: ClusterMeshStatus[]; me
                             </Link>
                           </td>
                           <td className="pf-v6-c-table__td">
-                            <MeshStatus conditions={cs.conditions} conditionType="OperatorInstalled" />
+                            <MeshStatus conditions={cs.conditions} conditionType="OperatorInstalled" isCompact />
                           </td>
                           <td className="pf-v6-c-table__td">
                             {operatorCondition ? conditionMessage(operatorCondition) : '-'}
@@ -272,7 +272,7 @@ const MeshDetailContent: FC<{ ns: string; name: string }> = ({ ns, name }) => {
             <MeshStatus conditions={conditions} conditionType="Ready" />
           </FlexItem>
           <FlexItem>
-            <Label color="blue" isCompact>{t('Managed')}</Label>
+            <Label color="blue">{t('Managed')}</Label>
           </FlexItem>
         </Flex>
       </PageSection>

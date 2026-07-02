@@ -125,7 +125,7 @@ const ControlPlaneRow: FC<RowProps<EnrichedControlPlane>> = ({ obj, activeColumn
       </TableData>
       <TableData id="status" activeColumnIDs={activeColumnIDs}>
         {obj.status?.conditions ? (
-          <MeshStatus conditions={obj.status.conditions} conditionType="Ready" />
+          <MeshStatus conditions={obj.status.conditions} conditionType="Ready" isCompact />
         ) : (
           <Label color="grey">{t('Unknown')}</Label>
         )}

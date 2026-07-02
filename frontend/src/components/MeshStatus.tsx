@@ -60,17 +60,18 @@ export function getStatusRank(conditions?: K8sCondition[], conditionType?: strin
 
 export function statusIcon(status: string): ReactNode {
   const color = status === 'True' ? 'green' : status === 'Unknown' ? 'grey' : 'red'
-  return <Label color={color}>{status}</Label>
+  return <Label color={color} isCompact>{status}</Label>
 }
 
 interface MeshStatusProps {
   conditions?: K8sCondition[]
   conditionType?: string
+  isCompact?: boolean
 }
 
 /** Renders a colored PatternFly Label reflecting the status of a K8s condition (default: "Ready"). */
-export const MeshStatus: FC<MeshStatusProps> = ({ conditions, conditionType }) => {
+export const MeshStatus: FC<MeshStatusProps> = ({ conditions, conditionType, isCompact }) => {
   const { t } = useMeshTranslation()
   const { label, color } = deriveStatus(conditions, conditionType)
-  return <Label color={color}>{t(label)}</Label>
+  return <Label color={color} isCompact={isCompact}>{t(label)}</Label>
 }

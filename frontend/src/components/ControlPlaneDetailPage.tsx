@@ -110,9 +110,9 @@ const ControlPlaneDetailContent: FC<{ cluster: string; name: string }> = ({ clus
           </FlexItem>
           <FlexItem>
             {matchedMCM
-              ? <Label color="blue" isCompact>{t('Managed')}</Label>
+              ? <Label color="blue">{t('Managed')}</Label>
               : meshID
-                ? <Label color="purple" isCompact>{t('Discovered')}</Label>
+                ? <Label color="purple">{t('Discovered')}</Label>
                 : null}
           </FlexItem>
         </Flex>

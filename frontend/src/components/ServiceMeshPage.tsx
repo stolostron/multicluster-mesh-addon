@@ -151,7 +151,7 @@ const MeshRow: FC<RowProps<FleetMeshItem>> = ({ obj, activeColumnIDs }) => {
       <TableData id="status" activeColumnIDs={activeColumnIDs}>
         {obj.meshIDConflict
           ? <Label color="red">{t('Mesh ID Conflict')}</Label>
-          : <MeshStatus conditions={obj.conditions} />}
+          : <MeshStatus conditions={obj.conditions} isCompact />}
       </TableData>
     </>
   )
