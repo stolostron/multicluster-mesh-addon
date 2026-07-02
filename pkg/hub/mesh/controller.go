@@ -143,6 +143,7 @@ func RegisterController(mgr manager.Manager) error {
 //+kubebuilder:rbac:groups=cluster.open-cluster-management.io,resources=managedclustersets,verbs=get;list;watch
 //+kubebuilder:rbac:groups=work.open-cluster-management.io,resources=manifestworks,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=cert-manager.io,resources=certificates,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=authentication.open-cluster-management.io,resources=managedserviceaccounts,verbs=get;list;watch;create;update;delete
 //+kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
 
 // Reconcile implements the reconcile loop for MultiClusterMesh resources
@@ -257,6 +258,11 @@ func (r *Reconciler) doReconcile(ctx context.Context, mesh *meshv1alpha1.MultiCl
 		}
 		klog.V(4).Infof("Applied operator ManifestWork %s/%s", work.Namespace, work.Name)
 
+		// Create ManagedServiceAccount resources for each cluster.
+		if err := r.ensureManagedServiceAccountCreated(ctx, mesh, &cluster); err != nil {
+			return reconcile.Result{}, fmt.Errorf("failed to create ManagedServiceAccounts: %w", err)
+		}
+
 		if mesh.Spec.Security.Trust.CertManager.IssuerRef.Name != "" {
 			if err := r.ensureCertificateForCluster(ctx, mesh, &cluster); err != nil {
 				return reconcile.Result{}, fmt.Errorf("failed to ensure certificate for cluster %s: %w", cluster.Name, err)
@@ -274,6 +280,11 @@ func (r *Reconciler) doReconcile(ctx context.Context, mesh *meshv1alpha1.MultiCl
 
 	if err := r.cleanupManifestWorks(ctx, mesh.Spec.ClusterSet); err != nil {
 		return reconcile.Result{}, fmt.Errorf("failed to cleanup ManifestWorks: %w", err)
+	}
+
+	// Cleanup ManagedServiceAccount when the cluster(s) are removed from the ClusterSet.
+	if err := r.cleanupManagedServiceAccounts(ctx, mesh, clusters); err != nil {
+		return reconcile.Result{}, fmt.Errorf("failed to cleanup ManagedServiceAccounts: %w", err)
 	}
 
 	return reconcile.Result{}, nil
@@ -348,6 +359,10 @@ func (r *Reconciler) handleDeletion(ctx context.Context, mesh *meshv1alpha1.Mult
 	klog.Infof("Handling deletion for MultiClusterMesh %s/%s", mesh.Namespace, mesh.Name)
 	if err := r.cleanupManifestWorks(ctx, mesh.Spec.ClusterSet); err != nil {
 		return reconcile.Result{}, fmt.Errorf("failed to cleanup ManifestWorks: %w", err)
+	}
+
+	if err := r.deleteAllManagedServiceAccounts(ctx, mesh); err != nil {
+		return reconcile.Result{}, fmt.Errorf("failed to cleanup ManagedServiceAccount resources: %w", err)
 	}
 
 	// Trigger reconciliation for other meshes targeting the same cluster set.
