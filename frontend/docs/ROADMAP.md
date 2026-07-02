@@ -5,7 +5,6 @@
 - **Data plane visibility** — Meshes have control planes but also data planes — the namespaces within clusters where application workloads run with sidecar proxies. The UI needs a way to discover and visualize data planes (which clusters, which namespaces, how many workloads). The discovery mechanism and UI design are TBD.
 - **Create / delete mesh actions** — Add a "Create Mesh" button to the list page and "Delete Mesh" on the detail page.
 - **Edit mesh** — Edit issuer, operator config, etc. from the detail page.
-- **CI workflow** — Add a GitHub Actions workflow to the parent repo (`.github/workflows/frontend-ci.yml`) that runs `make test build` on PRs touching `frontend/**`, using two parallel jobs (test — which includes type checking — and build).
 
 ## Blocked on backend
 

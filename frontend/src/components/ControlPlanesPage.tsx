@@ -84,7 +84,7 @@ const ControlPlaneRow: FC<RowProps<EnrichedControlPlane>> = ({ obj, activeColumn
       <TableData id="meshID" activeColumnIDs={activeColumnIDs}>
         {obj.managedBy ? (
           <Tooltip content={t('Managed by {{name}}', { name: obj.managedBy.name })}>
-            <Link to={`/fleet-mesh/meshes/${obj.managedBy.namespace}/${obj.managedBy.name}`}>
+            <Link to={`/fleet-mesh/meshes/${encodeURIComponent(obj.managedBy.namespace)}/${encodeURIComponent(obj.managedBy.name)}`}>
               <Label color="blue" isCompact>{obj.meshID ?? '-'}</Label>
             </Link>
           </Tooltip>
@@ -106,7 +106,7 @@ const ControlPlaneRow: FC<RowProps<EnrichedControlPlane>> = ({ obj, activeColumn
         </Link>
       </TableData>
       <TableData id="cluster" activeColumnIDs={activeColumnIDs}>
-        <Link to={`/multicloud/infrastructure/clusters/details/${obj.clusterName}/${obj.clusterName}/overview`}>
+        <Link to={`/multicloud/infrastructure/clusters/details/${encodeURIComponent(obj.clusterName)}/${encodeURIComponent(obj.clusterName)}/overview`}>
           {obj.clusterName}
         </Link>
       </TableData>

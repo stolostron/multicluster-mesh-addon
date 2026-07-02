@@ -37,7 +37,7 @@ import { useEnrichedControlPlanes } from '../hooks/useEnrichedControlPlanes'
 import { useManagedClusters } from '../hooks/useManagedClusters'
 import type { EnrichedControlPlane } from '../types/istio'
 import type { K8sCondition } from '../types/common'
-import type { ManagedCluster } from '../types/managedCluster'
+import type { ClusterAvailability, ManagedCluster } from '../types/managedCluster'
 import { getClusterAvailability, availabilityColor, availabilityLabelKey } from '../types/managedCluster'
 import { ControlPlanesCard } from './ControlPlanesCard'
 import { MeshStatus, getStatusRank, statusIcon } from './MeshStatus'
@@ -105,16 +105,16 @@ const DiscoveredMeshDetailContent: FC<{ meshID: string }> = ({ meshID }) => {
   }, [matchingPlanes])
 
   const clusterAvailabilityMap = useMemo(() => {
-    const map = new Map<string, ClusterAvailabilityCategory>()
+    const map = new Map<string, ClusterAvailability>()
     for (const name of uniqueClusterNames) {
-      map.set(name, getClusterAvailability(managedClusterMap.get(name)) as ClusterAvailabilityCategory)
+      map.set(name, getClusterAvailability(managedClusterMap.get(name)))
     }
     return map
   }, [uniqueClusterNames, managedClusterMap])
 
   const clusterCounts = useMemo(() => {
     const result = { available: 0, unavailable: 0, unreachable: 0 }
-    clusterAvailabilityMap.forEach((cat) => { if (cat !== 'all') result[cat]++ })
+    clusterAvailabilityMap.forEach((cat) => { result[cat]++ })
     return result
   }, [clusterAvailabilityMap])
 
@@ -162,22 +162,24 @@ const DiscoveredMeshDetailContent: FC<{ meshID: string }> = ({ meshID }) => {
     )
   }
 
-  const worstConditions = aggregateStatus(matchingPlanes)
-  const networks = uniqueNetworks(matchingPlanes)
-  const created = oldestTimestamp(matchingPlanes)
+  const worstConditions = useMemo(() => aggregateStatus(matchingPlanes), [matchingPlanes])
+  const networks = useMemo(() => uniqueNetworks(matchingPlanes), [matchingPlanes])
+  const created = useMemo(() => oldestTimestamp(matchingPlanes), [matchingPlanes])
 
-  // Check for meshID conflict with managed meshes
-  const hasConflict = enrichedPlanes.some((cp) => cp.managedBy && cp.meshID === meshID)
+  const hasConflict = useMemo(
+    () => enrichedPlanes.some((cp) => cp.managedBy && cp.meshID === meshID),
+    [enrichedPlanes, meshID],
+  )
 
-  const allConditions: { clusterName: string; cpName: string; condition: K8sCondition }[] = []
-  for (const cp of matchingPlanes) {
-    for (const c of cp.status?.conditions ?? []) {
-      allConditions.push({ clusterName: cp.clusterName, cpName: cp.metadata.name, condition: c })
+  const visibleConditions = useMemo(() => {
+    const all: { clusterName: string; cpName: string; condition: K8sCondition }[] = []
+    for (const cp of matchingPlanes) {
+      for (const c of cp.status?.conditions ?? []) {
+        all.push({ clusterName: cp.clusterName, cpName: cp.metadata.name, condition: c })
+      }
     }
-  }
-  const visibleConditions = showAllConditions
-    ? allConditions
-    : allConditions.filter((entry) => entry.condition.status !== 'True')
+    return showAllConditions ? all : all.filter((entry) => entry.condition.status !== 'True')
+  }, [matchingPlanes, showAllConditions])
 
   const networkDisplay = networks.length === 0
     ? '-'
@@ -344,7 +346,7 @@ const DiscoveredMeshDetailContent: FC<{ meshID: string }> = ({ meshID }) => {
             <ControlPlanesCard planes={matchingPlanes} />
           </GridItem>
 
-          {allConditions.length > 0 && (
+          {matchingPlanes.some((cp) => cp.status?.conditions?.length) && (
             <GridItem span={12}>
               <Card isCompact>
                 <CardTitle>
@@ -366,8 +368,9 @@ const DiscoveredMeshDetailContent: FC<{ meshID: string }> = ({ meshID }) => {
                       <EmptyStateBody>{t('No issues detected.')}</EmptyStateBody>
                     </EmptyState>
                   ) : (
+                    <div style={{ maxHeight: '400px', overflowY: 'auto' }}>
                     <table className="pf-v6-c-table pf-m-grid-md pf-m-compact" role="grid">
-                      <thead className="pf-v6-c-table__thead">
+                      <thead className="pf-v6-c-table__thead" style={{ position: 'sticky', top: 0, zIndex: 1 }}>
                         <tr className="pf-v6-c-table__tr">
                           <th className="pf-v6-c-table__th" scope="col">{t('Cluster')}</th>
                           <th className="pf-v6-c-table__th" scope="col">{t('Control Plane')}</th>
@@ -394,6 +397,7 @@ const DiscoveredMeshDetailContent: FC<{ meshID: string }> = ({ meshID }) => {
                         ))}
                       </tbody>
                     </table>
+                    </div>
                   )}
                 </CardBody>
               </Card>

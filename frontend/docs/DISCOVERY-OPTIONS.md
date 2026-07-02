@@ -76,7 +76,7 @@ Correlated Istio CRs get a `managedBy` field pointing to the MCM's name and name
 
 ## Data flow
 
-```
+```text
 Hub cluster                          Managed clusters
 ┌──────────────────────┐             ┌─────────────────────┐
 │ MultiClusterMesh CRs │             │ Istio CRs           │

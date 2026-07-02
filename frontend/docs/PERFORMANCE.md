@@ -8,6 +8,7 @@ The frontend uses two data fetching patterns:
 
 - **Meshes page**: `useFleetMeshItems` merges `useK8sWatchResource` for `MultiClusterMesh` CRs with ACM Search discovery and enrichment of Istio CRs. The unified list shows both managed and discovered meshes.
 - **Control Planes page**: Two-phase discovery + enrichment. `useFleetSearchPoll` discovers Istio CRs across all clusters via ACM Search (30s poll). `fleetK8sGet` enriches each discovered CR with full spec/status from the individual cluster. Results are stored in a module-level cache (surviving component unmounts during page navigation) with a 2.5-minute TTL. An `initialEnrichmentDone` flag prevents spinner flash on subsequent search poll updates.
+- **Detail pages**: Both mesh detail pages (`MeshDetailPage`, `DiscoveredMeshDetailPage`) run the full enrichment pipeline (`useMultiClusterMeshes` + `useDiscoveredControlPlanes` + `useEnrichedControlPlanes`) to populate the Control Planes card, then filter client-side to the mesh's subset. They also watch all `ManagedCluster` objects fleet-wide via `useManagedClusters` for cluster availability status.
 
 ## Known Constraints
 
@@ -28,6 +29,16 @@ This N+1 pattern exists because ACM Search only indexes common K8s metadata (kin
 - Cancellation support prevents stale fetches from updating state
 - Debounced state updates (once per second max) prevent re-render storms during enrichment
 - Cache eviction sweeps remove entries for deleted control planes
+
+### Fleet-Wide ManagedCluster Watch
+
+Detail pages watch all `ManagedCluster` objects on the hub via `useManagedClusters` to show cluster availability status (Available/Unavailable/Unreachable). This is a fleet-wide list watch — at 200+ clusters, the hub returns all ManagedCluster objects and maintains a WebSocket subscription for updates. Each update produces a new array reference that cascades through `managedClusterMap` rebuilds.
+
+The watch is not scoped to mesh-member clusters because that would require individual watches per cluster name (potentially 20+ per detail page). The Console SDK likely dedupes identical watch configs across components, so navigating between detail pages should not create duplicate subscriptions.
+
+**Mitigations in place:**
+- `managedClusterMap` is wrapped in `useMemo` keyed on the watch data, so the Map only rebuilds when the array reference changes
+- Downstream computations (`clusterAvailabilityMap`, `clusterCounts`, `filteredClusters`) are all memoized
 
 ## Optimizations Applied
 
@@ -77,3 +88,4 @@ Things to watch as scale increases:
 - [ ] **Cache memory**: Each cached Istio CR is ~2-5KB. At 500+ CPs with cluster churn, monitor memory usage during long sessions. Eviction is in place but only runs after enrichment cycles.
 - [ ] **Search response size**: The full fleet search response is metadata-only and should be small even at 500+ CPs. If it grows, investigate the `limit` parameter on `useFleetSearchPoll`.
 - [ ] **MCM index rebuild frequency**: The `mcmIndex` rebuilds whenever the MCMs WebSocket watch fires. Building a Map from 100 MCMs with 20 clusters each is ~2000 `Map.set` calls (microseconds), but if MCM count grows significantly or WebSocket updates become frequent, profile whether the index build cost is measurable.
+- [ ] **ManagedCluster watch size**: Detail pages watch all ManagedCluster objects fleet-wide. At 200+ clusters this is acceptable, but if the fleet grows to 1000+ clusters, consider scoping the watch to mesh-member clusters only or deriving availability from a lighter-weight source.

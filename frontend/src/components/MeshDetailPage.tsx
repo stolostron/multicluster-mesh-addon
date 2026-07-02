@@ -6,6 +6,7 @@ import {
   Timestamp,
 } from '@openshift-console/dynamic-plugin-sdk'
 import {
+  Alert,
   Breadcrumb,
   BreadcrumbItem,
   Card,
@@ -66,10 +67,12 @@ const CONFLICT_REASONS = ['OperatorConfigConflict', 'NamespaceConflict']
 export const ClusterStatusSection: FC<{
   clusterStatuses: ClusterMeshStatus[]
   managedClusterMap?: Map<string, ManagedCluster>
+  managedClustersLoaded?: boolean
   meshConditions?: K8sCondition[]
 }> = ({
   clusterStatuses,
   managedClusterMap,
+  managedClustersLoaded = true,
   meshConditions,
 }) => {
   const { t } = useMeshTranslation()
@@ -178,7 +181,6 @@ export const ClusterStatusSection: FC<{
                   ) : (
                     filtered.map((cs) => {
                       const operatorCondition = cs.conditions?.find((c) => c.type === 'OperatorInstalled')
-                      const availability = getClusterAvailability(managedClusterMap?.get(cs.clusterName))
                       return (
                         <tr className="pf-v6-c-table__tr" key={cs.clusterName}>
                           <td className="pf-v6-c-table__td">
@@ -187,7 +189,10 @@ export const ClusterStatusSection: FC<{
                             </Link>
                           </td>
                           <td className="pf-v6-c-table__td">
-                            <Label color={availabilityColor(availability)} isCompact>{t(availabilityLabelKey(availability))}</Label>
+                            {managedClustersLoaded ? (() => {
+                              const availability = getClusterAvailability(managedClusterMap?.get(cs.clusterName))
+                              return <Label color={availabilityColor(availability)} isCompact>{t(availabilityLabelKey(availability))}</Label>
+                            })() : '-'}
                           </td>
                           <td className="pf-v6-c-table__td">
                             <MeshStatus conditions={cs.conditions} conditionType="OperatorInstalled" isCompact />
@@ -217,9 +222,9 @@ const MeshDetailContent: FC<{ ns: string; name: string }> = ({ ns, name }) => {
     namespace: ns,
   })
   const [mcms] = useMultiClusterMeshes()
-  const [managedClusters] = useManagedClusters()
+  const [managedClusters, managedClustersLoaded] = useManagedClusters()
   const { results: searchResults } = useDiscoveredControlPlanes()
-  const [enrichedPlanes] = useEnrichedControlPlanes(searchResults, mcms ?? [])
+  const [enrichedPlanes, , , enrichmentError] = useEnrichedControlPlanes(searchResults, mcms ?? [])
   const managedClusterMap = useMemo(() => {
     const map = new Map<string, ManagedCluster>()
     for (const mc of managedClusters ?? []) {
@@ -301,6 +306,16 @@ const MeshDetailContent: FC<{ ns: string; name: string }> = ({ ns, name }) => {
 
       <PageSection>
         <Grid hasGutter>
+          {!!enrichmentError && (
+            <GridItem span={12}>
+              <Alert
+                variant="warning"
+                isInline
+                title={t('Unable to load control plane data. Some information may be incomplete.')}
+              />
+            </GridItem>
+          )}
+
           <GridItem span={12}>
             <Card isCompact>
               <CardBody>
@@ -365,7 +380,7 @@ const MeshDetailContent: FC<{ ns: string; name: string }> = ({ ns, name }) => {
           </GridItem>
 
           <GridItem span={12}>
-            <ClusterStatusSection clusterStatuses={clusterStatuses} managedClusterMap={managedClusterMap} meshConditions={conditions} />
+            <ClusterStatusSection clusterStatuses={clusterStatuses} managedClusterMap={managedClusterMap} managedClustersLoaded={managedClustersLoaded} meshConditions={conditions} />
           </GridItem>
 
           <GridItem span={12}>

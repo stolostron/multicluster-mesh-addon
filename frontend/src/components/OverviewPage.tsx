@@ -108,7 +108,6 @@ function collectRecentIssues(meshes: MultiClusterMesh[], controlPlanes: Enriched
 
 const OverviewPage: FC = () => {
   const { t } = useMeshTranslation()
-
   const {
     items,
     mcms,
