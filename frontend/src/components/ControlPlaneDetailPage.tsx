@@ -126,6 +126,20 @@ const ControlPlaneDetailContent: FC<{ cluster: string; name: string }> = ({ clus
               <CardBody>
                 <DescriptionList isCompact columnModifier={{ default: '2Col' }}>
                   <DescriptionListGroup>
+                    <DescriptionListTerm>{t('Mesh ID')}</DescriptionListTerm>
+                    <DescriptionListDescription>
+                      {meshID
+                        ? (matchedMCM
+                            ? meshID
+                            : <Link to={`/fleet-mesh-discovered/${encodeURIComponent(meshID)}`}>{meshID}</Link>)
+                        : '-'}
+                    </DescriptionListDescription>
+                  </DescriptionListGroup>
+                  <DescriptionListGroup>
+                    <DescriptionListTerm>{t('Network')}</DescriptionListTerm>
+                    <DescriptionListDescription>{network ?? '-'}</DescriptionListDescription>
+                  </DescriptionListGroup>
+                  <DescriptionListGroup>
                     <DescriptionListTerm>{t('Cluster')}</DescriptionListTerm>
                     <DescriptionListDescription>
                       <Link to={`/multicloud/infrastructure/clusters/details/${cluster}/${cluster}/overview`}>
@@ -142,15 +156,17 @@ const ControlPlaneDetailContent: FC<{ cluster: string; name: string }> = ({ clus
                     <DescriptionListDescription>{spec.version ?? '-'}</DescriptionListDescription>
                   </DescriptionListGroup>
                   <DescriptionListGroup>
-                    <DescriptionListTerm>{t('Mesh ID')}</DescriptionListTerm>
+                    <DescriptionListTerm>{t('Created')}</DescriptionListTerm>
                     <DescriptionListDescription>
-                      {meshID
-                        ? (matchedMCM
-                            ? meshID
-                            : <Link to={`/fleet-mesh-discovered/${encodeURIComponent(meshID)}`}>{meshID}</Link>)
-                        : '-'}
+                      <Timestamp timestamp={istio.metadata?.creationTimestamp} />
                     </DescriptionListDescription>
                   </DescriptionListGroup>
+                  {multiClusterName && (
+                    <DescriptionListGroup>
+                      <DescriptionListTerm>{t('Cluster Name (Istio)')}</DescriptionListTerm>
+                      <DescriptionListDescription>{multiClusterName}</DescriptionListDescription>
+                    </DescriptionListGroup>
+                  )}
                   {matchedMCM && (
                     <DescriptionListGroup>
                       <DescriptionListTerm>{t('Managed Mesh')}</DescriptionListTerm>
@@ -161,22 +177,6 @@ const ControlPlaneDetailContent: FC<{ cluster: string; name: string }> = ({ clus
                       </DescriptionListDescription>
                     </DescriptionListGroup>
                   )}
-                  <DescriptionListGroup>
-                    <DescriptionListTerm>{t('Network')}</DescriptionListTerm>
-                    <DescriptionListDescription>{network ?? '-'}</DescriptionListDescription>
-                  </DescriptionListGroup>
-                  {multiClusterName && (
-                    <DescriptionListGroup>
-                      <DescriptionListTerm>{t('Cluster Name (Istio)')}</DescriptionListTerm>
-                      <DescriptionListDescription>{multiClusterName}</DescriptionListDescription>
-                    </DescriptionListGroup>
-                  )}
-                  <DescriptionListGroup>
-                    <DescriptionListTerm>{t('Created')}</DescriptionListTerm>
-                    <DescriptionListDescription>
-                      <Timestamp timestamp={istio.metadata?.creationTimestamp} />
-                    </DescriptionListDescription>
-                  </DescriptionListGroup>
                 </DescriptionList>
               </CardBody>
             </Card>
