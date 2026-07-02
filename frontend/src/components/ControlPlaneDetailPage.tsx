@@ -93,7 +93,7 @@ const ControlPlaneDetailContent: FC<{ cluster: string; name: string }> = ({ clus
       <PageSection>
         <Breadcrumb>
           <BreadcrumbItem>
-            <Link to="/mesh-control-planes">{t('Control Planes')}</Link>
+            <Link to="/fleet-mesh/control-planes">{t('Control Planes')}</Link>
           </BreadcrumbItem>
           <BreadcrumbItem isActive>{`${cluster} / ${name}`}</BreadcrumbItem>
         </Breadcrumb>
@@ -122,25 +122,24 @@ const ControlPlaneDetailContent: FC<{ cluster: string; name: string }> = ({ clus
         <Grid hasGutter>
           <GridItem span={5}>
             <Card isCompact>
-              <CardTitle><strong>{t('Overview')}</strong></CardTitle>
               <CardBody>
                 <DescriptionList isCompact columnModifier={{ default: '2Col' }}>
                   <DescriptionListGroup>
-                    <DescriptionListTerm>{t('Mesh ID')}</DescriptionListTerm>
+                    <DescriptionListTerm><strong>{t('Mesh ID')}</strong></DescriptionListTerm>
                     <DescriptionListDescription>
                       {meshID
                         ? (matchedMCM
                             ? meshID
-                            : <Link to={`/fleet-mesh-discovered/${encodeURIComponent(meshID)}`}>{meshID}</Link>)
+                            : <Link to={`/fleet-mesh/meshes/discovered/${encodeURIComponent(meshID)}`}>{meshID}</Link>)
                         : '-'}
                     </DescriptionListDescription>
                   </DescriptionListGroup>
                   <DescriptionListGroup>
-                    <DescriptionListTerm>{t('Network')}</DescriptionListTerm>
+                    <DescriptionListTerm><strong>{t('Network')}</strong></DescriptionListTerm>
                     <DescriptionListDescription>{network ?? '-'}</DescriptionListDescription>
                   </DescriptionListGroup>
                   <DescriptionListGroup>
-                    <DescriptionListTerm>{t('Cluster')}</DescriptionListTerm>
+                    <DescriptionListTerm><strong>{t('Cluster')}</strong></DescriptionListTerm>
                     <DescriptionListDescription>
                       <Link to={`/multicloud/infrastructure/clusters/details/${cluster}/${cluster}/overview`}>
                         {cluster}
@@ -148,30 +147,30 @@ const ControlPlaneDetailContent: FC<{ cluster: string; name: string }> = ({ clus
                     </DescriptionListDescription>
                   </DescriptionListGroup>
                   <DescriptionListGroup>
-                    <DescriptionListTerm>{t('Control Plane Namespace')}</DescriptionListTerm>
+                    <DescriptionListTerm><strong>{t('Control Plane Namespace')}</strong></DescriptionListTerm>
                     <DescriptionListDescription>{spec.namespace}</DescriptionListDescription>
                   </DescriptionListGroup>
                   <DescriptionListGroup>
-                    <DescriptionListTerm>{t('Version')}</DescriptionListTerm>
+                    <DescriptionListTerm><strong>{t('Version')}</strong></DescriptionListTerm>
                     <DescriptionListDescription>{spec.version ?? '-'}</DescriptionListDescription>
                   </DescriptionListGroup>
                   <DescriptionListGroup>
-                    <DescriptionListTerm>{t('Created')}</DescriptionListTerm>
+                    <DescriptionListTerm><strong>{t('Created')}</strong></DescriptionListTerm>
                     <DescriptionListDescription>
                       <Timestamp timestamp={istio.metadata?.creationTimestamp} />
                     </DescriptionListDescription>
                   </DescriptionListGroup>
                   {multiClusterName && (
                     <DescriptionListGroup>
-                      <DescriptionListTerm>{t('Cluster Name (Istio)')}</DescriptionListTerm>
+                      <DescriptionListTerm><strong>{t('Cluster Name (Istio)')}</strong></DescriptionListTerm>
                       <DescriptionListDescription>{multiClusterName}</DescriptionListDescription>
                     </DescriptionListGroup>
                   )}
                   {matchedMCM && (
                     <DescriptionListGroup>
-                      <DescriptionListTerm>{t('Managed Mesh')}</DescriptionListTerm>
+                      <DescriptionListTerm><strong>{t('Managed Mesh')}</strong></DescriptionListTerm>
                       <DescriptionListDescription>
-                        <Link to={`/service-mesh/${matchedMCM.namespace}/${matchedMCM.name}`}>
+                        <Link to={`/fleet-mesh/meshes/${matchedMCM.namespace}/${matchedMCM.name}`}>
                           {matchedMCM.name}
                         </Link>
                       </DescriptionListDescription>
@@ -231,7 +230,7 @@ const ControlPlaneDetailPage: FC = () => {
         <EmptyState>
           <Title headingLevel="h2" size="lg">{t('Not Found')}</Title>
           <EmptyStateBody>
-            {t('Invalid control plane URL. Expected /mesh-control-planes/:cluster/:name.')}
+            {t('Invalid URL. Expected /fleet-mesh/control-planes/:cluster/:name.')}
           </EmptyStateBody>
         </EmptyState>
       </PageSection>
@@ -241,5 +240,5 @@ const ControlPlaneDetailPage: FC = () => {
   return <ControlPlaneDetailContent cluster={cluster} name={name} />
 }
 
-/** Detail page for a single Istio control plane, reached via /mesh-control-planes/:cluster/:name. */
+/** Detail page for a single Istio control plane, reached via /fleet-mesh/control-planes/:cluster/:name. */
 export default ControlPlaneDetailPage

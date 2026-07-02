@@ -29,6 +29,14 @@ import { useMeshTranslation } from '../utils/i18nUtils'
 function buildColumns(t: (key: string) => string): TableColumn<FleetMeshItem>[] {
   return [
     {
+      title: t('Mesh ID'),
+      id: 'meshID',
+      sort: (data: FleetMeshItem[], sortDirection: string) => {
+        const dir = sortDirection === 'asc' ? 1 : -1
+        return [...data].sort((a, b) => dir * (a.meshID ?? '').localeCompare(b.meshID ?? ''))
+      },
+    },
+    {
       title: t('Name'),
       id: 'name',
       sort: (data: FleetMeshItem[], sortDirection: string) => {
@@ -37,19 +45,11 @@ function buildColumns(t: (key: string) => string): TableColumn<FleetMeshItem>[] 
       },
     },
     {
-      title: t('Namespace'),
-      id: 'namespace',
+      title: t('Cluster Set'),
+      id: 'clusterSet',
       sort: (data: FleetMeshItem[], sortDirection: string) => {
         const dir = sortDirection === 'asc' ? 1 : -1
-        return [...data].sort((a, b) => dir * (a.mcmNamespace ?? '').localeCompare(b.mcmNamespace ?? ''))
-      },
-    },
-    {
-      title: t('Kind'),
-      id: 'kind',
-      sort: (data: FleetMeshItem[], sortDirection: string) => {
-        const dir = sortDirection === 'asc' ? 1 : -1
-        return [...data].sort((a, b) => dir * a.kind.localeCompare(b.kind))
+        return [...data].sort((a, b) => dir * (a.clusterSet ?? '').localeCompare(b.clusterSet ?? ''))
       },
     },
     {
@@ -58,14 +58,6 @@ function buildColumns(t: (key: string) => string): TableColumn<FleetMeshItem>[] 
       sort: (data: FleetMeshItem[], sortDirection: string) => {
         const dir = sortDirection === 'asc' ? 1 : -1
         return [...data].sort((a, b) => dir * (a.clusterCount - b.clusterCount))
-      },
-    },
-    {
-      title: t('Cluster Set'),
-      id: 'clusterSet',
-      sort: (data: FleetMeshItem[], sortDirection: string) => {
-        const dir = sortDirection === 'asc' ? 1 : -1
-        return [...data].sort((a, b) => dir * (a.clusterSet ?? '').localeCompare(b.clusterSet ?? ''))
       },
     },
     {
@@ -113,6 +105,11 @@ const MeshRow: FC<RowProps<FleetMeshItem>> = ({ obj, activeColumnIDs }) => {
 
   return (
     <>
+      <TableData id="meshID" activeColumnIDs={activeColumnIDs}>
+        {isManaged
+          ? <Label color="blue" isCompact>{obj.meshID ?? '-'}</Label>
+          : <Label color="purple" isCompact>{obj.meshID ?? '-'}</Label>}
+      </TableData>
       <TableData id="name" activeColumnIDs={activeColumnIDs}>
         <Link to={obj.detailLink}>
           {nameContent}
@@ -123,23 +120,15 @@ const MeshRow: FC<RowProps<FleetMeshItem>> = ({ obj, activeColumnIDs }) => {
           </Tooltip>
         )}
       </TableData>
-      <TableData id="namespace" activeColumnIDs={activeColumnIDs}>
-        {obj.mcmNamespace ?? '-'}
-      </TableData>
-      <TableData id="kind" activeColumnIDs={activeColumnIDs}>
-        {isManaged
-          ? <Label color="blue" isCompact>{t('Managed')}</Label>
-          : <Label color="purple" isCompact>{t('Discovered')}</Label>}
-      </TableData>
-      <TableData id="clusters" activeColumnIDs={activeColumnIDs}>
-        {obj.clusterCount}
-      </TableData>
       <TableData id="clusterSet" activeColumnIDs={activeColumnIDs}>
         {obj.clusterSet ? (
           <Link to={`/multicloud/infrastructure/clusters/sets/details/${encodeURIComponent(obj.clusterSet)}/overview`}>
             {obj.clusterSet}
           </Link>
         ) : '-'}
+      </TableData>
+      <TableData id="clusters" activeColumnIDs={activeColumnIDs}>
+        {obj.clusterCount}
       </TableData>
       <TableData id="trust" activeColumnIDs={activeColumnIDs}>
         {isManaged
@@ -160,16 +149,10 @@ const MeshRow: FC<RowProps<FleetMeshItem>> = ({ obj, activeColumnIDs }) => {
 function buildSearchFilters(t: (key: string) => string): RowSearchFilter<FleetMeshItem>[] {
   return [
     {
-      filter: (input, obj) => fuzzyCaseInsensitive(input.selected?.[0], obj.kind),
-      filterGroupName: t('Kind'),
-      placeholder: t('Filter by kind...'),
-      type: 'kind',
-    },
-    {
-      filter: (input, obj) => fuzzyCaseInsensitive(input.selected?.[0], obj.mcmNamespace ?? ''),
-      filterGroupName: t('Namespace'),
-      placeholder: t('Filter by namespace...'),
-      type: 'namespace',
+      filter: (input, obj) => fuzzyCaseInsensitive(input.selected?.[0], obj.meshID ?? ''),
+      filterGroupName: t('Mesh ID'),
+      placeholder: t('Filter by mesh ID...'),
+      type: 'meshID',
     },
   ]
 }

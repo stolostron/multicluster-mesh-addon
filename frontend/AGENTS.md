@@ -7,7 +7,7 @@ OpenShift ConsolePlugin that adds a "Fleet Service Mesh" perspective to the Open
 Related links:
 - [OSSM-12887](https://redhat.atlassian.net/browse/OSSM-12887) — Epic: OSSM/Kiali ACM console integration developer preview
 - [OCPSTRAT-2989](https://redhat.atlassian.net/browse/OCPSTRAT-2989) — Feature: Fleet-wide service mesh console integration with ACM
-- [docs/ROADMAP.md](docs/ROADMAP.md) — Current status and future plans
+- [docs/ROADMAP.md](docs/ROADMAP.md) — Future plans and backlog
 - [docs/INITIAL-SPIKE.md](docs/INITIAL-SPIKE.md) — Original spike research and architecture notes
 - [DEV-INSTALL.md](DEV-INSTALL.md) — End-to-end dev setup on CRC
 
@@ -19,14 +19,15 @@ Related links:
 - `rstest.config.ts` — Rstest test runner config (jsdom environment, module aliases, setup files, SWC JSX transform)
 - `hack/start-console.sh` — Runs local OpenShift Console (`origin-console`) pointed at webpack dev server
 - `deploy/` — Kubernetes manifests (ConsolePlugin CR, Deployment/Service, nginx config)
-- `src/types/` — TypeScript types for K8s resources (MultiClusterMesh, Certificate, ManifestWork, Istio)
+- `src/types/` — TypeScript types for K8s resources (MultiClusterMesh, Certificate, ManifestWork, Istio, ManagedCluster)
 - `src/types/fleetMesh.ts` — FleetMeshItem type for the unified mesh list (managed + discovered)
-- `src/components/` — React page and card components (ServiceMeshPage, MeshDetailPage, DiscoveredMeshDetailPage, ControlPlanesPage, ControlPlaneDetailPage, MeshStatus, StatusDonutChart, TrustStatusCard)
-- `src/hooks/` — Data fetching hooks (useMultiClusterMeshes, useFleetMeshItems, useDiscoveredControlPlanes, useEnrichedControlPlanes)
+- `src/types/managedCluster.ts` — ManagedCluster type, GVK, and cluster availability helpers
+- `src/components/` — React page and card components (OverviewPage, ServiceMeshPage, MeshDetailPage, DiscoveredMeshDetailPage, ControlPlanesPage, ControlPlaneDetailPage, ControlPlanesCard, MeshStatus, StatusDonutChart, TrustStatusCard)
+- `src/hooks/` — Data fetching hooks (useMultiClusterMeshes, useManagedClusters, useFleetMeshItems, useDiscoveredControlPlanes, useEnrichedControlPlanes)
 - `src/utils/filterUtils.ts` — Case-insensitive filter utility for multi-field list filtering
 - `src/utils/i18nUtils.ts` — i18n hook (`useMeshTranslation`) and namespace constant
 - `src/locales/en/plugin__ossm-acm.json` — English translation strings
-- `src/__mocks__/` — Rstest mocks for Console SDK, multicluster-sdk, react-router, react-charts, and static assets
+- `src/__mocks__/` — Rstest mocks for Console SDK, multicluster-sdk, react-router, and react-charts
 - `src/setupTests.tsx` — Rstest setup (jest-dom matchers via expect.extend, i18n mock, jsdom stubs, cleanup)
 - `src/rstest-globals.d.ts` — Type declarations for rstest globals (`describe`, `it`, `expect`, `rstest`, etc.)
 
@@ -76,7 +77,7 @@ export default PerspectiveIcon
 
 ### Route registration order
 
-The detail route (`/service-mesh/:ns/:name`) must be registered BEFORE the list route (`/service-mesh`) in `console-extensions.ts`. React Router v5 matches the first route whose path prefix matches.
+The detail route (`/fleet-mesh/meshes/:ns/:name`) must be registered BEFORE the list route (`/fleet-mesh/meshes`) in `console-extensions.ts`. React Router v5 matches the first route whose path prefix matches.
 
 ### Data sources
 
@@ -85,6 +86,7 @@ All data comes from the hub cluster Kubernetes API via `useK8sWatchResource`:
 | Resource | Where it lives | What it shows |
 |----------|---------------|---------------|
 | `MultiClusterMesh` | Mesh namespace (e.g. `mesh-system`) | Mesh spec, status, per-cluster conditions |
+| `ManagedCluster` (cluster.open-cluster-management.io/v1) | Cluster-scoped | Cluster availability (Available/Unavailable/Unreachable) |
 | `Certificate` (cert-manager.io/v1) | Mesh namespace | Per-cluster cert status, expiry, renewal |
 | `ManifestWork` (work.open-cluster-management.io/v1) | Per-cluster namespace (e.g. `local-cluster`) | Trust distribution status |
 
@@ -115,7 +117,7 @@ const MyComponent: FC = () => {
 
 For strings with interpolated values, use `{{variable}}` syntax:
 ```typescript
-t('Cluster Status ({{count}})', { count: clusterStatuses.length })
+t('Clusters ({{count}})', { count: clusterStatuses.length })
 ```
 
 For navigation and perspective names in `console-extensions.ts`, use the `consoleName()` helper which produces `%plugin__ossm-acm~Title%` markers for the Console's own i18n system (separate from react-i18next).
@@ -164,9 +166,10 @@ Rstest uses `>` as snapshot separator vs Jest's `:` — relevant if snapshot tes
 - No comments unless the WHY is non-obvious
 - Use PatternFly components for all UI — `Card`, `DescriptionList`, `Label`, `Grid`, `Flex`, `PageSection`, etc.
 - Tables in scrollable containers (max 400px) use sticky `<thead>` for column visibility
-- Cards showing per-cluster data should include summary labels, toggle filters, search, and scroll for scale (5-500 clusters)
+- Cards showing per-cluster data should include toggle filters (All/Ready/Not Ready/Unknown), search, and scroll for scale (5-500 clusters)
 - Condition status uses four colors: green (True/Ready), orange (Degraded — Ready but secondary conditions failing), red (False), grey (Unknown)
 - Trust distribution status uses: green "Distributed", orange "Applied", red with reason, grey "Pending"
+- A cluster can host multiple control planes (for different meshes, different namespaces, or redundancy). Never assume a 1:1 relationship between clusters and control planes. Use unique cluster names (via `Set`) when counting clusters, and include CP identity (name or namespace) when attributing data to avoid ambiguity.
 - Empty states should distinguish "no data exists" from "filter matched nothing"
 - Sign commits with `-s` flag
 - Never amend or rewrite existing commits unless explicitly asked
@@ -188,14 +191,16 @@ Rstest uses `>` as snapshot separator vs Jest's `:` — relevant if snapshot tes
 4. Handle three states: loading (spinner), error (message), loaded (render)
 5. For cross-namespace watches, omit the `namespace` field (requires cluster-level RBAC)
 
-### Adding a column to the list page
+### Adding a column to a list page
 
-1. Add entry to `buildColumns()` in `ServiceMeshPage.tsx` with `title: t('...')`, `id`, and optionally `sort`
-2. `sort` can be a dot-path string or a function — if using a function, add explicit types: `(data: FleetMeshItem[], sortDirection: string) => FleetMeshItem[]`
+Both `ServiceMeshPage.tsx` (Meshes) and `ControlPlanesPage.tsx` (Control Planes) follow the same pattern:
+
+1. Add entry to `buildColumns()` with `title: t('...')`, `id`, and optionally `sort`
+2. `sort` can be a dot-path string or a function — if using a function, add explicit types: `(data: T[], sortDirection: string) => T[]`
 3. Add the new string key to `src/locales/en/plugin__ossm-acm.json`
-4. Add a `<TableData id="..." activeColumnIDs={activeColumnIDs}>` cell to `MeshRow`
+4. Add a `<TableData id="..." activeColumnIDs={activeColumnIDs}>` cell to the row component
 5. Cell order doesn't need to match column order (matched by `id`), but keep them aligned for readability
-6. `ServiceMeshPage.tsx` operates on `FleetMeshItem` (not `MultiClusterMesh`) — the unified type covering both managed and discovered meshes
+6. `ServiceMeshPage.tsx` operates on `FleetMeshItem` (the unified type covering managed and discovered meshes); `ControlPlanesPage.tsx` operates on `EnrichedControlPlane`
 
 ## Backend CRD Reference
 

@@ -13,9 +13,7 @@ const fleetServiceMeshPerspective: EncodedExtension = {
     icon: { $codeRef: 'perspectiveIcon' },
     landingPageURL: { $codeRef: 'perspective.landingPageURL' },
     importRedirectURL: { $codeRef: 'perspective.importRedirectURL' },
-    defaultPins: [
-      { group: 'maistra.io', version: 'v2', kind: 'ServiceMeshControlPlane' },
-    ],
+    defaultPins: [],
   },
 }
 
@@ -25,7 +23,7 @@ const overviewNavItem: EncodedExtension = {
     perspective: 'fleet-service-mesh',
     id: 'fleet-mesh-overview',
     name: consoleName('Overview'),
-    href: '/fleet-mesh-overview',
+    href: '/fleet-mesh/overview',
   },
 }
 
@@ -35,7 +33,7 @@ const fleetMeshesNavItem: EncodedExtension = {
     perspective: 'fleet-service-mesh',
     id: 'fleet-meshes',
     name: consoleName('Meshes'),
-    href: '/service-mesh',
+    href: '/fleet-mesh/meshes',
   },
 }
 
@@ -45,7 +43,7 @@ const controlPlanesNavItem: EncodedExtension = {
     perspective: 'fleet-service-mesh',
     id: 'fleet-control-planes',
     name: consoleName('Control Planes'),
-    href: '/mesh-control-planes',
+    href: '/fleet-mesh/control-planes',
   },
 }
 
@@ -53,16 +51,16 @@ const fleetMeshDetailRoute: EncodedExtension = {
   type: 'console.page/route',
   properties: {
     perspective: 'fleet-service-mesh',
-    path: '/service-mesh/:ns/:name',
+    path: '/fleet-mesh/meshes/:ns/:name',
     component: { $codeRef: 'meshDetailPage.default' },
   },
 }
 
-const fleetMeshOverviewRoute: EncodedExtension = {
+const fleetMeshListRoute: EncodedExtension = {
   type: 'console.page/route',
   properties: {
     perspective: 'fleet-service-mesh',
-    path: '/service-mesh',
+    path: '/fleet-mesh/meshes',
     component: { $codeRef: 'serviceMeshPage.default' },
   },
 }
@@ -71,7 +69,7 @@ const discoveredMeshDetailRoute: EncodedExtension = {
   type: 'console.page/route',
   properties: {
     perspective: 'fleet-service-mesh',
-    path: '/fleet-mesh-discovered/:meshID',
+    path: '/fleet-mesh/meshes/discovered/:meshID',
     component: { $codeRef: 'discoveredMeshDetailPage.default' },
   },
 }
@@ -80,7 +78,7 @@ const controlPlaneDetailRoute: EncodedExtension = {
   type: 'console.page/route',
   properties: {
     perspective: 'fleet-service-mesh',
-    path: '/mesh-control-planes/:cluster/:name',
+    path: '/fleet-mesh/control-planes/:cluster/:name',
     component: { $codeRef: 'controlPlaneDetailPage.default' },
   },
 }
@@ -89,7 +87,7 @@ const controlPlanesRoute: EncodedExtension = {
   type: 'console.page/route',
   properties: {
     perspective: 'fleet-service-mesh',
-    path: '/mesh-control-planes',
+    path: '/fleet-mesh/control-planes',
     component: { $codeRef: 'controlPlanesPage.default' },
   },
 }
@@ -98,7 +96,7 @@ const overviewRoute: EncodedExtension = {
   type: 'console.page/route',
   properties: {
     perspective: 'fleet-service-mesh',
-    path: '/fleet-mesh-overview',
+    path: '/fleet-mesh/overview',
     component: { $codeRef: 'overviewPage.default' },
   },
 }
@@ -110,10 +108,10 @@ export const extensions: EncodedExtension[] = [
   overviewNavItem,
   fleetMeshesNavItem,
   controlPlanesNavItem,
-  overviewRoute,
   fleetMeshDetailRoute,
-  fleetMeshOverviewRoute,
+  fleetMeshListRoute,
   discoveredMeshDetailRoute,
   controlPlaneDetailRoute,
   controlPlanesRoute,
+  overviewRoute,
 ]

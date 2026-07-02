@@ -15,6 +15,7 @@ import {
   DescriptionListDescription,
   DescriptionListGroup,
   DescriptionListTerm,
+  Divider,
   EmptyState,
   EmptyStateBody,
   Flex,
@@ -31,6 +32,14 @@ import {
 } from '@patternfly/react-core'
 import type { MultiClusterMesh, K8sCondition, ClusterMeshStatus } from '../types/multiClusterMesh'
 import { multiClusterMeshGroupVersionKind } from '../types/multiClusterMesh'
+import type { EnrichedControlPlane } from '../types/istio'
+import { useMultiClusterMeshes } from '../hooks/useMultiClusterMeshes'
+import { useDiscoveredControlPlanes } from '../hooks/useDiscoveredControlPlanes'
+import { useEnrichedControlPlanes } from '../hooks/useEnrichedControlPlanes'
+import { useManagedClusters } from '../hooks/useManagedClusters'
+import type { ManagedCluster } from '../types/managedCluster'
+import { getClusterAvailability, availabilityColor, availabilityLabelKey } from '../types/managedCluster'
+import { ControlPlanesCard } from './ControlPlanesCard'
 import { MeshStatus, statusIcon } from './MeshStatus'
 import { TrustStatusCard } from './TrustStatusCard'
 import { useMeshTranslation } from '../utils/i18nUtils'
@@ -54,8 +63,13 @@ function categorizeCluster(cs: ClusterMeshStatus): ClusterStatusCategory {
 const CONFLICT_REASONS = ['OperatorConfigConflict', 'NamespaceConflict']
 
 /** Per-cluster operator status table with filter toggles and search for a single mesh. */
-export const ClusterStatusSection: FC<{ clusterStatuses: ClusterMeshStatus[]; meshConditions?: K8sCondition[] }> = ({
+export const ClusterStatusSection: FC<{
+  clusterStatuses: ClusterMeshStatus[]
+  managedClusterMap?: Map<string, ManagedCluster>
+  meshConditions?: K8sCondition[]
+}> = ({
   clusterStatuses,
+  managedClusterMap,
   meshConditions,
 }) => {
   const { t } = useMeshTranslation()
@@ -87,7 +101,7 @@ export const ClusterStatusSection: FC<{ clusterStatuses: ClusterMeshStatus[]; me
     const isConflict = readyCondition && CONFLICT_REASONS.includes(readyCondition.reason ?? '')
     return (
       <Card isCompact>
-        <CardTitle><strong>{t('Cluster Status (0)')}</strong></CardTitle>
+        <CardTitle><strong>{t('Clusters (0)')}</strong></CardTitle>
         <CardBody>
           <EmptyState variant="xs">
             <EmptyStateBody>
@@ -105,20 +119,8 @@ export const ClusterStatusSection: FC<{ clusterStatuses: ClusterMeshStatus[]; me
 
   return (
     <Card isCompact>
-      <CardTitle><strong>{t('Cluster Status ({{count}})', { count: clusterStatuses.length })}</strong></CardTitle>
+      <CardTitle><strong>{t('Clusters ({{count}})', { count: clusterStatuses.length })}</strong></CardTitle>
       <CardBody>
-        <Flex style={{ marginBottom: '1rem' }} spaceItems={{ default: 'spaceItemsMd' }}>
-          <FlexItem>
-            <Label color="green" isCompact>{t('{{count}} Ready', { count: counts.ready })}</Label>
-          </FlexItem>
-          <FlexItem>
-            <Label color="red" isCompact>{t('{{count}} Not Ready', { count: counts.notReady })}</Label>
-          </FlexItem>
-          <FlexItem>
-            <Label color="grey" isCompact>{t('{{count}} Unknown', { count: counts.unknown })}</Label>
-          </FlexItem>
-        </Flex>
-
         <Grid hasGutter>
           <GridItem span={12}>
             <Flex style={{ marginBottom: '1rem' }}>
@@ -161,6 +163,7 @@ export const ClusterStatusSection: FC<{ clusterStatuses: ClusterMeshStatus[]; me
                 <thead className="pf-v6-c-table__thead" style={{ position: 'sticky', top: 0, zIndex: 1 }}>
                   <tr className="pf-v6-c-table__tr">
                     <th className="pf-v6-c-table__th" scope="col">{t('Cluster')}</th>
+                    <th className="pf-v6-c-table__th" scope="col">{t('Cluster Status')}</th>
                     <th className="pf-v6-c-table__th" scope="col">{t('Operator Status')}</th>
                     <th className="pf-v6-c-table__th" scope="col">{t('Message')}</th>
                   </tr>
@@ -168,19 +171,23 @@ export const ClusterStatusSection: FC<{ clusterStatuses: ClusterMeshStatus[]; me
                 <tbody className="pf-v6-c-table__tbody">
                   {filtered.length === 0 ? (
                     <tr className="pf-v6-c-table__tr">
-                      <td className="pf-v6-c-table__td" colSpan={3} style={{ textAlign: 'center' }}>
+                      <td className="pf-v6-c-table__td" colSpan={4} style={{ textAlign: 'center' }}>
                         {t('No clusters match the current filter.')}
                       </td>
                     </tr>
                   ) : (
                     filtered.map((cs) => {
                       const operatorCondition = cs.conditions?.find((c) => c.type === 'OperatorInstalled')
+                      const availability = getClusterAvailability(managedClusterMap?.get(cs.clusterName))
                       return (
                         <tr className="pf-v6-c-table__tr" key={cs.clusterName}>
                           <td className="pf-v6-c-table__td">
                             <Link to={`/multicloud/infrastructure/clusters/details/${cs.clusterName}/${cs.clusterName}/overview`}>
                               {cs.clusterName}
                             </Link>
+                          </td>
+                          <td className="pf-v6-c-table__td">
+                            <Label color={availabilityColor(availability)} isCompact>{t(availabilityLabelKey(availability))}</Label>
                           </td>
                           <td className="pf-v6-c-table__td">
                             <MeshStatus conditions={cs.conditions} conditionType="OperatorInstalled" isCompact />
@@ -209,6 +216,21 @@ const MeshDetailContent: FC<{ ns: string; name: string }> = ({ ns, name }) => {
     name,
     namespace: ns,
   })
+  const [mcms] = useMultiClusterMeshes()
+  const [managedClusters] = useManagedClusters()
+  const { results: searchResults } = useDiscoveredControlPlanes()
+  const [enrichedPlanes] = useEnrichedControlPlanes(searchResults, mcms ?? [])
+  const managedClusterMap = useMemo(() => {
+    const map = new Map<string, ManagedCluster>()
+    for (const mc of managedClusters ?? []) {
+      if (mc.metadata?.name) map.set(mc.metadata.name, mc)
+    }
+    return map
+  }, [managedClusters])
+  const managedPlanes = useMemo(
+    () => enrichedPlanes.filter((cp) => cp.managedBy?.name === name && cp.managedBy?.namespace === ns),
+    [enrichedPlanes, name, ns],
+  )
 
   useEffect(() => {
     if (loadError) console.error('Failed to load mesh:', loadError)
@@ -260,7 +282,7 @@ const MeshDetailContent: FC<{ ns: string; name: string }> = ({ ns, name }) => {
       <PageSection>
         <Breadcrumb>
           <BreadcrumbItem>
-            <Link to="/service-mesh">{t('Meshes')}</Link>
+            <Link to="/fleet-mesh/meshes">{t('Meshes')}</Link>
           </BreadcrumbItem>
           <BreadcrumbItem isActive>{mesh.metadata?.name}</BreadcrumbItem>
         </Breadcrumb>
@@ -279,27 +301,26 @@ const MeshDetailContent: FC<{ ns: string; name: string }> = ({ ns, name }) => {
 
       <PageSection>
         <Grid hasGutter>
-          <GridItem span={6}>
+          <GridItem span={12}>
             <Card isCompact>
-              <CardTitle><strong>{t('Overview')}</strong></CardTitle>
               <CardBody>
                 <DescriptionList isCompact columnModifier={{ default: '2Col' }}>
                   <DescriptionListGroup>
-                    <DescriptionListTerm>{t('Cluster Set')}</DescriptionListTerm>
+                    <DescriptionListTerm><strong>{t('Cluster Set')}</strong></DescriptionListTerm>
                     <DescriptionListDescription>
-                      <Link to={`/multicloud/infrastructure/clusters/sets/details/${spec.clusterSet}/overview`}>
+                      <Link to={`/multicloud/infrastructure/clusters/sets/details/${encodeURIComponent(spec.clusterSet)}/overview`}>
                         {spec.clusterSet}
                       </Link>
                     </DescriptionListDescription>
                   </DescriptionListGroup>
                   <DescriptionListGroup>
-                    <DescriptionListTerm>{t('Control Plane Namespace')}</DescriptionListTerm>
+                    <DescriptionListTerm><strong>{t('Control Plane Namespace')}</strong></DescriptionListTerm>
                     <DescriptionListDescription>
                       {spec.controlPlane?.namespace || 'istio-system'}
                     </DescriptionListDescription>
                   </DescriptionListGroup>
                   <DescriptionListGroup>
-                    <DescriptionListTerm>{t('cert-manager Issuer')}</DescriptionListTerm>
+                    <DescriptionListTerm><strong>{t('cert-manager Issuer')}</strong></DescriptionListTerm>
                     <DescriptionListDescription>
                       {issuerName
                         ? `${issuerName} (${issuerRef?.kind || 'Issuer'})`
@@ -307,39 +328,33 @@ const MeshDetailContent: FC<{ ns: string; name: string }> = ({ ns, name }) => {
                     </DescriptionListDescription>
                   </DescriptionListGroup>
                   <DescriptionListGroup>
-                    <DescriptionListTerm>{t('Created')}</DescriptionListTerm>
+                    <DescriptionListTerm><strong>{t('Created')}</strong></DescriptionListTerm>
                     <DescriptionListDescription>
                       <Timestamp timestamp={mesh.metadata?.creationTimestamp} />
                     </DescriptionListDescription>
                   </DescriptionListGroup>
                 </DescriptionList>
-              </CardBody>
-            </Card>
-          </GridItem>
-
-          <GridItem span={6}>
-            <Card isCompact>
-              <CardTitle><strong>{t('OSSM Operator')}</strong></CardTitle>
-              <CardBody>
+                <Divider style={{ margin: '0.75rem 0' }} />
+                <Title headingLevel="h4" size="md" style={{ marginBottom: '0.5rem' }}>{t('OSSM Operator')}</Title>
                 <DescriptionList isCompact columnModifier={{ default: '2Col' }}>
                   <DescriptionListGroup>
-                    <DescriptionListTerm>{t('Namespace')}</DescriptionListTerm>
+                    <DescriptionListTerm><strong>{t('Namespace')}</strong></DescriptionListTerm>
                     <DescriptionListDescription>
                       {spec.operator?.namespace || t('(platform default)')}
                     </DescriptionListDescription>
                   </DescriptionListGroup>
                   <DescriptionListGroup>
-                    <DescriptionListTerm>{t('Channel')}</DescriptionListTerm>
+                    <DescriptionListTerm><strong>{t('Channel')}</strong></DescriptionListTerm>
                     <DescriptionListDescription>{spec.operator?.channel || 'stable'}</DescriptionListDescription>
                   </DescriptionListGroup>
                   <DescriptionListGroup>
-                    <DescriptionListTerm>{t('Source')}</DescriptionListTerm>
+                    <DescriptionListTerm><strong>{t('Source')}</strong></DescriptionListTerm>
                     <DescriptionListDescription>
                       {spec.operator?.source || t('(platform default)')}
                     </DescriptionListDescription>
                   </DescriptionListGroup>
                   <DescriptionListGroup>
-                    <DescriptionListTerm>{t('Install Plan Approval')}</DescriptionListTerm>
+                    <DescriptionListTerm><strong>{t('Install Plan Approval')}</strong></DescriptionListTerm>
                     <DescriptionListDescription>
                       {spec.operator?.installPlanApproval || 'Automatic'}
                     </DescriptionListDescription>
@@ -350,16 +365,20 @@ const MeshDetailContent: FC<{ ns: string; name: string }> = ({ ns, name }) => {
           </GridItem>
 
           <GridItem span={12}>
+            <ClusterStatusSection clusterStatuses={clusterStatuses} managedClusterMap={managedClusterMap} meshConditions={conditions} />
+          </GridItem>
+
+          <GridItem span={12}>
+            <ControlPlanesCard planes={managedPlanes} />
+          </GridItem>
+
+          <GridItem span={12}>
             <TrustStatusCard
               clusterStatuses={clusterStatuses}
               issuerName={issuerName ?? ''}
               meshName={mesh.metadata?.name ?? ''}
               meshNamespace={ns}
             />
-          </GridItem>
-
-          <GridItem span={12}>
-            <ClusterStatusSection clusterStatuses={clusterStatuses} meshConditions={conditions} />
           </GridItem>
 
           {conditions.length > 0 && (
@@ -411,7 +430,7 @@ const MeshDetailPage: FC = () => {
         <EmptyState>
           <Title headingLevel="h2" size="lg">{t('Not Found')}</Title>
           <EmptyStateBody>
-            {t('Invalid mesh URL. Expected /service-mesh/:namespace/:name.')}
+            {t('Invalid mesh URL. Expected /fleet-mesh/meshes/:namespace/:name.')}
           </EmptyStateBody>
         </EmptyState>
       </PageSection>
@@ -421,5 +440,5 @@ const MeshDetailPage: FC = () => {
   return <MeshDetailContent ns={ns} name={name} />
 }
 
-/** Detail page for a single MultiClusterMesh, reached via /service-mesh/:ns/:name. */
+/** Detail page for a single MultiClusterMesh, reached via /fleet-mesh/meshes/:ns/:name. */
 export default MeshDetailPage

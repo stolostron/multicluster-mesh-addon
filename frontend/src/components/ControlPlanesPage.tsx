@@ -31,10 +31,6 @@ import { useMeshTranslation } from '../utils/i18nUtils'
 
 function buildColumns(t: (key: string) => string): TableColumn<EnrichedControlPlane>[] {
   return [
-    { title: t('Cluster'), id: 'cluster', sort: 'clusterName' },
-    { title: t('Name'), id: 'name', sort: 'metadata.name' },
-    { title: t('Namespace'), id: 'namespace', sort: 'controlPlaneNamespace' },
-    { title: t('Version'), id: 'version', sort: 'version' },
     {
       title: t('Mesh ID'),
       id: 'meshID',
@@ -45,7 +41,10 @@ function buildColumns(t: (key: string) => string): TableColumn<EnrichedControlPl
         )
       },
     },
-    { title: t('Network'), id: 'network', sort: 'network' },
+    { title: t('Name'), id: 'name', sort: 'metadata.name' },
+    { title: t('Cluster'), id: 'cluster', sort: 'clusterName' },
+    { title: t('Namespace'), id: 'namespace', sort: 'controlPlaneNamespace' },
+    { title: t('Version'), id: 'version', sort: 'version' },
     { title: t('Created'), id: 'created', sort: 'metadata.creationTimestamp' },
     {
       title: t('Status'),
@@ -82,32 +81,16 @@ const ControlPlaneRow: FC<RowProps<EnrichedControlPlane>> = ({ obj, activeColumn
   const { t } = useMeshTranslation()
   return (
     <>
-      <TableData id="cluster" activeColumnIDs={activeColumnIDs}>
-        <Link to={`/multicloud/infrastructure/clusters/details/${obj.clusterName}/${obj.clusterName}/overview`}>
-          {obj.clusterName}
-        </Link>
-      </TableData>
-      <TableData id="name" activeColumnIDs={activeColumnIDs}>
-        <Link to={`/mesh-control-planes/${encodeURIComponent(obj.clusterName)}/${encodeURIComponent(obj.metadata.name)}`}>
-          {obj.metadata.name}
-        </Link>
-      </TableData>
-      <TableData id="namespace" activeColumnIDs={activeColumnIDs}>
-        {obj.controlPlaneNamespace ?? '-'}
-      </TableData>
-      <TableData id="version" activeColumnIDs={activeColumnIDs}>
-        {obj.version ?? '-'}
-      </TableData>
       <TableData id="meshID" activeColumnIDs={activeColumnIDs}>
         {obj.managedBy ? (
           <Tooltip content={t('Managed by {{name}}', { name: obj.managedBy.name })}>
-            <Link to={`/service-mesh/${obj.managedBy.namespace}/${obj.managedBy.name}`}>
+            <Link to={`/fleet-mesh/meshes/${obj.managedBy.namespace}/${obj.managedBy.name}`}>
               <Label color="blue" isCompact>{obj.meshID ?? '-'}</Label>
             </Link>
           </Tooltip>
         ) : obj.meshID ? (
           <Tooltip content={t('Discovered mesh — not managed by a MultiClusterMesh CR')}>
-            <Link to={`/fleet-mesh-discovered/${encodeURIComponent(obj.meshID)}`}>
+            <Link to={`/fleet-mesh/meshes/discovered/${encodeURIComponent(obj.meshID)}`}>
               <Label color="purple" isCompact>{obj.meshID}</Label>
             </Link>
           </Tooltip>
@@ -117,8 +100,21 @@ const ControlPlaneRow: FC<RowProps<EnrichedControlPlane>> = ({ obj, activeColumn
           </Tooltip>
         )}
       </TableData>
-      <TableData id="network" activeColumnIDs={activeColumnIDs}>
-        {obj.network ?? '-'}
+      <TableData id="name" activeColumnIDs={activeColumnIDs}>
+        <Link to={`/fleet-mesh/control-planes/${encodeURIComponent(obj.clusterName)}/${encodeURIComponent(obj.metadata.name)}`}>
+          {obj.metadata.name}
+        </Link>
+      </TableData>
+      <TableData id="cluster" activeColumnIDs={activeColumnIDs}>
+        <Link to={`/multicloud/infrastructure/clusters/details/${obj.clusterName}/${obj.clusterName}/overview`}>
+          {obj.clusterName}
+        </Link>
+      </TableData>
+      <TableData id="namespace" activeColumnIDs={activeColumnIDs}>
+        {obj.controlPlaneNamespace ?? '-'}
+      </TableData>
+      <TableData id="version" activeColumnIDs={activeColumnIDs}>
+        {obj.version ?? '-'}
       </TableData>
       <TableData id="created" activeColumnIDs={activeColumnIDs}>
         {obj.metadata.creationTimestamp ? <Timestamp timestamp={obj.metadata.creationTimestamp} /> : '-'}
@@ -137,6 +133,12 @@ const ControlPlaneRow: FC<RowProps<EnrichedControlPlane>> = ({ obj, activeColumn
 function buildSearchFilters(t: (key: string) => string): RowSearchFilter<EnrichedControlPlane>[] {
   return [
     {
+      filter: (input, obj) => fuzzyCaseInsensitive(input.selected?.[0], obj.meshID ?? ''),
+      filterGroupName: t('Mesh ID'),
+      placeholder: t('Filter by mesh ID...'),
+      type: 'meshID',
+    },
+    {
       filter: (input, obj) => fuzzyCaseInsensitive(input.selected?.[0], obj.clusterName),
       filterGroupName: t('Cluster'),
       placeholder: t('Filter by cluster...'),
@@ -154,18 +156,6 @@ function buildSearchFilters(t: (key: string) => string): RowSearchFilter<Enriche
       placeholder: t('Filter by version...'),
       type: 'version',
     },
-    {
-      filter: (input, obj) => fuzzyCaseInsensitive(input.selected?.[0], obj.meshID ?? ''),
-      filterGroupName: t('Mesh ID'),
-      placeholder: t('Filter by mesh ID...'),
-      type: 'meshID',
-    },
-    {
-      filter: (input, obj) => fuzzyCaseInsensitive(input.selected?.[0], obj.network ?? ''),
-      filterGroupName: t('Network'),
-      placeholder: t('Filter by network...'),
-      type: 'network',
-    },
   ]
 }
 
@@ -181,7 +171,7 @@ const ControlPlanesPage: FC = () => {
   const [activeColumns, userSettingsLoaded] = useActiveColumns({
     columns,
     showNamespaceOverride: false,
-    columnManagementID: 'sailoperator.io~v1~Istio',
+    columnManagementID: 'fleet-service-mesh~control-planes',
   })
 
   if (searchLoaded && !searchError && searchResults.length === 0 && !isFleetAvailable) {

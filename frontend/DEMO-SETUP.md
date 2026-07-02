@@ -7,8 +7,8 @@ Refer to [DEV-INSTALL.md](DEV-INSTALL.md) for general guidance on managing a dev
 
 | MCM CR | MCM Namespace | Istio CR | CP Namespace | Mesh ID | Trust |
 |--------|---------------|----------|--------------|---------|-------|
-| `unsecure-mcm` | `unsecure-mcm-ns` | `unsecure-istio` | `unsecure-ns` | `unsecure-id` | No |
-| `secure-mcm` | `secure-mcm-ns` | `secure-istio` | `secure-ns` | `secure-id` | Yes |
+| `unsecure-mcm` | `unsecure-mcm-ns` | `unsecure-istio` | `unsecure-ns` | `unsecure-mcm-ns-unsecure-mcm` | No |
+| `secure-mcm` | `secure-mcm-ns` | `secure-istio` | `secure-ns` | `secure-mcm-ns-secure-mcm` | Yes |
 | — | — | `discovered-alpha-istio` | `discovered-alpha-ns` | `discovered-alpha-id` | — |
 | — | — | `discovered-beta-istio` | `discovered-beta-ns` | `discovered-beta-id` | — |
 
@@ -185,8 +185,8 @@ oc get crd istios.sailoperator.io
 ## 6. Create managed Istio CRs
 
 These simulate what the MCM controller would create after reconciling each MCM.
-Each targets the namespace matching its MCM's `spec.controlPlane.namespace` and
-shares its MCM's mesh-id.
+Each targets the namespace matching its MCM's `spec.controlPlane.namespace`.
+The mesh ID follows the convention the controller will use: `<MCM namespace>-<MCM name>`.
 
 ```bash
 oc apply -f - <<'EOF'
@@ -198,7 +198,7 @@ spec:
   namespace: unsecure-ns
   values:
     global:
-      meshID: unsecure-id
+      meshID: unsecure-mcm-ns-unsecure-mcm
       multiCluster:
         clusterName: local-cluster
       network: network1
@@ -213,7 +213,7 @@ spec:
   namespace: secure-ns
   values:
     global:
-      meshID: secure-id
+      meshID: secure-mcm-ns-secure-mcm
       multiCluster:
         clusterName: local-cluster
       network: network1

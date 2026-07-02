@@ -5,6 +5,4 @@ export const Link: FC<{ to: string; state?: unknown; children?: ReactNode }> = (
   <a href={to}>{children}</a>
 )
 
-export const useLocation = rs.fn(() => ({ pathname: '/', state: null, search: '', hash: '', key: 'default' }))
-
 export const useParams = rs.fn(() => ({}))

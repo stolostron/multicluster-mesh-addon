@@ -38,7 +38,7 @@ describe('ControlPlaneDetailPage', () => {
       rstest.mocked(useParams).mockReturnValue({})
       render(<ControlPlaneDetailPage />)
       expect(screen.getByText('Not Found')).toBeInTheDocument()
-      expect(screen.getByText('Invalid control plane URL. Expected /mesh-control-planes/:cluster/:name.')).toBeInTheDocument()
+      expect(screen.getByText('Invalid URL. Expected /fleet-mesh/control-planes/:cluster/:name.')).toBeInTheDocument()
     })
   })
 
@@ -145,7 +145,7 @@ describe('ControlPlaneDetailPage', () => {
         expect(screen.getByText('Managed Mesh')).toBeInTheDocument()
         expect(screen.getByRole('link', { name: 'my-mesh' })).toHaveAttribute(
           'href',
-          '/service-mesh/mesh-system/my-mesh',
+          '/fleet-mesh/meshes/mesh-system/my-mesh',
         )
       })
     })
@@ -154,7 +154,7 @@ describe('ControlPlaneDetailPage', () => {
       rstest.mocked(fleetK8sGet).mockResolvedValue(makeIstio())
       render(<ControlPlaneDetailPage />)
       await waitFor(() => {
-        expect(screen.getByText('Overview')).toBeInTheDocument()
+        expect(screen.getByText('Mesh ID')).toBeInTheDocument()
       })
       expect(screen.queryByText('Managed Mesh')).not.toBeInTheDocument()
     })
@@ -187,7 +187,7 @@ describe('ControlPlaneDetailPage', () => {
       }))
       render(<ControlPlaneDetailPage />)
       await waitFor(() => {
-        expect(screen.getByText('Overview')).toBeInTheDocument()
+        expect(screen.getByText('Mesh ID')).toBeInTheDocument()
       })
       expect(screen.queryByText('Managed')).not.toBeInTheDocument()
       expect(screen.queryByText('Discovered')).not.toBeInTheDocument()
@@ -199,7 +199,7 @@ describe('ControlPlaneDetailPage', () => {
       await waitFor(() => {
         expect(screen.getByRole('link', { name: 'mesh1' })).toHaveAttribute(
           'href',
-          '/fleet-mesh-discovered/mesh1',
+          '/fleet-mesh/meshes/discovered/mesh1',
         )
       })
     })
@@ -226,7 +226,7 @@ describe('ControlPlaneDetailPage', () => {
       }))
       render(<ControlPlaneDetailPage />)
       await waitFor(() => {
-        expect(screen.getByText('Overview')).toBeInTheDocument()
+        expect(screen.getByText('Mesh ID')).toBeInTheDocument()
       })
       expect(screen.queryByText('Managed Mesh')).not.toBeInTheDocument()
     })
