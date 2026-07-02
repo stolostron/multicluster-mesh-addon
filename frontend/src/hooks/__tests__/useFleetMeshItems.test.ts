@@ -74,7 +74,7 @@ describe('useFleetMeshItems', () => {
     expect(item.mcmNamespace).toBe('mesh-system')
     expect(item.clusterCount).toBe(1)
     expect(item.trustIssuer).toBe('mesh-ca')
-    expect(item.detailLink).toBe('/service-mesh/mesh-system/my-mesh')
+    expect(item.detailLink).toBe('/fleet-mesh/meshes/mesh-system/my-mesh')
     expect(item.statusRank).toBe(0)
     expect(item.conditions).toEqual([{ type: 'Ready', status: 'True' }])
     expect(item.mcm).toBe(mcm)
@@ -95,7 +95,7 @@ describe('useFleetMeshItems', () => {
     expect(discovered[0].meshID).toBe('shared-mesh')
     expect(discovered[0].clusterCount).toBe(2)
     expect(discovered[0].controlPlanes).toHaveLength(2)
-    expect(discovered[0].detailLink).toBe('/fleet-mesh-discovered/shared-mesh')
+    expect(discovered[0].detailLink).toBe('/fleet-mesh/meshes/discovered/shared-mesh')
   })
 
   it('standalone CRs (no meshID) become individual discovered items', () => {
@@ -112,7 +112,7 @@ describe('useFleetMeshItems', () => {
     expect(discovered[0].metadata.name).toBe('cluster-a/default')
     expect(discovered[0].clusterCount).toBe(1)
     expect(discovered[1].metadata.name).toBe('cluster-b/istio')
-    expect(discovered[1].detailLink).toBe('/mesh-control-planes/cluster-b/istio')
+    expect(discovered[1].detailLink).toBe('/fleet-mesh/control-planes/cluster-b/istio')
   })
 
   it('excludes managed CRs from discovered items', () => {

@@ -7,10 +7,12 @@ An OpenShift `ConsolePlugin` that registers a standalone **Fleet Service Mesh** 
 This plugin registers a new **console perspective** — a top-level entry in the perspective switcher dropdown (alongside "Administrator", "Developer", "Fleet Management", "Fleet Virtualization", etc.). Selecting it switches to a dedicated left-hand nav and landing page owned entirely by this plugin. No changes to ACM are required.
 
 The plugin provides:
-- **Fleet Meshes list page** — sortable table of all `MultiClusterMesh` resources with status, trust configuration, and cluster counts
-- **Mesh detail page** — overview, operator config, per-cluster trust status (cert-manager Certificates + ManifestWorks), cluster status with filters/search, and conditions
-- **Control Planes list page** — discovers all sail-operator `Istio` CRs across managed clusters via ACM Search, enriched with version, meshID, and health status. Shows which control planes are managed by a `MultiClusterMesh` CR.
-- **Control Plane detail page** — per-cluster control plane details (version, namespace, meshID, network, conditions) with "Managed By" link when correlated to a fleet mesh
+- **Overview page** (`/fleet-mesh/overview`) — landing page with donut charts for mesh and control plane health, plus a Recent Issues panel showing the latest non-healthy conditions across the fleet
+- **Meshes list page** (`/fleet-mesh/meshes`) — unified table of managed (`MultiClusterMesh`) and discovered (Istio CR) meshes with Mesh ID, Name, Cluster Set, Clusters, Trust, and Status columns. Mesh ID is color-coded: blue for managed, purple for discovered.
+- **Managed mesh detail page** (`/fleet-mesh/meshes/:ns/:name`) — mesh configuration and OSSM Operator settings in a single card, per-cluster operator status (Clusters card), control planes with filter/search, trust distribution status (cert-manager Certificates + ManifestWorks), and conditions
+- **Discovered mesh detail page** (`/fleet-mesh/meshes/discovered/:meshID`) — overview, control planes with filter/search, and aggregated conditions for meshID-grouped Istio CRs not managed by a `MultiClusterMesh`
+- **Control Planes list page** (`/fleet-mesh/control-planes`) — discovers all sail-operator `Istio` CRs across managed clusters via ACM Search, enriched with version, meshID, and health status. Mesh ID column links to the managing mesh or discovered mesh detail page.
+- **Control Plane detail page** (`/fleet-mesh/control-planes/:cluster/:name`) — per-cluster control plane details (meshID, network, namespace, version, conditions) with inline links to the managing or discovered mesh
 - **Cross-perspective links** — cluster names link to ACM cluster detail pages; cluster set names link to ACM cluster set detail pages
 
 ## Prerequisites

@@ -75,7 +75,7 @@ function buildItems(
       clusterCount: mcm.status?.clusterStatus?.length ?? 0,
       clusterSet: mcm.spec.clusterSet,
       conditions: mcm.status?.conditions,
-      detailLink: `/service-mesh/${encodeURIComponent(ns)}/${encodeURIComponent(name)}`,
+      detailLink: `/fleet-mesh/meshes/${encodeURIComponent(ns)}/${encodeURIComponent(name)}`,
       kind: 'managed',
       mcm,
       mcmNamespace: ns,
@@ -109,10 +109,10 @@ function buildItems(
         name: meshID,
         creationTimestamp: oldestTimestamp(planes),
       },
-      clusterCount: planes.length,
+      clusterCount: new Set(planes.map((cp) => cp.clusterName)).size,
       conditions,
       controlPlanes: planes,
-      detailLink: `/fleet-mesh-discovered/${encodeURIComponent(meshID)}`,
+      detailLink: `/fleet-mesh/meshes/discovered/${encodeURIComponent(meshID)}`,
       kind: 'discovered',
       meshID,
       meshIDConflict: conflict,
@@ -129,25 +129,20 @@ function buildItems(
       clusterCount: 1,
       conditions: cp.status?.conditions,
       controlPlanes: [cp],
-      detailLink: `/mesh-control-planes/${encodeURIComponent(cp.clusterName)}/${encodeURIComponent(cp.metadata.name)}`,
+      detailLink: `/fleet-mesh/control-planes/${encodeURIComponent(cp.clusterName)}/${encodeURIComponent(cp.metadata.name)}`,
       kind: 'discovered',
       statusRank: getStatusRank(cp.status?.conditions),
     })
   }
 
-  // Mark managed items whose CPs share a meshID with unmanaged CRs
   for (const item of managedItems) {
     if (!item.mcm) continue
     const mcmName = item.mcm.metadata?.name
     const mcmNs = item.mcm.metadata?.namespace
     for (const cp of enrichedPlanes) {
-      if (
-        cp.managedBy?.name === mcmName &&
-        cp.managedBy?.namespace === mcmNs &&
-        cp.meshID &&
-        meshIDGroups.has(cp.meshID)
-      ) {
-        item.meshIDConflict = true
+      if (cp.managedBy?.name === mcmName && cp.managedBy?.namespace === mcmNs && cp.meshID) {
+        if (!item.meshID) item.meshID = cp.meshID
+        if (meshIDGroups.has(cp.meshID)) item.meshIDConflict = true
         break
       }
     }

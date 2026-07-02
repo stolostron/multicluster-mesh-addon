@@ -51,7 +51,7 @@ Use optional chaining (`?.`) and nullish coalescing (`??`) for all Kubernetes ob
 
 All dynamic route segments must use `encodeURIComponent()` when building links, and `decodeURIComponent()` when reading params on the target page. Example:
 ```tsx
-<Link to={`/fleet-mesh-discovered/${encodeURIComponent(meshID)}`}>
+<Link to={`/fleet-mesh/meshes/discovered/${encodeURIComponent(meshID)}`}>
 ```
 
 ### Discriminated Union Types for Unified Lists
@@ -76,7 +76,7 @@ See `enrichmentCache` in `src/hooks/useEnrichedControlPlanes.ts` for the referen
 ### Two-Phase Loading
 
 When a page depends on multiple async sources with different latencies, render the fast source immediately and update when the slow source completes. Don't block the entire UI on the slowest source. Example:
-- Show MCM count card immediately when `mcmsLoaded` is true
+- Show mesh donut chart with MCM-only counts immediately when `mcmsLoaded` is true
 - Update to include discovered meshes when `enrichmentLoaded` becomes true
 
 Use granular loading/error states in hook returns (e.g., `mcmsLoaded`, `mcmsError`, `enrichmentLoaded`, `enrichmentError`) so consumers can render each section independently.

@@ -168,7 +168,6 @@ export function useEnrichedControlPlanes(
         clusterName: r.cluster,
         controlPlaneNamespace: spec?.namespace,
         meshID: spec?.values?.global?.meshID,
-        multiClusterName: spec?.values?.global?.multiCluster?.clusterName,
         network: spec?.values?.global?.network,
         status: cached?.status,
         version: spec?.version,

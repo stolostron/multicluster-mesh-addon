@@ -70,7 +70,7 @@ describe('ControlPlanesPage', () => {
     await waitFor(() => {
       expect(screen.getByRole('link', { name: 'myistio' })).toHaveAttribute(
         'href',
-        '/mesh-control-planes/cluster-a/myistio',
+        '/fleet-mesh/control-planes/cluster-a/myistio',
       )
     })
   })
@@ -82,7 +82,7 @@ describe('ControlPlanesPage', () => {
     await waitFor(() => {
       const nameLink = screen.getByRole('link', { name: 'default' })
       const row = nameLink.closest('tr') as HTMLTableRowElement
-      expect(within(row).getAllByText('-').length).toBeGreaterThanOrEqual(4)
+      expect(within(row).getAllByText('-').length).toBeGreaterThanOrEqual(3)
     })
   })
 

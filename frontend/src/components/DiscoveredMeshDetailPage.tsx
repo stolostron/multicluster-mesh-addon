@@ -24,15 +24,22 @@ import {
   GridItem,
   Label,
   PageSection,
+  SearchInput,
   Spinner,
   Title,
+  ToggleGroup,
+  ToggleGroupItem,
   Tooltip,
 } from '@patternfly/react-core'
 import { useMultiClusterMeshes } from '../hooks/useMultiClusterMeshes'
 import { useDiscoveredControlPlanes } from '../hooks/useDiscoveredControlPlanes'
 import { useEnrichedControlPlanes } from '../hooks/useEnrichedControlPlanes'
+import { useManagedClusters } from '../hooks/useManagedClusters'
 import type { EnrichedControlPlane } from '../types/istio'
 import type { K8sCondition } from '../types/common'
+import type { ManagedCluster } from '../types/managedCluster'
+import { getClusterAvailability, availabilityColor, availabilityLabelKey } from '../types/managedCluster'
+import { ControlPlanesCard } from './ControlPlanesCard'
 import { MeshStatus, getStatusRank, statusIcon } from './MeshStatus'
 import { useMeshTranslation } from '../utils/i18nUtils'
 
@@ -66,10 +73,15 @@ function oldestTimestamp(planes: EnrichedControlPlane[]): string | undefined {
   return oldest
 }
 
+type ClusterAvailabilityCategory = 'all' | 'available' | 'unavailable' | 'unreachable'
+
 const DiscoveredMeshDetailContent: FC<{ meshID: string }> = ({ meshID }) => {
   const { t } = useMeshTranslation()
   const [showAllConditions, setShowAllConditions] = useState(false)
+  const [clusterFilter, setClusterFilter] = useState<ClusterAvailabilityCategory>('all')
+  const [clusterSearch, setClusterSearch] = useState('')
   const [mcms] = useMultiClusterMeshes()
+  const [managedClusters] = useManagedClusters()
   const { results: searchResults, loaded: searchLoaded, error: searchError } = useDiscoveredControlPlanes()
   const [enrichedPlanes, , enrichmentLoaded, enrichmentError] = useEnrichedControlPlanes(searchResults, mcms ?? [])
 
@@ -77,6 +89,42 @@ const DiscoveredMeshDetailContent: FC<{ meshID: string }> = ({ meshID }) => {
     () => enrichedPlanes.filter((cp) => !cp.managedBy && cp.meshID === meshID),
     [enrichedPlanes, meshID],
   )
+
+  const managedClusterMap = useMemo(() => {
+    const map = new Map<string, ManagedCluster>()
+    for (const mc of managedClusters ?? []) {
+      if (mc.metadata?.name) map.set(mc.metadata.name, mc)
+    }
+    return map
+  }, [managedClusters])
+
+  const uniqueClusterNames = useMemo(() => {
+    const names = new Set<string>()
+    for (const cp of matchingPlanes) names.add(cp.clusterName)
+    return [...names].sort()
+  }, [matchingPlanes])
+
+  const clusterAvailabilityMap = useMemo(() => {
+    const map = new Map<string, ClusterAvailabilityCategory>()
+    for (const name of uniqueClusterNames) {
+      map.set(name, getClusterAvailability(managedClusterMap.get(name)) as ClusterAvailabilityCategory)
+    }
+    return map
+  }, [uniqueClusterNames, managedClusterMap])
+
+  const clusterCounts = useMemo(() => {
+    const result = { available: 0, unavailable: 0, unreachable: 0 }
+    clusterAvailabilityMap.forEach((cat) => { if (cat !== 'all') result[cat]++ })
+    return result
+  }, [clusterAvailabilityMap])
+
+  const filteredClusters = useMemo(() => {
+    return uniqueClusterNames.filter((name) => {
+      if (clusterFilter !== 'all' && clusterAvailabilityMap.get(name) !== clusterFilter) return false
+      if (clusterSearch && !name.toLowerCase().includes(clusterSearch.toLowerCase())) return false
+      return true
+    })
+  }, [uniqueClusterNames, clusterAvailabilityMap, clusterFilter, clusterSearch])
 
   const loaded = searchLoaded && enrichmentLoaded
 
@@ -121,10 +169,10 @@ const DiscoveredMeshDetailContent: FC<{ meshID: string }> = ({ meshID }) => {
   // Check for meshID conflict with managed meshes
   const hasConflict = enrichedPlanes.some((cp) => cp.managedBy && cp.meshID === meshID)
 
-  const allConditions: { clusterName: string; condition: K8sCondition }[] = []
+  const allConditions: { clusterName: string; cpName: string; condition: K8sCondition }[] = []
   for (const cp of matchingPlanes) {
     for (const c of cp.status?.conditions ?? []) {
-      allConditions.push({ clusterName: cp.clusterName, condition: c })
+      allConditions.push({ clusterName: cp.clusterName, cpName: cp.metadata.name, condition: c })
     }
   }
   const visibleConditions = showAllConditions
@@ -146,7 +194,7 @@ const DiscoveredMeshDetailContent: FC<{ meshID: string }> = ({ meshID }) => {
       <PageSection>
         <Breadcrumb>
           <BreadcrumbItem>
-            <Link to="/service-mesh">{t('Meshes')}</Link>
+            <Link to="/fleet-mesh/meshes">{t('Meshes')}</Link>
           </BreadcrumbItem>
           <BreadcrumbItem isActive>{meshID}</BreadcrumbItem>
         </Breadcrumb>
@@ -189,23 +237,22 @@ const DiscoveredMeshDetailContent: FC<{ meshID: string }> = ({ meshID }) => {
 
           <GridItem span={5}>
             <Card isCompact>
-              <CardTitle><strong>{t('Overview')}</strong></CardTitle>
               <CardBody>
                 <DescriptionList isCompact columnModifier={{ default: '2Col' }}>
                   <DescriptionListGroup>
-                    <DescriptionListTerm>{t('Mesh ID')}</DescriptionListTerm>
+                    <DescriptionListTerm><strong>{t('Mesh ID')}</strong></DescriptionListTerm>
                     <DescriptionListDescription>{meshID}</DescriptionListDescription>
                   </DescriptionListGroup>
                   <DescriptionListGroup>
-                    <DescriptionListTerm>{t('Networks')}</DescriptionListTerm>
+                    <DescriptionListTerm><strong>{t('Networks')}</strong></DescriptionListTerm>
                     <DescriptionListDescription>{networkDisplay}</DescriptionListDescription>
                   </DescriptionListGroup>
                   <DescriptionListGroup>
-                    <DescriptionListTerm>{t('Clusters')}</DescriptionListTerm>
-                    <DescriptionListDescription>{matchingPlanes.length}</DescriptionListDescription>
+                    <DescriptionListTerm><strong>{t('Clusters')}</strong></DescriptionListTerm>
+                    <DescriptionListDescription>{uniqueClusterNames.length}</DescriptionListDescription>
                   </DescriptionListGroup>
                   <DescriptionListGroup>
-                    <DescriptionListTerm>{t('Created')}</DescriptionListTerm>
+                    <DescriptionListTerm><strong>{t('Created')}</strong></DescriptionListTerm>
                     <DescriptionListDescription>
                       {created ? <Timestamp timestamp={created} /> : '-'}
                     </DescriptionListDescription>
@@ -217,48 +264,84 @@ const DiscoveredMeshDetailContent: FC<{ meshID: string }> = ({ meshID }) => {
 
           <GridItem span={12}>
             <Card isCompact>
-              <CardTitle><strong>{t('Control Planes')}</strong></CardTitle>
+              <CardTitle><strong>{t('Clusters ({{count}})', { count: uniqueClusterNames.length })}</strong></CardTitle>
               <CardBody>
+                <Flex style={{ marginBottom: '1rem' }}>
+                  <FlexItem>
+                    <ToggleGroup>
+                      <ToggleGroupItem
+                        text={t('All ({{count}})', { count: uniqueClusterNames.length })}
+                        isSelected={clusterFilter === 'all'}
+                        onChange={() => setClusterFilter('all')}
+                      />
+                      <ToggleGroupItem
+                        text={t('Available ({{count}})', { count: clusterCounts.available })}
+                        isSelected={clusterFilter === 'available'}
+                        onChange={() => setClusterFilter('available')}
+                      />
+                      <ToggleGroupItem
+                        text={t('Unavailable ({{count}})', { count: clusterCounts.unavailable })}
+                        isSelected={clusterFilter === 'unavailable'}
+                        onChange={() => setClusterFilter('unavailable')}
+                      />
+                      <ToggleGroupItem
+                        text={t('Unreachable ({{count}})', { count: clusterCounts.unreachable })}
+                        isSelected={clusterFilter === 'unreachable'}
+                        onChange={() => setClusterFilter('unreachable')}
+                      />
+                    </ToggleGroup>
+                  </FlexItem>
+                  <FlexItem grow={{ default: 'grow' }}>
+                    <SearchInput
+                      placeholder={t('Filter by cluster name')}
+                      value={clusterSearch}
+                      onChange={(_event, value) => setClusterSearch(value)}
+                      onClear={() => setClusterSearch('')}
+                    />
+                  </FlexItem>
+                </Flex>
+
                 <div style={{ maxHeight: '400px', overflowY: 'auto' }}>
                   <table className="pf-v6-c-table pf-m-grid-md pf-m-compact" role="grid">
                     <thead className="pf-v6-c-table__thead" style={{ position: 'sticky', top: 0, zIndex: 1 }}>
                       <tr className="pf-v6-c-table__tr">
                         <th className="pf-v6-c-table__th" scope="col">{t('Cluster')}</th>
-                        <th className="pf-v6-c-table__th" scope="col">{t('Name')}</th>
-                        <th className="pf-v6-c-table__th" scope="col">{t('Namespace')}</th>
-                        <th className="pf-v6-c-table__th" scope="col">{t('Version')}</th>
-                        <th className="pf-v6-c-table__th" scope="col">{t('Status')}</th>
+                        <th className="pf-v6-c-table__th" scope="col">{t('Cluster Status')}</th>
                       </tr>
                     </thead>
                     <tbody className="pf-v6-c-table__tbody">
-                      {matchingPlanes.map((cp) => (
-                        <tr className="pf-v6-c-table__tr" key={`${cp.clusterName}/${cp.metadata.name}`}>
-                          <td className="pf-v6-c-table__td">
-                            <Link to={`/multicloud/infrastructure/clusters/details/${cp.clusterName}/${cp.clusterName}/overview`}>
-                              {cp.clusterName}
-                            </Link>
-                          </td>
-                          <td className="pf-v6-c-table__td">
-                            <Link to={`/mesh-control-planes/${encodeURIComponent(cp.clusterName)}/${encodeURIComponent(cp.metadata.name)}`}>
-                              {cp.metadata.name}
-                            </Link>
-                          </td>
-                          <td className="pf-v6-c-table__td">{cp.controlPlaneNamespace ?? '-'}</td>
-                          <td className="pf-v6-c-table__td">{cp.version ?? '-'}</td>
-                          <td className="pf-v6-c-table__td">
-                            {cp.status?.conditions ? (
-                              <MeshStatus conditions={cp.status.conditions} conditionType="Ready" isCompact />
-                            ) : (
-                              <Label color="grey">{t('Unknown')}</Label>
-                            )}
+                      {filteredClusters.length === 0 ? (
+                        <tr className="pf-v6-c-table__tr">
+                          <td className="pf-v6-c-table__td" colSpan={2} style={{ textAlign: 'center' }}>
+                            {t('No clusters match the current filter.')}
                           </td>
                         </tr>
-                      ))}
+                      ) : (
+                        filteredClusters.map((clusterName) => {
+                          const availability = clusterAvailabilityMap.get(clusterName) ?? 'unreachable'
+                          return (
+                            <tr className="pf-v6-c-table__tr" key={clusterName}>
+                              <td className="pf-v6-c-table__td">
+                                <Link to={`/multicloud/infrastructure/clusters/details/${clusterName}/${clusterName}/overview`}>
+                                  {clusterName}
+                                </Link>
+                              </td>
+                              <td className="pf-v6-c-table__td">
+                                <Label color={availabilityColor(availability)} isCompact>{t(availabilityLabelKey(availability))}</Label>
+                              </td>
+                            </tr>
+                          )
+                        })
+                      )}
                     </tbody>
                   </table>
                 </div>
               </CardBody>
             </Card>
+          </GridItem>
+
+          <GridItem span={12}>
+            <ControlPlanesCard planes={matchingPlanes} />
           </GridItem>
 
           {allConditions.length > 0 && (
@@ -287,6 +370,7 @@ const DiscoveredMeshDetailContent: FC<{ meshID: string }> = ({ meshID }) => {
                       <thead className="pf-v6-c-table__thead">
                         <tr className="pf-v6-c-table__tr">
                           <th className="pf-v6-c-table__th" scope="col">{t('Cluster')}</th>
+                          <th className="pf-v6-c-table__th" scope="col">{t('Control Plane')}</th>
                           <th className="pf-v6-c-table__th" scope="col">{t('Type')}</th>
                           <th className="pf-v6-c-table__th" scope="col">{t('Status')}</th>
                           <th className="pf-v6-c-table__th" scope="col">{t('Reason')}</th>
@@ -296,8 +380,9 @@ const DiscoveredMeshDetailContent: FC<{ meshID: string }> = ({ meshID }) => {
                       </thead>
                       <tbody className="pf-v6-c-table__tbody">
                         {visibleConditions.map((entry, i) => (
-                          <tr className="pf-v6-c-table__tr" key={`${entry.clusterName}-${entry.condition.type}-${i}`}>
+                          <tr className="pf-v6-c-table__tr" key={`${entry.clusterName}-${entry.cpName}-${entry.condition.type}-${i}`}>
                             <td className="pf-v6-c-table__td">{entry.clusterName}</td>
+                            <td className="pf-v6-c-table__td">{entry.cpName}</td>
                             <td className="pf-v6-c-table__td">{entry.condition.type}</td>
                             <td className="pf-v6-c-table__td">{statusIcon(entry.condition.status)}</td>
                             <td className="pf-v6-c-table__td">{entry.condition.reason ?? '-'}</td>
@@ -330,7 +415,7 @@ const DiscoveredMeshDetailPage: FC = () => {
         <EmptyState>
           <Title headingLevel="h2" size="lg">{t('Not Found')}</Title>
           <EmptyStateBody>
-            {t('Invalid mesh URL. Expected /fleet-mesh-discovered/:meshID.')}
+            {t('Invalid mesh URL. Expected /fleet-mesh/meshes/discovered/:meshID.')}
           </EmptyStateBody>
         </EmptyState>
       </PageSection>

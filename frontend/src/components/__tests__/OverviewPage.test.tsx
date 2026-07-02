@@ -25,7 +25,7 @@ const makeEnrichedCP = (overrides: Partial<EnrichedControlPlane> = {}): Enriched
 const makeItem = (overrides: Partial<FleetMeshItem> = {}): FleetMeshItem => ({
   metadata: { name: 'test-mesh' },
   kind: 'managed',
-  detailLink: '/service-mesh/mesh-system/test-mesh',
+  detailLink: '/fleet-mesh/meshes/mesh-system/test-mesh',
   clusterCount: 1,
   statusRank: 0,
   conditions: [{ type: 'Ready', status: 'True' }],
@@ -62,7 +62,6 @@ describe('OverviewPage', () => {
     mockDefaults({ mcmsLoaded: false })
     render(<OverviewPage />)
     expect(screen.getByLabelText('Loading fleet meshes')).toBeInTheDocument()
-    expect(screen.getByLabelText('Loading clusters count')).toBeInTheDocument()
     expect(screen.getByLabelText('Loading recent issues')).toBeInTheDocument()
   })
 
@@ -91,26 +90,6 @@ describe('OverviewPage', () => {
     mockDefaults({ mcmsLoaded: false })
     render(<OverviewPage />)
     expect(screen.getByText('Meshes')).toBeInTheDocument()
-  })
-
-  it('shows Clusters with Service Mesh card with cluster count', () => {
-    const items = [
-      makeItem({
-        kind: 'managed',
-        mcm: makeMesh({
-          status: {
-            clusterStatus: [
-              { clusterName: 'cluster-a', conditions: [] },
-              { clusterName: 'cluster-b', conditions: [] },
-            ],
-          },
-        }),
-      }),
-    ]
-    mockDefaults({ items, enrichmentLoaded: true })
-    render(<OverviewPage />)
-    expect(screen.getByText('Clusters with Service Mesh')).toBeInTheDocument()
-    expect(screen.getByText('2')).toBeInTheDocument()
   })
 
   it('shows Control Planes card title with count when loaded', () => {
@@ -195,12 +174,6 @@ describe('OverviewPage', () => {
     expect(screen.getByText('No control planes discovered across the fleet.')).toBeInTheDocument()
   })
 
-  it('shows empty state in Clusters card when no clusters are in any mesh', () => {
-    mockDefaults()
-    render(<OverviewPage />)
-    expect(screen.getByText('No clusters are part of any mesh yet.')).toBeInTheDocument()
-  })
-
   it('shows "No issues detected" when everything is healthy', () => {
     const items = [makeItem({ conditions: [{ type: 'Ready', status: 'True' }] })]
     const mcms = [makeMesh({ status: { conditions: [{ type: 'Ready', status: 'True' }] } })]
@@ -226,7 +199,7 @@ describe('OverviewPage', () => {
     render(<OverviewPage />)
     expect(screen.getByText('Clusters Not Ready')).toBeInTheDocument()
     const link = screen.getByRole('link', { name: 'test-mesh' })
-    expect(link).toHaveAttribute('href', '/service-mesh/mesh-system/test-mesh')
+    expect(link).toHaveAttribute('href', '/fleet-mesh/meshes/mesh-system/test-mesh')
   })
 
   it('shows control plane issues in recent issues card', () => {
@@ -245,7 +218,7 @@ describe('OverviewPage', () => {
     render(<OverviewPage />)
     expect(screen.getByText('Reconcile Error')).toBeInTheDocument()
     const link = screen.getByRole('link', { name: 'cluster-a / default' })
-    expect(link).toHaveAttribute('href', '/mesh-control-planes/cluster-a/default')
+    expect(link).toHaveAttribute('href', '/fleet-mesh/control-planes/cluster-a/default')
   })
 
   it('shows per-cluster mesh issues in recent issues card', () => {
@@ -268,7 +241,7 @@ describe('OverviewPage', () => {
     render(<OverviewPage />)
     expect(screen.getByText('Reconcile Error')).toBeInTheDocument()
     const link = screen.getByRole('link', { name: 'test-mesh / cluster-a' })
-    expect(link).toHaveAttribute('href', '/service-mesh/mesh-system/test-mesh')
+    expect(link).toHaveAttribute('href', '/fleet-mesh/meshes/mesh-system/test-mesh')
   })
 
   it('shows both mesh and control plane issues together sorted by time', () => {
@@ -299,9 +272,9 @@ describe('OverviewPage', () => {
     expect(screen.getByText('Reconcile Error')).toBeInTheDocument()
 
     const meshLink = screen.getByRole('link', { name: 'test-mesh' })
-    expect(meshLink).toHaveAttribute('href', '/service-mesh/mesh-system/test-mesh')
+    expect(meshLink).toHaveAttribute('href', '/fleet-mesh/meshes/mesh-system/test-mesh')
     const cpLink = screen.getByRole('link', { name: 'cluster-a / default' })
-    expect(cpLink).toHaveAttribute('href', '/mesh-control-planes/cluster-a/default')
+    expect(cpLink).toHaveAttribute('href', '/fleet-mesh/control-planes/cluster-a/default')
 
     const rows = screen.getAllByRole('row')
     const dataRows = rows.filter((r) => r.querySelector('td'))
@@ -333,8 +306,8 @@ describe('OverviewPage', () => {
     mockDefaults()
     render(<OverviewPage />)
     const viewAllLinks = screen.getAllByRole('link', { name: 'View all' })
-    expect(viewAllLinks[0]).toHaveAttribute('href', '/service-mesh')
-    expect(viewAllLinks[1]).toHaveAttribute('href', '/mesh-control-planes')
+    expect(viewAllLinks[0]).toHaveAttribute('href', '/fleet-mesh/meshes')
+    expect(viewAllLinks[1]).toHaveAttribute('href', '/fleet-mesh/control-planes')
   })
 
   it('renders mesh section even when CP section errors', () => {

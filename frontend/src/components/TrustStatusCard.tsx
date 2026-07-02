@@ -241,18 +241,6 @@ export const TrustStatusCard: FC<TrustStatusCardProps> = ({
     <Card isCompact>
       <CardTitle><strong>{t('Trust Status ({{count}})', { count: clusterStatuses.length })}</strong></CardTitle>
       <CardBody>
-        <Flex style={{ marginBottom: '1rem' }} spaceItems={{ default: 'spaceItemsMd' }}>
-          <FlexItem>
-            <Label color="green" isCompact>{t('{{count}} Distributed', { count: counts.ready })}</Label>
-          </FlexItem>
-          <FlexItem>
-            <Label color="grey" isCompact>{t('{{count}} Pending', { count: counts.pending })}</Label>
-          </FlexItem>
-          <FlexItem>
-            <Label color="red" isCompact>{t('{{count}} Failed', { count: counts.failed })}</Label>
-          </FlexItem>
-        </Flex>
-
         <Flex style={{ marginBottom: '1rem' }}>
           <FlexItem>
             <ToggleGroup>

@@ -21,7 +21,6 @@ import { TopologyIcon, ServerIcon } from '@patternfly/react-icons'
 import { useFleetMeshItems } from '../hooks/useFleetMeshItems'
 import type { MultiClusterMesh, K8sCondition } from '../types/multiClusterMesh'
 import type { EnrichedControlPlane } from '../types/istio'
-import type { FleetMeshItem } from '../types/fleetMesh'
 import type { StatusColor } from './MeshStatus'
 import { deriveStatus } from './MeshStatus'
 import { StatusDonutChart } from './StatusDonutChart'
@@ -38,26 +37,6 @@ function countByStatus(items: { conditions?: K8sCondition[] }[], conditionType?:
     else counts.notReady++
   }
   return counts
-}
-
-function countUniqueClustersFromItems(items: FleetMeshItem[]): number {
-  const clusters = new Set<string>()
-  for (const item of items) {
-    if (item.kind === 'managed') {
-      for (const cs of item.mcm?.status?.clusterStatus ?? []) clusters.add(cs.clusterName)
-    } else {
-      for (const cp of item.controlPlanes ?? []) clusters.add(cp.clusterName)
-    }
-  }
-  return clusters.size
-}
-
-function countUniqueClustersFromMcms(mcms: MultiClusterMesh[]): number {
-  const clusters = new Set<string>()
-  for (const mesh of mcms) {
-    for (const cs of mesh.status?.clusterStatus ?? []) clusters.add(cs.clusterName)
-  }
-  return clusters.size
 }
 
 type IssueKind = 'mesh' | 'controlPlane'
@@ -79,7 +58,7 @@ function collectRecentIssues(meshes: MultiClusterMesh[], controlPlanes: Enriched
   for (const mesh of meshes) {
     const meshName = mesh.metadata?.name ?? ''
     const meshNamespace = mesh.metadata?.namespace ?? ''
-    const meshLink = `/service-mesh/${encodeURIComponent(meshNamespace)}/${encodeURIComponent(meshName)}`
+    const meshLink = `/fleet-mesh/meshes/${encodeURIComponent(meshNamespace)}/${encodeURIComponent(meshName)}`
 
     for (const c of mesh.status?.conditions ?? []) {
       if (c.status === 'True') continue
@@ -110,7 +89,7 @@ function collectRecentIssues(meshes: MultiClusterMesh[], controlPlanes: Enriched
       issues.push({
         kind: 'controlPlane',
         source: `${cp.clusterName} / ${cp.metadata.name}`,
-        link: `/mesh-control-planes/${encodeURIComponent(cp.clusterName)}/${encodeURIComponent(cp.metadata.name)}`,
+        link: `/fleet-mesh/control-planes/${encodeURIComponent(cp.clusterName)}/${encodeURIComponent(cp.metadata.name)}`,
         label,
         color,
         lastTransitionTime: c.lastTransitionTime,
@@ -152,13 +131,6 @@ const OverviewPage: FC = () => {
     [items, mcms, enrichmentLoaded],
   )
 
-  const clusterCount = useMemo(
-    () => enrichmentLoaded
-      ? countUniqueClustersFromItems(items)
-      : countUniqueClustersFromMcms(mcms),
-    [items, mcms, enrichmentLoaded],
-  )
-
   const cpLoaded = searchLoaded
   const cpSectionError = searchError ?? enrichmentError
   const cpCount = enrichedPlanes.length
@@ -181,92 +153,75 @@ const OverviewPage: FC = () => {
 
       <PageSection>
         <Grid hasGutter>
-          <GridItem span={4}>
-            <Card>
-              <CardTitle style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span>
-                  <TopologyIcon style={{ marginRight: '0.5rem' }} />
-                  {t('Meshes')}
-                </span>
-                <Link to="/service-mesh" style={{ fontSize: 'var(--pf-v6-global--FontSize--sm)' }}>{t('View all')}</Link>
-              </CardTitle>
-              <CardBody style={{ overflow: 'hidden' }}>
-                {!mcmsLoaded ? (
-                  <Spinner size="md" aria-label={t('Loading fleet meshes')} />
-                ) : mcmsError ? (
-                  <Alert variant="danger" isInline isPlain title={t('Unable to load mesh data')} />
-                ) : meshCount === 0 ? (
-                  <EmptyState variant="xs">
-                    <EmptyStateBody>{t('No managed or discovered meshes found.')}</EmptyStateBody>
-                  </EmptyState>
-                ) : (
-                  <>
-                    {!!cpSectionError && enrichmentLoaded && (
-                      <Alert
-                        variant="warning"
-                        isInline
-                        isPlain
-                        title={t('Unable to load control plane data. Some meshes may not be shown.')}
-                        style={{ marginBottom: '0.5rem' }}
-                      />
+          <GridItem span={5}>
+            <Grid hasGutter>
+              <GridItem span={12}>
+                <Card>
+                  <CardTitle style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span>
+                      <TopologyIcon style={{ marginRight: '0.5rem' }} />
+                      {t('Meshes')}
+                    </span>
+                    <Link to="/fleet-mesh/meshes" style={{ fontSize: 'var(--pf-v6-global--FontSize--sm)' }}>{t('View all')}</Link>
+                  </CardTitle>
+                  <CardBody style={{ overflow: 'hidden' }}>
+                    {!mcmsLoaded ? (
+                      <Spinner size="md" aria-label={t('Loading fleet meshes')} />
+                    ) : mcmsError ? (
+                      <Alert variant="danger" isInline isPlain title={t('Unable to load mesh data')} />
+                    ) : meshCount === 0 ? (
+                      <EmptyState variant="xs">
+                        <EmptyStateBody>{t('No managed or discovered meshes found.')}</EmptyStateBody>
+                      </EmptyState>
+                    ) : (
+                      <>
+                        {!!cpSectionError && enrichmentLoaded && (
+                          <Alert
+                            variant="warning"
+                            isInline
+                            isPlain
+                            title={t('Unable to load control plane data. Some meshes may not be shown.')}
+                            style={{ marginBottom: '0.5rem' }}
+                          />
+                        )}
+                        <StatusDonutChart counts={meshStatusCounts} subtitle={t('total')} />
+                      </>
                     )}
-                    <StatusDonutChart counts={meshStatusCounts} subtitle={t('total')} />
-                  </>
-                )}
-              </CardBody>
-            </Card>
+                  </CardBody>
+                </Card>
+              </GridItem>
+
+              <GridItem span={12}>
+                <Card>
+                  <CardTitle style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span>
+                      <ServerIcon style={{ marginRight: '0.5rem' }} />
+                      {t('Control Planes')}
+                    </span>
+                    <Link to="/fleet-mesh/control-planes" style={{ fontSize: 'var(--pf-v6-global--FontSize--sm)' }}>{t('View all')}</Link>
+                  </CardTitle>
+                  <CardBody style={{ overflow: 'hidden' }}>
+                    {!cpLoaded ? (
+                      <Spinner size="md" aria-label={t('Loading control planes')} />
+                    ) : !isFleetAvailable ? (
+                      <Label color="grey">{t('This page requires Red Hat Advanced Cluster Management.')}</Label>
+                    ) : cpSectionError ? (
+                      <Alert variant="danger" isInline isPlain title={t('Unable to load control plane data')} />
+                    ) : cpCount === 0 ? (
+                      <EmptyState variant="xs">
+                        <EmptyStateBody>{t('No control planes discovered across the fleet.')}</EmptyStateBody>
+                      </EmptyState>
+                    ) : (
+                      <StatusDonutChart counts={cpStatusCounts} subtitle={t('total')} />
+                    )}
+                  </CardBody>
+                </Card>
+              </GridItem>
+            </Grid>
           </GridItem>
 
-          <GridItem span={4}>
-            <Card>
-              <CardTitle style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span>
-                  <ServerIcon style={{ marginRight: '0.5rem' }} />
-                  {t('Control Planes')}
-                </span>
-                <Link to="/mesh-control-planes" style={{ fontSize: 'var(--pf-v6-global--FontSize--sm)' }}>{t('View all')}</Link>
-              </CardTitle>
-              <CardBody style={{ overflow: 'hidden' }}>
-                {!cpLoaded ? (
-                  <Spinner size="md" aria-label={t('Loading control planes')} />
-                ) : !isFleetAvailable ? (
-                  <Label color="grey">{t('This page requires Red Hat Advanced Cluster Management.')}</Label>
-                ) : cpSectionError ? (
-                  <Alert variant="danger" isInline isPlain title={t('Unable to load control plane data')} />
-                ) : cpCount === 0 ? (
-                  <EmptyState variant="xs">
-                    <EmptyStateBody>{t('No control planes discovered across the fleet.')}</EmptyStateBody>
-                  </EmptyState>
-                ) : (
-                  <StatusDonutChart counts={cpStatusCounts} subtitle={t('total')} />
-                )}
-              </CardBody>
-            </Card>
-          </GridItem>
-
-          <GridItem span={4} style={{ display: 'flex' }}>
-            <Card style={{ width: '100%' }}>
-              <CardTitle>
-                {t('Clusters with Service Mesh')}
-              </CardTitle>
-              <CardBody style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 1 }}>
-                {!mcmsLoaded ? (
-                  <Spinner size="md" aria-label={t('Loading clusters count')} />
-                ) : mcmsError ? (
-                  <Alert variant="danger" isInline isPlain title={t('Unable to load mesh data')} />
-                ) : clusterCount === 0 ? (
-                  <EmptyState variant="xs">
-                    <EmptyStateBody>{t('No clusters are part of any mesh yet.')}</EmptyStateBody>
-                  </EmptyState>
-                ) : (
-                  <Title headingLevel="h2" size="4xl">{clusterCount}</Title>
-                )}
-              </CardBody>
-            </Card>
-          </GridItem>
-
-          <GridItem span={12}>
-            <Card isCompact style={{ minHeight: 'calc(100vh - 500px)' }}>
+          <GridItem span={7}>
+            <Card isCompact style={{ height: '100%' }}>
               <CardTitle>{t('Recent Issues')}</CardTitle>
               <CardBody>
                 {!mcmsLoaded || !cpLoaded ? (
