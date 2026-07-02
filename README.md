@@ -176,7 +176,7 @@ kubectl apply -n mesh-system -f samples/basic.yaml
 
 For more configuration options, see the [samples](./samples/) directory:
 
-- **[basic.yaml](./samples/basic.yaml)** - Minimal configuration using defaults
+- **[basic.yaml](./samples/basic.yaml)** - Minimal configuration for K8s clusters (Sail operator)
 - **[complete.yaml](./samples/complete.yaml)** - All available fields with documentation
 - **[openshift.yaml](./samples/openshift.yaml)** - OpenShift-specific configuration
 - **[pinned-version.yaml](./samples/pinned-version.yaml)** - Version pinning with manual approval

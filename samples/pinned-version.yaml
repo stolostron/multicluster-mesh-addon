@@ -12,6 +12,7 @@ spec:
 
   # Operator configuration with version pinning and manual approval
   operator:
+    name: sailoperator
     namespace: sail-operator
     channel: stable
     source: operatorhubio-catalog
