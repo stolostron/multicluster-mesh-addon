@@ -86,8 +86,8 @@ export const ClusterStatusSection: FC<{ clusterStatuses: ClusterMeshStatus[]; me
     const readyCondition = meshConditions?.find((c) => c.type === 'Ready')
     const isConflict = readyCondition && CONFLICT_REASONS.includes(readyCondition.reason ?? '')
     return (
-      <Card>
-        <CardTitle>{t('Cluster Status (0)')}</CardTitle>
+      <Card isCompact>
+        <CardTitle><strong>{t('Cluster Status (0)')}</strong></CardTitle>
         <CardBody>
           <EmptyState variant="xs">
             <EmptyStateBody>
@@ -104,8 +104,8 @@ export const ClusterStatusSection: FC<{ clusterStatuses: ClusterMeshStatus[]; me
   }
 
   return (
-    <Card>
-      <CardTitle>{t('Cluster Status ({{count}})', { count: clusterStatuses.length })}</CardTitle>
+    <Card isCompact>
+      <CardTitle><strong>{t('Cluster Status ({{count}})', { count: clusterStatuses.length })}</strong></CardTitle>
       <CardBody>
         <Flex style={{ marginBottom: '1rem' }} spaceItems={{ default: 'spaceItemsMd' }}>
           <FlexItem>
@@ -281,9 +281,9 @@ const MeshDetailContent: FC<{ ns: string; name: string }> = ({ ns, name }) => {
         <Grid hasGutter>
           <GridItem span={6}>
             <Card isCompact>
-              <CardTitle>{t('Overview')}</CardTitle>
+              <CardTitle><strong>{t('Overview')}</strong></CardTitle>
               <CardBody>
-                <DescriptionList isHorizontal isCompact>
+                <DescriptionList isCompact columnModifier={{ default: '2Col' }}>
                   <DescriptionListGroup>
                     <DescriptionListTerm>{t('Cluster Set')}</DescriptionListTerm>
                     <DescriptionListDescription>
@@ -319,9 +319,9 @@ const MeshDetailContent: FC<{ ns: string; name: string }> = ({ ns, name }) => {
 
           <GridItem span={6}>
             <Card isCompact>
-              <CardTitle>{t('OSSM Operator')}</CardTitle>
+              <CardTitle><strong>{t('OSSM Operator')}</strong></CardTitle>
               <CardBody>
-                <DescriptionList isHorizontal isCompact>
+                <DescriptionList isCompact columnModifier={{ default: '2Col' }}>
                   <DescriptionListGroup>
                     <DescriptionListTerm>{t('Namespace')}</DescriptionListTerm>
                     <DescriptionListDescription>
@@ -364,8 +364,8 @@ const MeshDetailContent: FC<{ ns: string; name: string }> = ({ ns, name }) => {
 
           {conditions.length > 0 && (
             <GridItem span={12}>
-              <Card>
-                <CardTitle>{t('Conditions')}</CardTitle>
+              <Card isCompact>
+                <CardTitle><strong>{t('Conditions')}</strong></CardTitle>
                 <CardBody>
                   <table className="pf-v6-c-table pf-m-grid-md pf-m-compact" role="grid">
                     <thead className="pf-v6-c-table__thead">

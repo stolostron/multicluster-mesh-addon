@@ -122,9 +122,9 @@ const ControlPlaneDetailContent: FC<{ cluster: string; name: string }> = ({ clus
         <Grid hasGutter>
           <GridItem span={6}>
             <Card isCompact>
-              <CardTitle>{t('Overview')}</CardTitle>
+              <CardTitle><strong>{t('Overview')}</strong></CardTitle>
               <CardBody>
-                <DescriptionList isHorizontal isCompact>
+                <DescriptionList isCompact columnModifier={{ default: '2Col' }}>
                   <DescriptionListGroup>
                     <DescriptionListTerm>{t('Cluster')}</DescriptionListTerm>
                     <DescriptionListDescription>
@@ -169,9 +169,9 @@ const ControlPlaneDetailContent: FC<{ cluster: string; name: string }> = ({ clus
           {matchedMCM && (
             <GridItem span={6}>
               <Card isCompact>
-                <CardTitle>{t('Managed By')}</CardTitle>
+                <CardTitle><strong>{t('Managed By')}</strong></CardTitle>
                 <CardBody>
-                  <DescriptionList isHorizontal isCompact>
+                  <DescriptionList isCompact>
                     <DescriptionListGroup>
                       <DescriptionListTerm>{t('Mesh')}</DescriptionListTerm>
                       <DescriptionListDescription>
@@ -189,9 +189,9 @@ const ControlPlaneDetailContent: FC<{ cluster: string; name: string }> = ({ clus
           {!matchedMCM && meshID && (
             <GridItem span={6}>
               <Card isCompact>
-                <CardTitle>{t('Discovered Mesh')}</CardTitle>
+                <CardTitle><strong>{t('Discovered Mesh')}</strong></CardTitle>
                 <CardBody>
-                  <DescriptionList isHorizontal isCompact>
+                  <DescriptionList isCompact>
                     <DescriptionListGroup>
                       <DescriptionListTerm>{t('Mesh ID')}</DescriptionListTerm>
                       <DescriptionListDescription>
@@ -208,8 +208,8 @@ const ControlPlaneDetailContent: FC<{ cluster: string; name: string }> = ({ clus
 
           {conditions.length > 0 && (
             <GridItem span={12}>
-              <Card>
-                <CardTitle>{t('Conditions')}</CardTitle>
+              <Card isCompact>
+                <CardTitle><strong>{t('Conditions')}</strong></CardTitle>
                 <CardBody>
                   <table className="pf-v6-c-table pf-m-grid-md pf-m-compact" role="grid">
                     <thead className="pf-v6-c-table__thead">

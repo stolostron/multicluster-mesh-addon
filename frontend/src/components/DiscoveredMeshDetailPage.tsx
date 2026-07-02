@@ -189,9 +189,9 @@ const DiscoveredMeshDetailContent: FC<{ meshID: string }> = ({ meshID }) => {
 
           <GridItem span={6}>
             <Card isCompact>
-              <CardTitle>{t('Overview')}</CardTitle>
+              <CardTitle><strong>{t('Overview')}</strong></CardTitle>
               <CardBody>
-                <DescriptionList isHorizontal isCompact>
+                <DescriptionList isCompact columnModifier={{ default: '2Col' }}>
                   <DescriptionListGroup>
                     <DescriptionListTerm>{t('Mesh ID')}</DescriptionListTerm>
                     <DescriptionListDescription>{meshID}</DescriptionListDescription>
@@ -216,8 +216,8 @@ const DiscoveredMeshDetailContent: FC<{ meshID: string }> = ({ meshID }) => {
           </GridItem>
 
           <GridItem span={12}>
-            <Card>
-              <CardTitle>{t('Control Planes')}</CardTitle>
+            <Card isCompact>
+              <CardTitle><strong>{t('Control Planes')}</strong></CardTitle>
               <CardBody>
                 <div style={{ maxHeight: '400px', overflowY: 'auto' }}>
                   <table className="pf-v6-c-table pf-m-grid-md pf-m-compact" role="grid">
@@ -263,10 +263,10 @@ const DiscoveredMeshDetailContent: FC<{ meshID: string }> = ({ meshID }) => {
 
           {allConditions.length > 0 && (
             <GridItem span={12}>
-              <Card>
+              <Card isCompact>
                 <CardTitle>
                   <Flex justifyContent={{ default: 'justifyContentSpaceBetween' }} alignItems={{ default: 'alignItemsCenter' }}>
-                    <FlexItem>{t('Conditions')}</FlexItem>
+                    <FlexItem><strong>{t('Conditions')}</strong></FlexItem>
                     <FlexItem>
                       <Button
                         variant="link"
