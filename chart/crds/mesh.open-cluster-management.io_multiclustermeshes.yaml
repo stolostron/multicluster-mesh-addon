@@ -59,7 +59,8 @@ spec:
                     type: string
                 type: object
               operator:
-                description: Operator defines the Mesh Operator installation configuration
+                description: Operator defines the Service Mesh Operator installation
+                  configuration
                 properties:
                   channel:
                     default: stable
@@ -77,7 +78,7 @@ spec:
                   namespace:
                     default: multicluster-mesh-operator
                     description: |-
-                      Namespace is the namespace where the Mesh Operator will be installed.
+                      Namespace is the namespace where the Service Mesh Operator will be installed.
                       This namespace may be deleted when the mesh is removed, so avoid
                       using a namespace that contains other resources.
                     type: string

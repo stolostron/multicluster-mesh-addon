@@ -82,7 +82,7 @@ type MultiClusterMeshSpec struct {
 	// +optional
 	ControlPlane ControlPlaneConfig `json:"controlPlane,omitempty"`
 
-	// Operator defines the Mesh Operator installation configuration
+	// Operator defines the Service Mesh Operator installation configuration
 	// +optional
 	Operator OperatorConfig `json:"operator,omitempty"`
 
@@ -99,9 +99,9 @@ type ControlPlaneConfig struct {
 	Namespace string `json:"namespace,omitempty"`
 }
 
-// OperatorConfig defines the Mesh Operator installation settings
+// OperatorConfig defines the Service Mesh Operator installation settings
 type OperatorConfig struct {
-	// Namespace is the namespace where the Mesh Operator will be installed.
+	// Namespace is the namespace where the Service Mesh Operator will be installed.
 	// This namespace may be deleted when the mesh is removed, so avoid
 	// using a namespace that contains other resources.
 	// +optional

@@ -15,7 +15,7 @@ spec:
 
   # Sail Operator installation configuration
   operator:
-    # Namespace where the Mesh Operator will be installed (default: multicluster-mesh-operator)
+    # Namespace where the Service Mesh Operator will be installed (default: multicluster-mesh-operator)
     # This namespace may be deleted when the mesh is removed
     namespace: multicluster-mesh-operator
 
