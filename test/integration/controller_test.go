@@ -831,7 +831,9 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 				otherNs = util.UniqueName("other-ns")
 				otherMesh = util.UniqueName("other-mesh")
 				util.CreateNamespace(ctx, k8sClient, otherNs)
-				util.CreateMultiClusterMesh(ctx, k8sClient, otherMesh, otherNs, testClusterSet)
+				util.CreateMultiClusterMesh(ctx, k8sClient, otherMesh, otherNs, testClusterSet, meshv1alpha1.MultiClusterMeshSpec{
+					ControlPlane: meshv1alpha1.ControlPlaneConfig{Namespace: "istio-system-2"},
+				})
 				expectMeshNotReady(otherMesh, otherNs)
 			})
 
