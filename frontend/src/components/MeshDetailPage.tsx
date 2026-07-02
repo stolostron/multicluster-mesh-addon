@@ -271,6 +271,9 @@ const MeshDetailContent: FC<{ ns: string; name: string }> = ({ ns, name }) => {
           <FlexItem>
             <MeshStatus conditions={conditions} conditionType="Ready" />
           </FlexItem>
+          <FlexItem>
+            <Label color="blue" isCompact>{t('Managed')}</Label>
+          </FlexItem>
         </Flex>
       </PageSection>
 

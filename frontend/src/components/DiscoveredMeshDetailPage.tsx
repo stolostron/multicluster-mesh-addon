@@ -158,7 +158,7 @@ const DiscoveredMeshDetailContent: FC<{ meshID: string }> = ({ meshID }) => {
             <MeshStatus conditions={worstConditions} conditionType="Ready" />
           </FlexItem>
           <FlexItem>
-            <Label color="grey" isCompact>{t('Discovered')}</Label>
+            <Label color="purple" isCompact>{t('Discovered')}</Label>
           </FlexItem>
         </Flex>
       </PageSection>

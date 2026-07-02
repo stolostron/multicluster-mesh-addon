@@ -89,6 +89,12 @@ describe('MeshDetailPage', () => {
       expect(screen.getByRole('heading', { name: 'test-mesh' })).toBeInTheDocument()
     })
 
+    it('shows blue Managed label in header', () => {
+      rstest.mocked(useK8sWatchResource).mockReturnValue([makeMesh(), true, null])
+      render(<MeshDetailPage />)
+      expect(screen.getByText('Managed')).toBeInTheDocument()
+    })
+
     it('links spec.clusterSet to the ACM cluster set detail page', () => {
       rstest.mocked(useK8sWatchResource).mockReturnValue([makeMesh({ spec: { clusterSet: 'my-clusterset' } }), true, null])
       render(<MeshDetailPage />)
