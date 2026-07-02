@@ -6,16 +6,9 @@ import {
   Alert,
   Card,
   CardBody,
-  CardFooter,
   CardTitle,
-  DescriptionList,
-  DescriptionListDescription,
-  DescriptionListGroup,
-  DescriptionListTerm,
   EmptyState,
   EmptyStateBody,
-  Flex,
-  FlexItem,
   Grid,
   GridItem,
   Label,
@@ -25,38 +18,44 @@ import {
   Tooltip,
 } from '@patternfly/react-core'
 import { TopologyIcon, ServerIcon } from '@patternfly/react-icons'
-import { useMultiClusterMeshes } from '../hooks/useMultiClusterMeshes'
-import { useDiscoveredControlPlanes } from '../hooks/useDiscoveredControlPlanes'
-import { useEnrichedControlPlanes } from '../hooks/useEnrichedControlPlanes'
+import { useFleetMeshItems } from '../hooks/useFleetMeshItems'
 import type { MultiClusterMesh, K8sCondition } from '../types/multiClusterMesh'
 import type { EnrichedControlPlane } from '../types/istio'
+import type { FleetMeshItem } from '../types/fleetMesh'
 import type { StatusColor } from './MeshStatus'
 import { deriveStatus } from './MeshStatus'
+import { StatusDonutChart } from './StatusDonutChart'
+import type { StatusCounts } from './StatusDonutChart'
 import { useMeshTranslation } from '../utils/i18nUtils'
 
-interface StatusCounts {
-  ready: number
-  notReady: number
-  unknown: number
-}
-
 function countByStatus(items: { conditions?: K8sCondition[] }[], conditionType?: string): StatusCounts {
-  const counts: StatusCounts = { ready: 0, notReady: 0, unknown: 0 }
+  const counts = { degraded: 0, notReady: 0, ready: 0, unknown: 0 }
   for (const item of items) {
     const { color } = deriveStatus(item.conditions, conditionType)
     if (color === 'green') counts.ready++
+    else if (color === 'orange') counts.degraded++
     else if (color === 'grey') counts.unknown++
     else counts.notReady++
   }
   return counts
 }
 
-function countUniqueClusters(meshes: MultiClusterMesh[]): number {
+function countUniqueClustersFromItems(items: FleetMeshItem[]): number {
   const clusters = new Set<string>()
-  for (const mesh of meshes) {
-    for (const cs of mesh.status?.clusterStatus ?? []) {
-      clusters.add(cs.clusterName)
+  for (const item of items) {
+    if (item.kind === 'managed') {
+      for (const cs of item.mcm?.status?.clusterStatus ?? []) clusters.add(cs.clusterName)
+    } else {
+      for (const cp of item.controlPlanes ?? []) clusters.add(cp.clusterName)
     }
+  }
+  return clusters.size
+}
+
+function countUniqueClustersFromMcms(mcms: MultiClusterMesh[]): number {
+  const clusters = new Set<string>()
+  for (const mesh of mcms) {
+    for (const cs of mesh.status?.clusterStatus ?? []) clusters.add(cs.clusterName)
   }
   return clusters.size
 }
@@ -128,41 +127,41 @@ function collectRecentIssues(meshes: MultiClusterMesh[], controlPlanes: Enriched
   return issues.slice(0, MAX_ISSUES)
 }
 
-const StatusCountLabels: FC<{ counts: StatusCounts }> = ({ counts }) => {
-  const { t } = useMeshTranslation()
-  return (
-    <Flex spaceItems={{ default: 'spaceItemsMd' }}>
-      <FlexItem>
-        <Label color="green" isCompact>{t('{{count}} Ready', { count: counts.ready })}</Label>
-      </FlexItem>
-      <FlexItem>
-        <Label color="red" isCompact>{t('{{count}} Not Ready', { count: counts.notReady })}</Label>
-      </FlexItem>
-      <FlexItem>
-        <Label color="grey" isCompact>{t('{{count}} Unknown', { count: counts.unknown })}</Label>
-      </FlexItem>
-    </Flex>
-  )
-}
-
 const OverviewPage: FC = () => {
   const { t } = useMeshTranslation()
 
-  const [meshes, meshesLoaded, meshesError] = useMultiClusterMeshes()
   const {
-    results: searchResults,
-    loaded: cpLoaded,
-    error: cpError,
+    items,
+    mcms,
+    mcmsLoaded,
+    mcmsError,
+    enrichedPlanes,
+    enrichmentLoaded,
+    enrichmentError,
+    searchLoaded,
+    searchError,
     isFleetAvailable,
-  } = useDiscoveredControlPlanes()
-  const [enrichedPlanes, , , enrichmentError] = useEnrichedControlPlanes(searchResults, meshes ?? [])
+  } = useFleetMeshItems()
 
+  // Two-phase Meshes: show MCM counts immediately, add discovered when ready
+  const meshCount = enrichmentLoaded ? items.length : mcms.length
   const meshStatusCounts = useMemo(
-    () => countByStatus((meshes ?? []).map((m) => ({ conditions: m.status?.conditions }))),
-    [meshes],
+    () => enrichmentLoaded
+      ? countByStatus(items)
+      : countByStatus(mcms.map((m) => ({ conditions: m.status?.conditions }))),
+    [items, mcms, enrichmentLoaded],
   )
 
-  const clusterCount = useMemo(() => countUniqueClusters(meshes ?? []), [meshes])
+  const clusterCount = useMemo(
+    () => enrichmentLoaded
+      ? countUniqueClustersFromItems(items)
+      : countUniqueClustersFromMcms(mcms),
+    [items, mcms, enrichmentLoaded],
+  )
+
+  const cpLoaded = searchLoaded
+  const cpSectionError = searchError ?? enrichmentError
+  const cpCount = enrichedPlanes.length
 
   const cpStatusCounts = useMemo(
     () => countByStatus(enrichedPlanes.map((cp) => ({ conditions: cp.status?.conditions }))),
@@ -170,13 +169,9 @@ const OverviewPage: FC = () => {
   )
 
   const recentIssues = useMemo(
-    () => collectRecentIssues(meshes ?? [], enrichedPlanes),
-    [meshes, enrichedPlanes],
+    () => collectRecentIssues(mcms, enrichedPlanes),
+    [mcms, enrichedPlanes],
   )
-
-  const meshCount = meshes?.length ?? 0
-  const cpCount = enrichedPlanes.length
-  const cpSectionError = cpError ?? enrichmentError
 
   return (
     <>
@@ -186,90 +181,54 @@ const OverviewPage: FC = () => {
 
       <PageSection>
         <Grid hasGutter>
-          {/* Count cards */}
           <GridItem span={4}>
-            <Card isCompact>
-              <CardTitle><Tooltip content={t('Fleet Mesh')}><TopologyIcon style={{ marginRight: '0.5rem' }} /></Tooltip>{t('Fleet Meshes')}</CardTitle>
-              <CardBody>
-                {!meshesLoaded ? (
-                  <Spinner size="lg" aria-label={t('Loading fleet meshes count')} />
-                ) : meshesError ? (
-                  <Alert variant="danger" isInline isPlain title={t('Unable to load mesh data')} />
-                ) : (
-                  <Title headingLevel="h2" size="4xl">{meshCount}</Title>
-                )}
-              </CardBody>
-            </Card>
-          </GridItem>
-
-          <GridItem span={4}>
-            <Card isCompact>
-              <CardTitle><Tooltip content={t('Control Plane')}><ServerIcon style={{ marginRight: '0.5rem' }} /></Tooltip>{t('Control Planes')}</CardTitle>
-              <CardBody>
-                {!cpLoaded ? (
-                  <Spinner size="lg" aria-label={t('Loading control planes count')} />
-                ) : !isFleetAvailable ? (
-                  <DescriptionList>
-                    <DescriptionListGroup>
-                      <DescriptionListTerm>-</DescriptionListTerm>
-                      <DescriptionListDescription>
-                        <Label color="grey" isCompact>{t('Requires ACM')}</Label>
-                      </DescriptionListDescription>
-                    </DescriptionListGroup>
-                  </DescriptionList>
-                ) : cpSectionError ? (
-                  <Alert variant="danger" isInline isPlain title={t('Unable to load control plane data')} />
-                ) : (
-                  <Title headingLevel="h2" size="4xl">{cpCount}</Title>
-                )}
-              </CardBody>
-            </Card>
-          </GridItem>
-
-          <GridItem span={4}>
-            <Card isCompact>
-              <CardTitle>{t('Managed Clusters')}</CardTitle>
-              <CardBody>
-                {!meshesLoaded ? (
-                  <Spinner size="lg" aria-label={t('Loading managed clusters count')} />
-                ) : meshesError ? (
-                  <Alert variant="danger" isInline isPlain title={t('Unable to load mesh data')} />
-                ) : (
-                  <Title headingLevel="h2" size="4xl">{clusterCount}</Title>
-                )}
-              </CardBody>
-            </Card>
-          </GridItem>
-
-          {/* Health cards */}
-          <GridItem span={6}>
-            <Card isCompact>
-              <CardTitle><Tooltip content={t('Fleet Mesh')}><TopologyIcon style={{ marginRight: '0.5rem' }} /></Tooltip>{t('Fleet Meshes Health')}</CardTitle>
-              <CardBody>
-                {!meshesLoaded ? (
-                  <Spinner size="md" aria-label={t('Loading fleet meshes health')} />
-                ) : meshesError ? (
+            <Card>
+              <CardTitle style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span>
+                  <TopologyIcon style={{ marginRight: '0.5rem' }} />
+                  {t('Meshes')}
+                </span>
+                <Link to="/service-mesh" style={{ fontSize: 'var(--pf-v6-global--FontSize--sm)' }}>{t('View all')}</Link>
+              </CardTitle>
+              <CardBody style={{ overflow: 'hidden' }}>
+                {!mcmsLoaded ? (
+                  <Spinner size="md" aria-label={t('Loading fleet meshes')} />
+                ) : mcmsError ? (
                   <Alert variant="danger" isInline isPlain title={t('Unable to load mesh data')} />
                 ) : meshCount === 0 ? (
                   <EmptyState variant="xs">
-                    <EmptyStateBody>{t('No meshes have been created yet.')}</EmptyStateBody>
+                    <EmptyStateBody>{t('No managed or discovered meshes found.')}</EmptyStateBody>
                   </EmptyState>
                 ) : (
-                  <StatusCountLabels counts={meshStatusCounts} />
+                  <>
+                    {!!cpSectionError && enrichmentLoaded && (
+                      <Alert
+                        variant="warning"
+                        isInline
+                        isPlain
+                        title={t('Unable to load control plane data. Some meshes may not be shown.')}
+                        style={{ marginBottom: '0.5rem' }}
+                      />
+                    )}
+                    <StatusDonutChart counts={meshStatusCounts} subtitle={t('total')} />
+                  </>
                 )}
               </CardBody>
-              <CardFooter>
-                <Link to="/service-mesh">{t('View all fleet meshes')}</Link>
-              </CardFooter>
             </Card>
           </GridItem>
 
-          <GridItem span={6}>
-            <Card isCompact>
-              <CardTitle><Tooltip content={t('Control Plane')}><ServerIcon style={{ marginRight: '0.5rem' }} /></Tooltip>{t('Control Planes Health')}</CardTitle>
-              <CardBody>
+          <GridItem span={4}>
+            <Card>
+              <CardTitle style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span>
+                  <ServerIcon style={{ marginRight: '0.5rem' }} />
+                  {t('Control Planes')}
+                </span>
+                <Link to="/mesh-control-planes" style={{ fontSize: 'var(--pf-v6-global--FontSize--sm)' }}>{t('View all')}</Link>
+              </CardTitle>
+              <CardBody style={{ overflow: 'hidden' }}>
                 {!cpLoaded ? (
-                  <Spinner size="md" aria-label={t('Loading control planes health')} />
+                  <Spinner size="md" aria-label={t('Loading control planes')} />
                 ) : !isFleetAvailable ? (
                   <Label color="grey">{t('This page requires Red Hat Advanced Cluster Management.')}</Label>
                 ) : cpSectionError ? (
@@ -279,38 +238,55 @@ const OverviewPage: FC = () => {
                     <EmptyStateBody>{t('No control planes discovered across the fleet.')}</EmptyStateBody>
                   </EmptyState>
                 ) : (
-                  <StatusCountLabels counts={cpStatusCounts} />
+                  <StatusDonutChart counts={cpStatusCounts} subtitle={t('total')} />
                 )}
               </CardBody>
-              <CardFooter>
-                <Link to="/mesh-control-planes">{t('View all control planes')}</Link>
-              </CardFooter>
             </Card>
           </GridItem>
 
-          {/* Recent issues */}
+          <GridItem span={4} style={{ display: 'flex' }}>
+            <Card style={{ width: '100%' }}>
+              <CardTitle>
+                {t('Clusters with Service Mesh')}
+              </CardTitle>
+              <CardBody style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 1 }}>
+                {!mcmsLoaded ? (
+                  <Spinner size="md" aria-label={t('Loading clusters count')} />
+                ) : mcmsError ? (
+                  <Alert variant="danger" isInline isPlain title={t('Unable to load mesh data')} />
+                ) : clusterCount === 0 ? (
+                  <EmptyState variant="xs">
+                    <EmptyStateBody>{t('No clusters are part of any mesh yet.')}</EmptyStateBody>
+                  </EmptyState>
+                ) : (
+                  <Title headingLevel="h2" size="4xl">{clusterCount}</Title>
+                )}
+              </CardBody>
+            </Card>
+          </GridItem>
+
           <GridItem span={12}>
-            <Card isCompact>
+            <Card isCompact style={{ minHeight: 'calc(100vh - 500px)' }}>
               <CardTitle>{t('Recent Issues')}</CardTitle>
               <CardBody>
-                {!meshesLoaded || !cpLoaded ? (
+                {!mcmsLoaded || !cpLoaded ? (
                   <Spinner size="md" aria-label={t('Loading recent issues')} />
-                ) : (meshesError && cpSectionError) ? (
+                ) : (mcmsError && cpSectionError) ? (
                   <Alert variant="danger" isInline isPlain title={t('Unable to load fleet data')} />
                 ) : (
                   <>
-                    {(meshesError || cpSectionError) && (
+                    {(mcmsError || cpSectionError) && (
                       <Alert
                         variant="warning"
                         isInline
                         isPlain
-                        title={meshesError
+                        title={mcmsError
                           ? t('Unable to load mesh data. Some issues may not be shown.')
                           : t('Unable to load control plane data. Some issues may not be shown.')}
                         style={{ marginBottom: '1rem' }}
                       />
                     )}
-                    {recentIssues.length === 0 && !meshesError && !cpSectionError ? (
+                    {recentIssues.length === 0 && !mcmsError && !cpSectionError ? (
                       <EmptyState variant="xs">
                         <EmptyStateBody>{t('No issues detected.')}</EmptyStateBody>
                       </EmptyState>
@@ -324,10 +300,10 @@ const OverviewPage: FC = () => {
                           </tr>
                         </thead>
                         <tbody className="pf-v6-c-table__tbody">
-                          {recentIssues.map((issue, i) => (
+                          {recentIssues.map((issue) => (
                             <tr className="pf-v6-c-table__tr" key={`${issue.kind}-${issue.source}-${issue.label}`}>
                               <td className="pf-v6-c-table__td">
-                                <Tooltip content={issue.kind === 'mesh' ? t('Fleet Mesh') : t('Control Plane')}>
+                                <Tooltip content={issue.kind === 'mesh' ? t('Mesh') : t('Control Plane')}>
                                   {issue.kind === 'mesh'
                                     ? <TopologyIcon style={{ marginRight: '0.5rem' }} />
                                     : <ServerIcon style={{ marginRight: '0.5rem' }} />}

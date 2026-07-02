@@ -1,5 +1,5 @@
 import { renderHook, waitFor, act } from '@testing-library/react'
-import { useEnrichedControlPlanes } from '../useEnrichedControlPlanes'
+import { useEnrichedControlPlanes, __resetEnrichmentCache } from '../useEnrichedControlPlanes'
 import { fleetK8sGet } from '@stolostron/multicluster-sdk'
 import type { Istio } from '../../types/istio'
 import type { MultiClusterMesh } from '../../types/multiClusterMesh'
@@ -27,6 +27,7 @@ const makeIstio = (namespace = 'istio-system', meshID?: string): Istio => ({
 afterEach(() => {
   rstest.clearAllMocks()
   rstest.useRealTimers()
+  __resetEnrichmentCache()
 })
 
 describe('useEnrichedControlPlanes', () => {
@@ -233,5 +234,49 @@ describe('useEnrichedControlPlanes', () => {
     await waitFor(() => {
       expect(result.current[0][0].managedBy).toBeUndefined()
     })
+  })
+
+  it('reuses module-level cache across component remounts without new network calls', async () => {
+    rstest.mocked(fleetK8sGet).mockResolvedValue(makeIstio())
+    const results = [makeSearchResult('cluster-a', 'default')]
+
+    const { result, unmount } = renderHook(() => useEnrichedControlPlanes(results as any, []))
+    await waitFor(() => expect(result.current[2]).toBe(true))
+    const callsAfterFirstMount = rstest.mocked(fleetK8sGet).mock.calls.length
+
+    unmount()
+
+    const { result: result2 } = renderHook(() => useEnrichedControlPlanes(results as any, []))
+    await waitFor(() => expect(result2.current[2]).toBe(true))
+    expect(rstest.mocked(fleetK8sGet).mock.calls.length).toBe(callsAfterFirstMount)
+    expect(result2.current[0][0].version).toBe('v1.24.0')
+  })
+
+  it('does not reset enrichmentLoaded on subsequent search poll updates', async () => {
+    rstest.mocked(fleetK8sGet).mockResolvedValue(makeIstio())
+    const results1 = [makeSearchResult('cluster-a', 'default')]
+
+    const { result, rerender } = renderHook(
+      ({ r }) => useEnrichedControlPlanes(r as any, []),
+      { initialProps: { r: results1 } },
+    )
+
+    await waitFor(() => expect(result.current[2]).toBe(true))
+    expect(rstest.mocked(fleetK8sGet)).toHaveBeenCalledTimes(1)
+
+    rstest.mocked(fleetK8sGet).mockResolvedValue(makeIstio('istio-system', 'mesh2'))
+    const results2 = [
+      makeSearchResult('cluster-a', 'default'),
+      makeSearchResult('cluster-b', 'default'),
+    ]
+    rerender({ r: results2 })
+
+    // After initial enrichment, enrichmentLoaded stays true during subsequent cycles
+    expect(result.current[2]).toBe(true)
+
+    await waitFor(() => {
+      expect(rstest.mocked(fleetK8sGet).mock.calls.length).toBeGreaterThanOrEqual(2)
+    })
+    expect(result.current[2]).toBe(true)
   })
 })

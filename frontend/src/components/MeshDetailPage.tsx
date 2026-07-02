@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import type { FC, ReactNode } from 'react'
+import type { FC } from 'react'
 import { useParams, Link } from 'react-router-dom-v5-compat'
 import {
   useK8sWatchResource,
@@ -31,7 +31,7 @@ import {
 } from '@patternfly/react-core'
 import type { MultiClusterMesh, K8sCondition, ClusterMeshStatus } from '../types/multiClusterMesh'
 import { multiClusterMeshGroupVersionKind } from '../types/multiClusterMesh'
-import { MeshStatus } from './MeshStatus'
+import { MeshStatus, statusIcon } from './MeshStatus'
 import { TrustStatusCard } from './TrustStatusCard'
 import { useMeshTranslation } from '../utils/i18nUtils'
 
@@ -39,11 +39,6 @@ function conditionMessage(condition: K8sCondition): string {
   if (condition.message) return condition.message
   if (condition.reason) return condition.reason
   return condition.status
-}
-
-function statusIcon(status: string): ReactNode {
-  const color = status === 'True' ? 'green' : status === 'Unknown' ? 'grey' : 'red'
-  return <Label color={color}>{status}</Label>
 }
 
 type ClusterStatusCategory = 'all' | 'ready' | 'notReady' | 'unknown'
@@ -91,8 +86,8 @@ export const ClusterStatusSection: FC<{ clusterStatuses: ClusterMeshStatus[]; me
     const readyCondition = meshConditions?.find((c) => c.type === 'Ready')
     const isConflict = readyCondition && CONFLICT_REASONS.includes(readyCondition.reason ?? '')
     return (
-      <Card>
-        <CardTitle>{t('Cluster Status (0)')}</CardTitle>
+      <Card isCompact>
+        <CardTitle><strong>{t('Cluster Status (0)')}</strong></CardTitle>
         <CardBody>
           <EmptyState variant="xs">
             <EmptyStateBody>
@@ -109,8 +104,8 @@ export const ClusterStatusSection: FC<{ clusterStatuses: ClusterMeshStatus[]; me
   }
 
   return (
-    <Card>
-      <CardTitle>{t('Cluster Status ({{count}})', { count: clusterStatuses.length })}</CardTitle>
+    <Card isCompact>
+      <CardTitle><strong>{t('Cluster Status ({{count}})', { count: clusterStatuses.length })}</strong></CardTitle>
       <CardBody>
         <Flex style={{ marginBottom: '1rem' }} spaceItems={{ default: 'spaceItemsMd' }}>
           <FlexItem>
@@ -188,7 +183,7 @@ export const ClusterStatusSection: FC<{ clusterStatuses: ClusterMeshStatus[]; me
                             </Link>
                           </td>
                           <td className="pf-v6-c-table__td">
-                            <MeshStatus conditions={cs.conditions} conditionType="OperatorInstalled" />
+                            <MeshStatus conditions={cs.conditions} conditionType="OperatorInstalled" isCompact />
                           </td>
                           <td className="pf-v6-c-table__td">
                             {operatorCondition ? conditionMessage(operatorCondition) : '-'}
@@ -265,7 +260,7 @@ const MeshDetailContent: FC<{ ns: string; name: string }> = ({ ns, name }) => {
       <PageSection>
         <Breadcrumb>
           <BreadcrumbItem>
-            <Link to="/service-mesh">{t('Fleet Meshes')}</Link>
+            <Link to="/service-mesh">{t('Meshes')}</Link>
           </BreadcrumbItem>
           <BreadcrumbItem isActive>{mesh.metadata?.name}</BreadcrumbItem>
         </Breadcrumb>
@@ -276,6 +271,9 @@ const MeshDetailContent: FC<{ ns: string; name: string }> = ({ ns, name }) => {
           <FlexItem>
             <MeshStatus conditions={conditions} conditionType="Ready" />
           </FlexItem>
+          <FlexItem>
+            <Label color="blue">{t('Managed')}</Label>
+          </FlexItem>
         </Flex>
       </PageSection>
 
@@ -283,9 +281,9 @@ const MeshDetailContent: FC<{ ns: string; name: string }> = ({ ns, name }) => {
         <Grid hasGutter>
           <GridItem span={6}>
             <Card isCompact>
-              <CardTitle>{t('Overview')}</CardTitle>
+              <CardTitle><strong>{t('Overview')}</strong></CardTitle>
               <CardBody>
-                <DescriptionList isHorizontal isCompact>
+                <DescriptionList isCompact columnModifier={{ default: '2Col' }}>
                   <DescriptionListGroup>
                     <DescriptionListTerm>{t('Cluster Set')}</DescriptionListTerm>
                     <DescriptionListDescription>
@@ -321,9 +319,9 @@ const MeshDetailContent: FC<{ ns: string; name: string }> = ({ ns, name }) => {
 
           <GridItem span={6}>
             <Card isCompact>
-              <CardTitle>{t('OSSM Operator')}</CardTitle>
+              <CardTitle><strong>{t('OSSM Operator')}</strong></CardTitle>
               <CardBody>
-                <DescriptionList isHorizontal isCompact>
+                <DescriptionList isCompact columnModifier={{ default: '2Col' }}>
                   <DescriptionListGroup>
                     <DescriptionListTerm>{t('Namespace')}</DescriptionListTerm>
                     <DescriptionListDescription>
@@ -366,8 +364,8 @@ const MeshDetailContent: FC<{ ns: string; name: string }> = ({ ns, name }) => {
 
           {conditions.length > 0 && (
             <GridItem span={12}>
-              <Card>
-                <CardTitle>{t('Conditions')}</CardTitle>
+              <Card isCompact>
+                <CardTitle><strong>{t('Conditions')}</strong></CardTitle>
                 <CardBody>
                   <table className="pf-v6-c-table pf-m-grid-md pf-m-compact" role="grid">
                     <thead className="pf-v6-c-table__thead">

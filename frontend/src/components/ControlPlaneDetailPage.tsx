@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import type { FC, ReactNode } from 'react'
+import type { FC } from 'react'
 import { useParams, Link } from 'react-router-dom-v5-compat'
 import { fleetK8sGet } from '@stolostron/multicluster-sdk'
 import {
@@ -31,13 +31,8 @@ import { istioModel } from '../types/istio'
 import type { K8sCondition } from '../types/common'
 import { useMultiClusterMeshes } from '../hooks/useMultiClusterMeshes'
 import { buildMcmIndex, lookupMcm } from '../utils/correlateMCM'
-import { MeshStatus } from './MeshStatus'
+import { MeshStatus, statusIcon } from './MeshStatus'
 import { useMeshTranslation } from '../utils/i18nUtils'
-
-function statusIcon(status: string): ReactNode {
-  const color = status === 'True' ? 'green' : status === 'Unknown' ? 'grey' : 'red'
-  return <Label color={color}>{status}</Label>
-}
 
 const ControlPlaneDetailContent: FC<{ cluster: string; name: string }> = ({ cluster, name }) => {
   const { t } = useMeshTranslation()
@@ -113,6 +108,13 @@ const ControlPlaneDetailContent: FC<{ cluster: string; name: string }> = ({ clus
               <Label color="grey">{t('Unknown')}</Label>
             )}
           </FlexItem>
+          <FlexItem>
+            {matchedMCM
+              ? <Label color="blue">{t('Managed')}</Label>
+              : meshID
+                ? <Label color="purple">{t('Discovered')}</Label>
+                : null}
+          </FlexItem>
         </Flex>
       </PageSection>
 
@@ -120,9 +122,9 @@ const ControlPlaneDetailContent: FC<{ cluster: string; name: string }> = ({ clus
         <Grid hasGutter>
           <GridItem span={6}>
             <Card isCompact>
-              <CardTitle>{t('Overview')}</CardTitle>
+              <CardTitle><strong>{t('Overview')}</strong></CardTitle>
               <CardBody>
-                <DescriptionList isHorizontal isCompact>
+                <DescriptionList isCompact columnModifier={{ default: '2Col' }}>
                   <DescriptionListGroup>
                     <DescriptionListTerm>{t('Cluster')}</DescriptionListTerm>
                     <DescriptionListDescription>
@@ -167,11 +169,11 @@ const ControlPlaneDetailContent: FC<{ cluster: string; name: string }> = ({ clus
           {matchedMCM && (
             <GridItem span={6}>
               <Card isCompact>
-                <CardTitle>{t('Managed By')}</CardTitle>
+                <CardTitle><strong>{t('Managed By')}</strong></CardTitle>
                 <CardBody>
-                  <DescriptionList isHorizontal isCompact>
+                  <DescriptionList isCompact>
                     <DescriptionListGroup>
-                      <DescriptionListTerm>{t('Fleet Mesh')}</DescriptionListTerm>
+                      <DescriptionListTerm>{t('Mesh')}</DescriptionListTerm>
                       <DescriptionListDescription>
                         <Link to={`/service-mesh/${matchedMCM.namespace}/${matchedMCM.name}`}>
                           {matchedMCM.name}
@@ -184,10 +186,30 @@ const ControlPlaneDetailContent: FC<{ cluster: string; name: string }> = ({ clus
             </GridItem>
           )}
 
+          {!matchedMCM && meshID && (
+            <GridItem span={6}>
+              <Card isCompact>
+                <CardTitle><strong>{t('Discovered Mesh')}</strong></CardTitle>
+                <CardBody>
+                  <DescriptionList isCompact>
+                    <DescriptionListGroup>
+                      <DescriptionListTerm>{t('Mesh ID')}</DescriptionListTerm>
+                      <DescriptionListDescription>
+                        <Link to={`/fleet-mesh-discovered/${encodeURIComponent(meshID)}`}>
+                          {meshID}
+                        </Link>
+                      </DescriptionListDescription>
+                    </DescriptionListGroup>
+                  </DescriptionList>
+                </CardBody>
+              </Card>
+            </GridItem>
+          )}
+
           {conditions.length > 0 && (
             <GridItem span={12}>
-              <Card>
-                <CardTitle>{t('Conditions')}</CardTitle>
+              <Card isCompact>
+                <CardTitle><strong>{t('Conditions')}</strong></CardTitle>
                 <CardBody>
                   <table className="pf-v6-c-table pf-m-grid-md pf-m-compact" role="grid">
                     <thead className="pf-v6-c-table__thead">

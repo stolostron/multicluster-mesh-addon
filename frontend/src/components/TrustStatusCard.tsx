@@ -169,7 +169,7 @@ export const TrustStatusCard: FC<TrustStatusCardProps> = ({
   if (!hasIssuer) {
     return (
       <Card isCompact>
-        <CardTitle>{t('Trust Status')}</CardTitle>
+        <CardTitle><strong>{t('Trust Status')}</strong></CardTitle>
         <CardBody>
           <EmptyState variant="xs">
             <EmptyStateBody>
@@ -184,7 +184,7 @@ export const TrustStatusCard: FC<TrustStatusCardProps> = ({
   if (certsError) {
     return (
       <Card isCompact>
-        <CardTitle>{t('Trust Status')}</CardTitle>
+        <CardTitle><strong>{t('Trust Status')}</strong></CardTitle>
         <CardBody>
           <EmptyState variant="xs">
             <Title headingLevel="h4" size="md">{t('Unable to load certificate data')}</Title>
@@ -200,7 +200,7 @@ export const TrustStatusCard: FC<TrustStatusCardProps> = ({
   if (!certsLoaded || (!mwLoaded && !mwError)) {
     return (
       <Card isCompact>
-        <CardTitle>{t('Trust Status')}</CardTitle>
+        <CardTitle><strong>{t('Trust Status')}</strong></CardTitle>
         <CardBody>
           <Spinner aria-label={t('Loading trust status')} size="lg" />
         </CardBody>
@@ -211,7 +211,7 @@ export const TrustStatusCard: FC<TrustStatusCardProps> = ({
   if (clusterStatuses.length === 0) {
     return (
       <Card isCompact>
-        <CardTitle>{t('Trust Status')}</CardTitle>
+        <CardTitle><strong>{t('Trust Status')}</strong></CardTitle>
         <CardBody>
           <EmptyState variant="xs">
             <EmptyStateBody>{t('No clusters are part of this mesh yet.')}</EmptyStateBody>
@@ -225,7 +225,7 @@ export const TrustStatusCard: FC<TrustStatusCardProps> = ({
   if (noCertsAtAll) {
     return (
       <Card isCompact>
-        <CardTitle>{t('Trust Status')}</CardTitle>
+        <CardTitle><strong>{t('Trust Status')}</strong></CardTitle>
         <CardBody>
           <EmptyState variant="xs">
             <EmptyStateBody>
@@ -239,7 +239,7 @@ export const TrustStatusCard: FC<TrustStatusCardProps> = ({
 
   return (
     <Card isCompact>
-      <CardTitle>{t('Trust Status ({{count}})', { count: clusterStatuses.length })}</CardTitle>
+      <CardTitle><strong>{t('Trust Status ({{count}})', { count: clusterStatuses.length })}</strong></CardTitle>
       <CardBody>
         <Flex style={{ marginBottom: '1rem' }} spaceItems={{ default: 'spaceItemsMd' }}>
           <FlexItem>

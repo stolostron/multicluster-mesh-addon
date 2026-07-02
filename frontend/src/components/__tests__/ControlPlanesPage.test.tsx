@@ -86,6 +86,19 @@ describe('ControlPlanesPage', () => {
     })
   })
 
+  describe('Mesh ID column', () => {
+    it('shows grey dash label for standalone CPs with no meshID and no managedBy', async () => {
+      const results = [makeSearchResult('cluster-a', 'default')]
+      rstest.mocked(useFleetSearchPoll).mockReturnValue([results, true, undefined, rstest.fn()])
+      render(<ControlPlanesPage />)
+      await waitFor(() => {
+        const nameLink = screen.getByRole('link', { name: 'default' })
+        const row = nameLink.closest('tr') as HTMLTableRowElement
+        expect(within(row).getAllByText('-').length).toBeGreaterThanOrEqual(1)
+      })
+    })
+  })
+
   describe('fleet availability guard', () => {
     it('shows RHACM message when loaded, no results, and fleet not available', () => {
       rstest.mocked(useFleetSearchPoll).mockReturnValue([[], true, undefined, rstest.fn()])

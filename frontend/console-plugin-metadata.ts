@@ -8,6 +8,7 @@ export const pluginMetadata: ConsolePluginBuildMetadata = {
   exposedModules: {
     controlPlaneDetailPage: './src/components/ControlPlaneDetailPage',
     controlPlanesPage: './src/components/ControlPlanesPage',
+    discoveredMeshDetailPage: './src/components/DiscoveredMeshDetailPage',
     meshDetailPage: './src/components/MeshDetailPage',
     overviewPage: './src/components/OverviewPage',
     serviceMeshPage: './src/components/ServiceMeshPage',

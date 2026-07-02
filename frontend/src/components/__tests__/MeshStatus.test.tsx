@@ -75,6 +75,33 @@ describe('MeshStatus', () => {
     })
   })
 
+  it('shows Degraded when Ready=True but a secondary condition is False', () => {
+    const conditions: K8sCondition[] = [
+      { type: 'Ready', status: 'True' },
+      { type: 'DependenciesHealthy', status: 'False', reason: 'IstioCNINotFound' },
+    ]
+    render(<MeshStatus conditions={conditions} />)
+    expect(screen.getByText('Degraded')).toBeInTheDocument()
+  })
+
+  it('does not show Degraded when Ready=True and secondary condition is Unknown', () => {
+    const conditions: K8sCondition[] = [
+      { type: 'Ready', status: 'True' },
+      { type: 'Progressing', status: 'Unknown' },
+    ]
+    render(<MeshStatus conditions={conditions} />)
+    expect(screen.getByText('Ready')).toBeInTheDocument()
+  })
+
+  it('does not show Degraded for non-Ready conditionType even when secondary is False', () => {
+    const conditions: K8sCondition[] = [
+      { type: 'OperatorInstalled', status: 'True' },
+      { type: 'Other', status: 'False' },
+    ]
+    render(<MeshStatus conditions={conditions} conditionType="OperatorInstalled" />)
+    expect(screen.getByText('OperatorInstalled')).toBeInTheDocument()
+  })
+
   it('shows Healthy when all non-target conditions are True', () => {
     const conditions: K8sCondition[] = [
       { type: 'SomeOther', status: 'True' },

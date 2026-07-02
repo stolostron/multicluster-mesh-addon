@@ -85,8 +85,14 @@ describe('MeshDetailPage', () => {
     it('renders the breadcrumb and mesh name heading when loaded', () => {
       rstest.mocked(useK8sWatchResource).mockReturnValue([makeMesh(), true, null])
       render(<MeshDetailPage />)
-      expect(screen.getByRole('link', { name: 'Fleet Meshes' })).toBeInTheDocument()
+      expect(screen.getByRole('link', { name: 'Meshes' })).toBeInTheDocument()
       expect(screen.getByRole('heading', { name: 'test-mesh' })).toBeInTheDocument()
+    })
+
+    it('shows blue Managed label in header', () => {
+      rstest.mocked(useK8sWatchResource).mockReturnValue([makeMesh(), true, null])
+      render(<MeshDetailPage />)
+      expect(screen.getByText('Managed')).toBeInTheDocument()
     })
 
     it('links spec.clusterSet to the ACM cluster set detail page', () => {
@@ -170,6 +176,7 @@ describe('MeshDetailPage', () => {
       expect(screen.getByText('AllClustersReady')).toBeInTheDocument()
       expect(screen.getByText('All good')).toBeInTheDocument()
     })
+
   })
 })
 

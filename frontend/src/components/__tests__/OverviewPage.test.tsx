@@ -1,14 +1,12 @@
 import { render, screen } from '@testing-library/react'
 import OverviewPage from '../OverviewPage'
-import { useMultiClusterMeshes } from '../../hooks/useMultiClusterMeshes'
-import { useDiscoveredControlPlanes } from '../../hooks/useDiscoveredControlPlanes'
-import { useEnrichedControlPlanes } from '../../hooks/useEnrichedControlPlanes'
+import { useFleetMeshItems } from '../../hooks/useFleetMeshItems'
+import type { UseFleetMeshItemsResult } from '../../hooks/useFleetMeshItems'
 import type { MultiClusterMesh } from '../../types/multiClusterMesh'
 import type { EnrichedControlPlane } from '../../types/istio'
+import type { FleetMeshItem } from '../../types/fleetMesh'
 
-rstest.mock('../../hooks/useMultiClusterMeshes', { mock: true })
-rstest.mock('../../hooks/useDiscoveredControlPlanes', { mock: true })
-rstest.mock('../../hooks/useEnrichedControlPlanes', { mock: true })
+rstest.mock('../../hooks/useFleetMeshItems', { mock: true })
 
 const makeMesh = (overrides: Partial<MultiClusterMesh> = {}): MultiClusterMesh => ({
   apiVersion: 'mesh.open-cluster-management.io/v1alpha1',
@@ -24,36 +22,31 @@ const makeEnrichedCP = (overrides: Partial<EnrichedControlPlane> = {}): Enriched
   ...overrides,
 })
 
-function mockDefaults(opts: {
-  meshes?: MultiClusterMesh[]
-  meshesLoaded?: boolean
-  meshesError?: unknown
-  enrichedPlanes?: EnrichedControlPlane[]
-  enrichmentError?: unknown
-  cpLoaded?: boolean
-  cpError?: unknown
-  isFleetAvailable?: boolean
-} = {}) {
-  const {
-    meshes = [],
-    meshesLoaded = true,
-    meshesError = null,
-    enrichedPlanes = [],
-    enrichmentError = null,
-    cpLoaded = true,
-    cpError = null,
-    isFleetAvailable = true,
-  } = opts
+const makeItem = (overrides: Partial<FleetMeshItem> = {}): FleetMeshItem => ({
+  metadata: { name: 'test-mesh' },
+  kind: 'managed',
+  detailLink: '/service-mesh/mesh-system/test-mesh',
+  clusterCount: 1,
+  statusRank: 0,
+  conditions: [{ type: 'Ready', status: 'True' }],
+  ...overrides,
+})
 
-  rstest.mocked(useMultiClusterMeshes).mockReturnValue([meshes, meshesLoaded, meshesError])
-  rstest.mocked(useDiscoveredControlPlanes).mockReturnValue({
-    results: [],
-    loaded: cpLoaded,
-    error: cpError,
-    isFleetAvailable,
-    refetch: rstest.fn(),
-  } as any)
-  rstest.mocked(useEnrichedControlPlanes).mockReturnValue([enrichedPlanes, true, true, enrichmentError])
+function mockDefaults(overrides: Partial<UseFleetMeshItemsResult> = {}) {
+  rstest.mocked(useFleetMeshItems).mockReturnValue({
+    items: [],
+    loaded: true,
+    isFleetAvailable: true,
+    mcms: [],
+    mcmsLoaded: true,
+    mcmsError: null,
+    enrichedPlanes: [],
+    enrichmentLoaded: true,
+    enrichmentError: null,
+    searchLoaded: true,
+    searchError: null,
+    ...overrides,
+  })
 }
 
 afterEach(() => rstest.clearAllMocks())
@@ -66,93 +59,161 @@ describe('OverviewPage', () => {
   })
 
   it('shows spinners while mesh data is loading', () => {
-    mockDefaults({ meshesLoaded: false })
+    mockDefaults({ mcmsLoaded: false })
     render(<OverviewPage />)
-    expect(screen.getByLabelText('Loading fleet meshes count')).toBeInTheDocument()
-    expect(screen.getByLabelText('Loading managed clusters count')).toBeInTheDocument()
-    expect(screen.getByLabelText('Loading fleet meshes health')).toBeInTheDocument()
+    expect(screen.getByLabelText('Loading fleet meshes')).toBeInTheDocument()
+    expect(screen.getByLabelText('Loading clusters count')).toBeInTheDocument()
     expect(screen.getByLabelText('Loading recent issues')).toBeInTheDocument()
   })
 
   it('shows spinners while control plane data is loading', () => {
-    mockDefaults({ cpLoaded: false })
+    mockDefaults({ searchLoaded: false })
     render(<OverviewPage />)
-    expect(screen.getByLabelText('Loading control planes count')).toBeInTheDocument()
-    expect(screen.getByLabelText('Loading control planes health')).toBeInTheDocument()
+    expect(screen.getByLabelText('Loading control planes')).toBeInTheDocument()
     expect(screen.getByLabelText('Loading recent issues')).toBeInTheDocument()
   })
 
-  it('shows mesh count when meshes are loaded', () => {
-    const meshes = [makeMesh(), makeMesh({ metadata: { name: 'mesh-2', namespace: 'mesh-system' } })]
-    mockDefaults({ meshes })
+  it('shows Meshes card title with count from items when enrichmentLoaded', () => {
+    const items = [makeItem(), makeItem({ metadata: { name: 'mesh-2' } })]
+    mockDefaults({ items, enrichmentLoaded: true })
     render(<OverviewPage />)
-    expect(screen.getByText('2')).toBeInTheDocument()
+    expect(screen.getByText('Meshes')).toBeInTheDocument()
   })
 
-  it('shows cluster count from mesh cluster statuses', () => {
-    const meshes = [
-      makeMesh({
-        status: {
-          clusterStatus: [
-            { clusterName: 'cluster-a', conditions: [{ type: 'OperatorInstalled', status: 'True' }] },
-            { clusterName: 'cluster-b', conditions: [{ type: 'OperatorInstalled', status: 'True' }] },
-          ],
-        },
+  it('shows Meshes card title with count from mcms when enrichmentLoaded is false', () => {
+    const mcms = [makeMesh(), makeMesh({ metadata: { name: 'mesh-2', namespace: 'mesh-system' } })]
+    mockDefaults({ mcms, enrichmentLoaded: false, items: [] })
+    render(<OverviewPage />)
+    expect(screen.getByText('Meshes')).toBeInTheDocument()
+  })
+
+  it('shows Meshes title without count while loading', () => {
+    mockDefaults({ mcmsLoaded: false })
+    render(<OverviewPage />)
+    expect(screen.getByText('Meshes')).toBeInTheDocument()
+  })
+
+  it('shows Clusters with Service Mesh card with cluster count', () => {
+    const items = [
+      makeItem({
+        kind: 'managed',
+        mcm: makeMesh({
+          status: {
+            clusterStatus: [
+              { clusterName: 'cluster-a', conditions: [] },
+              { clusterName: 'cluster-b', conditions: [] },
+            ],
+          },
+        }),
       }),
     ]
-    mockDefaults({ meshes })
+    mockDefaults({ items, enrichmentLoaded: true })
     render(<OverviewPage />)
+    expect(screen.getByText('Clusters with Service Mesh')).toBeInTheDocument()
     expect(screen.getByText('2')).toBeInTheDocument()
   })
 
-  it('shows control plane count when enriched planes are loaded', () => {
-    const enrichedPlanes = [makeEnrichedCP(), makeEnrichedCP({ clusterName: 'cluster-b' })]
+  it('shows Control Planes card title with count when loaded', () => {
+    const enrichedPlanes = [
+      makeEnrichedCP({ clusterName: 'cluster-a' }),
+      makeEnrichedCP({ clusterName: 'cluster-b', metadata: { name: 'cp-2' } }),
+    ]
     mockDefaults({ enrichedPlanes })
     render(<OverviewPage />)
-    expect(screen.getByText('2')).toBeInTheDocument()
+    expect(screen.getByText('Control Planes')).toBeInTheDocument()
   })
 
-  it('shows health status labels for Ready meshes', () => {
-    const meshes = [
-      makeMesh({
-        status: { conditions: [{ type: 'Ready', status: 'True' }] },
-      }),
-    ]
-    mockDefaults({ meshes })
+  it('shows donut chart for Ready meshes in card body', () => {
+    const items = [makeItem({ conditions: [{ type: 'Ready', status: 'True' }] })]
+    mockDefaults({ items, enrichmentLoaded: true })
     render(<OverviewPage />)
-    expect(screen.getByText('1 Ready')).toBeInTheDocument()
-    expect(screen.getByText('0 Not Ready')).toBeInTheDocument()
-    expect(screen.getByText('0 Unknown')).toBeInTheDocument()
+    const donuts = screen.getAllByTestId('chart-donut')
+    expect(donuts.length).toBeGreaterThanOrEqual(1)
+    expect(donuts[0]).toHaveAttribute('data-subtitle', 'total')
   })
 
-  it('shows health status labels for degraded meshes', () => {
-    const meshes = [
-      makeMesh({
-        status: { conditions: [{ type: 'Ready', status: 'False', reason: 'ClustersNotReady' }] },
+  it('shows donut chart for degraded meshes in card body', () => {
+    const items = [makeItem({ conditions: [{ type: 'Ready', status: 'False', reason: 'ClustersNotReady' }] })]
+    mockDefaults({ items, enrichmentLoaded: true })
+    render(<OverviewPage />)
+    const donuts = screen.getAllByTestId('chart-donut')
+    expect(donuts.length).toBeGreaterThanOrEqual(1)
+    expect(screen.getByTestId('donut-segment-Not Ready')).toBeInTheDocument()
+  })
+
+  it('classifies mesh as Degraded when Ready=True but secondary condition is False', () => {
+    const items = [makeItem({
+      conditions: [
+        { type: 'Ready', status: 'True' },
+        { type: 'Reconciled', status: 'False', reason: 'ReconcileError' },
+      ],
+    })]
+    mockDefaults({ items, enrichmentLoaded: true })
+    render(<OverviewPage />)
+    expect(screen.getByTestId('donut-segment-Degraded')).toHaveTextContent('Degraded: 1')
+  })
+
+  it('does not classify as Degraded when secondary condition is Unknown', () => {
+    const items = [makeItem({
+      conditions: [
+        { type: 'Ready', status: 'True' },
+        { type: 'Progressing', status: 'Unknown' },
+      ],
+    })]
+    mockDefaults({ items, enrichmentLoaded: true })
+    render(<OverviewPage />)
+    expect(screen.getByTestId('donut-segment-Degraded')).toHaveTextContent('Degraded: 0')
+    expect(screen.getByTestId('donut-segment-Ready')).toHaveTextContent('Ready: 1')
+  })
+
+  it('shows donut chart for control plane health in card body', () => {
+    const enrichedPlanes = [
+      makeEnrichedCP({ status: { conditions: [{ type: 'Ready', status: 'True' }] } }),
+      makeEnrichedCP({
+        clusterName: 'cluster-b',
+        metadata: { name: 'cp-2' },
+        status: { conditions: [{ type: 'Ready', status: 'False', reason: 'ReconcileError' }] },
       }),
     ]
-    mockDefaults({ meshes })
+    mockDefaults({ enrichedPlanes })
     render(<OverviewPage />)
-    expect(screen.getByText('0 Ready')).toBeInTheDocument()
-    expect(screen.getByText('1 Not Ready')).toBeInTheDocument()
+    expect(screen.getByText('Control Planes')).toBeInTheDocument()
+    const donuts = screen.getAllByTestId('chart-donut')
+    const cpDonut = donuts.find((d) => d.getAttribute('data-subtitle') === 'total')
+    expect(cpDonut).toBeTruthy()
+  })
+
+  it('shows empty state in Meshes card when no meshes exist', () => {
+    mockDefaults()
+    render(<OverviewPage />)
+    expect(screen.getByText('No managed or discovered meshes found.')).toBeInTheDocument()
+  })
+
+  it('shows empty state in Control Planes card when no control planes exist', () => {
+    mockDefaults()
+    render(<OverviewPage />)
+    expect(screen.getByText('No control planes discovered across the fleet.')).toBeInTheDocument()
+  })
+
+  it('shows empty state in Clusters card when no clusters are in any mesh', () => {
+    mockDefaults()
+    render(<OverviewPage />)
+    expect(screen.getByText('No clusters are part of any mesh yet.')).toBeInTheDocument()
   })
 
   it('shows "No issues detected" when everything is healthy', () => {
-    const meshes = [
-      makeMesh({
-        status: { conditions: [{ type: 'Ready', status: 'True' }] },
-      }),
-    ]
+    const items = [makeItem({ conditions: [{ type: 'Ready', status: 'True' }] })]
+    const mcms = [makeMesh({ status: { conditions: [{ type: 'Ready', status: 'True' }] } })]
     const enrichedPlanes = [
       makeEnrichedCP({ status: { conditions: [{ type: 'Ready', status: 'True' }] } }),
     ]
-    mockDefaults({ meshes, enrichedPlanes })
+    mockDefaults({ items, mcms, enrichedPlanes, enrichmentLoaded: true })
     render(<OverviewPage />)
     expect(screen.getByText('No issues detected.')).toBeInTheDocument()
   })
 
   it('shows recent issues when meshes have non-True conditions', () => {
-    const meshes = [
+    const mcms = [
       makeMesh({
         status: {
           conditions: [
@@ -161,7 +222,7 @@ describe('OverviewPage', () => {
         },
       }),
     ]
-    mockDefaults({ meshes })
+    mockDefaults({ mcms })
     render(<OverviewPage />)
     expect(screen.getByText('Clusters Not Ready')).toBeInTheDocument()
     const link = screen.getByRole('link', { name: 'test-mesh' })
@@ -188,7 +249,7 @@ describe('OverviewPage', () => {
   })
 
   it('shows per-cluster mesh issues in recent issues card', () => {
-    const meshes = [
+    const mcms = [
       makeMesh({
         status: {
           conditions: [{ type: 'Ready', status: 'True' }],
@@ -203,7 +264,7 @@ describe('OverviewPage', () => {
         },
       }),
     ]
-    mockDefaults({ meshes })
+    mockDefaults({ mcms })
     render(<OverviewPage />)
     expect(screen.getByText('Reconcile Error')).toBeInTheDocument()
     const link = screen.getByRole('link', { name: 'test-mesh / cluster-a' })
@@ -211,7 +272,7 @@ describe('OverviewPage', () => {
   })
 
   it('shows both mesh and control plane issues together sorted by time', () => {
-    const meshes = [
+    const mcms = [
       makeMesh({
         status: {
           conditions: [
@@ -231,7 +292,7 @@ describe('OverviewPage', () => {
         },
       }),
     ]
-    mockDefaults({ meshes, enrichedPlanes })
+    mockDefaults({ mcms, enrichedPlanes })
     render(<OverviewPage />)
 
     expect(screen.getByText('Clusters Not Ready')).toBeInTheDocument()
@@ -249,35 +310,21 @@ describe('OverviewPage', () => {
     expect(dataRows[1]).toHaveTextContent('test-mesh')
   })
 
-  it('shows empty mesh state in health card when no meshes exist', () => {
-    mockDefaults()
+  it('shows ACM required message when fleet is unavailable and data is loaded', () => {
+    mockDefaults({ isFleetAvailable: false, searchLoaded: true })
     render(<OverviewPage />)
-    expect(screen.getByText('No meshes have been created yet.')).toBeInTheDocument()
-  })
-
-  it('shows empty CP state in health card when no control planes exist', () => {
-    mockDefaults()
-    render(<OverviewPage />)
-    expect(screen.getByText('No control planes discovered across the fleet.')).toBeInTheDocument()
-  })
-
-  it('shows Requires ACM note when fleet is unavailable and data is loaded', () => {
-    mockDefaults({ isFleetAvailable: false, cpLoaded: true })
-    render(<OverviewPage />)
-    expect(screen.getByText('Requires ACM')).toBeInTheDocument()
     expect(screen.getByText('This page requires Red Hat Advanced Cluster Management.')).toBeInTheDocument()
   })
 
-  it('shows spinners instead of Requires ACM while CP data is still loading', () => {
-    mockDefaults({ isFleetAvailable: false, cpLoaded: false })
+  it('shows spinner instead of ACM message while CP data is still loading', () => {
+    mockDefaults({ isFleetAvailable: false, searchLoaded: false })
     render(<OverviewPage />)
-    expect(screen.getByLabelText('Loading control planes count')).toBeInTheDocument()
-    expect(screen.getByLabelText('Loading control planes health')).toBeInTheDocument()
-    expect(screen.queryByText('Requires ACM')).not.toBeInTheDocument()
+    expect(screen.getByLabelText('Loading control planes')).toBeInTheDocument()
+    expect(screen.queryByText('This page requires Red Hat Advanced Cluster Management.')).not.toBeInTheDocument()
   })
 
   it('shows mesh error alert when mesh watch fails', () => {
-    mockDefaults({ meshesError: new Error('watch failed') })
+    mockDefaults({ mcmsError: new Error('watch failed') })
     render(<OverviewPage />)
     expect(screen.getAllByText('Unable to load mesh data').length).toBeGreaterThanOrEqual(1)
   })
@@ -285,32 +332,37 @@ describe('OverviewPage', () => {
   it('renders view-all links to list pages', () => {
     mockDefaults()
     render(<OverviewPage />)
-    expect(screen.getByRole('link', { name: 'View all fleet meshes' })).toHaveAttribute('href', '/service-mesh')
-    expect(screen.getByRole('link', { name: 'View all control planes' })).toHaveAttribute('href', '/mesh-control-planes')
+    const viewAllLinks = screen.getAllByRole('link', { name: 'View all' })
+    expect(viewAllLinks[0]).toHaveAttribute('href', '/service-mesh')
+    expect(viewAllLinks[1]).toHaveAttribute('href', '/mesh-control-planes')
   })
 
   it('renders mesh section even when CP section errors', () => {
-    const meshes = [
-      makeMesh({
-        status: { conditions: [{ type: 'Ready', status: 'True' }] },
-      }),
-    ]
-    mockDefaults({ meshes, cpError: new Error('search failed') })
+    const items = [makeItem({ conditions: [{ type: 'Ready', status: 'True' }] })]
+    mockDefaults({ items, enrichmentLoaded: true, searchError: new Error('search failed') })
     render(<OverviewPage />)
-    expect(screen.getByText('1')).toBeInTheDocument()
-    expect(screen.getByText('1 Ready')).toBeInTheDocument()
+    expect(screen.getByText('Meshes')).toBeInTheDocument()
+    const donuts = screen.getAllByTestId('chart-donut')
+    expect(donuts.find((d) => d.getAttribute('data-subtitle') === 'total')).toBeTruthy()
     expect(screen.getAllByText('Unable to load control plane data').length).toBeGreaterThanOrEqual(1)
   })
 
   it('shows partial-data warning in issues card when only mesh data fails', () => {
-    mockDefaults({ meshesError: new Error('watch failed') })
+    mockDefaults({ mcmsError: new Error('watch failed') })
     render(<OverviewPage />)
     expect(screen.getByText('Unable to load mesh data. Some issues may not be shown.')).toBeInTheDocument()
     expect(screen.queryByText('No issues detected.')).not.toBeInTheDocument()
   })
 
   it('shows partial-data warning in issues card when only CP data fails', () => {
-    mockDefaults({ cpError: new Error('search failed') })
+    mockDefaults({ searchError: new Error('search failed') })
+    render(<OverviewPage />)
+    expect(screen.getByText('Unable to load control plane data. Some issues may not be shown.')).toBeInTheDocument()
+    expect(screen.queryByText('No issues detected.')).not.toBeInTheDocument()
+  })
+
+  it('shows CP error in issues card when enrichmentError is set but searchError is null', () => {
+    mockDefaults({ enrichmentError: new Error('enrichment failed') })
     render(<OverviewPage />)
     expect(screen.getByText('Unable to load control plane data. Some issues may not be shown.')).toBeInTheDocument()
     expect(screen.queryByText('No issues detected.')).not.toBeInTheDocument()
@@ -326,21 +378,14 @@ describe('OverviewPage', () => {
         },
       }),
     ]
-    mockDefaults({ meshesError: new Error('watch failed'), enrichedPlanes })
+    mockDefaults({ mcmsError: new Error('watch failed'), enrichedPlanes })
     render(<OverviewPage />)
     expect(screen.getByText('Unable to load mesh data. Some issues may not be shown.')).toBeInTheDocument()
     expect(screen.getByText('Reconcile Error')).toBeInTheDocument()
   })
 
-  it('shows CP error in issues card when enrichmentError is set but cpError is null', () => {
-    mockDefaults({ enrichmentError: new Error('enrichment failed') })
-    render(<OverviewPage />)
-    expect(screen.getByText('Unable to load control plane data. Some issues may not be shown.')).toBeInTheDocument()
-    expect(screen.queryByText('No issues detected.')).not.toBeInTheDocument()
-  })
-
   it('limits recent issues to 5 most recent entries', () => {
-    const meshes = [
+    const mcms = [
       makeMesh({
         status: {
           conditions: [
@@ -371,12 +416,36 @@ describe('OverviewPage', () => {
         },
       }),
     ]
-    mockDefaults({ meshes })
+    mockDefaults({ mcms })
     render(<OverviewPage />)
     const rows = screen.getAllByRole('row')
     const dataRows = rows.filter((r) => r.querySelector('td'))
     expect(dataRows).toHaveLength(5)
     expect(dataRows[0]).toHaveTextContent('c5')
     expect(dataRows[4]).toHaveTextContent('c1')
+  })
+
+  it('shows mesh loading independently from CP loading', () => {
+    const items = [makeItem()]
+    mockDefaults({ items, mcmsLoaded: true, enrichmentLoaded: true, searchLoaded: false })
+    render(<OverviewPage />)
+    expect(screen.getByText('Meshes')).toBeInTheDocument()
+    expect(screen.getByLabelText('Loading control planes')).toBeInTheDocument()
+  })
+
+  it('uses mesh health from mcms when enrichmentLoaded is false', () => {
+    const mcms = [
+      makeMesh({ status: { conditions: [{ type: 'Ready', status: 'True' }] } }),
+      makeMesh({
+        metadata: { name: 'mesh-2', namespace: 'mesh-system' },
+        status: { conditions: [{ type: 'Ready', status: 'False', reason: 'ClustersNotReady' }] },
+      }),
+    ]
+    mockDefaults({ mcms, enrichmentLoaded: false, items: [] })
+    render(<OverviewPage />)
+    const donuts = screen.getAllByTestId('chart-donut')
+    const meshDonut = donuts.find((d) => d.getAttribute('data-subtitle') === 'total')
+    expect(meshDonut).toBeTruthy()
+    expect(meshDonut).toHaveAttribute('data-title', '2')
   })
 })
