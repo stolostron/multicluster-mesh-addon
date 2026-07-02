@@ -59,7 +59,8 @@ spec:
                     type: string
                 type: object
               operator:
-                description: Operator defines the Sail Operator installation configuration
+                description: Operator defines the Service Mesh Operator installation
+                  configuration
                 properties:
                   channel:
                     default: stable
@@ -75,10 +76,19 @@ spec:
                     - Manual
                     type: string
                   namespace:
+                    default: multicluster-mesh-operator
                     description: |-
-                      Namespace is the namespace where the Sail Operator will be installed
-                      Defaults to "openshift-operators" on OpenShift, "sail-operator" on vanilla Kubernetes
+                      Namespace is the namespace where the Service Mesh Operator will be installed.
+                      This namespace may be deleted when the mesh is removed, so avoid
+                      using a namespace that contains other resources.
                     type: string
+                    x-kubernetes-validations:
+                    - message: namespace must not use the reserved 'openshift-' prefix
+                      rule: '!self.startsWith(''openshift-'')'
+                    - message: namespace must not use the reserved 'kube-' prefix
+                      rule: '!self.startsWith(''kube-'')'
+                    - message: namespace must not be 'default'
+                      rule: self != 'default'
                   source:
                     description: |-
                       Source is the CatalogSource name

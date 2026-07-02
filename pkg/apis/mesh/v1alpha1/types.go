@@ -82,7 +82,7 @@ type MultiClusterMeshSpec struct {
 	// +optional
 	ControlPlane ControlPlaneConfig `json:"controlPlane,omitempty"`
 
-	// Operator defines the Sail Operator installation configuration
+	// Operator defines the Service Mesh Operator installation configuration
 	// +optional
 	Operator OperatorConfig `json:"operator,omitempty"`
 
@@ -99,11 +99,16 @@ type ControlPlaneConfig struct {
 	Namespace string `json:"namespace,omitempty"`
 }
 
-// OperatorConfig defines the Sail Operator installation settings
+// OperatorConfig defines the Service Mesh Operator installation settings
 type OperatorConfig struct {
-	// Namespace is the namespace where the Sail Operator will be installed
-	// Defaults to "openshift-operators" on OpenShift, "sail-operator" on vanilla Kubernetes
+	// Namespace is the namespace where the Service Mesh Operator will be installed.
+	// This namespace may be deleted when the mesh is removed, so avoid
+	// using a namespace that contains other resources.
 	// +optional
+	// +kubebuilder:default="multicluster-mesh-operator"
+	// +kubebuilder:validation:XValidation:rule="!self.startsWith('openshift-')",message="namespace must not use the reserved 'openshift-' prefix"
+	// +kubebuilder:validation:XValidation:rule="!self.startsWith('kube-')",message="namespace must not use the reserved 'kube-' prefix"
+	// +kubebuilder:validation:XValidation:rule="self != 'default'",message="namespace must not be 'default'"
 	Namespace string `json:"namespace,omitempty"`
 
 	// Channel is the OLM subscription channel (e.g., "stable", "1.23")
