@@ -188,6 +188,9 @@ const (
 	// ConditionOperatorInstalled indicates whether the operator is installed on a cluster
 	ConditionOperatorInstalled = "OperatorInstalled"
 
+	// ConditionTrustEstablished indicates whether trust has been established on a cluster
+	ConditionTrustEstablished = "TrustEstablished"
+
 	// ReasonAllClustersReady indicates all clusters have confirmed operator installation
 	ReasonAllClustersReady = "AllClustersReady"
 
@@ -199,6 +202,15 @@ const (
 
 	// ReasonOperatorInstalled indicates the operator CSV has been successfully installed
 	ReasonOperatorInstalled = "Installed"
+
+	// ReasonTrustEstablished indicates trust has been successfully established
+	ReasonTrustEstablished = "Established"
+
+	// ReasonCertificateIssuancePending indicates the CA certificate has not been issued yet
+	ReasonCertificateIssuancePending = "CertificateIssuancePending"
+
+	// ReasonCertificateDistributionPending indicates the certificate is being distributed to the spoke
+	ReasonCertificateDistributionPending = "CertificateDistributionPending"
 
 	// ReasonMissingProductClaim indicates the cluster is missing its product claim
 	ReasonMissingProductClaim = "MissingProductClaim"

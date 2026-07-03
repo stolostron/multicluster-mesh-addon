@@ -485,6 +485,7 @@ func (r *Reconciler) triggerReconcileForNotReadyMeshes(ctx context.Context, mesh
 func (r *Reconciler) determineStatus(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, clusters []clusterv1.ManagedCluster) error {
 	mesh.Status.ClusterStatus = make([]meshv1alpha1.ClusterMeshStatus, 0, len(clusters))
 	allReady := len(clusters) > 0
+	trustConfigured := mesh.Spec.Security.Trust.CertManager.IssuerRef.Name != ""
 
 	for _, cluster := range clusters {
 		if getProductClaim(&cluster) == "" {
@@ -507,6 +508,16 @@ func (r *Reconciler) determineStatus(ctx context.Context, mesh *meshv1alpha1.Mul
 			mesh.SetClusterCondition(cluster.Name, meshv1alpha1.ConditionOperatorInstalled, metav1.ConditionFalse,
 				meshv1alpha1.ReasonInstallationPending, "Operator installation is pending")
 		}
+
+		if trustConfigured {
+			trustReady, err := r.determineTrustStatus(ctx, mesh, cluster.Name)
+			if err != nil {
+				return err
+			}
+			if !trustReady {
+				allReady = false
+			}
+		}
 	}
 
 	if allReady {
@@ -518,6 +529,39 @@ func (r *Reconciler) determineStatus(ctx context.Context, mesh *meshv1alpha1.Mul
 	}
 
 	return nil
+}
+
+func (r *Reconciler) determineTrustStatus(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, clusterName string) (bool, error) {
+	secretName := getCacertsName(clusterName)
+	secret := &corev1.Secret{}
+	if err := r.Get(ctx, key.Of(secretName, mesh.Namespace), secret); err != nil {
+		if apierrors.IsNotFound(err) {
+			mesh.SetClusterCondition(clusterName, meshv1alpha1.ConditionTrustEstablished, metav1.ConditionFalse,
+				meshv1alpha1.ReasonCertificateIssuancePending, "Waiting for CA certificate to be issued")
+			return false, nil
+		}
+		return false, fmt.Errorf("failed to get cacerts secret for cluster %s: %w", clusterName, err)
+	}
+
+	cacertsWork := &workv1.ManifestWork{}
+	if err := r.Get(ctx, key.Of(ManifestWorkNameCacerts, clusterName), cacertsWork); err != nil {
+		if apierrors.IsNotFound(err) {
+			mesh.SetClusterCondition(clusterName, meshv1alpha1.ConditionTrustEstablished, metav1.ConditionFalse,
+				meshv1alpha1.ReasonCertificateDistributionPending, "Trust is being established")
+			return false, nil
+		}
+		return false, fmt.Errorf("failed to get cacerts ManifestWork for cluster %s: %w", clusterName, err)
+	}
+
+	if meta.IsStatusConditionTrue(cacertsWork.Status.Conditions, workv1.WorkApplied) {
+		mesh.SetClusterCondition(clusterName, meshv1alpha1.ConditionTrustEstablished, metav1.ConditionTrue,
+			meshv1alpha1.ReasonTrustEstablished, "Trust is established")
+		return true, nil
+	}
+
+	mesh.SetClusterCondition(clusterName, meshv1alpha1.ConditionTrustEstablished, metav1.ConditionFalse,
+		meshv1alpha1.ReasonCertificateDistributionPending, "Trust is being established")
+	return false, nil
 }
 
 func getManifestWorkFeedback(work *workv1.ManifestWork) *string {

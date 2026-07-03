@@ -60,6 +60,20 @@ func CreateOCPManagedCluster(ctx context.Context, k8sClient client.Client, name,
 	SetProductClaim(ctx, k8sClient, name, product)
 }
 
+// SetManifestWorkApplied updates a ManifestWork's status to mark it as applied,
+// simulating what the OCM work agent does on a real spoke cluster.
+func SetManifestWorkApplied(ctx context.Context, k8sClient client.Client, workName, namespace string) {
+	work := &workv1.ManifestWork{}
+	Expect(k8sClient.Get(ctx, key.Of(workName, namespace), work)).To(Succeed())
+	work.Status.Conditions = []metav1.Condition{{
+		Type:               workv1.WorkApplied,
+		Status:             metav1.ConditionTrue,
+		Reason:             "Applied",
+		LastTransitionTime: metav1.Now(),
+	}}
+	Expect(k8sClient.Status().Update(ctx, work)).To(Succeed())
+}
+
 // SetManifestWorkFeedback updates a ManifestWork's status to include a string feedback value,
 // simulating what the OCM work agent does on a real spoke cluster.
 func SetManifestWorkFeedback(ctx context.Context, k8sClient client.Client, workName, namespace, feedbackName, feedbackValue string) {
