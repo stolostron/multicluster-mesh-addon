@@ -123,7 +123,7 @@ const ControlPlaneDetailContent: FC<{ cluster: string; name: string; type: strin
                     <DescriptionListDescription>
                       {meshID
                         ? (matchedMCM
-                            ? meshID
+                            ? <Link to={`/fleet-mesh/meshes/managed/${encodeURIComponent(matchedMCM.namespace)}/${encodeURIComponent(matchedMCM.name)}`}>{meshID}</Link>
                             : <Link to={`/fleet-mesh/meshes/discovered/${encodeURIComponent(meshID)}`}>{meshID}</Link>)
                         : '-'}
                     </DescriptionListDescription>
@@ -158,16 +158,6 @@ const ControlPlaneDetailContent: FC<{ cluster: string; name: string; type: strin
                     <DescriptionListGroup>
                       <DescriptionListTerm><strong>{t('Cluster Name (Istio)')}</strong></DescriptionListTerm>
                       <DescriptionListDescription>{multiClusterName}</DescriptionListDescription>
-                    </DescriptionListGroup>
-                  )}
-                  {matchedMCM && (
-                    <DescriptionListGroup>
-                      <DescriptionListTerm><strong>{t('Managed Mesh')}</strong></DescriptionListTerm>
-                      <DescriptionListDescription>
-                        <Link to={`/fleet-mesh/meshes/managed/${encodeURIComponent(matchedMCM.namespace)}/${encodeURIComponent(matchedMCM.name)}`}>
-                          {matchedMCM.name}
-                        </Link>
-                      </DescriptionListDescription>
                     </DescriptionListGroup>
                   )}
                 </DescriptionList>
