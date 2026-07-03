@@ -3,6 +3,8 @@
 Instructions for setting up a 4-control-plane demo environment on a CRC cluster.
 Refer to [DEV-INSTALL.md](DEV-INSTALL.md) for general guidance on managing a dev install.
 
+> **Quick start:** [`hack/setup-demo.sh`](hack/setup-demo.sh) automates the entire setup process described below. Run it from the `frontend/` directory as an alternative to following the manual steps.
+
 ## Resource Layout
 
 | MCM CR | MCM Namespace | Istio CR | CP Namespace | Mesh ID | Trust |

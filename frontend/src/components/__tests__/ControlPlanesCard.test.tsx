@@ -1,19 +1,17 @@
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { ControlPlanesCard } from '../ControlPlanesCard'
+import { makeEnrichedCP } from '../../__fixtures__/testFactories'
 import type { EnrichedControlPlane } from '../../types/istio'
 
 function makeCp(cluster: string, name: string, overrides: Partial<EnrichedControlPlane> = {}): EnrichedControlPlane {
-  return {
-    apiVersion: 'sailoperator.io/v1',
-    kind: 'Istio',
-    metadata: { name, creationTimestamp: '2026-01-01T00:00:00Z' },
+  return makeEnrichedCP({
     clusterName: cluster,
-    controlPlaneNamespace: 'istio-system',
+    metadata: { name, creationTimestamp: '2026-01-01T00:00:00Z' },
     version: 'v1.24.0',
     status: { conditions: [{ type: 'Ready', status: 'True' }] },
     ...overrides,
-  } as EnrichedControlPlane
+  })
 }
 
 describe('ControlPlanesCard', () => {

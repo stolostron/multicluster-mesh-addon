@@ -19,7 +19,7 @@ The plugin provides:
 
 - [CRC](https://crc.dev) or OpenShift cluster with ACM installed and the multicluster-mesh-addon backend controller deployed. See [DEV-INSTALL.md](DEV-INSTALL.md) steps 1-4 for full setup instructions.
 - `oc` logged in as `kubeadmin`
-- Node.js 20+
+- Node.js `^20.19.0 || >=22.12.0`
 - `jq`, `make`
 - For production image builds: `podman` or `docker`
 
@@ -36,6 +36,9 @@ Run `make help` to see all available targets.
 ## Documentation
 
 - [DEV-INSTALL.md](DEV-INSTALL.md) — End-to-end setup guide for CRC (ACM, cert-manager, backend controller, frontend plugin)
+- [DEMO-SETUP.md](DEMO-SETUP.md) — Demo environment setup guide
 - [AGENTS.md](AGENTS.md) — AI/dev agent context for the frontend codebase
 - [docs/ROADMAP.md](docs/ROADMAP.md) — Current status and future plans
 - [docs/INITIAL-SPIKE.md](docs/INITIAL-SPIKE.md) — Original spike research and architecture notes
+- [docs/DISCOVERY-OPTIONS.md](docs/DISCOVERY-OPTIONS.md) — Architecture and design rationale for control plane discovery
+- [docs/PERFORMANCE.md](docs/PERFORMANCE.md) — Performance analysis and optimizations

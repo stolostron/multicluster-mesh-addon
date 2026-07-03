@@ -40,9 +40,11 @@ describe('useVirtualRows', () => {
 
   it('respects custom rowHeight', () => {
     const { result } = renderHook(() => useVirtualRows(items, 20, 5))
+    const { result: largeRowResult, unmount } = renderHook(() => useVirtualRows(items, 80, 5))
     expect(result.current.visibleItems.length).toBeGreaterThan(
-      renderHook(() => useVirtualRows(items, 80, 5)).result.current.visibleItems.length,
+      largeRowResult.current.visibleItems.length,
     )
+    unmount()
   })
 
   it('provides a containerRef callback', () => {

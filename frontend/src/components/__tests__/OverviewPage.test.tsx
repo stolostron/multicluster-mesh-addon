@@ -2,25 +2,10 @@ import { render, screen } from '@testing-library/react'
 import OverviewPage from '../OverviewPage'
 import { useFleetMeshItems } from '../../hooks/useFleetMeshItems'
 import type { UseFleetMeshItemsResult } from '../../hooks/useFleetMeshItems'
-import type { MultiClusterMesh } from '../../types/multiClusterMesh'
-import type { EnrichedControlPlane } from '../../types/istio'
 import type { FleetMeshItem } from '../../types/fleetMesh'
+import { makeMesh, makeEnrichedCP } from '../../__fixtures__/testFactories'
 
 rstest.mock('../../hooks/useFleetMeshItems', { mock: true })
-
-const makeMesh = (overrides: Partial<MultiClusterMesh> = {}): MultiClusterMesh => ({
-  apiVersion: 'mesh.open-cluster-management.io/v1alpha1',
-  kind: 'MultiClusterMesh',
-  metadata: { name: 'test-mesh', namespace: 'mesh-system' },
-  spec: { clusterSet: 'global' },
-  ...overrides,
-})
-
-const makeEnrichedCP = (overrides: Partial<EnrichedControlPlane> = {}): EnrichedControlPlane => ({
-  metadata: { name: 'default' },
-  clusterName: 'cluster-a',
-  ...overrides,
-})
 
 const makeItem = (overrides: Partial<FleetMeshItem> = {}): FleetMeshItem => ({
   metadata: { name: 'test-mesh' },

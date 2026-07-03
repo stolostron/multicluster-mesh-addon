@@ -3,7 +3,8 @@ import { useMultiClusterMeshes } from './useMultiClusterMeshes'
 import { useDiscoveredControlPlanes } from './useDiscoveredControlPlanes'
 import { useEnrichedControlPlanes } from './useEnrichedControlPlanes'
 import { getStatusRank } from '../components/MeshStatus'
-import type { K8sCondition } from '../types/common'
+import { oldestTimestamp } from '../utils/oldestTimestamp'
+import { worstConditions } from '../utils/worstConditions'
 import type { FleetMeshItem } from '../types/fleetMesh'
 import type { EnrichedControlPlane } from '../types/istio'
 import type { MultiClusterMesh } from '../types/multiClusterMesh'
@@ -20,31 +21,6 @@ export interface UseFleetMeshItemsResult {
   mcmsLoaded: boolean
   searchError: unknown
   searchLoaded: boolean
-}
-
-function oldestTimestamp(planes: EnrichedControlPlane[]): string | undefined {
-  let oldest: string | undefined
-  for (const cp of planes) {
-    const ts = cp.metadata.creationTimestamp
-    if (ts && (!oldest || ts < oldest)) oldest = ts
-  }
-  return oldest
-}
-
-function worstConditions(planes: EnrichedControlPlane[]): {
-  conditions: K8sCondition[] | undefined
-  rank: number
-} {
-  let worstRank = -1
-  let worstConditions: K8sCondition[] | undefined
-  for (const cp of planes) {
-    const rank = getStatusRank(cp.status?.conditions)
-    if (rank > worstRank) {
-      worstRank = rank
-      worstConditions = cp.status?.conditions
-    }
-  }
-  return { conditions: worstConditions, rank: worstRank === -1 ? 1 : worstRank }
 }
 
 function collectManagedMeshIDs(enrichedPlanes: EnrichedControlPlane[]): Set<string> {
@@ -72,7 +48,7 @@ function buildItems(
       (cp) => cp.managedBy?.name === name && cp.managedBy?.namespace === ns
     )
 
-    const { conditions, rank } = correlatedPlanes.length > 0
+    const { conditions, rank } = correlatedPlanes.length > 0 && correlatedPlanes.some(cp => cp.status?.conditions)
       ? worstConditions(correlatedPlanes)
       : { conditions: mcm.status?.conditions, rank: getStatusRank(mcm.status?.conditions) }
 

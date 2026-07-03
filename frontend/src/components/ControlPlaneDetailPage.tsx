@@ -28,10 +28,11 @@ import {
 } from '@patternfly/react-core'
 import type { Istio } from '../types/istio'
 import { istioModel } from '../types/istio'
-import type { K8sCondition } from '../types/common'
 import { useMultiClusterMeshes } from '../hooks/useMultiClusterMeshes'
 import { buildMcmIndex, lookupMcm } from '../utils/correlateMCM'
-import { MeshStatus, statusIcon } from './MeshStatus'
+import { clusterDetailLink } from '../utils/linkUtils'
+import { ConditionsTable } from './ConditionsTable'
+import { MeshStatus } from './MeshStatus'
 import { CP_TYPES } from '../utils/cpTypeSegment'
 import type { CpType } from '../utils/cpTypeSegment'
 import { useMeshTranslation } from '../utils/i18nUtils'
@@ -137,7 +138,7 @@ const ControlPlaneDetailContent: FC<{ cluster: string; name: string; type: CpTyp
                   <DescriptionListGroup>
                     <DescriptionListTerm><strong>{t('Cluster')}</strong></DescriptionListTerm>
                     <DescriptionListDescription>
-                      <Link to={`/multicloud/infrastructure/clusters/details/${cluster}/${cluster}/overview`}>
+                      <Link to={clusterDetailLink(cluster)}>
                         {cluster}
                       </Link>
                     </DescriptionListDescription>
@@ -172,30 +173,7 @@ const ControlPlaneDetailContent: FC<{ cluster: string; name: string; type: CpTyp
               <Card isCompact>
                 <CardTitle><strong>{t('Conditions')}</strong></CardTitle>
                 <CardBody>
-                  <table className="pf-v6-c-table pf-m-grid-md pf-m-compact" role="grid">
-                    <thead className="pf-v6-c-table__thead">
-                      <tr className="pf-v6-c-table__tr">
-                        <th className="pf-v6-c-table__th" scope="col">{t('Type')}</th>
-                        <th className="pf-v6-c-table__th" scope="col">{t('Status')}</th>
-                        <th className="pf-v6-c-table__th" scope="col">{t('Reason')}</th>
-                        <th className="pf-v6-c-table__th" scope="col">{t('Message')}</th>
-                        <th className="pf-v6-c-table__th" scope="col">{t('Last Transition')}</th>
-                      </tr>
-                    </thead>
-                    <tbody className="pf-v6-c-table__tbody">
-                      {conditions.map((c: K8sCondition, i: number) => (
-                        <tr className="pf-v6-c-table__tr" key={`${c.type}-${i}`}>
-                          <td className="pf-v6-c-table__td">{c.type}</td>
-                          <td className="pf-v6-c-table__td">{statusIcon(c.status)}</td>
-                          <td className="pf-v6-c-table__td">{c.reason ?? '-'}</td>
-                          <td className="pf-v6-c-table__td">{c.message ?? '-'}</td>
-                          <td className="pf-v6-c-table__td">
-                            {c.lastTransitionTime ? <Timestamp timestamp={c.lastTransitionTime} /> : '-'}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                  <ConditionsTable conditions={conditions} />
                 </CardBody>
               </Card>
             </GridItem>

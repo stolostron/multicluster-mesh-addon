@@ -22,6 +22,7 @@ import { ExclamationTriangleIcon } from '@patternfly/react-icons'
 import { useFleetMeshItems } from '../hooks/useFleetMeshItems'
 import type { FleetMeshItem } from '../types/fleetMesh'
 import { MeshStatus } from './MeshStatus'
+import { clusterSetDetailLink } from '../utils/linkUtils'
 import { fuzzyCaseInsensitive } from '../utils/filterUtils'
 import type { RowSearchFilter } from '../utils/filterUtils'
 import { useMeshTranslation } from '../utils/i18nUtils'
@@ -131,7 +132,7 @@ const MeshRow: FC<RowProps<FleetMeshItem>> = ({ obj, activeColumnIDs }) => {
       </TableData>
       <TableData id="clusterSet" activeColumnIDs={activeColumnIDs}>
         {obj.clusterSet ? (
-          <Link to={`/multicloud/infrastructure/clusters/sets/details/${encodeURIComponent(obj.clusterSet)}/overview`}>
+          <Link to={clusterSetDetailLink(obj.clusterSet)}>
             {obj.clusterSet}
           </Link>
         ) : '-'}

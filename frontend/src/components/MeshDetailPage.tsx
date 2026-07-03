@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo } from 'react'
 import type { FC } from 'react'
 import { useParams, Link } from 'react-router-dom-v5-compat'
 import {
@@ -25,29 +25,27 @@ import {
   GridItem,
   Label,
   PageSection,
-  SearchInput,
   Spinner,
   Title,
-  ToggleGroup,
-  ToggleGroupItem,
   Tooltip,
 } from '@patternfly/react-core'
-import type { MultiClusterMesh, K8sCondition, ClusterMeshStatus } from '../types/multiClusterMesh'
+import type { MultiClusterMesh, ClusterMeshStatus } from '../types/multiClusterMesh'
+import type { K8sCondition } from '../types/common'
 import { multiClusterMeshGroupVersionKind } from '../types/multiClusterMesh'
-import type { EnrichedControlPlane } from '../types/istio'
 import { useMultiClusterMeshes } from '../hooks/useMultiClusterMeshes'
 import { useDiscoveredControlPlanes } from '../hooks/useDiscoveredControlPlanes'
 import { useEnrichedControlPlanes } from '../hooks/useEnrichedControlPlanes'
-import { useManagedClusters } from '../hooks/useManagedClusters'
+import { useManagedClusterMap } from '../hooks/useManagedClusterMap'
 import type { ManagedCluster } from '../types/managedCluster'
 import { getClusterAvailability, availabilityColor, availabilityLabelKey } from '../types/managedCluster'
+import { clusterDetailLink, clusterSetDetailLink } from '../utils/linkUtils'
+import { ConditionsTable } from './ConditionsTable'
 import { ControlPlanesCard } from './ControlPlanesCard'
-import { MeshStatus, statusIcon } from './MeshStatus'
+import { MeshStatus } from './MeshStatus'
 import { TrustStatusCard } from './TrustStatusCard'
-import { useVirtualRows } from '../hooks/useVirtualRows'
+import { VirtualFilterTable } from './VirtualFilterTable'
+import type { CategoryLabel, VirtualFilterColumn } from './VirtualFilterTable'
 import { useMeshTranslation } from '../utils/i18nUtils'
-
-const CLUSTER_COL_WIDTHS = ['25%', '20%', '20%', '35%']
 
 function conditionMessage(condition: K8sCondition): string {
   if (condition.message) return condition.message
@@ -55,9 +53,9 @@ function conditionMessage(condition: K8sCondition): string {
   return condition.status
 }
 
-type ClusterStatusCategory = 'all' | 'ready' | 'notReady' | 'unknown'
+type ClusterCategory = 'ready' | 'notReady' | 'unknown'
 
-function categorizeCluster(cs: ClusterMeshStatus): ClusterStatusCategory {
+function categorizeCluster(cs: ClusterMeshStatus): ClusterCategory {
   const op = cs.conditions?.find((c) => c.type === 'OperatorInstalled')
   if (!op) return 'unknown'
   if (op.status === 'True') return 'ready'
@@ -66,6 +64,13 @@ function categorizeCluster(cs: ClusterMeshStatus): ClusterStatusCategory {
 }
 
 const CONFLICT_REASONS = ['OperatorConfigConflict', 'NamespaceConflict']
+
+const CLUSTER_CATEGORY_LABELS: CategoryLabel[] = [
+  { key: 'all', label: 'All ({{count}})' },
+  { key: 'ready', label: 'Ready ({{count}})' },
+  { key: 'notReady', label: 'Not Ready ({{count}})' },
+  { key: 'unknown', label: 'Unknown ({{count}})' },
+]
 
 /** Per-cluster operator status table with filter toggles and search for a single mesh. */
 export const ClusterStatusSection: FC<{
@@ -80,30 +85,43 @@ export const ClusterStatusSection: FC<{
   meshConditions,
 }) => {
   const { t } = useMeshTranslation()
-  const [filter, setFilter] = useState<ClusterStatusCategory>('all')
-  const [search, setSearch] = useState('')
 
-  const categoryMap = useMemo(() => {
-    const map = new Map<string, ClusterStatusCategory>()
-    clusterStatuses.forEach((cs) => map.set(cs.clusterName, categorizeCluster(cs)))
-    return map
-  }, [clusterStatuses])
-
-  const counts = useMemo(() => {
-    const result = { ready: 0, notReady: 0, unknown: 0 }
-    categoryMap.forEach((cat) => { if (cat !== 'all') result[cat]++ })
-    return result
-  }, [categoryMap])
-
-  const filtered = useMemo(() => {
-    return clusterStatuses.filter((cs) => {
-      if (filter !== 'all' && categoryMap.get(cs.clusterName) !== filter) return false
-      if (search && !cs.clusterName.toLowerCase().includes(search.toLowerCase())) return false
-      return true
-    })
-  }, [clusterStatuses, categoryMap, filter, search])
-
-  const { visibleItems, topSpacer, bottomSpacer, containerRef } = useVirtualRows(filtered)
+  const columns = useMemo<VirtualFilterColumn<ClusterMeshStatus>[]>(() => [
+    {
+      key: 'cluster',
+      label: 'Cluster',
+      render: (cs) => (
+        <Link to={clusterDetailLink(cs.clusterName)}>{cs.clusterName}</Link>
+      ),
+      width: '25%',
+    },
+    {
+      key: 'clusterStatus',
+      label: 'Cluster Status',
+      render: (cs) => {
+        if (!managedClustersLoaded) return '-'
+        const availability = getClusterAvailability(managedClusterMap?.get(cs.clusterName))
+        return <Label color={availabilityColor(availability)} isCompact>{t(availabilityLabelKey(availability))}</Label>
+      },
+      width: '20%',
+    },
+    {
+      key: 'operatorStatus',
+      label: 'Operator Status',
+      render: (cs) => <MeshStatus conditions={cs.conditions} conditionType="OperatorInstalled" isCompact />,
+      width: '20%',
+    },
+    {
+      key: 'message',
+      label: 'Message',
+      render: (cs) => {
+        const operatorCondition = cs.conditions?.find((c) => c.type === 'OperatorInstalled')
+        const msg = operatorCondition ? conditionMessage(operatorCondition) : '-'
+        return <Tooltip content={msg}><span>{msg}</span></Tooltip>
+      },
+      width: '35%',
+    },
+  ], [managedClusterMap, managedClustersLoaded, t])
 
   if (clusterStatuses.length === 0) {
     const readyCondition = meshConditions?.find((c) => c.type === 'Ready')
@@ -130,97 +148,16 @@ export const ClusterStatusSection: FC<{
     <Card isCompact>
       <CardTitle><strong>{t('Clusters ({{count}})', { count: clusterStatuses.length })}</strong></CardTitle>
       <CardBody>
-        <Grid hasGutter>
-          <GridItem span={12}>
-            <Flex style={{ marginBottom: '1rem' }}>
-              <FlexItem>
-                <ToggleGroup>
-                  <ToggleGroupItem
-                    text={t('All ({{count}})', { count: clusterStatuses.length })}
-                    isSelected={filter === 'all'}
-                    onChange={() => setFilter('all')}
-                  />
-                  <ToggleGroupItem
-                    text={t('Ready ({{count}})', { count: counts.ready })}
-                    isSelected={filter === 'ready'}
-                    onChange={() => setFilter('ready')}
-                  />
-                  <ToggleGroupItem
-                    text={t('Not Ready ({{count}})', { count: counts.notReady })}
-                    isSelected={filter === 'notReady'}
-                    onChange={() => setFilter('notReady')}
-                  />
-                  <ToggleGroupItem
-                    text={t('Unknown ({{count}})', { count: counts.unknown })}
-                    isSelected={filter === 'unknown'}
-                    onChange={() => setFilter('unknown')}
-                  />
-                </ToggleGroup>
-              </FlexItem>
-              <FlexItem grow={{ default: 'grow' }}>
-                <SearchInput
-                  placeholder={t('Filter by cluster name')}
-                  value={search}
-                  onChange={(_event, value) => setSearch(value)}
-                  onClear={() => setSearch('')}
-                />
-              </FlexItem>
-            </Flex>
-
-            <table className="pf-v6-c-table pf-m-grid-md pf-m-compact" role="grid" style={{ tableLayout: 'fixed' }}>
-              <thead className="pf-v6-c-table__thead">
-                <tr className="pf-v6-c-table__tr">
-                  <th className="pf-v6-c-table__th" scope="col" style={{ width: CLUSTER_COL_WIDTHS[0] }}>{t('Cluster')}</th>
-                  <th className="pf-v6-c-table__th" scope="col" style={{ width: CLUSTER_COL_WIDTHS[1] }}>{t('Cluster Status')}</th>
-                  <th className="pf-v6-c-table__th" scope="col" style={{ width: CLUSTER_COL_WIDTHS[2] }}>{t('Operator Status')}</th>
-                  <th className="pf-v6-c-table__th" scope="col" style={{ width: CLUSTER_COL_WIDTHS[3] }}>{t('Message')}</th>
-                </tr>
-              </thead>
-            </table>
-            <div ref={containerRef} style={{ maxHeight: '368px', overflowY: 'auto' }}>
-              {filtered.length === 0 ? (
-                <div style={{ textAlign: 'center', padding: '1rem' }}>
-                  {t('No clusters match the current filter.')}
-                </div>
-              ) : (
-                <table className="pf-v6-c-table pf-m-grid-md pf-m-compact" role="grid" style={{ tableLayout: 'fixed' }}>
-                  <colgroup>
-                    {CLUSTER_COL_WIDTHS.map((w, i) => <col key={i} style={{ width: w }} />)}
-                  </colgroup>
-                  <tbody className="pf-v6-c-table__tbody">
-                    {topSpacer > 0 && <tr><td colSpan={4} style={{ height: topSpacer, padding: 0, border: 'none' }} /></tr>}
-                    {visibleItems.map((cs) => {
-                      const operatorCondition = cs.conditions?.find((c) => c.type === 'OperatorInstalled')
-                      const msg = operatorCondition ? conditionMessage(operatorCondition) : '-'
-                      return (
-                        <tr className="pf-v6-c-table__tr" key={cs.clusterName}>
-                          <td className="pf-v6-c-table__td" style={{ width: CLUSTER_COL_WIDTHS[0] }}>
-                            <Link to={`/multicloud/infrastructure/clusters/details/${cs.clusterName}/${cs.clusterName}/overview`}>
-                              {cs.clusterName}
-                            </Link>
-                          </td>
-                          <td className="pf-v6-c-table__td" style={{ width: CLUSTER_COL_WIDTHS[1] }}>
-                            {managedClustersLoaded ? (() => {
-                              const availability = getClusterAvailability(managedClusterMap?.get(cs.clusterName))
-                              return <Label color={availabilityColor(availability)} isCompact>{t(availabilityLabelKey(availability))}</Label>
-                            })() : '-'}
-                          </td>
-                          <td className="pf-v6-c-table__td" style={{ width: CLUSTER_COL_WIDTHS[2] }}>
-                            <MeshStatus conditions={cs.conditions} conditionType="OperatorInstalled" isCompact />
-                          </td>
-                          <td className="pf-v6-c-table__td" style={{ width: CLUSTER_COL_WIDTHS[3], overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                            <Tooltip content={msg}><span>{msg}</span></Tooltip>
-                          </td>
-                        </tr>
-                      )
-                    })}
-                    {bottomSpacer > 0 && <tr><td colSpan={4} style={{ height: bottomSpacer, padding: 0, border: 'none' }} /></tr>}
-                  </tbody>
-                </table>
-              )}
-            </div>
-          </GridItem>
-        </Grid>
+        <VirtualFilterTable
+          categorize={categorizeCluster}
+          categoryLabels={CLUSTER_CATEGORY_LABELS}
+          columns={columns}
+          emptyMessage="No clusters match the current filter."
+          items={clusterStatuses}
+          rowKey={(cs) => cs.clusterName}
+          searchMatch={(cs, query) => cs.clusterName.toLowerCase().includes(query.toLowerCase())}
+          searchPlaceholder="Filter by cluster name"
+        />
       </CardBody>
     </Card>
   )
@@ -234,16 +171,9 @@ const MeshDetailContent: FC<{ ns: string; name: string }> = ({ ns, name }) => {
     namespace: ns,
   })
   const [mcms] = useMultiClusterMeshes()
-  const [managedClusters, managedClustersLoaded] = useManagedClusters()
+  const [managedClusterMap, managedClustersLoaded] = useManagedClusterMap()
   const { results: searchResults } = useDiscoveredControlPlanes()
   const [enrichedPlanes, , , enrichmentError] = useEnrichedControlPlanes(searchResults, mcms ?? [])
-  const managedClusterMap = useMemo(() => {
-    const map = new Map<string, ManagedCluster>()
-    for (const mc of managedClusters ?? []) {
-      if (mc.metadata?.name) map.set(mc.metadata.name, mc)
-    }
-    return map
-  }, [managedClusters])
   const managedPlanes = useMemo(
     () => enrichedPlanes.filter((cp) => cp.managedBy?.name === name && cp.managedBy?.namespace === ns),
     [enrichedPlanes, name, ns],
@@ -337,7 +267,7 @@ const MeshDetailContent: FC<{ ns: string; name: string }> = ({ ns, name }) => {
                   <DescriptionListGroup>
                     <DescriptionListTerm><strong>{t('Cluster Set')}</strong></DescriptionListTerm>
                     <DescriptionListDescription>
-                      <Link to={`/multicloud/infrastructure/clusters/sets/details/${encodeURIComponent(spec.clusterSet)}/overview`}>
+                      <Link to={clusterSetDetailLink(spec.clusterSet)}>
                         {spec.clusterSet}
                       </Link>
                     </DescriptionListDescription>
@@ -415,30 +345,7 @@ const MeshDetailContent: FC<{ ns: string; name: string }> = ({ ns, name }) => {
               <Card isCompact>
                 <CardTitle><strong>{t('Conditions')}</strong></CardTitle>
                 <CardBody>
-                  <table className="pf-v6-c-table pf-m-grid-md pf-m-compact" role="grid">
-                    <thead className="pf-v6-c-table__thead">
-                      <tr className="pf-v6-c-table__tr">
-                        <th className="pf-v6-c-table__th" scope="col">{t('Type')}</th>
-                        <th className="pf-v6-c-table__th" scope="col">{t('Status')}</th>
-                        <th className="pf-v6-c-table__th" scope="col">{t('Reason')}</th>
-                        <th className="pf-v6-c-table__th" scope="col">{t('Message')}</th>
-                        <th className="pf-v6-c-table__th" scope="col">{t('Last Transition')}</th>
-                      </tr>
-                    </thead>
-                    <tbody className="pf-v6-c-table__tbody">
-                      {conditions.map((c, i) => (
-                        <tr className="pf-v6-c-table__tr" key={`${c.type}-${i}`}>
-                          <td className="pf-v6-c-table__td">{c.type}</td>
-                          <td className="pf-v6-c-table__td">{statusIcon(c.status)}</td>
-                          <td className="pf-v6-c-table__td">{c.reason ?? '-'}</td>
-                          <td className="pf-v6-c-table__td">{c.message ?? '-'}</td>
-                          <td className="pf-v6-c-table__td">
-                            {c.lastTransitionTime ? <Timestamp timestamp={c.lastTransitionTime} /> : '-'}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                  <ConditionsTable conditions={conditions} />
                 </CardBody>
               </Card>
             </GridItem>

@@ -1,6 +1,6 @@
 import { render, screen } from '@testing-library/react'
 import { MeshStatus, getStatusRank } from '../MeshStatus'
-import type { K8sCondition } from '../../types/multiClusterMesh'
+import type { K8sCondition } from '../../types/common'
 
 // i18n is mocked in setupTests.ts: t(key) returns the key (pass-through)
 

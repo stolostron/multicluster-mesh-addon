@@ -3,26 +3,10 @@ import ControlPlanesPage from '../ControlPlanesPage'
 import { useFleetSearchPoll, useIsFleetAvailable } from '@stolostron/multicluster-sdk'
 import { useK8sWatchResource } from '@openshift-console/dynamic-plugin-sdk'
 import { useEnrichedControlPlanes } from '../../hooks/useEnrichedControlPlanes'
+import { makeSearchResult, makeEnrichedCP } from '../../__fixtures__/testFactories'
 import type { EnrichedControlPlane } from '../../types/istio'
 
 rstest.mock('../../hooks/useEnrichedControlPlanes', { mock: true })
-
-const makeSearchResult = (cluster: string, name: string) => ({
-  apiVersion: 'sailoperator.io/v1',
-  kind: 'Istio',
-  metadata: { name, creationTimestamp: '2026-06-22T12:00:00Z' },
-  cluster,
-  spec: { namespace: 'istio-system' },
-})
-
-const makeEnrichedFromSearch = (cluster: string, name: string, overrides: Partial<EnrichedControlPlane> = {}): EnrichedControlPlane => ({
-  apiVersion: 'sailoperator.io/v1',
-  kind: 'Istio',
-  metadata: { name, creationTimestamp: '2026-06-22T12:00:00Z' },
-  clusterName: cluster,
-  controlPlaneNamespace: 'istio-system',
-  ...overrides,
-} as EnrichedControlPlane)
 
 afterEach(() => rstest.clearAllMocks())
 
@@ -57,8 +41,8 @@ describe('ControlPlanesPage', () => {
       makeSearchResult('cluster-b', 'default'),
     ]
     const enriched = [
-      makeEnrichedFromSearch('cluster-a', 'default'),
-      makeEnrichedFromSearch('cluster-b', 'default'),
+      makeEnrichedCP(),
+      makeEnrichedCP({ clusterName: 'cluster-b' }),
     ]
     rstest.mocked(useFleetSearchPoll).mockReturnValue([results, true, undefined, rstest.fn()])
     rstest.mocked(useEnrichedControlPlanes).mockReturnValue([enriched, true, true, null])
@@ -71,7 +55,7 @@ describe('ControlPlanesPage', () => {
 
   it('links cluster names to ACM cluster detail pages', async () => {
     const results = [makeSearchResult('cluster-a', 'default')]
-    const enriched = [makeEnrichedFromSearch('cluster-a', 'default')]
+    const enriched = [makeEnrichedCP()]
     rstest.mocked(useFleetSearchPoll).mockReturnValue([results, true, undefined, rstest.fn()])
     rstest.mocked(useEnrichedControlPlanes).mockReturnValue([enriched, true, true, null])
     render(<ControlPlanesPage />)
@@ -85,7 +69,7 @@ describe('ControlPlanesPage', () => {
 
   it('links CR names to control plane detail pages', async () => {
     const results = [makeSearchResult('cluster-a', 'myistio')]
-    const enriched = [makeEnrichedFromSearch('cluster-a', 'myistio')]
+    const enriched = [makeEnrichedCP({ metadata: { name: 'myistio' } })]
     rstest.mocked(useFleetSearchPoll).mockReturnValue([results, true, undefined, rstest.fn()])
     rstest.mocked(useEnrichedControlPlanes).mockReturnValue([enriched, true, true, null])
     render(<ControlPlanesPage />)
@@ -99,7 +83,7 @@ describe('ControlPlanesPage', () => {
 
   it('shows dash for enrichment columns before enrichment completes', async () => {
     const results = [makeSearchResult('cluster-a', 'default')]
-    const enriched = [makeEnrichedFromSearch('cluster-a', 'default')]
+    const enriched = [makeEnrichedCP()]
     rstest.mocked(useFleetSearchPoll).mockReturnValue([results, true, undefined, rstest.fn()])
     rstest.mocked(useEnrichedControlPlanes).mockReturnValue([enriched, true, false, null])
     render(<ControlPlanesPage />)
@@ -113,7 +97,7 @@ describe('ControlPlanesPage', () => {
   describe('Mesh ID column', () => {
     it('shows dash with no link for standalone CPs', async () => {
       const results = [makeSearchResult('cluster-a', 'default')]
-      const enriched = [makeEnrichedFromSearch('cluster-a', 'default')]
+      const enriched = [makeEnrichedCP()]
       rstest.mocked(useFleetSearchPoll).mockReturnValue([results, true, undefined, rstest.fn()])
       rstest.mocked(useEnrichedControlPlanes).mockReturnValue([enriched, true, true, null])
       render(<ControlPlanesPage />)
@@ -152,7 +136,7 @@ describe('ControlPlanesPage', () => {
 
   describe('Type column', () => {
     it('shows Managed type for CPs with managedBy', () => {
-      const cp = makeEnrichedFromSearch('cluster-a', 'default', {
+      const cp = makeEnrichedCP({
         managedBy: { name: 'my-mesh', namespace: 'mesh-system' },
         meshID: 'mesh-system-my-mesh',
       })
@@ -163,7 +147,7 @@ describe('ControlPlanesPage', () => {
     })
 
     it('shows Discovered type for CPs with meshID but no managedBy', () => {
-      const cp = makeEnrichedFromSearch('cluster-a', 'default', {
+      const cp = makeEnrichedCP({
         meshID: 'discovered-id',
       })
       rstest.mocked(useFleetSearchPoll).mockReturnValue([[], true, undefined, rstest.fn()])
@@ -173,7 +157,7 @@ describe('ControlPlanesPage', () => {
     })
 
     it('shows Standalone type for CPs with no meshID and no managedBy', () => {
-      const cp = makeEnrichedFromSearch('cluster-a', 'default')
+      const cp = makeEnrichedCP()
       rstest.mocked(useFleetSearchPoll).mockReturnValue([[], true, undefined, rstest.fn()])
       rstest.mocked(useEnrichedControlPlanes).mockReturnValue([[cp], true, true, null])
       render(<ControlPlanesPage />)
@@ -181,7 +165,7 @@ describe('ControlPlanesPage', () => {
     })
 
     it('links managed mesh ID to the managed mesh detail page', () => {
-      const cp = makeEnrichedFromSearch('cluster-a', 'default', {
+      const cp = makeEnrichedCP({
         managedBy: { name: 'my-mesh', namespace: 'mesh-system' },
         meshID: 'mesh-system-my-mesh',
       })
@@ -195,7 +179,7 @@ describe('ControlPlanesPage', () => {
     })
 
     it('links discovered mesh ID to the discovered mesh detail page', () => {
-      const cp = makeEnrichedFromSearch('cluster-a', 'default', {
+      const cp = makeEnrichedCP({
         meshID: 'discovered-id',
       })
       rstest.mocked(useFleetSearchPoll).mockReturnValue([[], true, undefined, rstest.fn()])

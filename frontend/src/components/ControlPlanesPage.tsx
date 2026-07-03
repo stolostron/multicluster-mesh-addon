@@ -25,6 +25,7 @@ import { useEnrichedControlPlanes } from '../hooks/useEnrichedControlPlanes'
 import type { EnrichedControlPlane } from '../types/istio'
 import { MeshStatus, getStatusRank } from './MeshStatus'
 import { cpTypeSegment } from '../utils/cpTypeSegment'
+import { clusterDetailLink } from '../utils/linkUtils'
 import { fuzzyCaseInsensitive } from '../utils/filterUtils'
 import type { RowSearchFilter } from '../utils/filterUtils'
 import { useMeshTranslation } from '../utils/i18nUtils'
@@ -112,7 +113,7 @@ const ControlPlaneRow: FC<RowProps<EnrichedControlPlane>> = ({ obj, activeColumn
         </Link>
       </TableData>
       <TableData id="cluster" activeColumnIDs={activeColumnIDs}>
-        <Link to={`/multicloud/infrastructure/clusters/details/${encodeURIComponent(obj.clusterName)}/${encodeURIComponent(obj.clusterName)}/overview`}>
+        <Link to={clusterDetailLink(obj.clusterName)}>
           {obj.clusterName}
         </Link>
       </TableData>

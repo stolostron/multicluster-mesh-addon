@@ -3,26 +3,12 @@ import { useMultiClusterMeshes } from '../../hooks/useMultiClusterMeshes'
 import { useDiscoveredControlPlanes } from '../../hooks/useDiscoveredControlPlanes'
 import { useEnrichedControlPlanes } from '../../hooks/useEnrichedControlPlanes'
 import { useFleetMeshItems } from '../../hooks/useFleetMeshItems'
+import { makeMesh, makeEnrichedCP } from '../../__fixtures__/testFactories'
 import type { EnrichedControlPlane } from '../../types/istio'
 
 rstest.mock('../../hooks/useMultiClusterMeshes', { mock: true })
 rstest.mock('../../hooks/useDiscoveredControlPlanes', { mock: true })
 rstest.mock('../../hooks/useEnrichedControlPlanes', { mock: true })
-
-const makeMCM = (name: string, ns: string, clusterSet: string, overrides = {}) => ({
-  apiVersion: 'mesh.open-cluster-management.io/v1alpha1',
-  kind: 'MultiClusterMesh',
-  metadata: { name, namespace: ns, creationTimestamp: '2026-06-22T12:00:00Z' },
-  spec: { clusterSet, ...overrides },
-  status: { conditions: [{ type: 'Ready', status: 'True' }], clusterStatus: [{ clusterName: 'cluster-a' }] },
-})
-
-const makeEnrichedCP = (cluster: string, name: string, overrides = {}): EnrichedControlPlane => ({
-  metadata: { name, creationTimestamp: '2026-06-22T12:00:00Z' },
-  clusterName: cluster,
-  controlPlaneNamespace: 'istio-system',
-  ...overrides,
-})
 
 function setupMocks({
   mcms = [] as any[],
@@ -59,8 +45,10 @@ describe('useFleetMeshItems', () => {
   })
 
   it('converts MCM CRs to managed FleetMeshItems with correct flattened fields', () => {
-    const mcm = makeMCM('my-mesh', 'mesh-system', 'global', {
-      security: { trust: { certManager: { issuerRef: { name: 'mesh-ca' } } } },
+    const mcm = makeMesh({
+      metadata: { name: 'my-mesh', namespace: 'mesh-system', creationTimestamp: '2026-06-22T12:00:00Z' },
+      spec: { clusterSet: 'global', security: { trust: { certManager: { issuerRef: { name: 'mesh-ca' } } } } },
+      status: { conditions: [{ type: 'Ready', status: 'True' }], clusterStatus: [{ clusterName: 'cluster-a' }] },
     })
     setupMocks({ mcms: [mcm] })
 
@@ -82,8 +70,8 @@ describe('useFleetMeshItems', () => {
 
   it('groups unmanaged enriched CRs by meshID into discovered items', () => {
     const planes = [
-      makeEnrichedCP('cluster-a', 'default', { meshID: 'shared-mesh' }),
-      makeEnrichedCP('cluster-b', 'default', { meshID: 'shared-mesh' }),
+      makeEnrichedCP({ meshID: 'shared-mesh' }),
+      makeEnrichedCP({ clusterName: 'cluster-b', meshID: 'shared-mesh' }),
     ]
     setupMocks({ enrichedPlanes: planes })
 
@@ -100,8 +88,8 @@ describe('useFleetMeshItems', () => {
 
   it('standalone CRs (no meshID) become individual discovered items', () => {
     const planes = [
-      makeEnrichedCP('cluster-a', 'default', {}),
-      makeEnrichedCP('cluster-b', 'istio', {}),
+      makeEnrichedCP(),
+      makeEnrichedCP({ clusterName: 'cluster-b', metadata: { name: 'istio' } }),
     ]
     setupMocks({ enrichedPlanes: planes })
 
@@ -117,8 +105,8 @@ describe('useFleetMeshItems', () => {
 
   it('excludes managed CRs from discovered items', () => {
     const planes = [
-      makeEnrichedCP('cluster-a', 'default', { managedBy: { name: 'my-mesh', namespace: 'mesh-system' } }),
-      makeEnrichedCP('cluster-b', 'default', {}),
+      makeEnrichedCP({ managedBy: { name: 'my-mesh', namespace: 'mesh-system' } }),
+      makeEnrichedCP({ clusterName: 'cluster-b' }),
     ]
     setupMocks({ enrichedPlanes: planes })
 
@@ -130,13 +118,16 @@ describe('useFleetMeshItems', () => {
   })
 
   it('sets meshIDConflict on both managed and discovered items when meshIDs collide', () => {
-    const mcm = makeMCM('my-mesh', 'mesh-system', 'global')
+    const mcm = makeMesh({
+      metadata: { name: 'my-mesh', namespace: 'mesh-system', creationTimestamp: '2026-06-22T12:00:00Z' },
+      status: { conditions: [{ type: 'Ready', status: 'True' }], clusterStatus: [{ clusterName: 'cluster-a' }] },
+    })
     const planes = [
-      makeEnrichedCP('cluster-a', 'default', {
+      makeEnrichedCP({
         meshID: 'conflict-id',
         managedBy: { name: 'my-mesh', namespace: 'mesh-system' },
       }),
-      makeEnrichedCP('cluster-x', 'default', { meshID: 'conflict-id' }),
+      makeEnrichedCP({ clusterName: 'cluster-x', meshID: 'conflict-id' }),
     ]
     setupMocks({ mcms: [mcm], enrichedPlanes: planes })
 
@@ -150,11 +141,12 @@ describe('useFleetMeshItems', () => {
 
   it('reflects worst CR statusRank and conditions in meshID group', () => {
     const planes = [
-      makeEnrichedCP('cluster-a', 'default', {
+      makeEnrichedCP({
         meshID: 'mesh1',
         status: { conditions: [{ type: 'Ready', status: 'True' }] },
       }),
-      makeEnrichedCP('cluster-b', 'default', {
+      makeEnrichedCP({
+        clusterName: 'cluster-b',
         meshID: 'mesh1',
         status: { conditions: [{ type: 'Ready', status: 'False', reason: 'ReconcileError' }] },
       }),
@@ -170,8 +162,8 @@ describe('useFleetMeshItems', () => {
 
   it('standalone items with colliding names on different clusters have unique metadata.name', () => {
     const planes = [
-      makeEnrichedCP('cluster-a', 'default', {}),
-      makeEnrichedCP('cluster-b', 'default', {}),
+      makeEnrichedCP(),
+      makeEnrichedCP({ clusterName: 'cluster-b' }),
     ]
     setupMocks({ enrichedPlanes: planes })
 
@@ -185,7 +177,10 @@ describe('useFleetMeshItems', () => {
   })
 
   it('exposes MCM items and enrichmentError when enrichment fails', () => {
-    const mcm = makeMCM('my-mesh', 'mesh-system', 'global')
+    const mcm = makeMesh({
+      metadata: { name: 'my-mesh', namespace: 'mesh-system', creationTimestamp: '2026-06-22T12:00:00Z' },
+      status: { conditions: [{ type: 'Ready', status: 'True' }], clusterStatus: [{ clusterName: 'cluster-a' }] },
+    })
     const err = new Error('enrichment failed')
     setupMocks({ mcms: [mcm], enrichmentError: err })
 
@@ -197,7 +192,10 @@ describe('useFleetMeshItems', () => {
   })
 
   it('when ACM unavailable, isFleetAvailable=false and only managed items shown', () => {
-    const mcm = makeMCM('my-mesh', 'mesh-system', 'global')
+    const mcm = makeMesh({
+      metadata: { name: 'my-mesh', namespace: 'mesh-system', creationTimestamp: '2026-06-22T12:00:00Z' },
+      status: { conditions: [{ type: 'Ready', status: 'True' }], clusterStatus: [{ clusterName: 'cluster-a' }] },
+    })
     rstest.mocked(useMultiClusterMeshes).mockReturnValue([[mcm], true, undefined])
     rstest.mocked(useDiscoveredControlPlanes).mockReturnValue({
       results: [],
@@ -214,6 +212,26 @@ describe('useFleetMeshItems', () => {
     expect(result.current.enrichmentLoaded).toBe(true)
     expect(result.current.items).toHaveLength(1)
     expect(result.current.items[0].kind).toBe('managed')
+  })
+
+  it('falls back to MCM conditions when correlated CPs have no status object', () => {
+    const mcm = makeMesh({
+      metadata: { name: 'my-mesh', namespace: 'mesh-system', creationTimestamp: '2026-06-22T12:00:00Z' },
+      status: { conditions: [{ type: 'Ready', status: 'True' }], clusterStatus: [{ clusterName: 'cluster-a' }] },
+    })
+    const planes = [
+      makeEnrichedCP({
+        managedBy: { name: 'my-mesh', namespace: 'mesh-system' },
+        status: undefined,
+      }),
+    ]
+    setupMocks({ mcms: [mcm], enrichedPlanes: planes })
+
+    const { result } = renderHook(() => useFleetMeshItems())
+    const managed = result.current.items.find((i) => i.kind === 'managed')
+
+    expect(managed!.conditions).toEqual([{ type: 'Ready', status: 'True' }])
+    expect(managed!.statusRank).toBe(0)
   })
 
   it('loaded equals mcmsLoaded AND enrichmentLoaded', () => {

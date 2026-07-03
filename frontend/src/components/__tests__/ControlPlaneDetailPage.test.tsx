@@ -108,7 +108,7 @@ describe('ControlPlaneDetailPage', () => {
       rstest.mocked(fleetK8sGet).mockResolvedValue(makeIstio())
       render(<ControlPlaneDetailPage />)
       await waitFor(() => {
-        expect(screen.getAllByText('mesh1').length).toBeGreaterThanOrEqual(1)
+        expect(screen.getAllByText('mesh1')).toHaveLength(1)
       })
     })
 
@@ -156,7 +156,7 @@ describe('ControlPlaneDetailPage', () => {
       })
     })
 
-    it('does not show managed mesh link when not correlated', async () => {
+    it('shows discovered mesh link when not correlated to a managed mesh', async () => {
       rstest.mocked(fleetK8sGet).mockResolvedValue(makeIstio())
       render(<ControlPlaneDetailPage />)
       await waitFor(() => {
