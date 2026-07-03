@@ -299,6 +299,9 @@ export const TrustStatusCard: FC<TrustStatusCardProps> = ({
             </div>
           ) : (
             <table className="pf-v6-c-table pf-m-grid-md pf-m-compact" role="grid" style={{ tableLayout: 'fixed' }}>
+              <colgroup>
+                {TRUST_COL_WIDTHS.map((w, i) => <col key={i} style={{ width: w }} />)}
+              </colgroup>
               <tbody className="pf-v6-c-table__tbody">
                 {topSpacer > 0 && <tr><td colSpan={5} style={{ height: topSpacer, padding: 0, border: 'none' }} /></tr>}
                 {visibleItems.map((cs) => {

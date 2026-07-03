@@ -324,6 +324,9 @@ const DiscoveredMeshDetailContent: FC<{ meshID: string }> = ({ meshID }) => {
                     </div>
                   ) : (
                     <table className="pf-v6-c-table pf-m-grid-md pf-m-compact" role="grid" style={{ tableLayout: 'fixed' }}>
+                      <colgroup>
+                        {CLUSTER_COL_WIDTHS.map((w, i) => <col key={i} style={{ width: w }} />)}
+                      </colgroup>
                       <tbody className="pf-v6-c-table__tbody">
                         {clusterTopSpacer > 0 && <tr><td colSpan={2} style={{ height: clusterTopSpacer, padding: 0, border: 'none' }} /></tr>}
                         {visibleClusters.map((clusterName) => {
@@ -392,6 +395,9 @@ const DiscoveredMeshDetailContent: FC<{ meshID: string }> = ({ meshID }) => {
                     </table>
                     <div ref={condContainerRef} style={{ maxHeight: '368px', overflowY: 'auto' }}>
                       <table className="pf-v6-c-table pf-m-grid-md pf-m-compact" role="grid" style={{ tableLayout: 'fixed' }}>
+                        <colgroup>
+                          {CONDITION_COL_WIDTHS.map((w, i) => <col key={i} style={{ width: w }} />)}
+                        </colgroup>
                         <tbody className="pf-v6-c-table__tbody">
                           {condTopSpacer > 0 && <tr><td colSpan={7} style={{ height: condTopSpacer, padding: 0, border: 'none' }} /></tr>}
                           {visibleConditionRows.map((entry, i) => (
