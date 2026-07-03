@@ -24,6 +24,7 @@ import { useDiscoveredControlPlanes } from '../hooks/useDiscoveredControlPlanes'
 import { useEnrichedControlPlanes } from '../hooks/useEnrichedControlPlanes'
 import type { EnrichedControlPlane } from '../types/istio'
 import { MeshStatus, getStatusRank } from './MeshStatus'
+import { cpTypeSegment } from '../utils/cpTypeSegment'
 import { fuzzyCaseInsensitive } from '../utils/filterUtils'
 import type { RowSearchFilter } from '../utils/filterUtils'
 import { useMeshTranslation } from '../utils/i18nUtils'
@@ -106,7 +107,7 @@ const ControlPlaneRow: FC<RowProps<EnrichedControlPlane>> = ({ obj, activeColumn
         {obj.managedBy ? t('Managed') : obj.meshID ? t('Discovered') : t('Standalone')}
       </TableData>
       <TableData id="name" activeColumnIDs={activeColumnIDs}>
-        <Link to={`/fleet-mesh/control-planes/${encodeURIComponent(obj.clusterName)}/${encodeURIComponent(obj.metadata.name)}`}>
+        <Link to={`/fleet-mesh/control-planes/${cpTypeSegment(obj)}/${encodeURIComponent(obj.clusterName)}/${encodeURIComponent(obj.metadata.name)}`}>
           {obj.metadata.name}
         </Link>
       </TableData>

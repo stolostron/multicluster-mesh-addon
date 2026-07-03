@@ -39,7 +39,7 @@ describe('ControlPlanesCard', () => {
     render(<ControlPlanesCard planes={[makeCp('cluster-a', 'myistio')]} />)
     expect(screen.getByRole('link', { name: 'myistio' })).toHaveAttribute(
       'href',
-      '/fleet-mesh/control-planes/cluster-a/myistio',
+      '/fleet-mesh/control-planes/standalone/cluster-a/myistio',
     )
   })
 

@@ -25,6 +25,7 @@ import type { StatusColor } from './MeshStatus'
 import { deriveStatus } from './MeshStatus'
 import { StatusDonutChart } from './StatusDonutChart'
 import type { StatusCounts } from './StatusDonutChart'
+import { cpTypeSegment } from '../utils/cpTypeSegment'
 import { useMeshTranslation } from '../utils/i18nUtils'
 
 function countByStatus(items: { conditions?: K8sCondition[] }[], conditionType?: string): StatusCounts {
@@ -89,7 +90,7 @@ function collectRecentIssues(meshes: MultiClusterMesh[], controlPlanes: Enriched
       issues.push({
         kind: 'controlPlane',
         source: `${cp.clusterName} / ${cp.metadata.name}`,
-        link: `/fleet-mesh/control-planes/${encodeURIComponent(cp.clusterName)}/${encodeURIComponent(cp.metadata.name)}`,
+        link: `/fleet-mesh/control-planes/${cpTypeSegment(cp)}/${encodeURIComponent(cp.clusterName)}/${encodeURIComponent(cp.metadata.name)}`,
         label,
         color,
         lastTransitionTime: c.lastTransitionTime,

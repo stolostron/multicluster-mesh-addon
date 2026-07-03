@@ -112,7 +112,7 @@ describe('useFleetMeshItems', () => {
     expect(discovered[0].metadata.name).toBe('cluster-a/default')
     expect(discovered[0].clusterCount).toBe(1)
     expect(discovered[1].metadata.name).toBe('cluster-b/istio')
-    expect(discovered[1].detailLink).toBe('/fleet-mesh/control-planes/cluster-b/istio')
+    expect(discovered[1].detailLink).toBe('/fleet-mesh/control-planes/standalone/cluster-b/istio')
   })
 
   it('excludes managed CRs from discovered items', () => {

@@ -34,7 +34,7 @@ import { buildMcmIndex, lookupMcm } from '../utils/correlateMCM'
 import { MeshStatus, statusIcon } from './MeshStatus'
 import { useMeshTranslation } from '../utils/i18nUtils'
 
-const ControlPlaneDetailContent: FC<{ cluster: string; name: string }> = ({ cluster, name }) => {
+const ControlPlaneDetailContent: FC<{ cluster: string; name: string; type: string }> = ({ cluster, name, type }) => {
   const { t } = useMeshTranslation()
   const [istio, setIstio] = useState<Istio | null>(null)
   const [loaded, setLoaded] = useState(false)
@@ -95,6 +95,7 @@ const ControlPlaneDetailContent: FC<{ cluster: string; name: string }> = ({ clus
           <BreadcrumbItem>
             <Link to="/fleet-mesh/control-planes">{t('Control Planes')}</Link>
           </BreadcrumbItem>
+          <BreadcrumbItem>{({ managed: t('Managed'), discovered: t('Discovered'), standalone: t('Standalone') })[type]}</BreadcrumbItem>
           <BreadcrumbItem isActive>{`${cluster} / ${name}`}</BreadcrumbItem>
         </Breadcrumb>
         <Flex alignItems={{ default: 'alignItemsCenter' }} style={{ marginTop: '1rem' }}>
@@ -213,25 +214,27 @@ const ControlPlaneDetailContent: FC<{ cluster: string; name: string }> = ({ clus
   )
 }
 
+const VALID_TYPES = ['managed', 'discovered', 'standalone']
+
 const ControlPlaneDetailPage: FC = () => {
   const { t } = useMeshTranslation()
-  const { cluster, name } = useParams<{ cluster: string; name: string }>()
+  const { type, cluster, name } = useParams<{ type: string; cluster: string; name: string }>()
 
-  if (!cluster || !name) {
+  if (!type || !cluster || !name || !VALID_TYPES.includes(type)) {
     return (
       <PageSection>
         <EmptyState>
           <Title headingLevel="h2" size="lg">{t('Not Found')}</Title>
           <EmptyStateBody>
-            {t('Invalid URL. Expected /fleet-mesh/control-planes/:cluster/:name.')}
+            {t('Invalid URL. Expected /fleet-mesh/control-planes/:type/:cluster/:name.')}
           </EmptyStateBody>
         </EmptyState>
       </PageSection>
     )
   }
 
-  return <ControlPlaneDetailContent cluster={cluster} name={name} />
+  return <ControlPlaneDetailContent cluster={cluster} name={name} type={type} />
 }
 
-/** Detail page for a single Istio control plane, reached via /fleet-mesh/control-planes/:cluster/:name. */
+/** Detail page for a single Istio control plane, reached via /fleet-mesh/control-planes/:type/:cluster/:name. */
 export default ControlPlaneDetailPage

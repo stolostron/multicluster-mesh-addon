@@ -141,7 +141,7 @@ function buildItems(
       clusterCount: 1,
       conditions: cp.status?.conditions,
       controlPlanes: [cp],
-      detailLink: `/fleet-mesh/control-planes/${encodeURIComponent(cp.clusterName)}/${encodeURIComponent(cp.metadata.name)}`,
+      detailLink: `/fleet-mesh/control-planes/standalone/${encodeURIComponent(cp.clusterName)}/${encodeURIComponent(cp.metadata.name)}`,
       kind: 'discovered',
       statusRank: getStatusRank(cp.status?.conditions),
     })

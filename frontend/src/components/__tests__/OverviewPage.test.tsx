@@ -218,7 +218,7 @@ describe('OverviewPage', () => {
     render(<OverviewPage />)
     expect(screen.getByText('Reconcile Error')).toBeInTheDocument()
     const link = screen.getByRole('link', { name: 'cluster-a / default' })
-    expect(link).toHaveAttribute('href', '/fleet-mesh/control-planes/cluster-a/default')
+    expect(link).toHaveAttribute('href', '/fleet-mesh/control-planes/standalone/cluster-a/default')
   })
 
   it('shows per-cluster mesh issues in recent issues card', () => {
@@ -274,7 +274,7 @@ describe('OverviewPage', () => {
     const meshLink = screen.getByRole('link', { name: 'test-mesh' })
     expect(meshLink).toHaveAttribute('href', '/fleet-mesh/meshes/managed/mesh-system/test-mesh')
     const cpLink = screen.getByRole('link', { name: 'cluster-a / default' })
-    expect(cpLink).toHaveAttribute('href', '/fleet-mesh/control-planes/cluster-a/default')
+    expect(cpLink).toHaveAttribute('href', '/fleet-mesh/control-planes/standalone/cluster-a/default')
 
     const rows = screen.getAllByRole('row')
     const dataRows = rows.filter((r) => r.querySelector('td'))

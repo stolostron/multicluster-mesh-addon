@@ -92,7 +92,7 @@ describe('ServiceMeshPage', () => {
         metadata: { name: 'discovered-mesh' },
         kind: 'discovered',
         meshID: 'discovered-id',
-        detailLink: '/fleet-mesh/control-planes/c1/cp',
+        detailLink: '/fleet-mesh/meshes/discovered/discovered-id',
       }),
     ]
     mockHook({ items })

@@ -15,6 +15,7 @@ import {
 import type { EnrichedControlPlane, CpStatusCategory } from '../types/istio'
 import { categorizeCp } from '../types/istio'
 import { MeshStatus } from './MeshStatus'
+import { cpTypeSegment } from '../utils/cpTypeSegment'
 import { useVirtualRows } from '../hooks/useVirtualRows'
 import { useMeshTranslation } from '../utils/i18nUtils'
 
@@ -122,7 +123,7 @@ const ControlPlanesCard: FC<{ planes: EnrichedControlPlane[] }> = ({ planes }) =
                       </Link>
                     </td>
                     <td className="pf-v6-c-table__td" style={{ width: COL_WIDTHS[1] }}>
-                      <Link to={`/fleet-mesh/control-planes/${encodeURIComponent(cp.clusterName)}/${encodeURIComponent(cp.metadata.name)}`}>
+                      <Link to={`/fleet-mesh/control-planes/${cpTypeSegment(cp)}/${encodeURIComponent(cp.clusterName)}/${encodeURIComponent(cp.metadata.name)}`}>
                         {cp.metadata.name}
                       </Link>
                     </td>

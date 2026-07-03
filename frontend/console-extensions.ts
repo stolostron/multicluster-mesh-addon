@@ -78,7 +78,7 @@ const controlPlaneDetailRoute: EncodedExtension = {
   type: 'console.page/route',
   properties: {
     perspective: 'fleet-service-mesh',
-    path: '/fleet-mesh/control-planes/:cluster/:name',
+    path: '/fleet-mesh/control-planes/:type/:cluster/:name',
     component: { $codeRef: 'controlPlaneDetailPage.default' },
   },
 }

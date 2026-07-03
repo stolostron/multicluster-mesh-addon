@@ -77,7 +77,7 @@ export default PerspectiveIcon
 
 ### Route registration order
 
-Detail routes (`/fleet-mesh/meshes/managed/:ns/:name`, `/fleet-mesh/meshes/discovered/:meshID`) must be registered BEFORE the list route (`/fleet-mesh/meshes`) in `console-extensions.ts`. React Router v5 matches the first route whose path prefix matches.
+Detail routes (`/fleet-mesh/meshes/managed/:ns/:name`, `/fleet-mesh/meshes/discovered/:meshID`, `/fleet-mesh/control-planes/:type/:cluster/:name`) must be registered BEFORE their respective list routes (`/fleet-mesh/meshes`, `/fleet-mesh/control-planes`) in `console-extensions.ts`. React Router v5 matches the first route whose path prefix matches.
 
 ### Data sources
 

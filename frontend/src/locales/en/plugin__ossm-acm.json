@@ -45,7 +45,7 @@
   "Install Plan Approval": "Install Plan Approval",
   "Install Red Hat Advanced Cluster Management to discover unmanaged meshes across the fleet.": "Install Red Hat Advanced Cluster Management to discover unmanaged meshes across the fleet.",
   "Installing": "Installing",
-  "Invalid URL. Expected /fleet-mesh/control-planes/:cluster/:name.": "Invalid URL. Expected /fleet-mesh/control-planes/:cluster/:name.",
+  "Invalid URL. Expected /fleet-mesh/control-planes/:type/:cluster/:name.": "Invalid URL. Expected /fleet-mesh/control-planes/:type/:cluster/:name.",
   "Invalid mesh URL. Expected /fleet-mesh/meshes/managed/:namespace/:name.": "Invalid mesh URL. Expected /fleet-mesh/meshes/managed/:namespace/:name.",
   "Invalid mesh URL. Expected /fleet-mesh/meshes/discovered/:meshID.": "Invalid mesh URL. Expected /fleet-mesh/meshes/discovered/:meshID.",
   "Istio \"{{name}}\" was not found on cluster \"{{cluster}}\".": "Istio \"{{name}}\" was not found on cluster \"{{cluster}}\".",

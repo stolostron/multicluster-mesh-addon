@@ -38,13 +38,20 @@ describe('ControlPlaneDetailPage', () => {
       rstest.mocked(useParams).mockReturnValue({})
       render(<ControlPlaneDetailPage />)
       expect(screen.getByText('Not Found')).toBeInTheDocument()
-      expect(screen.getByText('Invalid URL. Expected /fleet-mesh/control-planes/:cluster/:name.')).toBeInTheDocument()
+      expect(screen.getByText('Invalid URL. Expected /fleet-mesh/control-planes/:type/:cluster/:name.')).toBeInTheDocument()
+    })
+
+    it('shows Not Found when type param is invalid', () => {
+      rstest.mocked(useParams).mockReturnValue({ type: 'bogus', cluster: 'cluster-a', name: 'default' })
+      render(<ControlPlaneDetailPage />)
+      expect(screen.getByText('Not Found')).toBeInTheDocument()
+      expect(screen.getByText('Invalid URL. Expected /fleet-mesh/control-planes/:type/:cluster/:name.')).toBeInTheDocument()
     })
   })
 
   describe('loading state', () => {
     it('shows spinner while fleetK8sGet is pending', () => {
-      rstest.mocked(useParams).mockReturnValue({ cluster: 'cluster-a', name: 'default' })
+      rstest.mocked(useParams).mockReturnValue({ type: 'discovered', cluster: 'cluster-a', name: 'default' })
       rstest.mocked(fleetK8sGet).mockReturnValue(new Promise(() => {}))
       render(<ControlPlaneDetailPage />)
       expect(screen.getByLabelText('Loading control plane')).toBeInTheDocument()
@@ -53,7 +60,7 @@ describe('ControlPlaneDetailPage', () => {
 
   describe('error states', () => {
     it('shows generic error when fleetK8sGet rejects', async () => {
-      rstest.mocked(useParams).mockReturnValue({ cluster: 'cluster-a', name: 'default' })
+      rstest.mocked(useParams).mockReturnValue({ type: 'discovered', cluster: 'cluster-a', name: 'default' })
       rstest.mocked(fleetK8sGet).mockRejectedValue(new Error('network timeout'))
       render(<ControlPlaneDetailPage />)
       await waitFor(() => {
@@ -63,7 +70,7 @@ describe('ControlPlaneDetailPage', () => {
     })
 
     it('shows not-found message for 404 errors', async () => {
-      rstest.mocked(useParams).mockReturnValue({ cluster: 'cluster-a', name: 'default' })
+      rstest.mocked(useParams).mockReturnValue({ type: 'discovered', cluster: 'cluster-a', name: 'default' })
       const error404 = new Error('Not Found')
       ;(error404 as any).code = 404
       rstest.mocked(fleetK8sGet).mockRejectedValue(error404)
@@ -77,7 +84,7 @@ describe('ControlPlaneDetailPage', () => {
 
   describe('loaded state', () => {
     beforeEach(() => {
-      rstest.mocked(useParams).mockReturnValue({ cluster: 'cluster-a', name: 'default' })
+      rstest.mocked(useParams).mockReturnValue({ type: 'discovered', cluster: 'cluster-a', name: 'default' })
     })
 
     it('renders the breadcrumb and name heading', async () => {
@@ -200,7 +207,7 @@ describe('ControlPlaneDetailPage', () => {
 
   describe('useEffect cancellation', () => {
     it('does not update state after unmount', async () => {
-      rstest.mocked(useParams).mockReturnValue({ cluster: 'cluster-a', name: 'default' })
+      rstest.mocked(useParams).mockReturnValue({ type: 'discovered', cluster: 'cluster-a', name: 'default' })
       let resolvePromise: (value: any) => void
       rstest.mocked(fleetK8sGet).mockReturnValue(new Promise((resolve) => { resolvePromise = resolve }))
       const { unmount } = render(<ControlPlaneDetailPage />)

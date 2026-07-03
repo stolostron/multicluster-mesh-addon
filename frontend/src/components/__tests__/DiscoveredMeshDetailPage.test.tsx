@@ -193,7 +193,7 @@ describe('DiscoveredMeshDetailPage', () => {
       render(<DiscoveredMeshDetailPage />)
       expect(screen.getByRole('link', { name: 'default' })).toHaveAttribute(
         'href',
-        '/fleet-mesh/control-planes/cluster-a/default',
+        '/fleet-mesh/control-planes/discovered/cluster-a/default',
       )
     })
 
