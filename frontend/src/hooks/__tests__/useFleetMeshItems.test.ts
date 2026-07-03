@@ -74,7 +74,7 @@ describe('useFleetMeshItems', () => {
     expect(item.mcmNamespace).toBe('mesh-system')
     expect(item.clusterCount).toBe(1)
     expect(item.trustIssuer).toBe('mesh-ca')
-    expect(item.detailLink).toBe('/fleet-mesh/meshes/mesh-system/my-mesh')
+    expect(item.detailLink).toBe('/fleet-mesh/meshes/managed/mesh-system/my-mesh')
     expect(item.statusRank).toBe(0)
     expect(item.conditions).toEqual([{ type: 'Ready', status: 'True' }])
     expect(item.mcm).toBe(mcm)

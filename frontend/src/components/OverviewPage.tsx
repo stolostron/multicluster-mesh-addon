@@ -58,7 +58,7 @@ function collectRecentIssues(meshes: MultiClusterMesh[], controlPlanes: Enriched
   for (const mesh of meshes) {
     const meshName = mesh.metadata?.name ?? ''
     const meshNamespace = mesh.metadata?.namespace ?? ''
-    const meshLink = `/fleet-mesh/meshes/${encodeURIComponent(meshNamespace)}/${encodeURIComponent(meshName)}`
+    const meshLink = `/fleet-mesh/meshes/managed/${encodeURIComponent(meshNamespace)}/${encodeURIComponent(meshName)}`
 
     for (const c of mesh.status?.conditions ?? []) {
       if (c.status === 'True') continue

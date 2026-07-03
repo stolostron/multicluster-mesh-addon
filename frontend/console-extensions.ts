@@ -51,7 +51,7 @@ const fleetMeshDetailRoute: EncodedExtension = {
   type: 'console.page/route',
   properties: {
     perspective: 'fleet-service-mesh',
-    path: '/fleet-mesh/meshes/:ns/:name',
+    path: '/fleet-mesh/meshes/managed/:ns/:name',
     component: { $codeRef: 'meshDetailPage.default' },
   },
 }

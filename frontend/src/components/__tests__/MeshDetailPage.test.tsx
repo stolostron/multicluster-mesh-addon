@@ -77,7 +77,7 @@ describe('MeshDetailPage', () => {
       rstest.mocked(useParams).mockReturnValue({})
       render(<MeshDetailPage />)
       expect(screen.getByText('Not Found')).toBeInTheDocument()
-      expect(screen.getByText('Invalid mesh URL. Expected /fleet-mesh/meshes/:namespace/:name.')).toBeInTheDocument()
+      expect(screen.getByText('Invalid mesh URL. Expected /fleet-mesh/meshes/managed/:namespace/:name.')).toBeInTheDocument()
     })
   })
 
@@ -115,7 +115,7 @@ describe('MeshDetailPage', () => {
       expect(screen.getByRole('heading', { name: 'test-mesh' })).toBeInTheDocument()
     })
 
-    it('shows blue Managed label in header', () => {
+    it('shows Managed in breadcrumb', () => {
       rstest.mocked(useK8sWatchResource).mockReturnValue([makeMesh(), true, null])
       render(<MeshDetailPage />)
       expect(screen.getByText('Managed')).toBeInTheDocument()

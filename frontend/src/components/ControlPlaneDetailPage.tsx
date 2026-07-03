@@ -108,13 +108,6 @@ const ControlPlaneDetailContent: FC<{ cluster: string; name: string }> = ({ clus
               <Label color="grey">{t('Unknown')}</Label>
             )}
           </FlexItem>
-          <FlexItem>
-            {matchedMCM
-              ? <Label color="blue">{t('Managed')}</Label>
-              : meshID
-                ? <Label color="purple">{t('Discovered')}</Label>
-                : null}
-          </FlexItem>
         </Flex>
       </PageSection>
 
@@ -170,7 +163,7 @@ const ControlPlaneDetailContent: FC<{ cluster: string; name: string }> = ({ clus
                     <DescriptionListGroup>
                       <DescriptionListTerm><strong>{t('Managed Mesh')}</strong></DescriptionListTerm>
                       <DescriptionListDescription>
-                        <Link to={`/fleet-mesh/meshes/${matchedMCM.namespace}/${matchedMCM.name}`}>
+                        <Link to={`/fleet-mesh/meshes/managed/${encodeURIComponent(matchedMCM.namespace)}/${encodeURIComponent(matchedMCM.name)}`}>
                           {matchedMCM.name}
                         </Link>
                       </DescriptionListDescription>

@@ -86,7 +86,7 @@ function buildItems(
       clusterCount: mcm.status?.clusterStatus?.length ?? 0,
       clusterSet: mcm.spec.clusterSet,
       conditions,
-      detailLink: `/fleet-mesh/meshes/${encodeURIComponent(ns)}/${encodeURIComponent(name)}`,
+      detailLink: `/fleet-mesh/meshes/managed/${encodeURIComponent(ns)}/${encodeURIComponent(name)}`,
       kind: 'managed',
       mcm,
       mcmNamespace: ns,

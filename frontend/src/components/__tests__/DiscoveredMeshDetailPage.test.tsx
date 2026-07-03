@@ -141,7 +141,7 @@ describe('DiscoveredMeshDetailPage', () => {
       expect(screen.getByRole('heading', { name: 'mesh1' })).toBeInTheDocument()
     })
 
-    it('shows Discovered label', () => {
+    it('shows Discovered in breadcrumb', () => {
       mockDefaults({ enrichedPlanes: [cp1] })
       render(<DiscoveredMeshDetailPage />)
       expect(screen.getByText('Discovered')).toBeInTheDocument()
@@ -254,11 +254,13 @@ describe('DiscoveredMeshDetailPage', () => {
       mockDefaults({ enrichedPlanes: [cp] })
       render(<DiscoveredMeshDetailPage />)
 
-      expect(screen.queryAllByText('cluster-a')).toHaveLength(3)
+      expect(screen.getByText('Reconciled')).toBeInTheDocument()
+      expect(screen.queryByText('Ready')).not.toBeInTheDocument()
 
       await user.click(screen.getByText('Show all conditions'))
 
-      expect(screen.queryAllByText('cluster-a')).toHaveLength(4)
+      expect(screen.getByText('Reconciled')).toBeInTheDocument()
+      expect(screen.getByText('Ready')).toBeInTheDocument()
     })
 
     it('toggles back to issues only', async () => {
@@ -275,10 +277,11 @@ describe('DiscoveredMeshDetailPage', () => {
       render(<DiscoveredMeshDetailPage />)
 
       await user.click(screen.getByText('Show all conditions'))
-      expect(screen.queryAllByText('cluster-a')).toHaveLength(4)
+      expect(screen.getByText('Ready')).toBeInTheDocument()
 
       await user.click(screen.getByText('Show issues only'))
-      expect(screen.queryAllByText('cluster-a')).toHaveLength(3)
+      expect(screen.queryByText('Ready')).not.toBeInTheDocument()
+      expect(screen.getByText('Reconciled')).toBeInTheDocument()
     })
 
     it('shows "No issues detected" when all conditions are True and showing issues only', () => {

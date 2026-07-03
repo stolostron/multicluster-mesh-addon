@@ -37,6 +37,14 @@ function buildColumns(t: (key: string) => string): TableColumn<FleetMeshItem>[] 
       },
     },
     {
+      title: t('Type'),
+      id: 'type',
+      sort: (data: FleetMeshItem[], sortDirection: string) => {
+        const dir = sortDirection === 'asc' ? 1 : -1
+        return [...data].sort((a, b) => dir * a.kind.localeCompare(b.kind))
+      },
+    },
+    {
       title: t('Name'),
       id: 'name',
       sort: (data: FleetMeshItem[], sortDirection: string) => {
@@ -106,14 +114,15 @@ const MeshRow: FC<RowProps<FleetMeshItem>> = ({ obj, activeColumnIDs }) => {
   return (
     <>
       <TableData id="meshID" activeColumnIDs={activeColumnIDs}>
-        {isManaged
-          ? <Label color="blue" isCompact>{obj.meshID ?? '-'}</Label>
-          : <Label color="purple" isCompact>{obj.meshID ?? '-'}</Label>}
+        {obj.meshID ? (
+          <Link to={obj.detailLink}>{obj.meshID}</Link>
+        ) : '-'}
+      </TableData>
+      <TableData id="type" activeColumnIDs={activeColumnIDs}>
+        {isManaged ? t('Managed') : t('Discovered')}
       </TableData>
       <TableData id="name" activeColumnIDs={activeColumnIDs}>
-        <Link to={obj.detailLink}>
-          {nameContent}
-        </Link>
+        {nameContent}
         {obj.meshIDConflict && (
           <Tooltip content={t('Mesh ID Conflict')}>
             <ExclamationTriangleIcon style={{ color: 'var(--pf-v6-global--warning-color--100)', marginLeft: '0.5rem' }} />
@@ -153,6 +162,12 @@ function buildSearchFilters(t: (key: string) => string): RowSearchFilter<FleetMe
       filterGroupName: t('Mesh ID'),
       placeholder: t('Filter by mesh ID...'),
       type: 'meshID',
+    },
+    {
+      filter: (input, obj) => fuzzyCaseInsensitive(input.selected?.[0], obj.kind),
+      filterGroupName: t('Type'),
+      placeholder: t('Filter by type...'),
+      type: 'type',
     },
   ]
 }

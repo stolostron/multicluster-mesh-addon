@@ -289,6 +289,7 @@ const MeshDetailContent: FC<{ ns: string; name: string }> = ({ ns, name }) => {
           <BreadcrumbItem>
             <Link to="/fleet-mesh/meshes">{t('Meshes')}</Link>
           </BreadcrumbItem>
+          <BreadcrumbItem>{t('Managed')}</BreadcrumbItem>
           <BreadcrumbItem isActive>{mesh.metadata?.name}</BreadcrumbItem>
         </Breadcrumb>
         <Flex alignItems={{ default: 'alignItemsCenter' }} style={{ marginTop: '1rem' }}>
@@ -297,9 +298,6 @@ const MeshDetailContent: FC<{ ns: string; name: string }> = ({ ns, name }) => {
           </FlexItem>
           <FlexItem>
             <MeshStatus conditions={conditions} conditionType="Ready" />
-          </FlexItem>
-          <FlexItem>
-            <Label color="blue">{t('Managed')}</Label>
           </FlexItem>
         </Flex>
       </PageSection>
@@ -445,7 +443,7 @@ const MeshDetailPage: FC = () => {
         <EmptyState>
           <Title headingLevel="h2" size="lg">{t('Not Found')}</Title>
           <EmptyStateBody>
-            {t('Invalid mesh URL. Expected /fleet-mesh/meshes/:namespace/:name.')}
+            {t('Invalid mesh URL. Expected /fleet-mesh/meshes/managed/:namespace/:name.')}
           </EmptyStateBody>
         </EmptyState>
       </PageSection>
@@ -455,5 +453,5 @@ const MeshDetailPage: FC = () => {
   return <MeshDetailContent ns={ns} name={name} />
 }
 
-/** Detail page for a single MultiClusterMesh, reached via /fleet-mesh/meshes/:ns/:name. */
+/** Detail page for a single MultiClusterMesh, reached via /fleet-mesh/meshes/managed/:ns/:name. */
 export default MeshDetailPage

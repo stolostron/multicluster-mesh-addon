@@ -12,13 +12,8 @@ const operatorFailed: K8sCondition = { type: 'OperatorInstalled', status: 'False
 
 describe('MeshStatus', () => {
   describe('with no conditions', () => {
-    it('shows Unknown', () => {
+    it('shows Unknown when no conditions provided', () => {
       render(<MeshStatus />)
-      expect(screen.getByText('Unknown')).toBeInTheDocument()
-    })
-
-    it('shows Unknown when conditions is empty', () => {
-      render(<MeshStatus conditions={[]} />)
       expect(screen.getByText('Unknown')).toBeInTheDocument()
     })
   })

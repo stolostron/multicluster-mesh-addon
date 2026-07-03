@@ -198,6 +198,7 @@ const DiscoveredMeshDetailContent: FC<{ meshID: string }> = ({ meshID }) => {
           <BreadcrumbItem>
             <Link to="/fleet-mesh/meshes">{t('Meshes')}</Link>
           </BreadcrumbItem>
+          <BreadcrumbItem>{t('Discovered')}</BreadcrumbItem>
           <BreadcrumbItem isActive>{meshID}</BreadcrumbItem>
         </Breadcrumb>
         <Flex alignItems={{ default: 'alignItemsCenter' }} style={{ marginTop: '1rem' }}>
@@ -206,9 +207,6 @@ const DiscoveredMeshDetailContent: FC<{ meshID: string }> = ({ meshID }) => {
           </FlexItem>
           <FlexItem>
             <MeshStatus conditions={worstConditions} conditionType="Ready" />
-          </FlexItem>
-          <FlexItem>
-            <Label color="purple">{t('Discovered')}</Label>
           </FlexItem>
         </Flex>
       </PageSection>

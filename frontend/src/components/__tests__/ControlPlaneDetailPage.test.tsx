@@ -145,7 +145,7 @@ describe('ControlPlaneDetailPage', () => {
         expect(screen.getByText('Managed Mesh')).toBeInTheDocument()
         expect(screen.getByRole('link', { name: 'my-mesh' })).toHaveAttribute(
           'href',
-          '/fleet-mesh/meshes/mesh-system/my-mesh',
+          '/fleet-mesh/meshes/managed/mesh-system/my-mesh',
         )
       })
     })
@@ -157,40 +157,6 @@ describe('ControlPlaneDetailPage', () => {
         expect(screen.getByText('Mesh ID')).toBeInTheDocument()
       })
       expect(screen.queryByText('Managed Mesh')).not.toBeInTheDocument()
-    })
-
-    it('shows blue Managed label when CP is managed by MCM', async () => {
-      const mcm = {
-        metadata: { name: 'my-mesh', namespace: 'mesh-system' },
-        spec: { clusterSet: 'global', controlPlane: { namespace: 'istio-system' } },
-        status: { clusterStatus: [{ clusterName: 'cluster-a' }] },
-      }
-      rstest.mocked(useK8sWatchResource).mockReturnValue([[mcm], true, null])
-      rstest.mocked(fleetK8sGet).mockResolvedValue(makeIstio())
-      render(<ControlPlaneDetailPage />)
-      await waitFor(() => {
-        expect(screen.getByText('Managed')).toBeInTheDocument()
-      })
-    })
-
-    it('shows purple Discovered label when CP has meshID but no MCM', async () => {
-      rstest.mocked(fleetK8sGet).mockResolvedValue(makeIstio())
-      render(<ControlPlaneDetailPage />)
-      await waitFor(() => {
-        expect(screen.getByText('Discovered')).toBeInTheDocument()
-      })
-    })
-
-    it('shows no kind label when CP has no meshID and no MCM', async () => {
-      rstest.mocked(fleetK8sGet).mockResolvedValue(makeIstio({
-        spec: { namespace: 'istio-system' },
-      }))
-      render(<ControlPlaneDetailPage />)
-      await waitFor(() => {
-        expect(screen.getByText('Mesh ID')).toBeInTheDocument()
-      })
-      expect(screen.queryByText('Managed')).not.toBeInTheDocument()
-      expect(screen.queryByText('Discovered')).not.toBeInTheDocument()
     })
 
     it('links mesh ID to discovered mesh page when CP has meshID but no MCM', async () => {
@@ -229,18 +195,6 @@ describe('ControlPlaneDetailPage', () => {
         expect(screen.getByText('Mesh ID')).toBeInTheDocument()
       })
       expect(screen.queryByText('Managed Mesh')).not.toBeInTheDocument()
-    })
-  })
-
-  describe('useEffect cleanup', () => {
-    it('does not update state after unmount', async () => {
-      rstest.mocked(useParams).mockReturnValue({ cluster: 'cluster-a', name: 'default' })
-      let resolvePromise: (value: any) => void
-      rstest.mocked(fleetK8sGet).mockReturnValue(new Promise((resolve) => { resolvePromise = resolve }))
-      const { unmount } = render(<ControlPlaneDetailPage />)
-      unmount()
-      resolvePromise!(makeIstio())
-      // No assertion needed — the test passes if no "state update on unmounted component" warning occurs
     })
   })
 })

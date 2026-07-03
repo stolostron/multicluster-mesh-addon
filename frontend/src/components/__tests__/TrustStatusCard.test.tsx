@@ -98,7 +98,7 @@ afterEach(() => rstest.clearAllMocks())
 // ---------------------------------------------------------------------------
 
 describe('TrustStatusCard — no issuer', () => {
-  it('renders the not-configured message and does not start any watches', () => {
+  it('renders the not-configured message (i18nKey) and does not start any watches', () => {
     render(<TrustStatusCard {...defaultProps} issuerName="" clusterStatuses={[]} />)
     expect(screen.getByText('Trust Status')).toBeInTheDocument()
     expect(screen.getByText('trustNotConfiguredMessage')).toBeInTheDocument()
