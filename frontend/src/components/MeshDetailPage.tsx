@@ -331,6 +331,10 @@ const MeshDetailContent: FC<{ ns: string; name: string }> = ({ ns, name }) => {
               <CardBody>
                 <DescriptionList isCompact columnModifier={{ default: '2Col' }}>
                   <DescriptionListGroup>
+                    <DescriptionListTerm><strong>{t('Mesh ID')}</strong></DescriptionListTerm>
+                    <DescriptionListDescription>{managedPlanes[0]?.meshID ?? `${ns}-${name}`}</DescriptionListDescription>
+                  </DescriptionListGroup>
+                  <DescriptionListGroup>
                     <DescriptionListTerm><strong>{t('Cluster Set')}</strong></DescriptionListTerm>
                     <DescriptionListDescription>
                       <Link to={`/multicloud/infrastructure/clusters/sets/details/${encodeURIComponent(spec.clusterSet)}/overview`}>
