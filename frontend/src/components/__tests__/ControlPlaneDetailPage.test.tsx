@@ -197,4 +197,17 @@ describe('ControlPlaneDetailPage', () => {
       expect(screen.queryByText('Managed Mesh')).not.toBeInTheDocument()
     })
   })
+
+  describe('useEffect cancellation', () => {
+    it('does not update state after unmount', async () => {
+      rstest.mocked(useParams).mockReturnValue({ cluster: 'cluster-a', name: 'default' })
+      let resolvePromise: (value: any) => void
+      rstest.mocked(fleetK8sGet).mockReturnValue(new Promise((resolve) => { resolvePromise = resolve }))
+      const { unmount } = render(<ControlPlaneDetailPage />)
+      unmount()
+      resolvePromise!(makeIstio())
+      await new Promise((r) => setTimeout(r, 0))
+      expect(screen.queryByText('default')).not.toBeInTheDocument()
+    })
+  })
 })

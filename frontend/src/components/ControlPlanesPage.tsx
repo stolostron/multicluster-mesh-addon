@@ -45,8 +45,8 @@ function buildColumns(t: (key: string) => string): TableColumn<EnrichedControlPl
       id: 'type',
       sort: (data: EnrichedControlPlane[], sortDirection: string) => {
         const dir = sortDirection === 'asc' ? 1 : -1
-        const typeOf = (cp: EnrichedControlPlane) => cp.managedBy ? 'a' : cp.meshID ? 'b' : 'c'
-        return [...data].sort((a, b) => dir * typeOf(a).localeCompare(typeOf(b)))
+        const typeRank = (cp: EnrichedControlPlane) => cp.managedBy ? 0 : cp.meshID ? 1 : 2
+        return [...data].sort((a, b) => dir * (typeRank(a) - typeRank(b)))
       },
     },
     { title: t('Name'), id: 'name', sort: 'metadata.name' },
