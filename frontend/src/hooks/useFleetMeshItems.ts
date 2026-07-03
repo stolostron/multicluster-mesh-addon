@@ -67,6 +67,17 @@ function buildItems(
   const managedItems: FleetMeshItem[] = mcms.map((mcm): FleetMeshItem => {
     const ns = mcm.metadata?.namespace ?? ''
     const name = mcm.metadata?.name ?? ''
+
+    const correlatedPlanes = enrichedPlanes.filter(
+      (cp) => cp.managedBy?.name === name && cp.managedBy?.namespace === ns
+    )
+
+    const { conditions, rank } = correlatedPlanes.length > 0
+      ? worstConditions(correlatedPlanes)
+      : { conditions: mcm.status?.conditions, rank: getStatusRank(mcm.status?.conditions) }
+
+    const meshID = correlatedPlanes.find((cp) => cp.meshID)?.meshID
+
     return {
       metadata: {
         name,
@@ -74,13 +85,14 @@ function buildItems(
       },
       clusterCount: mcm.status?.clusterStatus?.length ?? 0,
       clusterSet: mcm.spec.clusterSet,
-      conditions: mcm.status?.conditions,
+      conditions,
       detailLink: `/fleet-mesh/meshes/${encodeURIComponent(ns)}/${encodeURIComponent(name)}`,
       kind: 'managed',
       mcm,
       mcmNamespace: ns,
+      meshID,
       meshIDConflict: false,
-      statusRank: getStatusRank(mcm.status?.conditions),
+      statusRank: rank,
       trustIssuer: mcm.spec.security?.trust?.certManager?.issuerRef?.name,
     }
   })
@@ -136,15 +148,8 @@ function buildItems(
   }
 
   for (const item of managedItems) {
-    if (!item.mcm) continue
-    const mcmName = item.mcm.metadata?.name
-    const mcmNs = item.mcm.metadata?.namespace
-    for (const cp of enrichedPlanes) {
-      if (cp.managedBy?.name === mcmName && cp.managedBy?.namespace === mcmNs && cp.meshID) {
-        if (!item.meshID) item.meshID = cp.meshID
-        if (meshIDGroups.has(cp.meshID)) item.meshIDConflict = true
-        break
-      }
+    if (item.meshID && meshIDGroups.has(item.meshID)) {
+      item.meshIDConflict = true
     }
   }
 
