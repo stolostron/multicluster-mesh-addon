@@ -6,6 +6,7 @@ import { useMultiClusterMeshes } from '../../hooks/useMultiClusterMeshes'
 import { useDiscoveredControlPlanes } from '../../hooks/useDiscoveredControlPlanes'
 import { useEnrichedControlPlanes } from '../../hooks/useEnrichedControlPlanes'
 import { useManagedClusters } from '../../hooks/useManagedClusters'
+import { makeEnrichedCP as makeBaseCP } from '../../__fixtures__/testFactories'
 import type { EnrichedControlPlane } from '../../types/istio'
 
 rstest.mock('../../hooks/useMultiClusterMeshes', { mock: true })
@@ -17,10 +18,9 @@ const makeEnrichedCP = (
   cluster: string,
   name: string,
   overrides: Partial<EnrichedControlPlane> = {},
-): EnrichedControlPlane => ({
-  metadata: { name, creationTimestamp: '2026-06-22T12:00:00Z' },
+): EnrichedControlPlane => makeBaseCP({
   clusterName: cluster,
-  controlPlaneNamespace: 'istio-system',
+  metadata: { name, creationTimestamp: '2026-06-22T12:00:00Z' },
   meshID: 'mesh1',
   network: 'network1',
   version: 'v1.24.0',
@@ -141,7 +141,7 @@ describe('DiscoveredMeshDetailPage', () => {
       expect(screen.getByRole('heading', { name: 'mesh1' })).toBeInTheDocument()
     })
 
-    it('shows Discovered label', () => {
+    it('shows Discovered in breadcrumb', () => {
       mockDefaults({ enrichedPlanes: [cp1] })
       render(<DiscoveredMeshDetailPage />)
       expect(screen.getByText('Discovered')).toBeInTheDocument()
@@ -184,8 +184,8 @@ describe('DiscoveredMeshDetailPage', () => {
       mockDefaults({ enrichedPlanes: [cp1, cp2] })
       render(<DiscoveredMeshDetailPage />)
       expect(screen.getByText('Control Planes (2)')).toBeInTheDocument()
-      expect(screen.getAllByText('cluster-a').length).toBeGreaterThanOrEqual(1)
-      expect(screen.getAllByText('cluster-b').length).toBeGreaterThanOrEqual(1)
+      expect(screen.getAllByText('cluster-a')).toHaveLength(2)
+      expect(screen.getAllByText('cluster-b')).toHaveLength(2)
     })
 
     it('links CR names to control plane detail pages', () => {
@@ -193,7 +193,7 @@ describe('DiscoveredMeshDetailPage', () => {
       render(<DiscoveredMeshDetailPage />)
       expect(screen.getByRole('link', { name: 'default' })).toHaveAttribute(
         'href',
-        '/fleet-mesh/control-planes/cluster-a/default',
+        '/fleet-mesh/control-planes/discovered/cluster-a/default',
       )
     })
 
@@ -254,11 +254,13 @@ describe('DiscoveredMeshDetailPage', () => {
       mockDefaults({ enrichedPlanes: [cp] })
       render(<DiscoveredMeshDetailPage />)
 
-      expect(screen.queryAllByText('cluster-a')).toHaveLength(3)
+      expect(screen.getByText('Reconciled')).toBeInTheDocument()
+      expect(screen.queryByText('Ready')).not.toBeInTheDocument()
 
       await user.click(screen.getByText('Show all conditions'))
 
-      expect(screen.queryAllByText('cluster-a')).toHaveLength(4)
+      expect(screen.getByText('Reconciled')).toBeInTheDocument()
+      expect(screen.getByText('Ready')).toBeInTheDocument()
     })
 
     it('toggles back to issues only', async () => {
@@ -275,10 +277,11 @@ describe('DiscoveredMeshDetailPage', () => {
       render(<DiscoveredMeshDetailPage />)
 
       await user.click(screen.getByText('Show all conditions'))
-      expect(screen.queryAllByText('cluster-a')).toHaveLength(4)
+      expect(screen.getByText('Ready')).toBeInTheDocument()
 
       await user.click(screen.getByText('Show issues only'))
-      expect(screen.queryAllByText('cluster-a')).toHaveLength(3)
+      expect(screen.queryByText('Ready')).not.toBeInTheDocument()
+      expect(screen.getByText('Reconciled')).toBeInTheDocument()
     })
 
     it('shows "No issues detected" when all conditions are True and showing issues only', () => {
@@ -338,15 +341,15 @@ describe('DiscoveredMeshDetailPage', () => {
       ], true, null])
       render(<DiscoveredMeshDetailPage />)
       expect(screen.getByText('Clusters (2)')).toBeInTheDocument()
-      expect(screen.getAllByText('Available').length).toBeGreaterThanOrEqual(1)
-      expect(screen.getAllByText('Unavailable').length).toBeGreaterThanOrEqual(1)
+      expect(screen.getAllByText('Available')).toHaveLength(1)
+      expect(screen.getAllByText('Unavailable')).toHaveLength(1)
     })
 
     it('shows Unreachable when cluster is not in ManagedCluster data', () => {
       mockDefaults({ enrichedPlanes: [cp1] })
       rstest.mocked(useManagedClusters).mockReturnValue([[], true, null])
       render(<DiscoveredMeshDetailPage />)
-      expect(screen.getAllByText('Unreachable').length).toBeGreaterThanOrEqual(1)
+      expect(screen.getAllByText('Unreachable')).toHaveLength(1)
     })
 
     it('filters clusters by availability toggle', async () => {
@@ -359,7 +362,7 @@ describe('DiscoveredMeshDetailPage', () => {
       render(<DiscoveredMeshDetailPage />)
       await user.click(screen.getByText('Available (1)'))
       const clusterLinks = screen.getAllByRole('link', { name: 'cluster-a' })
-      expect(clusterLinks.length).toBeGreaterThanOrEqual(1)
+      expect(clusterLinks).toHaveLength(2)
     })
 
     it('filters clusters by search', async () => {
@@ -369,7 +372,7 @@ describe('DiscoveredMeshDetailPage', () => {
       const searchInputs = screen.getAllByPlaceholderText('Filter by cluster name')
       await user.type(searchInputs[0], 'cluster-a')
       const clusterLinks = screen.getAllByRole('link', { name: 'cluster-a' })
-      expect(clusterLinks.length).toBeGreaterThanOrEqual(1)
+      expect(clusterLinks).toHaveLength(2)
     })
 
     it('shows empty state when filter matches nothing', async () => {
@@ -378,7 +381,7 @@ describe('DiscoveredMeshDetailPage', () => {
       render(<DiscoveredMeshDetailPage />)
       const searchInputs = screen.getAllByPlaceholderText('Filter by cluster name')
       await user.type(searchInputs[0], 'zzznomatch')
-      expect(screen.getAllByText('No clusters match the current filter.').length).toBeGreaterThanOrEqual(1)
+      expect(screen.getAllByText('No clusters match the current filter.')).toHaveLength(1)
     })
   })
 })

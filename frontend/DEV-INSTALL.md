@@ -10,7 +10,7 @@ Complete instructions to go from zero to a working Fleet Service Mesh ConsolePlu
 - `podman` installed
 - `jq` installed
 - `make` installed
-- Node.js 20+
+- Node.js `^20.19.0 || >=22.12.0`
 - Go toolchain
 
 ## 1. Get an OpenShift cluster with ACM
@@ -298,7 +298,7 @@ oc get crd -o name | grep -E 'sailoperator\.io|istio\.io' | xargs oc delete
 
 For day-to-day UI work, run the plugin locally with webpack and a local OpenShift Console bridge.
 
-**Prerequisites:** `oc login`, ACM and backend controller deployed on the cluster, Node.js 20+, `podman` or `docker`, and npm dependencies installed.
+**Prerequisites:** `oc login`, ACM and backend controller deployed on the cluster, Node.js `^20.19.0 || >=22.12.0`, `podman` or `docker`, and npm dependencies installed.
 
 ```bash
 cd <multicluster-mesh-addon-repo>/frontend

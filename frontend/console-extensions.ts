@@ -51,7 +51,7 @@ const fleetMeshDetailRoute: EncodedExtension = {
   type: 'console.page/route',
   properties: {
     perspective: 'fleet-service-mesh',
-    path: '/fleet-mesh/meshes/:ns/:name',
+    path: '/fleet-mesh/meshes/managed/:ns/:name',
     component: { $codeRef: 'meshDetailPage.default' },
   },
 }
@@ -78,7 +78,7 @@ const controlPlaneDetailRoute: EncodedExtension = {
   type: 'console.page/route',
   properties: {
     perspective: 'fleet-service-mesh',
-    path: '/fleet-mesh/control-planes/:cluster/:name',
+    path: '/fleet-mesh/control-planes/:type/:cluster/:name',
     component: { $codeRef: 'controlPlaneDetailPage.default' },
   },
 }
@@ -109,8 +109,8 @@ export const extensions: EncodedExtension[] = [
   fleetMeshesNavItem,
   controlPlanesNavItem,
   fleetMeshDetailRoute,
-  fleetMeshListRoute,
   discoveredMeshDetailRoute,
+  fleetMeshListRoute,
   controlPlaneDetailRoute,
   controlPlanesRoute,
   overviewRoute,

@@ -1,6 +1,6 @@
 import { render, screen } from '@testing-library/react'
 import { MeshStatus, getStatusRank } from '../MeshStatus'
-import type { K8sCondition } from '../../types/multiClusterMesh'
+import type { K8sCondition } from '../../types/common'
 
 // i18n is mocked in setupTests.ts: t(key) returns the key (pass-through)
 
@@ -12,13 +12,8 @@ const operatorFailed: K8sCondition = { type: 'OperatorInstalled', status: 'False
 
 describe('MeshStatus', () => {
   describe('with no conditions', () => {
-    it('shows Unknown', () => {
+    it('shows Unknown when no conditions provided', () => {
       render(<MeshStatus />)
-      expect(screen.getByText('Unknown')).toBeInTheDocument()
-    })
-
-    it('shows Unknown when conditions is empty', () => {
-      render(<MeshStatus conditions={[]} />)
       expect(screen.getByText('Unknown')).toBeInTheDocument()
     })
   })

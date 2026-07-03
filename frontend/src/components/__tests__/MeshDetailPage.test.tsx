@@ -3,7 +3,8 @@ import userEvent from '@testing-library/user-event'
 import MeshDetailPage, { ClusterStatusSection } from '../MeshDetailPage'
 import { useParams } from 'react-router-dom-v5-compat'
 import { useK8sWatchResource } from '@openshift-console/dynamic-plugin-sdk'
-import type { MultiClusterMesh, K8sCondition, ClusterMeshStatus } from '../../types/multiClusterMesh'
+import { makeMesh, makeCluster } from '../../__fixtures__/testFactories'
+import type { K8sCondition } from '../../types/common'
 
 // TrustStatusCard has its own test file; stub it here to avoid consuming
 // useK8sWatchResource mock slots meant for the mesh watch.
@@ -37,33 +38,12 @@ rstest.mock('../../hooks/useManagedClusters', () => ({
   ], true, null],
 }))
 
-// ---------------------------------------------------------------------------
-// Test data factories
-// ---------------------------------------------------------------------------
-
 const makeCondition = (
   type: string,
   status: 'True' | 'False' | 'Unknown',
   reason?: string,
   message?: string,
 ): K8sCondition => ({ type, status, reason, message })
-
-const makeMesh = (overrides: Partial<MultiClusterMesh> = {}): MultiClusterMesh => ({
-  apiVersion: 'mesh.open-cluster-management.io/v1alpha1',
-  kind: 'MultiClusterMesh',
-  metadata: { name: 'test-mesh', namespace: 'mesh-system' },
-  spec: { clusterSet: 'global' },
-  ...overrides,
-})
-
-const makeCluster = (
-  name: string,
-  status: 'True' | 'False' | 'Unknown',
-  reason?: string,
-): ClusterMeshStatus => ({
-  clusterName: name,
-  conditions: [makeCondition('OperatorInstalled', status, reason)],
-})
 
 // ---------------------------------------------------------------------------
 // MeshDetailPage — router shell
@@ -77,7 +57,7 @@ describe('MeshDetailPage', () => {
       rstest.mocked(useParams).mockReturnValue({})
       render(<MeshDetailPage />)
       expect(screen.getByText('Not Found')).toBeInTheDocument()
-      expect(screen.getByText('Invalid mesh URL. Expected /fleet-mesh/meshes/:namespace/:name.')).toBeInTheDocument()
+      expect(screen.getByText('Invalid mesh URL. Expected /fleet-mesh/meshes/managed/:namespace/:name.')).toBeInTheDocument()
     })
   })
 
@@ -115,7 +95,7 @@ describe('MeshDetailPage', () => {
       expect(screen.getByRole('heading', { name: 'test-mesh' })).toBeInTheDocument()
     })
 
-    it('shows blue Managed label in header', () => {
+    it('shows Managed in breadcrumb', () => {
       rstest.mocked(useK8sWatchResource).mockReturnValue([makeMesh(), true, null])
       render(<MeshDetailPage />)
       expect(screen.getByText('Managed')).toBeInTheDocument()

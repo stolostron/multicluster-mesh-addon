@@ -3,7 +3,8 @@ import { useMultiClusterMeshes } from './useMultiClusterMeshes'
 import { useDiscoveredControlPlanes } from './useDiscoveredControlPlanes'
 import { useEnrichedControlPlanes } from './useEnrichedControlPlanes'
 import { getStatusRank } from '../components/MeshStatus'
-import type { K8sCondition } from '../types/common'
+import { oldestTimestamp } from '../utils/oldestTimestamp'
+import { worstConditions } from '../utils/worstConditions'
 import type { FleetMeshItem } from '../types/fleetMesh'
 import type { EnrichedControlPlane } from '../types/istio'
 import type { MultiClusterMesh } from '../types/multiClusterMesh'
@@ -20,31 +21,6 @@ export interface UseFleetMeshItemsResult {
   mcmsLoaded: boolean
   searchError: unknown
   searchLoaded: boolean
-}
-
-function oldestTimestamp(planes: EnrichedControlPlane[]): string | undefined {
-  let oldest: string | undefined
-  for (const cp of planes) {
-    const ts = cp.metadata.creationTimestamp
-    if (ts && (!oldest || ts < oldest)) oldest = ts
-  }
-  return oldest
-}
-
-function worstConditions(planes: EnrichedControlPlane[]): {
-  conditions: K8sCondition[] | undefined
-  rank: number
-} {
-  let worstRank = -1
-  let worstConditions: K8sCondition[] | undefined
-  for (const cp of planes) {
-    const rank = getStatusRank(cp.status?.conditions)
-    if (rank > worstRank) {
-      worstRank = rank
-      worstConditions = cp.status?.conditions
-    }
-  }
-  return { conditions: worstConditions, rank: worstRank === -1 ? 1 : worstRank }
 }
 
 function collectManagedMeshIDs(enrichedPlanes: EnrichedControlPlane[]): Set<string> {
@@ -67,6 +43,17 @@ function buildItems(
   const managedItems: FleetMeshItem[] = mcms.map((mcm): FleetMeshItem => {
     const ns = mcm.metadata?.namespace ?? ''
     const name = mcm.metadata?.name ?? ''
+
+    const correlatedPlanes = enrichedPlanes.filter(
+      (cp) => cp.managedBy?.name === name && cp.managedBy?.namespace === ns
+    )
+
+    const { conditions, rank } = correlatedPlanes.length > 0 && correlatedPlanes.some(cp => cp.status?.conditions)
+      ? worstConditions(correlatedPlanes)
+      : { conditions: mcm.status?.conditions, rank: getStatusRank(mcm.status?.conditions) }
+
+    const meshID = correlatedPlanes.find((cp) => cp.meshID)?.meshID
+
     return {
       metadata: {
         name,
@@ -74,13 +61,14 @@ function buildItems(
       },
       clusterCount: mcm.status?.clusterStatus?.length ?? 0,
       clusterSet: mcm.spec.clusterSet,
-      conditions: mcm.status?.conditions,
-      detailLink: `/fleet-mesh/meshes/${encodeURIComponent(ns)}/${encodeURIComponent(name)}`,
+      conditions,
+      detailLink: `/fleet-mesh/meshes/managed/${encodeURIComponent(ns)}/${encodeURIComponent(name)}`,
       kind: 'managed',
       mcm,
       mcmNamespace: ns,
+      meshID,
       meshIDConflict: false,
-      statusRank: getStatusRank(mcm.status?.conditions),
+      statusRank: rank,
       trustIssuer: mcm.spec.security?.trust?.certManager?.issuerRef?.name,
     }
   })
@@ -129,22 +117,15 @@ function buildItems(
       clusterCount: 1,
       conditions: cp.status?.conditions,
       controlPlanes: [cp],
-      detailLink: `/fleet-mesh/control-planes/${encodeURIComponent(cp.clusterName)}/${encodeURIComponent(cp.metadata.name)}`,
+      detailLink: `/fleet-mesh/control-planes/standalone/${encodeURIComponent(cp.clusterName)}/${encodeURIComponent(cp.metadata.name)}`,
       kind: 'discovered',
       statusRank: getStatusRank(cp.status?.conditions),
     })
   }
 
   for (const item of managedItems) {
-    if (!item.mcm) continue
-    const mcmName = item.mcm.metadata?.name
-    const mcmNs = item.mcm.metadata?.namespace
-    for (const cp of enrichedPlanes) {
-      if (cp.managedBy?.name === mcmName && cp.managedBy?.namespace === mcmNs && cp.meshID) {
-        if (!item.meshID) item.meshID = cp.meshID
-        if (meshIDGroups.has(cp.meshID)) item.meshIDConflict = true
-        break
-      }
+    if (item.meshID && meshIDGroups.has(item.meshID)) {
+      item.meshIDConflict = true
     }
   }
 

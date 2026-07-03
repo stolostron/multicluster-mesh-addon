@@ -19,12 +19,14 @@ import {
 } from '@patternfly/react-core'
 import { TopologyIcon, ServerIcon } from '@patternfly/react-icons'
 import { useFleetMeshItems } from '../hooks/useFleetMeshItems'
-import type { MultiClusterMesh, K8sCondition } from '../types/multiClusterMesh'
+import type { MultiClusterMesh } from '../types/multiClusterMesh'
+import type { K8sCondition } from '../types/common'
 import type { EnrichedControlPlane } from '../types/istio'
 import type { StatusColor } from './MeshStatus'
 import { deriveStatus } from './MeshStatus'
 import { StatusDonutChart } from './StatusDonutChart'
 import type { StatusCounts } from './StatusDonutChart'
+import { cpTypeSegment } from '../utils/cpTypeSegment'
 import { useMeshTranslation } from '../utils/i18nUtils'
 
 function countByStatus(items: { conditions?: K8sCondition[] }[], conditionType?: string): StatusCounts {
@@ -58,7 +60,7 @@ function collectRecentIssues(meshes: MultiClusterMesh[], controlPlanes: Enriched
   for (const mesh of meshes) {
     const meshName = mesh.metadata?.name ?? ''
     const meshNamespace = mesh.metadata?.namespace ?? ''
-    const meshLink = `/fleet-mesh/meshes/${encodeURIComponent(meshNamespace)}/${encodeURIComponent(meshName)}`
+    const meshLink = `/fleet-mesh/meshes/managed/${encodeURIComponent(meshNamespace)}/${encodeURIComponent(meshName)}`
 
     for (const c of mesh.status?.conditions ?? []) {
       if (c.status === 'True') continue
@@ -89,7 +91,7 @@ function collectRecentIssues(meshes: MultiClusterMesh[], controlPlanes: Enriched
       issues.push({
         kind: 'controlPlane',
         source: `${cp.clusterName} / ${cp.metadata.name}`,
-        link: `/fleet-mesh/control-planes/${encodeURIComponent(cp.clusterName)}/${encodeURIComponent(cp.metadata.name)}`,
+        link: `/fleet-mesh/control-planes/${cpTypeSegment(cp)}/${encodeURIComponent(cp.clusterName)}/${encodeURIComponent(cp.metadata.name)}`,
         label,
         color,
         lastTransitionTime: c.lastTransitionTime,
@@ -108,7 +110,6 @@ function collectRecentIssues(meshes: MultiClusterMesh[], controlPlanes: Enriched
 
 const OverviewPage: FC = () => {
   const { t } = useMeshTranslation()
-
   const {
     items,
     mcms,

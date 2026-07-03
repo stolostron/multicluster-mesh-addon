@@ -56,9 +56,10 @@ export interface EnrichedControlPlane {
   version?: string
 }
 
-export type CpStatusCategory = 'all' | 'ready' | 'notReady' | 'unknown'
+export type CpCategory = 'ready' | 'notReady' | 'unknown'
+export type CpFilterCategory = 'all' | CpCategory
 
-export function categorizeCp(cp: EnrichedControlPlane): CpStatusCategory {
+export function categorizeCp(cp: EnrichedControlPlane): CpCategory {
   const ready = cp.status?.conditions?.find((c) => c.type === 'Ready')
   if (!ready) return 'unknown'
   if (ready.status === 'True') return 'ready'

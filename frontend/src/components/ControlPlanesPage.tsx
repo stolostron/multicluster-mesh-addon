@@ -18,13 +18,14 @@ import {
   Label,
   PageSection,
   Title,
-  Tooltip,
 } from '@patternfly/react-core'
 import { useMultiClusterMeshes } from '../hooks/useMultiClusterMeshes'
 import { useDiscoveredControlPlanes } from '../hooks/useDiscoveredControlPlanes'
 import { useEnrichedControlPlanes } from '../hooks/useEnrichedControlPlanes'
 import type { EnrichedControlPlane } from '../types/istio'
 import { MeshStatus, getStatusRank } from './MeshStatus'
+import { cpTypeSegment } from '../utils/cpTypeSegment'
+import { clusterDetailLink } from '../utils/linkUtils'
 import { fuzzyCaseInsensitive } from '../utils/filterUtils'
 import type { RowSearchFilter } from '../utils/filterUtils'
 import { useMeshTranslation } from '../utils/i18nUtils'
@@ -39,6 +40,15 @@ function buildColumns(t: (key: string) => string): TableColumn<EnrichedControlPl
         return [...data].sort((a, b) =>
           dir * (a.meshID ?? '').localeCompare(b.meshID ?? ''),
         )
+      },
+    },
+    {
+      title: t('Type'),
+      id: 'type',
+      sort: (data: EnrichedControlPlane[], sortDirection: string) => {
+        const dir = sortDirection === 'asc' ? 1 : -1
+        const typeRank = (cp: EnrichedControlPlane) => cp.managedBy ? 0 : cp.meshID ? 1 : 2
+        return [...data].sort((a, b) => dir * (typeRank(a) - typeRank(b)))
       },
     },
     { title: t('Name'), id: 'name', sort: 'metadata.name' },
@@ -83,30 +93,27 @@ const ControlPlaneRow: FC<RowProps<EnrichedControlPlane>> = ({ obj, activeColumn
     <>
       <TableData id="meshID" activeColumnIDs={activeColumnIDs}>
         {obj.managedBy ? (
-          <Tooltip content={t('Managed by {{name}}', { name: obj.managedBy.name })}>
-            <Link to={`/fleet-mesh/meshes/${obj.managedBy.namespace}/${obj.managedBy.name}`}>
-              <Label color="blue" isCompact>{obj.meshID ?? '-'}</Label>
-            </Link>
-          </Tooltip>
+          <Link to={`/fleet-mesh/meshes/managed/${encodeURIComponent(obj.managedBy.namespace)}/${encodeURIComponent(obj.managedBy.name)}`}>
+            {obj.meshID ?? '-'}
+          </Link>
         ) : obj.meshID ? (
-          <Tooltip content={t('Discovered mesh — not managed by a MultiClusterMesh CR')}>
-            <Link to={`/fleet-mesh/meshes/discovered/${encodeURIComponent(obj.meshID)}`}>
-              <Label color="purple" isCompact>{obj.meshID}</Label>
-            </Link>
-          </Tooltip>
+          <Link to={`/fleet-mesh/meshes/discovered/${encodeURIComponent(obj.meshID)}`}>
+            {obj.meshID}
+          </Link>
         ) : (
-          <Tooltip content={t('Standalone control plane — no mesh ID or managing resource')}>
-            <Label color="grey" isCompact>-</Label>
-          </Tooltip>
+          <span>-</span>
         )}
       </TableData>
+      <TableData id="type" activeColumnIDs={activeColumnIDs}>
+        {obj.managedBy ? t('Managed') : obj.meshID ? t('Discovered') : t('Standalone')}
+      </TableData>
       <TableData id="name" activeColumnIDs={activeColumnIDs}>
-        <Link to={`/fleet-mesh/control-planes/${encodeURIComponent(obj.clusterName)}/${encodeURIComponent(obj.metadata.name)}`}>
+        <Link to={`/fleet-mesh/control-planes/${cpTypeSegment(obj)}/${encodeURIComponent(obj.clusterName)}/${encodeURIComponent(obj.metadata.name)}`}>
           {obj.metadata.name}
         </Link>
       </TableData>
       <TableData id="cluster" activeColumnIDs={activeColumnIDs}>
-        <Link to={`/multicloud/infrastructure/clusters/details/${obj.clusterName}/${obj.clusterName}/overview`}>
+        <Link to={clusterDetailLink(obj.clusterName)}>
           {obj.clusterName}
         </Link>
       </TableData>
@@ -137,6 +144,15 @@ function buildSearchFilters(t: (key: string) => string): RowSearchFilter<Enriche
       filterGroupName: t('Mesh ID'),
       placeholder: t('Filter by mesh ID...'),
       type: 'meshID',
+    },
+    {
+      filter: (input, obj) => {
+        const typeLabel = obj.managedBy ? 'managed' : obj.meshID ? 'discovered' : 'standalone'
+        return fuzzyCaseInsensitive(input.selected?.[0], typeLabel)
+      },
+      filterGroupName: t('Type'),
+      placeholder: t('Filter by type...'),
+      type: 'type',
     },
     {
       filter: (input, obj) => fuzzyCaseInsensitive(input.selected?.[0], obj.clusterName),

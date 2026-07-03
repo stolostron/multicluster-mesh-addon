@@ -73,6 +73,24 @@ describe('buildMcmIndex', () => {
   })
 })
 
+describe('buildMcmIndex — collision handling', () => {
+  it('warns and last MCM wins when different MCMs claim the same cluster+namespace', () => {
+    const warnSpy = rstest.spyOn(console, 'warn').mockImplementation(() => {})
+    const mcms = [
+      makeMCM('mesh-first', 'ns-1', 'istio-system', ['cluster-a']),
+      makeMCM('mesh-second', 'ns-2', 'istio-system', ['cluster-a']),
+    ]
+    const index = buildMcmIndex(mcms)
+
+    expect(warnSpy).toHaveBeenCalledTimes(1)
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('cluster-a/istio-system'),
+    )
+    expect(index.get('cluster-a/istio-system')).toEqual({ name: 'mesh-second', namespace: 'ns-2' })
+    warnSpy.mockRestore()
+  })
+})
+
 describe('lookupMcm', () => {
   const mcms = [
     makeMCM('mesh-a', 'ns-a', 'istio-system', ['cluster-1']),

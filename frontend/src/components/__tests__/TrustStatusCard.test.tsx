@@ -4,7 +4,8 @@ import { TrustStatusCard } from '../TrustStatusCard'
 import { useK8sWatchResource } from '@openshift-console/dynamic-plugin-sdk'
 import type { Certificate } from '../../types/certManager'
 import type { ManifestWork } from '../../types/manifestWork'
-import type { ClusterMeshStatus, K8sCondition } from '../../types/multiClusterMesh'
+import type { ClusterMeshStatus } from '../../types/multiClusterMesh'
+import type { K8sCondition } from '../../types/common'
 
 const CLUSTER_NAME_LABEL = 'mesh.open-cluster-management.io/cluster-name'
 const MESH_NAME_LABEL = 'mesh.open-cluster-management.io/mesh-name'
@@ -98,7 +99,7 @@ afterEach(() => rstest.clearAllMocks())
 // ---------------------------------------------------------------------------
 
 describe('TrustStatusCard — no issuer', () => {
-  it('renders the not-configured message and does not start any watches', () => {
+  it('renders the not-configured message (i18nKey) and does not start any watches', () => {
     render(<TrustStatusCard {...defaultProps} issuerName="" clusterStatuses={[]} />)
     expect(screen.getByText('Trust Status')).toBeInTheDocument()
     expect(screen.getByText('trustNotConfiguredMessage')).toBeInTheDocument()
