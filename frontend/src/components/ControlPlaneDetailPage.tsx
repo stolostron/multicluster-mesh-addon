@@ -32,9 +32,11 @@ import type { K8sCondition } from '../types/common'
 import { useMultiClusterMeshes } from '../hooks/useMultiClusterMeshes'
 import { buildMcmIndex, lookupMcm } from '../utils/correlateMCM'
 import { MeshStatus, statusIcon } from './MeshStatus'
+import { CP_TYPES } from '../utils/cpTypeSegment'
+import type { CpType } from '../utils/cpTypeSegment'
 import { useMeshTranslation } from '../utils/i18nUtils'
 
-const ControlPlaneDetailContent: FC<{ cluster: string; name: string; type: string }> = ({ cluster, name, type }) => {
+const ControlPlaneDetailContent: FC<{ cluster: string; name: string; type: CpType }> = ({ cluster, name, type }) => {
   const { t } = useMeshTranslation()
   const [istio, setIstio] = useState<Istio | null>(null)
   const [loaded, setLoaded] = useState(false)
@@ -204,13 +206,11 @@ const ControlPlaneDetailContent: FC<{ cluster: string; name: string; type: strin
   )
 }
 
-const VALID_TYPES = ['managed', 'discovered', 'standalone']
-
 const ControlPlaneDetailPage: FC = () => {
   const { t } = useMeshTranslation()
   const { type, cluster, name } = useParams<{ type: string; cluster: string; name: string }>()
 
-  if (!type || !cluster || !name || !VALID_TYPES.includes(type)) {
+  if (!type || !cluster || !name || !CP_TYPES.includes(type as CpType)) {
     return (
       <PageSection>
         <EmptyState>
@@ -223,7 +223,7 @@ const ControlPlaneDetailPage: FC = () => {
     )
   }
 
-  return <ControlPlaneDetailContent cluster={cluster} name={name} type={type} />
+  return <ControlPlaneDetailContent cluster={cluster} name={name} type={type as CpType} />
 }
 
 /** Detail page for a single Istio control plane, reached via /fleet-mesh/control-planes/:type/:cluster/:name. */

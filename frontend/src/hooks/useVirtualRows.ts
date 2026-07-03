@@ -27,8 +27,10 @@ export function useVirtualRows<T>(items: T[], rowHeight = 40, overscan = 5): Vir
     }
   }, [handleScroll])
 
-  const startIndex = Math.max(0, Math.floor(scrollTop / rowHeight) - overscan)
-  const endIndex = Math.min(items.length, Math.ceil((scrollTop + containerHeight) / rowHeight) + overscan)
+  const maxScroll = Math.max(0, items.length * rowHeight - containerHeight)
+  const clampedScrollTop = Math.min(scrollTop, maxScroll)
+  const startIndex = Math.max(0, Math.floor(clampedScrollTop / rowHeight) - overscan)
+  const endIndex = Math.min(items.length, Math.ceil((clampedScrollTop + containerHeight) / rowHeight) + overscan)
 
   return {
     bottomSpacer: (items.length - endIndex) * rowHeight,

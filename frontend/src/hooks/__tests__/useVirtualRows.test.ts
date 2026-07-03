@@ -49,4 +49,21 @@ describe('useVirtualRows', () => {
     const { result } = renderHook(() => useVirtualRows(items))
     expect(typeof result.current.containerRef).toBe('function')
   })
+
+  it('clamps scroll position when list shrinks', () => {
+    const largeList = Array.from({ length: 200 }, (_, i) => `item-${i}`)
+    const { result, rerender } = renderHook(
+      ({ items: list }) => useVirtualRows(list, 40, 5),
+      { initialProps: { items: largeList } },
+    )
+
+    expect(result.current.visibleItems.length).toBeGreaterThan(0)
+
+    const smallList = ['a', 'b', 'c']
+    rerender({ items: smallList })
+
+    expect(result.current.visibleItems).toEqual(smallList)
+    expect(result.current.topSpacer).toBe(0)
+    expect(result.current.bottomSpacer).toBe(0)
+  })
 })
