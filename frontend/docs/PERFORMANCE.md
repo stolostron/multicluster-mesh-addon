@@ -78,13 +78,17 @@ The watch is not scoped to mesh-member clusters because that would require indiv
 
 **Solution:** The enrichment cache was moved from `useRef` to a module-level `Map`. This allows the cache to survive component unmounts when navigating between pages. An `initialEnrichmentDone` ref flag gates the `enrichmentLoaded` reset to the first enrichment cycle only, preventing a full table spinner on subsequent search poll updates.
 
+### Virtualized Detail Page Tables
+
+**Problem:** Detail page cards (ClusterStatusSection, ControlPlanesCard, TrustStatusCard, DiscoveredMeshDetailPage Clusters/Conditions) rendered all rows as DOM nodes inside a `maxHeight: 400px` scrollable container. At 1,000 clusters, that's 1,000+ `<tr>` elements causing scroll jank.
+
+**Solution:** A local `useVirtualRows` hook (zero third-party dependencies) renders only visible rows plus a 5-row overscan buffer (~14 DOM rows instead of 1,000). Spacer `<tr>` elements maintain correct scroll position while preserving native table layout. Column widths are synchronized between the separated header table and body table via explicit percentages on both `<th>` and `<td>`.
+
 ## Monitoring Checklist
 
 Things to watch as scale increases:
 
 - [ ] **Enrichment latency**: At 200 CPs with 200ms per round, enrichment takes ~4s. If latency grows, consider increasing the concurrency limit from 10 or investigating batch API alternatives.
-- [ ] **TrustStatusCard DOM size**: At 200+ clusters, the card renders all rows in a plain `<table>`. If scrolling becomes janky, add pagination or virtualization within the card.
-- [ ] **ClusterStatusSection DOM size**: Same concern as TrustStatusCard. The search and filter toggles reduce visible rows, but the full DOM is still rendered.
 - [ ] **Cache memory**: Each cached Istio CR is ~2-5KB. At 500+ CPs with cluster churn, monitor memory usage during long sessions. Eviction is in place but only runs after enrichment cycles.
 - [ ] **Search response size**: The full fleet search response is metadata-only and should be small even at 500+ CPs. If it grows, investigate the `limit` parameter on `useFleetSearchPoll`.
 - [ ] **MCM index rebuild frequency**: The `mcmIndex` rebuilds whenever the MCMs WebSocket watch fires. Building a Map from 100 MCMs with 20 clusters each is ~2000 `Map.set` calls (microseconds), but if MCM count grows significantly or WebSocket updates become frequent, profile whether the index build cost is measurable.

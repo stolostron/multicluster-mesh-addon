@@ -27,7 +27,10 @@ import { certificateGroupVersionKind } from '../types/certManager'
 import type { ManifestWork } from '../types/manifestWork'
 import { manifestWorkGroupVersionKind } from '../types/manifestWork'
 import type { K8sCondition } from '../types/common'
+import { useVirtualRows } from '../hooks/useVirtualRows'
 import { useMeshTranslation } from '../utils/i18nUtils'
+
+const TRUST_COL_WIDTHS = ['20%', '20%', '20%', '20%', '20%']
 
 const CLUSTER_NAME_LABEL = 'mesh.open-cluster-management.io/cluster-name'
 const MESH_NAME_LABEL = 'mesh.open-cluster-management.io/mesh-name'
@@ -166,6 +169,8 @@ export const TrustStatusCard: FC<TrustStatusCardProps> = ({
     })
   }, [clusterStatuses, categoryByCluster, filter, search])
 
+  const { visibleItems, topSpacer, bottomSpacer, containerRef } = useVirtualRows(filtered)
+
   if (!hasIssuer) {
     return (
       <Card isCompact>
@@ -276,49 +281,51 @@ export const TrustStatusCard: FC<TrustStatusCardProps> = ({
           </FlexItem>
         </Flex>
 
-        <div style={{ maxHeight: '400px', overflowY: 'auto' }}>
-          <table className="pf-v6-c-table pf-m-grid-md pf-m-compact" role="grid">
-            <thead className="pf-v6-c-table__thead" style={{ position: 'sticky', top: 0, zIndex: 1 }}>
-              <tr className="pf-v6-c-table__tr">
-                <th className="pf-v6-c-table__th" scope="col">{t('Cluster')}</th>
-                <th className="pf-v6-c-table__th" scope="col">{t('Certificate')}</th>
-                <th className="pf-v6-c-table__th" scope="col">{t('Expires')}</th>
-                <th className="pf-v6-c-table__th" scope="col">{t('Renews')}</th>
-                <th className="pf-v6-c-table__th" scope="col">{t('Distribution')}</th>
-              </tr>
-            </thead>
-            <tbody className="pf-v6-c-table__tbody">
-              {filtered.length === 0 ? (
-                <tr className="pf-v6-c-table__tr">
-                  <td className="pf-v6-c-table__td" colSpan={5} style={{ textAlign: 'center' }}>
-                    {t('No clusters match the current filter.')}
-                  </td>
-                </tr>
-              ) : (
-                filtered.map((cs) => {
+        <table className="pf-v6-c-table pf-m-grid-md pf-m-compact" role="grid" style={{ tableLayout: 'fixed' }}>
+          <thead className="pf-v6-c-table__thead">
+            <tr className="pf-v6-c-table__tr">
+              <th className="pf-v6-c-table__th" scope="col" style={{ width: TRUST_COL_WIDTHS[0] }}>{t('Cluster')}</th>
+              <th className="pf-v6-c-table__th" scope="col" style={{ width: TRUST_COL_WIDTHS[1] }}>{t('Certificate')}</th>
+              <th className="pf-v6-c-table__th" scope="col" style={{ width: TRUST_COL_WIDTHS[2] }}>{t('Expires')}</th>
+              <th className="pf-v6-c-table__th" scope="col" style={{ width: TRUST_COL_WIDTHS[3] }}>{t('Renews')}</th>
+              <th className="pf-v6-c-table__th" scope="col" style={{ width: TRUST_COL_WIDTHS[4] }}>{t('Distribution')}</th>
+            </tr>
+          </thead>
+        </table>
+        <div ref={containerRef} style={{ maxHeight: '368px', overflowY: 'auto' }}>
+          {filtered.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '1rem' }}>
+              {t('No clusters match the current filter.')}
+            </div>
+          ) : (
+            <table className="pf-v6-c-table pf-m-grid-md pf-m-compact" role="grid" style={{ tableLayout: 'fixed' }}>
+              <tbody className="pf-v6-c-table__tbody">
+                {topSpacer > 0 && <tr><td colSpan={5} style={{ height: topSpacer, padding: 0, border: 'none' }} /></tr>}
+                {visibleItems.map((cs) => {
                   const cert = certsByCluster.get(cs.clusterName)
                   const mw = mwByCluster.get(cs.clusterName)
                   return (
                     <tr className="pf-v6-c-table__tr" key={cs.clusterName}>
-                      <td className="pf-v6-c-table__td">
+                      <td className="pf-v6-c-table__td" style={{ width: TRUST_COL_WIDTHS[0] }}>
                         <Link to={`/multicloud/infrastructure/clusters/details/${cs.clusterName}/${cs.clusterName}/overview`}>
                           {cs.clusterName}
                         </Link>
                       </td>
-                      <td className="pf-v6-c-table__td">{certStatusLabel(cert, t)}</td>
-                      <td className="pf-v6-c-table__td">
+                      <td className="pf-v6-c-table__td" style={{ width: TRUST_COL_WIDTHS[1] }}>{certStatusLabel(cert, t)}</td>
+                      <td className="pf-v6-c-table__td" style={{ width: TRUST_COL_WIDTHS[2] }}>
                         {cert?.status?.notAfter ? <Timestamp timestamp={cert.status.notAfter} /> : '-'}
                       </td>
-                      <td className="pf-v6-c-table__td">
+                      <td className="pf-v6-c-table__td" style={{ width: TRUST_COL_WIDTHS[3] }}>
                         {cert?.status?.renewalTime ? <Timestamp timestamp={cert.status.renewalTime} /> : '-'}
                       </td>
-                      <td className="pf-v6-c-table__td">{distributionStatusLabel(mw, mwError, t)}</td>
+                      <td className="pf-v6-c-table__td" style={{ width: TRUST_COL_WIDTHS[4] }}>{distributionStatusLabel(mw, mwError, t)}</td>
                     </tr>
                   )
-                })
-              )}
-            </tbody>
-          </table>
+                })}
+                {bottomSpacer > 0 && <tr><td colSpan={5} style={{ height: bottomSpacer, padding: 0, border: 'none' }} /></tr>}
+              </tbody>
+            </table>
+          )}
         </div>
       </CardBody>
     </Card>

@@ -41,7 +41,11 @@ import type { ClusterAvailability, ManagedCluster } from '../types/managedCluste
 import { getClusterAvailability, availabilityColor, availabilityLabelKey } from '../types/managedCluster'
 import { ControlPlanesCard } from './ControlPlanesCard'
 import { MeshStatus, getStatusRank, statusIcon } from './MeshStatus'
+import { useVirtualRows } from '../hooks/useVirtualRows'
 import { useMeshTranslation } from '../utils/i18nUtils'
+
+const CLUSTER_COL_WIDTHS = ['60%', '40%']
+const CONDITION_COL_WIDTHS = ['12%', '12%', '14%', '10%', '12%', '25%', '15%']
 
 function aggregateStatus(planes: EnrichedControlPlane[]): K8sCondition[] | undefined {
   let worstRank = -1
@@ -126,6 +130,8 @@ const DiscoveredMeshDetailContent: FC<{ meshID: string }> = ({ meshID }) => {
     })
   }, [uniqueClusterNames, clusterAvailabilityMap, clusterFilter, clusterSearch])
 
+  const { visibleItems: visibleClusters, topSpacer: clusterTopSpacer, bottomSpacer: clusterBottomSpacer, containerRef: clusterContainerRef } = useVirtualRows(filteredClusters)
+
   const worstConditions = useMemo(() => aggregateStatus(matchingPlanes), [matchingPlanes])
   const networks = useMemo(() => uniqueNetworks(matchingPlanes), [matchingPlanes])
   const created = useMemo(() => oldestTimestamp(matchingPlanes), [matchingPlanes])
@@ -144,6 +150,8 @@ const DiscoveredMeshDetailContent: FC<{ meshID: string }> = ({ meshID }) => {
     }
     return showAllConditions ? all : all.filter((entry) => entry.condition.status !== 'True')
   }, [matchingPlanes, showAllConditions])
+
+  const { visibleItems: visibleConditionRows, topSpacer: condTopSpacer, bottomSpacer: condBottomSpacer, containerRef: condContainerRef } = useVirtualRows(visibleConditions)
 
   const loaded = searchLoaded && enrichmentLoaded
 
@@ -301,40 +309,42 @@ const DiscoveredMeshDetailContent: FC<{ meshID: string }> = ({ meshID }) => {
                   </FlexItem>
                 </Flex>
 
-                <div style={{ maxHeight: '400px', overflowY: 'auto' }}>
-                  <table className="pf-v6-c-table pf-m-grid-md pf-m-compact" role="grid">
-                    <thead className="pf-v6-c-table__thead" style={{ position: 'sticky', top: 0, zIndex: 1 }}>
-                      <tr className="pf-v6-c-table__tr">
-                        <th className="pf-v6-c-table__th" scope="col">{t('Cluster')}</th>
-                        <th className="pf-v6-c-table__th" scope="col">{t('Cluster Status')}</th>
-                      </tr>
-                    </thead>
-                    <tbody className="pf-v6-c-table__tbody">
-                      {filteredClusters.length === 0 ? (
-                        <tr className="pf-v6-c-table__tr">
-                          <td className="pf-v6-c-table__td" colSpan={2} style={{ textAlign: 'center' }}>
-                            {t('No clusters match the current filter.')}
-                          </td>
-                        </tr>
-                      ) : (
-                        filteredClusters.map((clusterName) => {
+                <table className="pf-v6-c-table pf-m-grid-md pf-m-compact" role="grid" style={{ tableLayout: 'fixed' }}>
+                  <thead className="pf-v6-c-table__thead">
+                    <tr className="pf-v6-c-table__tr">
+                      <th className="pf-v6-c-table__th" scope="col" style={{ width: CLUSTER_COL_WIDTHS[0] }}>{t('Cluster')}</th>
+                      <th className="pf-v6-c-table__th" scope="col" style={{ width: CLUSTER_COL_WIDTHS[1] }}>{t('Cluster Status')}</th>
+                    </tr>
+                  </thead>
+                </table>
+                <div ref={clusterContainerRef} style={{ maxHeight: '368px', overflowY: 'auto' }}>
+                  {filteredClusters.length === 0 ? (
+                    <div style={{ textAlign: 'center', padding: '1rem' }}>
+                      {t('No clusters match the current filter.')}
+                    </div>
+                  ) : (
+                    <table className="pf-v6-c-table pf-m-grid-md pf-m-compact" role="grid" style={{ tableLayout: 'fixed' }}>
+                      <tbody className="pf-v6-c-table__tbody">
+                        {clusterTopSpacer > 0 && <tr><td colSpan={2} style={{ height: clusterTopSpacer, padding: 0, border: 'none' }} /></tr>}
+                        {visibleClusters.map((clusterName) => {
                           const availability = clusterAvailabilityMap.get(clusterName) ?? 'unreachable'
                           return (
                             <tr className="pf-v6-c-table__tr" key={clusterName}>
-                              <td className="pf-v6-c-table__td">
+                              <td className="pf-v6-c-table__td" style={{ width: CLUSTER_COL_WIDTHS[0] }}>
                                 <Link to={`/multicloud/infrastructure/clusters/details/${clusterName}/${clusterName}/overview`}>
                                   {clusterName}
                                 </Link>
                               </td>
-                              <td className="pf-v6-c-table__td">
+                              <td className="pf-v6-c-table__td" style={{ width: CLUSTER_COL_WIDTHS[1] }}>
                                 <Label color={availabilityColor(availability)} isCompact>{t(availabilityLabelKey(availability))}</Label>
                               </td>
                             </tr>
                           )
-                        })
-                      )}
-                    </tbody>
-                  </table>
+                        })}
+                        {clusterBottomSpacer > 0 && <tr><td colSpan={2} style={{ height: clusterBottomSpacer, padding: 0, border: 'none' }} /></tr>}
+                      </tbody>
+                    </table>
+                  )}
                 </div>
               </CardBody>
             </Card>
@@ -366,36 +376,42 @@ const DiscoveredMeshDetailContent: FC<{ meshID: string }> = ({ meshID }) => {
                       <EmptyStateBody>{t('No issues detected.')}</EmptyStateBody>
                     </EmptyState>
                   ) : (
-                    <div style={{ maxHeight: '400px', overflowY: 'auto' }}>
-                    <table className="pf-v6-c-table pf-m-grid-md pf-m-compact" role="grid">
-                      <thead className="pf-v6-c-table__thead" style={{ position: 'sticky', top: 0, zIndex: 1 }}>
+                    <>
+                    <table className="pf-v6-c-table pf-m-grid-md pf-m-compact" role="grid" style={{ tableLayout: 'fixed' }}>
+                      <thead className="pf-v6-c-table__thead">
                         <tr className="pf-v6-c-table__tr">
-                          <th className="pf-v6-c-table__th" scope="col">{t('Cluster')}</th>
-                          <th className="pf-v6-c-table__th" scope="col">{t('Control Plane')}</th>
-                          <th className="pf-v6-c-table__th" scope="col">{t('Type')}</th>
-                          <th className="pf-v6-c-table__th" scope="col">{t('Status')}</th>
-                          <th className="pf-v6-c-table__th" scope="col">{t('Reason')}</th>
-                          <th className="pf-v6-c-table__th" scope="col">{t('Message')}</th>
-                          <th className="pf-v6-c-table__th" scope="col">{t('Last Transition')}</th>
+                          <th className="pf-v6-c-table__th" scope="col" style={{ width: CONDITION_COL_WIDTHS[0] }}>{t('Cluster')}</th>
+                          <th className="pf-v6-c-table__th" scope="col" style={{ width: CONDITION_COL_WIDTHS[1] }}>{t('Control Plane')}</th>
+                          <th className="pf-v6-c-table__th" scope="col" style={{ width: CONDITION_COL_WIDTHS[2] }}>{t('Type')}</th>
+                          <th className="pf-v6-c-table__th" scope="col" style={{ width: CONDITION_COL_WIDTHS[3] }}>{t('Status')}</th>
+                          <th className="pf-v6-c-table__th" scope="col" style={{ width: CONDITION_COL_WIDTHS[4] }}>{t('Reason')}</th>
+                          <th className="pf-v6-c-table__th" scope="col" style={{ width: CONDITION_COL_WIDTHS[5] }}>{t('Message')}</th>
+                          <th className="pf-v6-c-table__th" scope="col" style={{ width: CONDITION_COL_WIDTHS[6] }}>{t('Last Transition')}</th>
                         </tr>
                       </thead>
-                      <tbody className="pf-v6-c-table__tbody">
-                        {visibleConditions.map((entry, i) => (
-                          <tr className="pf-v6-c-table__tr" key={`${entry.clusterName}-${entry.cpName}-${entry.condition.type}-${i}`}>
-                            <td className="pf-v6-c-table__td">{entry.clusterName}</td>
-                            <td className="pf-v6-c-table__td">{entry.cpName}</td>
-                            <td className="pf-v6-c-table__td">{entry.condition.type}</td>
-                            <td className="pf-v6-c-table__td">{statusIcon(entry.condition.status)}</td>
-                            <td className="pf-v6-c-table__td">{entry.condition.reason ?? '-'}</td>
-                            <td className="pf-v6-c-table__td">{entry.condition.message ?? '-'}</td>
-                            <td className="pf-v6-c-table__td">
-                              {entry.condition.lastTransitionTime ? <Timestamp timestamp={entry.condition.lastTransitionTime} /> : '-'}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
                     </table>
+                    <div ref={condContainerRef} style={{ maxHeight: '368px', overflowY: 'auto' }}>
+                      <table className="pf-v6-c-table pf-m-grid-md pf-m-compact" role="grid" style={{ tableLayout: 'fixed' }}>
+                        <tbody className="pf-v6-c-table__tbody">
+                          {condTopSpacer > 0 && <tr><td colSpan={7} style={{ height: condTopSpacer, padding: 0, border: 'none' }} /></tr>}
+                          {visibleConditionRows.map((entry, i) => (
+                            <tr className="pf-v6-c-table__tr" key={`${entry.clusterName}-${entry.cpName}-${entry.condition.type}-${i}`}>
+                              <td className="pf-v6-c-table__td" style={{ width: CONDITION_COL_WIDTHS[0] }}>{entry.clusterName}</td>
+                              <td className="pf-v6-c-table__td" style={{ width: CONDITION_COL_WIDTHS[1] }}>{entry.cpName}</td>
+                              <td className="pf-v6-c-table__td" style={{ width: CONDITION_COL_WIDTHS[2] }}>{entry.condition.type}</td>
+                              <td className="pf-v6-c-table__td" style={{ width: CONDITION_COL_WIDTHS[3] }}>{statusIcon(entry.condition.status)}</td>
+                              <td className="pf-v6-c-table__td" style={{ width: CONDITION_COL_WIDTHS[4] }}>{entry.condition.reason ?? '-'}</td>
+                              <td className="pf-v6-c-table__td" style={{ width: CONDITION_COL_WIDTHS[5] }}>{entry.condition.message ?? '-'}</td>
+                              <td className="pf-v6-c-table__td" style={{ width: CONDITION_COL_WIDTHS[6] }}>
+                                {entry.condition.lastTransitionTime ? <Timestamp timestamp={entry.condition.lastTransitionTime} /> : '-'}
+                              </td>
+                            </tr>
+                          ))}
+                          {condBottomSpacer > 0 && <tr><td colSpan={7} style={{ height: condBottomSpacer, padding: 0, border: 'none' }} /></tr>}
+                        </tbody>
+                      </table>
                     </div>
+                    </>
                   )}
                 </CardBody>
               </Card>

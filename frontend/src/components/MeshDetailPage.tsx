@@ -30,6 +30,7 @@ import {
   Title,
   ToggleGroup,
   ToggleGroupItem,
+  Tooltip,
 } from '@patternfly/react-core'
 import type { MultiClusterMesh, K8sCondition, ClusterMeshStatus } from '../types/multiClusterMesh'
 import { multiClusterMeshGroupVersionKind } from '../types/multiClusterMesh'
@@ -43,7 +44,10 @@ import { getClusterAvailability, availabilityColor, availabilityLabelKey } from 
 import { ControlPlanesCard } from './ControlPlanesCard'
 import { MeshStatus, statusIcon } from './MeshStatus'
 import { TrustStatusCard } from './TrustStatusCard'
+import { useVirtualRows } from '../hooks/useVirtualRows'
 import { useMeshTranslation } from '../utils/i18nUtils'
+
+const CLUSTER_COL_WIDTHS = ['25%', '20%', '20%', '35%']
 
 function conditionMessage(condition: K8sCondition): string {
   if (condition.message) return condition.message
@@ -98,6 +102,8 @@ export const ClusterStatusSection: FC<{
       return true
     })
   }, [clusterStatuses, categoryMap, filter, search])
+
+  const { visibleItems, topSpacer, bottomSpacer, containerRef } = useVirtualRows(filtered)
 
   if (clusterStatuses.length === 0) {
     const readyCondition = meshConditions?.find((c) => c.type === 'Ready')
@@ -161,51 +167,54 @@ export const ClusterStatusSection: FC<{
               </FlexItem>
             </Flex>
 
-            <div style={{ maxHeight: '400px', overflowY: 'auto' }}>
-              <table className="pf-v6-c-table pf-m-grid-md pf-m-compact" role="grid">
-                <thead className="pf-v6-c-table__thead" style={{ position: 'sticky', top: 0, zIndex: 1 }}>
-                  <tr className="pf-v6-c-table__tr">
-                    <th className="pf-v6-c-table__th" scope="col">{t('Cluster')}</th>
-                    <th className="pf-v6-c-table__th" scope="col">{t('Cluster Status')}</th>
-                    <th className="pf-v6-c-table__th" scope="col">{t('Operator Status')}</th>
-                    <th className="pf-v6-c-table__th" scope="col">{t('Message')}</th>
-                  </tr>
-                </thead>
-                <tbody className="pf-v6-c-table__tbody">
-                  {filtered.length === 0 ? (
-                    <tr className="pf-v6-c-table__tr">
-                      <td className="pf-v6-c-table__td" colSpan={4} style={{ textAlign: 'center' }}>
-                        {t('No clusters match the current filter.')}
-                      </td>
-                    </tr>
-                  ) : (
-                    filtered.map((cs) => {
+            <table className="pf-v6-c-table pf-m-grid-md pf-m-compact" role="grid" style={{ tableLayout: 'fixed' }}>
+              <thead className="pf-v6-c-table__thead">
+                <tr className="pf-v6-c-table__tr">
+                  <th className="pf-v6-c-table__th" scope="col" style={{ width: CLUSTER_COL_WIDTHS[0] }}>{t('Cluster')}</th>
+                  <th className="pf-v6-c-table__th" scope="col" style={{ width: CLUSTER_COL_WIDTHS[1] }}>{t('Cluster Status')}</th>
+                  <th className="pf-v6-c-table__th" scope="col" style={{ width: CLUSTER_COL_WIDTHS[2] }}>{t('Operator Status')}</th>
+                  <th className="pf-v6-c-table__th" scope="col" style={{ width: CLUSTER_COL_WIDTHS[3] }}>{t('Message')}</th>
+                </tr>
+              </thead>
+            </table>
+            <div ref={containerRef} style={{ maxHeight: '368px', overflowY: 'auto' }}>
+              {filtered.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: '1rem' }}>
+                  {t('No clusters match the current filter.')}
+                </div>
+              ) : (
+                <table className="pf-v6-c-table pf-m-grid-md pf-m-compact" role="grid" style={{ tableLayout: 'fixed' }}>
+                  <tbody className="pf-v6-c-table__tbody">
+                    {topSpacer > 0 && <tr><td colSpan={4} style={{ height: topSpacer, padding: 0, border: 'none' }} /></tr>}
+                    {visibleItems.map((cs) => {
                       const operatorCondition = cs.conditions?.find((c) => c.type === 'OperatorInstalled')
+                      const msg = operatorCondition ? conditionMessage(operatorCondition) : '-'
                       return (
                         <tr className="pf-v6-c-table__tr" key={cs.clusterName}>
-                          <td className="pf-v6-c-table__td">
+                          <td className="pf-v6-c-table__td" style={{ width: CLUSTER_COL_WIDTHS[0] }}>
                             <Link to={`/multicloud/infrastructure/clusters/details/${cs.clusterName}/${cs.clusterName}/overview`}>
                               {cs.clusterName}
                             </Link>
                           </td>
-                          <td className="pf-v6-c-table__td">
+                          <td className="pf-v6-c-table__td" style={{ width: CLUSTER_COL_WIDTHS[1] }}>
                             {managedClustersLoaded ? (() => {
                               const availability = getClusterAvailability(managedClusterMap?.get(cs.clusterName))
                               return <Label color={availabilityColor(availability)} isCompact>{t(availabilityLabelKey(availability))}</Label>
                             })() : '-'}
                           </td>
-                          <td className="pf-v6-c-table__td">
+                          <td className="pf-v6-c-table__td" style={{ width: CLUSTER_COL_WIDTHS[2] }}>
                             <MeshStatus conditions={cs.conditions} conditionType="OperatorInstalled" isCompact />
                           </td>
-                          <td className="pf-v6-c-table__td">
-                            {operatorCondition ? conditionMessage(operatorCondition) : '-'}
+                          <td className="pf-v6-c-table__td" style={{ width: CLUSTER_COL_WIDTHS[3], overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            <Tooltip content={msg}><span>{msg}</span></Tooltip>
                           </td>
                         </tr>
                       )
-                    })
-                  )}
-                </tbody>
-              </table>
+                    })}
+                    {bottomSpacer > 0 && <tr><td colSpan={4} style={{ height: bottomSpacer, padding: 0, border: 'none' }} /></tr>}
+                  </tbody>
+                </table>
+              )}
             </div>
           </GridItem>
         </Grid>

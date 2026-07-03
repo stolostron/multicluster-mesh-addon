@@ -15,7 +15,10 @@ import {
 import type { EnrichedControlPlane, CpStatusCategory } from '../types/istio'
 import { categorizeCp } from '../types/istio'
 import { MeshStatus } from './MeshStatus'
+import { useVirtualRows } from '../hooks/useVirtualRows'
 import { useMeshTranslation } from '../utils/i18nUtils'
+
+const COL_WIDTHS = ['25%', '20%', '20%', '15%', '20%']
 
 const ControlPlanesCard: FC<{ planes: EnrichedControlPlane[] }> = ({ planes }) => {
   const { t } = useMeshTranslation()
@@ -44,6 +47,8 @@ const ControlPlanesCard: FC<{ planes: EnrichedControlPlane[] }> = ({ planes }) =
       return true
     })
   }, [planes, categoryMap, filter, search])
+
+  const { visibleItems, topSpacer, bottomSpacer, containerRef } = useVirtualRows(filtered)
 
   if (planes.length === 0) return null
 
@@ -86,40 +91,41 @@ const ControlPlanesCard: FC<{ planes: EnrichedControlPlane[] }> = ({ planes }) =
           </FlexItem>
         </Flex>
 
-        <div style={{ maxHeight: '400px', overflowY: 'auto' }}>
-          <table className="pf-v6-c-table pf-m-grid-md pf-m-compact" role="grid">
-            <thead className="pf-v6-c-table__thead" style={{ position: 'sticky', top: 0, zIndex: 1 }}>
-              <tr className="pf-v6-c-table__tr">
-                <th className="pf-v6-c-table__th" scope="col">{t('Cluster')}</th>
-                <th className="pf-v6-c-table__th" scope="col">{t('Name')}</th>
-                <th className="pf-v6-c-table__th" scope="col">{t('Namespace')}</th>
-                <th className="pf-v6-c-table__th" scope="col">{t('Version')}</th>
-                <th className="pf-v6-c-table__th" scope="col">{t('Status')}</th>
-              </tr>
-            </thead>
-            <tbody className="pf-v6-c-table__tbody">
-              {filtered.length === 0 ? (
-                <tr className="pf-v6-c-table__tr">
-                  <td className="pf-v6-c-table__td" colSpan={5} style={{ textAlign: 'center' }}>
-                    {t('No control planes match the current filter.')}
-                  </td>
-                </tr>
-              ) : (
-                filtered.map((cp) => (
+        <table className="pf-v6-c-table pf-m-grid-md pf-m-compact" role="grid" style={{ tableLayout: 'fixed' }}>
+          <thead className="pf-v6-c-table__thead">
+            <tr className="pf-v6-c-table__tr">
+              <th className="pf-v6-c-table__th" scope="col" style={{ width: COL_WIDTHS[0] }}>{t('Cluster')}</th>
+              <th className="pf-v6-c-table__th" scope="col" style={{ width: COL_WIDTHS[1] }}>{t('Name')}</th>
+              <th className="pf-v6-c-table__th" scope="col" style={{ width: COL_WIDTHS[2] }}>{t('Namespace')}</th>
+              <th className="pf-v6-c-table__th" scope="col" style={{ width: COL_WIDTHS[3] }}>{t('Version')}</th>
+              <th className="pf-v6-c-table__th" scope="col" style={{ width: COL_WIDTHS[4] }}>{t('Status')}</th>
+            </tr>
+          </thead>
+        </table>
+        <div ref={containerRef} style={{ maxHeight: '368px', overflowY: 'auto' }}>
+          {filtered.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '1rem' }}>
+              {t('No control planes match the current filter.')}
+            </div>
+          ) : (
+            <table className="pf-v6-c-table pf-m-grid-md pf-m-compact" role="grid" style={{ tableLayout: 'fixed' }}>
+              <tbody className="pf-v6-c-table__tbody">
+                {topSpacer > 0 && <tr><td colSpan={5} style={{ height: topSpacer, padding: 0, border: 'none' }} /></tr>}
+                {visibleItems.map((cp) => (
                   <tr className="pf-v6-c-table__tr" key={`${cp.clusterName}/${cp.metadata.name}`}>
-                    <td className="pf-v6-c-table__td">
+                    <td className="pf-v6-c-table__td" style={{ width: COL_WIDTHS[0] }}>
                       <Link to={`/multicloud/infrastructure/clusters/details/${cp.clusterName}/${cp.clusterName}/overview`}>
                         {cp.clusterName}
                       </Link>
                     </td>
-                    <td className="pf-v6-c-table__td">
+                    <td className="pf-v6-c-table__td" style={{ width: COL_WIDTHS[1] }}>
                       <Link to={`/fleet-mesh/control-planes/${encodeURIComponent(cp.clusterName)}/${encodeURIComponent(cp.metadata.name)}`}>
                         {cp.metadata.name}
                       </Link>
                     </td>
-                    <td className="pf-v6-c-table__td">{cp.controlPlaneNamespace ?? '-'}</td>
-                    <td className="pf-v6-c-table__td">{cp.version ?? '-'}</td>
-                    <td className="pf-v6-c-table__td">
+                    <td className="pf-v6-c-table__td" style={{ width: COL_WIDTHS[2] }}>{cp.controlPlaneNamespace ?? '-'}</td>
+                    <td className="pf-v6-c-table__td" style={{ width: COL_WIDTHS[3] }}>{cp.version ?? '-'}</td>
+                    <td className="pf-v6-c-table__td" style={{ width: COL_WIDTHS[4] }}>
                       {cp.status?.conditions ? (
                         <MeshStatus conditions={cp.status.conditions} conditionType="Ready" isCompact />
                       ) : (
@@ -127,10 +133,11 @@ const ControlPlanesCard: FC<{ planes: EnrichedControlPlane[] }> = ({ planes }) =
                       )}
                     </td>
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
+                ))}
+                {bottomSpacer > 0 && <tr><td colSpan={5} style={{ height: bottomSpacer, padding: 0, border: 'none' }} /></tr>}
+              </tbody>
+            </table>
+          )}
         </div>
       </CardBody>
     </Card>
