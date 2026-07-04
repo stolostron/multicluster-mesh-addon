@@ -53,11 +53,14 @@ export function setInEnrichmentCache(cluster: string, name: string, data: Istio)
   const cacheKey = `${cluster}/${name}`
   enrichmentCache.delete(cacheKey)
   enrichmentCache.set(cacheKey, { data, fetchedAt: Date.now() })
+  if (enrichmentCache.size > MAX_CACHE_SIZE) {
+    const oldest = enrichmentCache.keys().next().value
+    if (oldest !== undefined) enrichmentCache.delete(oldest)
+  }
 }
 
 async function fetchInChunks(
   pending: { cluster: string; name: string }[],
-  cache: Map<string, CacheEntry>,
   onChunkProcessed: (n: number) => void,
   isCancelled: () => boolean,
 ) {
@@ -75,13 +78,7 @@ async function fetchInChunks(
     for (const result of results) {
       if (result.status === 'fulfilled') {
         const { cluster, name, data } = result.value
-        const cacheKey = `${cluster}/${name}`
-        cache.delete(cacheKey)
-        cache.set(cacheKey, { data, fetchedAt: Date.now() })
-        if (cache.size > MAX_CACHE_SIZE) {
-          const oldest = cache.keys().next().value
-          if (oldest !== undefined) cache.delete(oldest)
-        }
+        setInEnrichmentCache(cluster, name, data)
       }
     }
     onChunkProcessed(chunk.length)
@@ -142,7 +139,6 @@ export function useEnrichedControlPlanes(
 
     fetchInChunks(
       pending,
-      enrichmentCache,
       () => {
         if (!cancelled) {
           if (debounceRef.current) clearTimeout(debounceRef.current)

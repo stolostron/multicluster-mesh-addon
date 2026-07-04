@@ -71,29 +71,30 @@ describe('ControlPlanesCard', () => {
     expect(screen.queryByText('cluster-b')).not.toBeInTheDocument()
   })
 
-  it('filters by search term matching cluster or name', () => {
-    rstest.useFakeTimers()
-    const planes = [
-      makeCp('cluster-a', 'default'),
-      makeCp('cluster-b', 'default'),
-    ]
-    render(<ControlPlanesCard planes={planes} />)
+  describe('search with debounce', () => {
+    beforeEach(() => { rstest.useFakeTimers() })
+    afterEach(() => { rstest.useRealTimers() })
 
-    fireEvent.change(screen.getByPlaceholderText('Filter by cluster name'), { target: { value: 'cluster-a' } })
-    act(() => { rstest.advanceTimersByTime(200) })
-    expect(screen.getByText('cluster-a')).toBeInTheDocument()
-    expect(screen.queryByText('cluster-b')).not.toBeInTheDocument()
-    rstest.useRealTimers()
-  })
+    it('filters by search term matching cluster or name', () => {
+      const planes = [
+        makeCp('cluster-a', 'default'),
+        makeCp('cluster-b', 'default'),
+      ]
+      render(<ControlPlanesCard planes={planes} />)
 
-  it('shows empty state when filter matches nothing', () => {
-    rstest.useFakeTimers()
-    render(<ControlPlanesCard planes={[makeCp('cluster-a', 'default')]} />)
+      fireEvent.change(screen.getByPlaceholderText('Filter by cluster name'), { target: { value: 'cluster-a' } })
+      act(() => { rstest.advanceTimersByTime(200) })
+      expect(screen.getByText('cluster-a')).toBeInTheDocument()
+      expect(screen.queryByText('cluster-b')).not.toBeInTheDocument()
+    })
 
-    fireEvent.change(screen.getByPlaceholderText('Filter by cluster name'), { target: { value: 'zzznomatch' } })
-    act(() => { rstest.advanceTimersByTime(200) })
-    expect(screen.getByText('No control planes match the current filter.')).toBeInTheDocument()
-    rstest.useRealTimers()
+    it('shows empty state when filter matches nothing', () => {
+      render(<ControlPlanesCard planes={[makeCp('cluster-a', 'default')]} />)
+
+      fireEvent.change(screen.getByPlaceholderText('Filter by cluster name'), { target: { value: 'zzznomatch' } })
+      act(() => { rstest.advanceTimersByTime(200) })
+      expect(screen.getByText('No control planes match the current filter.')).toBeInTheDocument()
+    })
   })
 
   it('shows Unknown label when CP has no conditions', () => {

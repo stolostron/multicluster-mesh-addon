@@ -93,6 +93,31 @@ describe('useMeshControlPlanes', () => {
     expect(result.current[0][0].managedBy).toEqual({ name: 'my-mesh', namespace: 'mesh-system' })
   })
 
+  it('handles cluster scope changes on rerender', async () => {
+    const allResults = [
+      makeSearchResult('cluster-a', 'default'),
+      makeSearchResult('cluster-b', 'default'),
+    ]
+    setupSearchPoll(allResults)
+    rstest.mocked(fleetK8sGet).mockResolvedValue(makeIstio('istio-system', 'mesh1'))
+
+    const { result, rerender } = renderHook(
+      ({ clusters }) => useMeshControlPlanes(clusters, []),
+      { initialProps: { clusters: ['cluster-a'] } },
+    )
+
+    await waitFor(() => expect(result.current[1]).toBe(true))
+    expect(result.current[0]).toHaveLength(1)
+    expect(result.current[0][0].clusterName).toBe('cluster-a')
+
+    rerender({ clusters: ['cluster-b'] })
+
+    await waitFor(() => {
+      expect(result.current[0]).toHaveLength(1)
+      expect(result.current[0][0].clusterName).toBe('cluster-b')
+    })
+  })
+
   it('exposes error state from search poll failures', async () => {
     const searchErr = new Error('network error')
     rstest.mocked(useFleetSearchPoll).mockReturnValue([

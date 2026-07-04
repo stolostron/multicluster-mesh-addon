@@ -280,25 +280,25 @@ describe('TrustStatusCard — search', () => {
   const certs = [makeCert('alpha-cluster', 'True'), makeCert('beta-cluster', 'True')]
   const mws = [makeMW('alpha-cluster', true, true), makeMW('beta-cluster', true, true)]
 
-  beforeEach(() => setupWatches(certs, mws))
+  beforeEach(() => {
+    setupWatches(certs, mws)
+    rstest.useFakeTimers()
+  })
+  afterEach(() => { rstest.useRealTimers() })
 
   it('narrows results to the matching cluster', () => {
-    rstest.useFakeTimers()
     render(<TrustStatusCard {...defaultProps} clusterStatuses={clusters} />)
     fireEvent.change(screen.getByPlaceholderText('Filter by cluster name'), { target: { value: 'alpha' } })
     act(() => { rstest.advanceTimersByTime(200) })
     expect(screen.getByText('alpha-cluster')).toBeInTheDocument()
     expect(screen.queryByText('beta-cluster')).not.toBeInTheDocument()
-    rstest.useRealTimers()
   })
 
   it('shows no-match row when search has no results', () => {
-    rstest.useFakeTimers()
     render(<TrustStatusCard {...defaultProps} clusterStatuses={clusters} />)
     fireEvent.change(screen.getByPlaceholderText('Filter by cluster name'), { target: { value: 'zzznomatch' } })
     act(() => { rstest.advanceTimersByTime(200) })
     expect(screen.getByText('No clusters match the current filter.')).toBeInTheDocument()
-    rstest.useRealTimers()
   })
 })
 

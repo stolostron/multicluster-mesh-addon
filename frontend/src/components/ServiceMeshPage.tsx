@@ -26,6 +26,7 @@ import { clusterSetDetailLink } from '../utils/linkUtils'
 import { fuzzyCaseInsensitive } from '../utils/filterUtils'
 import type { RowSearchFilter } from '../utils/filterUtils'
 import { useMeshTranslation } from '../utils/i18nUtils'
+import { sortWithComparator } from '../utils/tableCallbacks'
 
 const compareMeshClusterCount = (a: FleetMeshItem, b: FleetMeshItem) => a.clusterCount - b.clusterCount
 const compareMeshClusterSet = (a: FleetMeshItem, b: FleetMeshItem) => (a.clusterSet ?? '').localeCompare(b.clusterSet ?? '')
@@ -37,62 +38,13 @@ const compareMeshType = (a: FleetMeshItem, b: FleetMeshItem) => a.kind.localeCom
 
 function buildColumns(t: (key: string) => string): TableColumn<FleetMeshItem>[] {
   return [
-    {
-      title: t('Mesh ID'),
-      id: 'meshID',
-      sort: (data: FleetMeshItem[], sortDirection: string) => {
-        const dir = sortDirection === 'asc' ? 1 : -1
-        return [...data].sort((a, b) => dir * compareMeshID(a, b))
-      },
-    },
-    {
-      title: t('Type'),
-      id: 'type',
-      sort: (data: FleetMeshItem[], sortDirection: string) => {
-        const dir = sortDirection === 'asc' ? 1 : -1
-        return [...data].sort((a, b) => dir * compareMeshType(a, b))
-      },
-    },
-    {
-      title: t('Name'),
-      id: 'name',
-      sort: (data: FleetMeshItem[], sortDirection: string) => {
-        const dir = sortDirection === 'asc' ? 1 : -1
-        return [...data].sort((a, b) => dir * compareMeshName(a, b))
-      },
-    },
-    {
-      title: t('Cluster Set'),
-      id: 'clusterSet',
-      sort: (data: FleetMeshItem[], sortDirection: string) => {
-        const dir = sortDirection === 'asc' ? 1 : -1
-        return [...data].sort((a, b) => dir * compareMeshClusterSet(a, b))
-      },
-    },
-    {
-      title: t('Clusters'),
-      id: 'clusters',
-      sort: (data: FleetMeshItem[], sortDirection: string) => {
-        const dir = sortDirection === 'asc' ? 1 : -1
-        return [...data].sort((a, b) => dir * compareMeshClusterCount(a, b))
-      },
-    },
-    {
-      title: t('Trust'),
-      id: 'trust',
-      sort: (data: FleetMeshItem[], sortDirection: string) => {
-        const dir = sortDirection === 'asc' ? 1 : -1
-        return [...data].sort((a, b) => dir * compareMeshTrust(a, b))
-      },
-    },
-    {
-      title: t('Status'),
-      id: 'status',
-      sort: (data: FleetMeshItem[], sortDirection: string) => {
-        const dir = sortDirection === 'asc' ? 1 : -1
-        return [...data].sort((a, b) => dir * compareMeshStatusRank(a, b))
-      },
-    },
+    { title: t('Mesh ID'), id: 'meshID', sort: (data: FleetMeshItem[], dir: string) => sortWithComparator(data, dir, compareMeshID) },
+    { title: t('Type'), id: 'type', sort: (data: FleetMeshItem[], dir: string) => sortWithComparator(data, dir, compareMeshType) },
+    { title: t('Name'), id: 'name', sort: (data: FleetMeshItem[], dir: string) => sortWithComparator(data, dir, compareMeshName) },
+    { title: t('Cluster Set'), id: 'clusterSet', sort: (data: FleetMeshItem[], dir: string) => sortWithComparator(data, dir, compareMeshClusterSet) },
+    { title: t('Clusters'), id: 'clusters', sort: (data: FleetMeshItem[], dir: string) => sortWithComparator(data, dir, compareMeshClusterCount) },
+    { title: t('Trust'), id: 'trust', sort: (data: FleetMeshItem[], dir: string) => sortWithComparator(data, dir, compareMeshTrust) },
+    { title: t('Status'), id: 'status', sort: (data: FleetMeshItem[], dir: string) => sortWithComparator(data, dir, compareMeshStatusRank) },
   ]
 }
 

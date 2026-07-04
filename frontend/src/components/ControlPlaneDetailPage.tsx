@@ -29,7 +29,7 @@ import {
 } from '@patternfly/react-core'
 import type { Istio } from '../types/istio'
 import { istioModel } from '../types/istio'
-import { getFromEnrichmentCache } from '../hooks/useEnrichedControlPlanes'
+import { getFromEnrichmentCache, setInEnrichmentCache } from '../hooks/useEnrichedControlPlanes'
 import { useMultiClusterMeshes } from '../hooks/useMultiClusterMeshes'
 import { buildMcmIndex, lookupMcm } from '../utils/correlateMCM'
 import { clusterDetailLink } from '../utils/linkUtils'
@@ -62,7 +62,10 @@ const ControlPlaneDetailContent: FC<{ cluster: string; name: string; type: CpTyp
     setRefreshError(null)
 
     fleetK8sGet<Istio>({ model: istioModel, name, cluster })
-      .then((r) => { if (!cancelled) { setIstio(r); setLoaded(true) } })
+      .then((r) => {
+        setInEnrichmentCache(cluster, name, r)
+        if (!cancelled) { setIstio(r); setLoaded(true) }
+      })
       .catch((e) => {
         if (!cancelled) {
           console.error('Failed to load control plane:', e)

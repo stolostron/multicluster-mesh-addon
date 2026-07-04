@@ -29,6 +29,7 @@ import { clusterDetailLink } from '../utils/linkUtils'
 import { fuzzyCaseInsensitive } from '../utils/filterUtils'
 import type { RowSearchFilter } from '../utils/filterUtils'
 import { useMeshTranslation } from '../utils/i18nUtils'
+import { sortWithComparator } from '../utils/tableCallbacks'
 
 const compareCpMeshID = (a: EnrichedControlPlane, b: EnrichedControlPlane) =>
   (a.meshID ?? '').localeCompare(b.meshID ?? '')
@@ -40,35 +41,14 @@ const compareCpType = (a: EnrichedControlPlane, b: EnrichedControlPlane) =>
 
 function buildColumns(t: (key: string) => string): TableColumn<EnrichedControlPlane>[] {
   return [
-    {
-      title: t('Mesh ID'),
-      id: 'meshID',
-      sort: (data: EnrichedControlPlane[], sortDirection: string) => {
-        const dir = sortDirection === 'asc' ? 1 : -1
-        return [...data].sort((a, b) => dir * compareCpMeshID(a, b))
-      },
-    },
-    {
-      title: t('Type'),
-      id: 'type',
-      sort: (data: EnrichedControlPlane[], sortDirection: string) => {
-        const dir = sortDirection === 'asc' ? 1 : -1
-        return [...data].sort((a, b) => dir * compareCpType(a, b))
-      },
-    },
+    { title: t('Mesh ID'), id: 'meshID', sort: (data: EnrichedControlPlane[], dir: string) => sortWithComparator(data, dir, compareCpMeshID) },
+    { title: t('Type'), id: 'type', sort: (data: EnrichedControlPlane[], dir: string) => sortWithComparator(data, dir, compareCpType) },
     { title: t('Name'), id: 'name', sort: 'metadata.name' },
     { title: t('Cluster'), id: 'cluster', sort: 'clusterName' },
     { title: t('Namespace'), id: 'namespace', sort: 'controlPlaneNamespace' },
     { title: t('Version'), id: 'version', sort: 'version' },
     { title: t('Created'), id: 'created', sort: 'metadata.creationTimestamp' },
-    {
-      title: t('Status'),
-      id: 'status',
-      sort: (data: EnrichedControlPlane[], sortDirection: string) => {
-        const dir = sortDirection === 'asc' ? 1 : -1
-        return [...data].sort((a, b) => dir * compareCpStatusRank(a, b))
-      },
-    },
+    { title: t('Status'), id: 'status', sort: (data: EnrichedControlPlane[], dir: string) => sortWithComparator(data, dir, compareCpStatusRank) },
   ]
 }
 

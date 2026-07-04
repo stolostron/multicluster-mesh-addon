@@ -375,15 +375,18 @@ describe('DiscoveredMeshDetailPage', () => {
       expect(clusterLinks).toHaveLength(2)
     })
 
-    it('shows empty state when filter matches nothing', () => {
-      rstest.useFakeTimers()
-      mockDefaults({ enrichedPlanes: [cp1] })
-      render(<DiscoveredMeshDetailPage />)
-      const searchInputs = screen.getAllByPlaceholderText('Filter by cluster name')
-      fireEvent.change(searchInputs[0], { target: { value: 'zzznomatch' } })
-      act(() => { rstest.advanceTimersByTime(200) })
-      expect(screen.getAllByText('No clusters match the current filter.')).toHaveLength(1)
-      rstest.useRealTimers()
+    describe('search with debounce', () => {
+      beforeEach(() => { rstest.useFakeTimers() })
+      afterEach(() => { rstest.useRealTimers() })
+
+      it('shows empty state when filter matches nothing', () => {
+        mockDefaults({ enrichedPlanes: [cp1] })
+        render(<DiscoveredMeshDetailPage />)
+        const searchInputs = screen.getAllByPlaceholderText('Filter by cluster name')
+        fireEvent.change(searchInputs[0], { target: { value: 'zzznomatch' } })
+        act(() => { rstest.advanceTimersByTime(200) })
+        expect(screen.getAllByText('No clusters match the current filter.')).toHaveLength(1)
+      })
     })
   })
 })

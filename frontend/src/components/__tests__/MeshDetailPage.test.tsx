@@ -306,23 +306,22 @@ describe('ClusterStatusSection', () => {
       makeCluster('beta-cluster', 'False'),
     ]
 
+    beforeEach(() => { rstest.useFakeTimers() })
+    afterEach(() => { rstest.useRealTimers() })
+
     it('shows only matching clusters when searching', () => {
-      rstest.useFakeTimers()
       render(<ClusterStatusSection clusterStatuses={clusters} />)
       fireEvent.change(screen.getByPlaceholderText('Filter by cluster name'), { target: { value: 'alpha' } })
       act(() => { rstest.advanceTimersByTime(200) })
       expect(screen.getByText('alpha-cluster')).toBeInTheDocument()
       expect(screen.queryByText('beta-cluster')).not.toBeInTheDocument()
-      rstest.useRealTimers()
     })
 
     it('shows no-match row when search has no results', () => {
-      rstest.useFakeTimers()
       render(<ClusterStatusSection clusterStatuses={clusters} />)
       fireEvent.change(screen.getByPlaceholderText('Filter by cluster name'), { target: { value: 'zzznomatch' } })
       act(() => { rstest.advanceTimersByTime(200) })
       expect(screen.getByText('No clusters match the current filter.')).toBeInTheDocument()
-      rstest.useRealTimers()
     })
   })
 

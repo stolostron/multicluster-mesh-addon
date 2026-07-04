@@ -67,36 +67,6 @@ describe('VirtualFilterTable', () => {
     expect(screen.queryByText('Charlie')).not.toBeInTheDocument()
   })
 
-  it('search filters items by the searchMatch predicate', () => {
-    rstest.useFakeTimers()
-    renderTable()
-
-    const searchInput = screen.getByPlaceholderText('Search...')
-    fireEvent.change(searchInput, { target: { value: 'alpha' } })
-
-    act(() => { rstest.advanceTimersByTime(200) })
-
-    expect(screen.getByText('Alpha')).toBeInTheDocument()
-    expect(screen.queryByText('Bravo')).not.toBeInTheDocument()
-    expect(screen.queryByText('Charlie')).not.toBeInTheDocument()
-
-    rstest.useRealTimers()
-  })
-
-  it('shows empty message when filter matches nothing', () => {
-    rstest.useFakeTimers()
-    renderTable()
-
-    const searchInput = screen.getByPlaceholderText('Search...')
-    fireEvent.change(searchInput, { target: { value: 'zzz-no-match' } })
-
-    act(() => { rstest.advanceTimersByTime(200) })
-
-    expect(screen.getByText('No items found')).toBeInTheDocument()
-
-    rstest.useRealTimers()
-  })
-
   it('shows all items when "All" toggle is selected', () => {
     renderTable()
 
@@ -109,33 +79,57 @@ describe('VirtualFilterTable', () => {
     expect(screen.getByText('Charlie')).toBeInTheDocument()
   })
 
-  it('does not filter before debounce elapses', () => {
-    rstest.useFakeTimers()
-    renderTable()
-    fireEvent.change(screen.getByPlaceholderText('Search...'), { target: { value: 'alpha' } })
-    expect(screen.getByText('Bravo')).toBeInTheDocument()
-    act(() => { rstest.advanceTimersByTime(200) })
-    expect(screen.queryByText('Bravo')).not.toBeInTheDocument()
-    rstest.useRealTimers()
-  })
+  describe('search with debounce', () => {
+    beforeEach(() => { rstest.useFakeTimers() })
+    afterEach(() => { rstest.useRealTimers() })
 
-  it('onClear immediately resets the filter without debounce delay', () => {
-    rstest.useFakeTimers()
-    renderTable()
+    it('search filters items by the searchMatch predicate', () => {
+      renderTable()
 
-    const searchInput = screen.getByPlaceholderText('Search...')
-    fireEvent.change(searchInput, { target: { value: 'alpha' } })
-    act(() => { rstest.advanceTimersByTime(200) })
-    expect(screen.queryByText('Bravo')).not.toBeInTheDocument()
+      const searchInput = screen.getByPlaceholderText('Search...')
+      fireEvent.change(searchInput, { target: { value: 'alpha' } })
 
-    const clearButton = screen.getByLabelText('Reset')
-    fireEvent.click(clearButton)
+      act(() => { rstest.advanceTimersByTime(200) })
 
-    expect(screen.getByText('Alpha')).toBeInTheDocument()
-    expect(screen.getByText('Bravo')).toBeInTheDocument()
-    expect(screen.getByText('Charlie')).toBeInTheDocument()
+      expect(screen.getByText('Alpha')).toBeInTheDocument()
+      expect(screen.queryByText('Bravo')).not.toBeInTheDocument()
+      expect(screen.queryByText('Charlie')).not.toBeInTheDocument()
+    })
 
-    rstest.useRealTimers()
+    it('shows empty message when filter matches nothing', () => {
+      renderTable()
+
+      const searchInput = screen.getByPlaceholderText('Search...')
+      fireEvent.change(searchInput, { target: { value: 'zzz-no-match' } })
+
+      act(() => { rstest.advanceTimersByTime(200) })
+
+      expect(screen.getByText('No items found')).toBeInTheDocument()
+    })
+
+    it('does not filter before debounce elapses', () => {
+      renderTable()
+      fireEvent.change(screen.getByPlaceholderText('Search...'), { target: { value: 'alpha' } })
+      expect(screen.getByText('Bravo')).toBeInTheDocument()
+      act(() => { rstest.advanceTimersByTime(200) })
+      expect(screen.queryByText('Bravo')).not.toBeInTheDocument()
+    })
+
+    it('onClear immediately resets the filter without debounce delay', () => {
+      renderTable()
+
+      const searchInput = screen.getByPlaceholderText('Search...')
+      fireEvent.change(searchInput, { target: { value: 'alpha' } })
+      act(() => { rstest.advanceTimersByTime(200) })
+      expect(screen.queryByText('Bravo')).not.toBeInTheDocument()
+
+      const clearButton = screen.getByLabelText('Reset')
+      fireEvent.click(clearButton)
+
+      expect(screen.getByText('Alpha')).toBeInTheDocument()
+      expect(screen.getByText('Bravo')).toBeInTheDocument()
+      expect(screen.getByText('Charlie')).toBeInTheDocument()
+    })
   })
 
   it('returns items via useVirtualRows (spacer rows present for large datasets)', () => {

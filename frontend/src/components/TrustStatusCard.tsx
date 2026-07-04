@@ -151,6 +151,11 @@ export const TrustStatusCard: FC<TrustStatusCardProps> = ({
     return map
   }, [manifestWorks])
 
+  const trustCategorize = useCallback(
+    (cs: ClusterMeshStatus) => categorizeTrust(certsByCluster.get(cs.clusterName), mwByCluster.get(cs.clusterName)),
+    [certsByCluster, mwByCluster],
+  )
+
   const columns = useMemo<VirtualFilterColumn<ClusterMeshStatus>[]>(() => [
     {
       key: 'cluster',
@@ -246,11 +251,6 @@ export const TrustStatusCard: FC<TrustStatusCardProps> = ({
       </Card>
     )
   }
-
-  const trustCategorize = useCallback(
-    (cs: ClusterMeshStatus) => categorizeTrust(certsByCluster.get(cs.clusterName), mwByCluster.get(cs.clusterName)),
-    [certsByCluster, mwByCluster],
-  )
 
   const noCertsAtAll = certsByCluster.size === 0 && mwByCluster.size === 0
   if (noCertsAtAll) {
