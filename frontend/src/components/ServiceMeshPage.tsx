@@ -189,8 +189,8 @@ const ServiceMeshPage: FC = () => {
     isFleetAvailable,
   } = useFleetMeshItems()
   const { t } = useMeshTranslation()
-  const columns = useMemo(() => buildColumns(t), [t])
-  const searchFilters = useMemo(() => buildSearchFilters(t), [t])
+  const columns = useMemo(() => buildColumns(t), []) // eslint-disable-line react-hooks/exhaustive-deps
+  const searchFilters = useMemo(() => buildSearchFilters(t), []) // eslint-disable-line react-hooks/exhaustive-deps
   const [staticData, filteredData, onFilterChange] = useListPageFilter(items, searchFilters as any)
   const [activeColumns, userSettingsLoaded] = useActiveColumns({
     columns,

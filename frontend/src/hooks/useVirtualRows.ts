@@ -37,25 +37,31 @@ export function useVirtualRows<T>(items: T[], rowHeight = 40, overscan = 5): Vir
   const containerHeightRef = useRef(containerHeight)
   containerHeightRef.current = containerHeight
 
+  const rafRef = useRef(0)
+
   const handleScroll = useCallback(() => {
-    if (!nodeRef.current) return
-    const newScrollTop = nodeRef.current.scrollTop
-    const h = containerHeightRef.current
-    const len = itemsLengthRef.current
-    const rh = rowHeightRef.current
-    const os = overscanRef.current
+    cancelAnimationFrame(rafRef.current)
+    rafRef.current = requestAnimationFrame(() => {
+      if (!nodeRef.current) return
+      const newScrollTop = nodeRef.current.scrollTop
+      const h = containerHeightRef.current
+      const len = itemsLengthRef.current
+      const rh = rowHeightRef.current
+      const os = overscanRef.current
 
-    const [curStart, curEnd] = computeIndices(scrollTopRef.current, h, len, rh, os)
-    const [newStart, newEnd] = computeIndices(newScrollTop, h, len, rh, os)
+      const [curStart, curEnd] = computeIndices(scrollTopRef.current, h, len, rh, os)
+      const [newStart, newEnd] = computeIndices(newScrollTop, h, len, rh, os)
 
-    if (newStart !== curStart || newEnd !== curEnd) {
-      setScrollTop(newScrollTop)
-    }
+      if (newStart !== curStart || newEnd !== curEnd) {
+        setScrollTop(newScrollTop)
+      }
+    })
   }, [])
 
   const containerRef = useCallback((node: HTMLDivElement | null) => {
     if (nodeRef.current) {
       nodeRef.current.removeEventListener('scroll', handleScroll)
+      cancelAnimationFrame(rafRef.current)
     }
     nodeRef.current = node
     if (node) {

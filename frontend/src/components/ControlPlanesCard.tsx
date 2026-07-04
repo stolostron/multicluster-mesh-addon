@@ -61,7 +61,7 @@ const ControlPlanesCard: FC<{ planes: EnrichedControlPlane[] }> = ({ planes }) =
         : <Label color="grey">{t('Unknown')}</Label>,
       width: '20%',
     },
-  ], [t])
+  ], []) // eslint-disable-line react-hooks/exhaustive-deps
 
   if (planes.length === 0) return null
 
