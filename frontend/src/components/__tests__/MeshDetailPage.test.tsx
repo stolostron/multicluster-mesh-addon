@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { act, render, screen, fireEvent } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import MeshDetailPage, { ClusterStatusSection } from '../MeshDetailPage'
 import { useParams } from 'react-router-dom-v5-compat'
@@ -306,19 +306,23 @@ describe('ClusterStatusSection', () => {
       makeCluster('beta-cluster', 'False'),
     ]
 
-    it('shows only matching clusters when searching', async () => {
-      const user = userEvent.setup()
+    it('shows only matching clusters when searching', () => {
+      rstest.useFakeTimers()
       render(<ClusterStatusSection clusterStatuses={clusters} />)
-      await user.type(screen.getByPlaceholderText('Filter by cluster name'), 'alpha')
+      fireEvent.change(screen.getByPlaceholderText('Filter by cluster name'), { target: { value: 'alpha' } })
+      act(() => { rstest.advanceTimersByTime(200) })
       expect(screen.getByText('alpha-cluster')).toBeInTheDocument()
       expect(screen.queryByText('beta-cluster')).not.toBeInTheDocument()
+      rstest.useRealTimers()
     })
 
-    it('shows no-match row when search has no results', async () => {
-      const user = userEvent.setup()
+    it('shows no-match row when search has no results', () => {
+      rstest.useFakeTimers()
       render(<ClusterStatusSection clusterStatuses={clusters} />)
-      await user.type(screen.getByPlaceholderText('Filter by cluster name'), 'zzznomatch')
+      fireEvent.change(screen.getByPlaceholderText('Filter by cluster name'), { target: { value: 'zzznomatch' } })
+      act(() => { rstest.advanceTimersByTime(200) })
       expect(screen.getByText('No clusters match the current filter.')).toBeInTheDocument()
+      rstest.useRealTimers()
     })
   })
 

@@ -24,6 +24,7 @@
   "Control Planes": "Control Planes",
   "Control Planes ({{count}})": "Control Planes ({{count}})",
   "Created": "Created",
+  "Data may be stale — background refresh failed.": "Data may be stale — background refresh failed.",
   "Degraded": "Degraded",
   "Discovered": "Discovered",
   "Discovered mesh \"{{meshID}}\" was not found.": "Discovered mesh \"{{meshID}}\" was not found.",

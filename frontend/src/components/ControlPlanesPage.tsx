@@ -30,6 +30,14 @@ import { fuzzyCaseInsensitive } from '../utils/filterUtils'
 import type { RowSearchFilter } from '../utils/filterUtils'
 import { useMeshTranslation } from '../utils/i18nUtils'
 
+const compareCpMeshID = (a: EnrichedControlPlane, b: EnrichedControlPlane) =>
+  (a.meshID ?? '').localeCompare(b.meshID ?? '')
+const compareCpStatusRank = (a: EnrichedControlPlane, b: EnrichedControlPlane) =>
+  getStatusRank(a.status?.conditions) - getStatusRank(b.status?.conditions)
+const cpTypeRank = (cp: EnrichedControlPlane) => cp.managedBy ? 0 : cp.meshID ? 1 : 2
+const compareCpType = (a: EnrichedControlPlane, b: EnrichedControlPlane) =>
+  cpTypeRank(a) - cpTypeRank(b)
+
 function buildColumns(t: (key: string) => string): TableColumn<EnrichedControlPlane>[] {
   return [
     {
@@ -37,9 +45,7 @@ function buildColumns(t: (key: string) => string): TableColumn<EnrichedControlPl
       id: 'meshID',
       sort: (data: EnrichedControlPlane[], sortDirection: string) => {
         const dir = sortDirection === 'asc' ? 1 : -1
-        return [...data].sort((a, b) =>
-          dir * (a.meshID ?? '').localeCompare(b.meshID ?? ''),
-        )
+        return [...data].sort((a, b) => dir * compareCpMeshID(a, b))
       },
     },
     {
@@ -47,8 +53,7 @@ function buildColumns(t: (key: string) => string): TableColumn<EnrichedControlPl
       id: 'type',
       sort: (data: EnrichedControlPlane[], sortDirection: string) => {
         const dir = sortDirection === 'asc' ? 1 : -1
-        const typeRank = (cp: EnrichedControlPlane) => cp.managedBy ? 0 : cp.meshID ? 1 : 2
-        return [...data].sort((a, b) => dir * (typeRank(a) - typeRank(b)))
+        return [...data].sort((a, b) => dir * compareCpType(a, b))
       },
     },
     { title: t('Name'), id: 'name', sort: 'metadata.name' },
@@ -61,9 +66,7 @@ function buildColumns(t: (key: string) => string): TableColumn<EnrichedControlPl
       id: 'status',
       sort: (data: EnrichedControlPlane[], sortDirection: string) => {
         const dir = sortDirection === 'asc' ? 1 : -1
-        return [...data].sort(
-          (a, b) => dir * (getStatusRank(a.status?.conditions) - getStatusRank(b.status?.conditions)),
-        )
+        return [...data].sort((a, b) => dir * compareCpStatusRank(a, b))
       },
     },
   ]

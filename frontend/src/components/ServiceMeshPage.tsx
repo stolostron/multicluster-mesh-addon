@@ -27,6 +27,14 @@ import { fuzzyCaseInsensitive } from '../utils/filterUtils'
 import type { RowSearchFilter } from '../utils/filterUtils'
 import { useMeshTranslation } from '../utils/i18nUtils'
 
+const compareMeshClusterCount = (a: FleetMeshItem, b: FleetMeshItem) => a.clusterCount - b.clusterCount
+const compareMeshClusterSet = (a: FleetMeshItem, b: FleetMeshItem) => (a.clusterSet ?? '').localeCompare(b.clusterSet ?? '')
+const compareMeshID = (a: FleetMeshItem, b: FleetMeshItem) => (a.meshID ?? '').localeCompare(b.meshID ?? '')
+const compareMeshName = (a: FleetMeshItem, b: FleetMeshItem) => a.metadata.name.localeCompare(b.metadata.name)
+const compareMeshStatusRank = (a: FleetMeshItem, b: FleetMeshItem) => a.statusRank - b.statusRank
+const compareMeshTrust = (a: FleetMeshItem, b: FleetMeshItem) => (a.trustIssuer ?? '').localeCompare(b.trustIssuer ?? '')
+const compareMeshType = (a: FleetMeshItem, b: FleetMeshItem) => a.kind.localeCompare(b.kind)
+
 function buildColumns(t: (key: string) => string): TableColumn<FleetMeshItem>[] {
   return [
     {
@@ -34,7 +42,7 @@ function buildColumns(t: (key: string) => string): TableColumn<FleetMeshItem>[] 
       id: 'meshID',
       sort: (data: FleetMeshItem[], sortDirection: string) => {
         const dir = sortDirection === 'asc' ? 1 : -1
-        return [...data].sort((a, b) => dir * (a.meshID ?? '').localeCompare(b.meshID ?? ''))
+        return [...data].sort((a, b) => dir * compareMeshID(a, b))
       },
     },
     {
@@ -42,7 +50,7 @@ function buildColumns(t: (key: string) => string): TableColumn<FleetMeshItem>[] 
       id: 'type',
       sort: (data: FleetMeshItem[], sortDirection: string) => {
         const dir = sortDirection === 'asc' ? 1 : -1
-        return [...data].sort((a, b) => dir * a.kind.localeCompare(b.kind))
+        return [...data].sort((a, b) => dir * compareMeshType(a, b))
       },
     },
     {
@@ -50,7 +58,7 @@ function buildColumns(t: (key: string) => string): TableColumn<FleetMeshItem>[] 
       id: 'name',
       sort: (data: FleetMeshItem[], sortDirection: string) => {
         const dir = sortDirection === 'asc' ? 1 : -1
-        return [...data].sort((a, b) => dir * a.metadata.name.localeCompare(b.metadata.name))
+        return [...data].sort((a, b) => dir * compareMeshName(a, b))
       },
     },
     {
@@ -58,7 +66,7 @@ function buildColumns(t: (key: string) => string): TableColumn<FleetMeshItem>[] 
       id: 'clusterSet',
       sort: (data: FleetMeshItem[], sortDirection: string) => {
         const dir = sortDirection === 'asc' ? 1 : -1
-        return [...data].sort((a, b) => dir * (a.clusterSet ?? '').localeCompare(b.clusterSet ?? ''))
+        return [...data].sort((a, b) => dir * compareMeshClusterSet(a, b))
       },
     },
     {
@@ -66,7 +74,7 @@ function buildColumns(t: (key: string) => string): TableColumn<FleetMeshItem>[] 
       id: 'clusters',
       sort: (data: FleetMeshItem[], sortDirection: string) => {
         const dir = sortDirection === 'asc' ? 1 : -1
-        return [...data].sort((a, b) => dir * (a.clusterCount - b.clusterCount))
+        return [...data].sort((a, b) => dir * compareMeshClusterCount(a, b))
       },
     },
     {
@@ -74,7 +82,7 @@ function buildColumns(t: (key: string) => string): TableColumn<FleetMeshItem>[] 
       id: 'trust',
       sort: (data: FleetMeshItem[], sortDirection: string) => {
         const dir = sortDirection === 'asc' ? 1 : -1
-        return [...data].sort((a, b) => dir * (a.trustIssuer ?? '').localeCompare(b.trustIssuer ?? ''))
+        return [...data].sort((a, b) => dir * compareMeshTrust(a, b))
       },
     },
     {
@@ -82,7 +90,7 @@ function buildColumns(t: (key: string) => string): TableColumn<FleetMeshItem>[] 
       id: 'status',
       sort: (data: FleetMeshItem[], sortDirection: string) => {
         const dir = sortDirection === 'asc' ? 1 : -1
-        return [...data].sort((a, b) => dir * (a.statusRank - b.statusRank))
+        return [...data].sort((a, b) => dir * compareMeshStatusRank(a, b))
       },
     },
   ]

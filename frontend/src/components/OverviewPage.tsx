@@ -29,10 +29,14 @@ import type { StatusCounts } from './StatusDonutChart'
 import { cpTypeSegment } from '../utils/cpTypeSegment'
 import { useMeshTranslation } from '../utils/i18nUtils'
 
-function countByStatus(items: { conditions?: K8sCondition[] }[], conditionType?: string): StatusCounts {
+function countByStatus<T>(
+  items: T[],
+  getConditions: (item: T) => K8sCondition[] | undefined,
+  conditionType?: string,
+): StatusCounts {
   const counts = { degraded: 0, notReady: 0, ready: 0, unknown: 0 }
   for (const item of items) {
-    const { color } = deriveStatus(item.conditions, conditionType)
+    const { color } = deriveStatus(getConditions(item), conditionType)
     if (color === 'green') counts.ready++
     else if (color === 'orange') counts.degraded++
     else if (color === 'grey') counts.unknown++
@@ -127,8 +131,8 @@ const OverviewPage: FC = () => {
   const meshCount = enrichmentLoaded ? items.length : mcms.length
   const meshStatusCounts = useMemo(
     () => enrichmentLoaded
-      ? countByStatus(items)
-      : countByStatus(mcms.map((m) => ({ conditions: m.status?.conditions }))),
+      ? countByStatus(items, (i) => i.conditions)
+      : countByStatus(mcms, (m) => m.status?.conditions),
     [items, mcms, enrichmentLoaded],
   )
 
@@ -137,7 +141,7 @@ const OverviewPage: FC = () => {
   const cpCount = enrichedPlanes.length
 
   const cpStatusCounts = useMemo(
-    () => countByStatus(enrichedPlanes.map((cp) => ({ conditions: cp.status?.conditions }))),
+    () => countByStatus(enrichedPlanes, (cp) => cp.status?.conditions),
     [enrichedPlanes],
   )
 

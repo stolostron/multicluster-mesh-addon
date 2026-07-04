@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from 'react'
+import { useCallback, useEffect, useMemo } from 'react'
 import type { FC, ReactNode } from 'react'
 import { Link } from 'react-router-dom-v5-compat'
 import { Trans } from 'react-i18next'
@@ -26,6 +26,7 @@ import { clusterDetailLink } from '../utils/linkUtils'
 import { VirtualFilterTable } from './VirtualFilterTable'
 import type { CategoryLabel, VirtualFilterColumn } from './VirtualFilterTable'
 import { useMeshTranslation } from '../utils/i18nUtils'
+import { clusterMeshStatusRowKey, clusterMeshStatusSearchMatch } from '../utils/tableCallbacks'
 
 const TRUST_CATEGORY_LABELS: CategoryLabel[] = [
   { key: 'all', label: 'All ({{count}})' },
@@ -246,6 +247,11 @@ export const TrustStatusCard: FC<TrustStatusCardProps> = ({
     )
   }
 
+  const trustCategorize = useCallback(
+    (cs: ClusterMeshStatus) => categorizeTrust(certsByCluster.get(cs.clusterName), mwByCluster.get(cs.clusterName)),
+    [certsByCluster, mwByCluster],
+  )
+
   const noCertsAtAll = certsByCluster.size === 0 && mwByCluster.size === 0
   if (noCertsAtAll) {
     return (
@@ -267,13 +273,13 @@ export const TrustStatusCard: FC<TrustStatusCardProps> = ({
       <CardTitle><strong>{t('Trust Status ({{count}})', { count: clusterStatuses.length })}</strong></CardTitle>
       <CardBody>
         <VirtualFilterTable
-          categorize={(cs) => categorizeTrust(certsByCluster.get(cs.clusterName), mwByCluster.get(cs.clusterName))}
+          categorize={trustCategorize}
           categoryLabels={TRUST_CATEGORY_LABELS}
           columns={columns}
           emptyMessage="No clusters match the current filter."
           items={clusterStatuses}
-          rowKey={(cs) => cs.clusterName}
-          searchMatch={(cs, query) => cs.clusterName.toLowerCase().includes(query.toLowerCase())}
+          rowKey={clusterMeshStatusRowKey}
+          searchMatch={clusterMeshStatusSearchMatch}
           searchPlaceholder="Filter by cluster name"
         />
       </CardBody>

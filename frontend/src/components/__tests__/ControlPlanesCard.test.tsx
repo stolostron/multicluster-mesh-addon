@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { act, render, screen, fireEvent } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { ControlPlanesCard } from '../ControlPlanesCard'
 import { makeEnrichedCP } from '../../__fixtures__/testFactories'
@@ -71,25 +71,29 @@ describe('ControlPlanesCard', () => {
     expect(screen.queryByText('cluster-b')).not.toBeInTheDocument()
   })
 
-  it('filters by search term matching cluster or name', async () => {
-    const user = userEvent.setup()
+  it('filters by search term matching cluster or name', () => {
+    rstest.useFakeTimers()
     const planes = [
       makeCp('cluster-a', 'default'),
       makeCp('cluster-b', 'default'),
     ]
     render(<ControlPlanesCard planes={planes} />)
 
-    await user.type(screen.getByPlaceholderText('Filter by cluster name'), 'cluster-a')
+    fireEvent.change(screen.getByPlaceholderText('Filter by cluster name'), { target: { value: 'cluster-a' } })
+    act(() => { rstest.advanceTimersByTime(200) })
     expect(screen.getByText('cluster-a')).toBeInTheDocument()
     expect(screen.queryByText('cluster-b')).not.toBeInTheDocument()
+    rstest.useRealTimers()
   })
 
-  it('shows empty state when filter matches nothing', async () => {
-    const user = userEvent.setup()
+  it('shows empty state when filter matches nothing', () => {
+    rstest.useFakeTimers()
     render(<ControlPlanesCard planes={[makeCp('cluster-a', 'default')]} />)
 
-    await user.type(screen.getByPlaceholderText('Filter by cluster name'), 'zzznomatch')
+    fireEvent.change(screen.getByPlaceholderText('Filter by cluster name'), { target: { value: 'zzznomatch' } })
+    act(() => { rstest.advanceTimersByTime(200) })
     expect(screen.getByText('No control planes match the current filter.')).toBeInTheDocument()
+    rstest.useRealTimers()
   })
 
   it('shows Unknown label when CP has no conditions', () => {

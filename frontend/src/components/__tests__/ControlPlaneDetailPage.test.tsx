@@ -3,6 +3,7 @@ import ControlPlaneDetailPage from '../ControlPlaneDetailPage'
 import { useParams } from 'react-router-dom-v5-compat'
 import { useK8sWatchResource } from '@openshift-console/dynamic-plugin-sdk'
 import { fleetK8sGet } from '@stolostron/multicluster-sdk'
+import { setInEnrichmentCache, __resetEnrichmentCache } from '../../hooks/useEnrichedControlPlanes'
 import type { Istio } from '../../types/istio'
 
 const makeIstio = (overrides: Partial<Istio> = {}): Istio => ({
@@ -26,7 +27,7 @@ const makeIstio = (overrides: Partial<Istio> = {}): Istio => ({
   ...overrides,
 })
 
-afterEach(() => rstest.clearAllMocks())
+afterEach(() => { rstest.clearAllMocks(); __resetEnrichmentCache() })
 
 beforeEach(() => {
   rstest.mocked(useK8sWatchResource).mockReturnValue([[], true, null])
@@ -190,6 +191,71 @@ describe('ControlPlaneDetailPage', () => {
       resolvePromise!(makeIstio())
       await new Promise((r) => setTimeout(r, 0))
       expect(screen.queryByText('default')).not.toBeInTheDocument()
+    })
+  })
+
+  describe('stale-while-revalidate', () => {
+    beforeEach(() => {
+      rstest.mocked(useParams).mockReturnValue({ type: 'discovered', cluster: 'cluster-a', name: 'default' })
+    })
+
+    it('renders cached data immediately without waiting for network', () => {
+      setInEnrichmentCache('cluster-a', 'default', makeIstio())
+      rstest.mocked(fleetK8sGet).mockReturnValue(new Promise(() => {}))
+      render(<ControlPlaneDetailPage />)
+      expect(screen.getByRole('heading', { name: 'default' })).toBeInTheDocument()
+      expect(screen.getByText('v1.24.0')).toBeInTheDocument()
+      expect(screen.queryByLabelText('Loading control plane')).not.toBeInTheDocument()
+    })
+
+    it('shows spinner when cache has no entry for the requested CP', () => {
+      rstest.mocked(fleetK8sGet).mockReturnValue(new Promise(() => {}))
+      render(<ControlPlaneDetailPage />)
+      expect(screen.getByLabelText('Loading control plane')).toBeInTheDocument()
+    })
+
+    it('shows refresh error banner when cached data is shown but background refresh fails', async () => {
+      setInEnrichmentCache('cluster-a', 'default', makeIstio())
+      rstest.mocked(fleetK8sGet).mockRejectedValue(new Error('network timeout'))
+      render(<ControlPlaneDetailPage />)
+      await waitFor(() => {
+        expect(screen.getByText('Data may be stale — background refresh failed.')).toBeInTheDocument()
+      })
+      expect(screen.getByRole('heading', { name: 'default' })).toBeInTheDocument()
+    })
+
+    it('does not show refresh error banner when cache miss and refresh fails', async () => {
+      rstest.mocked(fleetK8sGet).mockRejectedValue(new Error('network timeout'))
+      render(<ControlPlaneDetailPage />)
+      await waitFor(() => {
+        expect(screen.getByText('Error loading control plane')).toBeInTheDocument()
+      })
+      expect(screen.queryByText('Data may be stale — background refresh failed.')).not.toBeInTheDocument()
+    })
+
+    it('updates data when background refresh succeeds after cache hit', async () => {
+      const oldIstio = makeIstio({ spec: { namespace: 'istio-system', version: 'v1.23.0' } })
+      setInEnrichmentCache('cluster-a', 'default', oldIstio)
+      rstest.mocked(fleetK8sGet).mockResolvedValue(makeIstio())
+      render(<ControlPlaneDetailPage />)
+      expect(screen.getByText('v1.23.0')).toBeInTheDocument()
+      await waitFor(() => {
+        expect(screen.getByText('v1.24.0')).toBeInTheDocument()
+      })
+    })
+
+    it('clears stale data on route change when new CP has no cache entry', async () => {
+      setInEnrichmentCache('cluster-a', 'default', makeIstio())
+      rstest.mocked(fleetK8sGet).mockReturnValue(new Promise(() => {}))
+      const { rerender } = render(<ControlPlaneDetailPage />)
+      expect(screen.getByRole('heading', { name: 'default' })).toBeInTheDocument()
+
+      rstest.mocked(useParams).mockReturnValue({ type: 'discovered', cluster: 'cluster-b', name: 'other' })
+      rstest.mocked(fleetK8sGet).mockReturnValue(new Promise(() => {}))
+      rerender(<ControlPlaneDetailPage />)
+
+      expect(screen.queryByText('v1.24.0')).not.toBeInTheDocument()
+      expect(screen.getByLabelText('Loading control plane')).toBeInTheDocument()
     })
   })
 })

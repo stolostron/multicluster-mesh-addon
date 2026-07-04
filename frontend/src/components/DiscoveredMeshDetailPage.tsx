@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import type { FC } from 'react'
 import { useParams, Link } from 'react-router-dom-v5-compat'
 import {
@@ -48,6 +48,10 @@ import { useMeshTranslation } from '../utils/i18nUtils'
 
 const CONDITION_COL_WIDTHS = ['12%', '12%', '14%', '10%', '12%', '25%', '15%']
 
+const discoveredClusterRowKey = (name: string) => name
+const discoveredClusterSearchMatch = (name: string, query: string) =>
+  name.toLowerCase().includes(query.toLowerCase())
+
 const DISCOVERED_CLUSTER_CATEGORIES: CategoryLabel[] = [
   { key: 'all', label: 'All ({{count}})' },
   { key: 'available', label: 'Available ({{count}})' },
@@ -89,6 +93,11 @@ const DiscoveredMeshDetailContent: FC<{ meshID: string }> = ({ meshID }) => {
     }
     return map
   }, [uniqueClusterNames, managedClusterMap])
+
+  const discoveredClusterCategorize = useCallback(
+    (name: string) => clusterAvailabilityMap.get(name) ?? 'unreachable',
+    [clusterAvailabilityMap],
+  )
 
   const clusterColumns = useMemo<VirtualFilterColumn<string>[]>(() => [
     {
@@ -253,13 +262,13 @@ const DiscoveredMeshDetailContent: FC<{ meshID: string }> = ({ meshID }) => {
               <CardTitle><strong>{t('Clusters ({{count}})', { count: uniqueClusterNames.length })}</strong></CardTitle>
               <CardBody>
                 <VirtualFilterTable
-                  categorize={(name) => clusterAvailabilityMap.get(name) ?? 'unreachable'}
+                  categorize={discoveredClusterCategorize}
                   categoryLabels={DISCOVERED_CLUSTER_CATEGORIES}
                   columns={clusterColumns}
                   emptyMessage="No clusters match the current filter."
                   items={uniqueClusterNames}
-                  rowKey={(name) => name}
-                  searchMatch={(name, query) => name.toLowerCase().includes(query.toLowerCase())}
+                  rowKey={discoveredClusterRowKey}
+                  searchMatch={discoveredClusterSearchMatch}
                   searchPlaceholder="Filter by cluster name"
                 />
               </CardBody>
