@@ -11,26 +11,30 @@
 #
 # PREREQUISITES
 #
-#   1. A MultiClusterMesh CR that has been reconciled by the controller.
+#   1. Logged into the hub cluster. Your current oc/kubectl context must
+#      point at the hub cluster where the MultiClusterMesh CRs live.
+#      Example: oc login https://api.hub.example.com:6443
+#
+#   2. A MultiClusterMesh CR that has been reconciled by the controller.
 #      You need to know its name and namespace (passed via -m and -n).
 #      Verify with: kubectl get multiclustermesh -n <namespace> <name>
 #
-#   2. The Sail/OSSM operator must be installed on all managed clusters
+#   3. The Sail/OSSM operator must be installed on all managed clusters
 #      in the cluster set. The controller does this automatically — verify
 #      with: kubectl get csv -n openshift-operators | grep servicemesh
 #
-#   3. Cluster-admin access to every managed cluster in the cluster set.
+#   4. Cluster-admin access to every managed cluster in the cluster set.
 #      The script needs to create resources (Istio CRs, gateways, secrets)
 #      on each cluster. Provide access in one of these ways:
-#        - For a single-cluster setup (local-cluster): your current
-#          oc/kubectl login is sufficient.
+#        - For a single-cluster setup (local-cluster): your hub login
+#          from step 1 is sufficient — no extra configuration needed.
 #        - For multi-cluster: either set up kubectl contexts named after
 #          each cluster, or create per-cluster kubeconfig files in a
 #          directory and pass it with --kubeconfig-dir.
 #          Example: oc login https://api.cluster1.example.com:6443 \
 #                     --kubeconfig=my-kubeconfigs/cluster1.config
 #
-#   4. (Optional) If trust is configured on the MultiClusterMesh, the
+#   5. (Optional) If trust is configured on the MultiClusterMesh, the
 #      controller will have distributed cacerts to each cluster. This
 #      script transforms those certificates into the format Istio expects.
 #
