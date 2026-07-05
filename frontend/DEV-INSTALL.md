@@ -294,6 +294,35 @@ oc delete csv ${CSV} -n openshift-operators
 oc get crd -o name | grep -E 'sailoperator\.io|istio\.io' | xargs oc delete
 ```
 
+## 6b. (Optional) Create managed Istio control planes
+
+If your MultiClusterMesh CR has been reconciled by the controller (operator installed,
+trust distributed), you can use [`hack/setup-mesh-cps.sh`](hack/setup-mesh-cps.sh)
+to create Istio control planes on all clusters in the mesh's cluster set. This
+automates Istio CR creation, trust certificate transformation, IstioCNI, east-west
+gateways, and cross-cluster endpoint discovery.
+
+```bash
+cd <multicluster-mesh-addon-repo>/frontend
+
+# Create control planes for the mesh created in step 4
+hack/setup-mesh-cps.sh -m my-mesh -n mesh-system install
+```
+
+This creates an Istio control plane on each cluster in the mesh's cluster set with
+the correct mesh identity (meshID, trustDomain, clusterName, network). The Control
+Planes page will show these as "Managed by" the MCM once ACM Search indexes them
+(typically within 1-2 minutes).
+
+To clean up:
+
+```bash
+hack/setup-mesh-cps.sh -m my-mesh -n mesh-system uninstall
+```
+
+Run `hack/setup-mesh-cps.sh --help` for additional options (topology, Istio version,
+test application deployment).
+
 ## Local frontend development (fast iteration)
 
 For day-to-day UI work, run the plugin locally with webpack and a local OpenShift Console bridge.

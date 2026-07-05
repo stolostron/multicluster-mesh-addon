@@ -9,14 +9,14 @@ Refer to [DEV-INSTALL.md](DEV-INSTALL.md) for general guidance on managing a dev
 
 | MCM CR | MCM Namespace | Istio CR | CP Namespace | Mesh ID | Trust |
 |--------|---------------|----------|--------------|---------|-------|
-| `unsecure-mcm` | `unsecure-mcm-ns` | `unsecure-istio` | `unsecure-ns` | `unsecure-mcm-ns-unsecure-mcm` | No |
-| `secure-mcm` | `secure-mcm-ns` | `secure-istio` | `secure-ns` | `secure-mcm-ns-secure-mcm` | Yes |
+| `unsecure-mcm` | `unsecure-mcm-ns` | `unsecure-mcm-ns-unsecure-mcm-cp` | `unsecure-ns` | `unsecure-mcm-ns-unsecure-mcm` | No |
+| `secure-mcm` | `secure-mcm-ns` | `secure-mcm-ns-secure-mcm-cp` | `secure-ns` | `secure-mcm-ns-secure-mcm` | Yes |
 | — | — | `discovered-alpha-istio` | `discovered-alpha-ns` | `discovered-alpha-id` | — |
 | — | — | `discovered-beta-istio` | `discovered-beta-ns` | `discovered-beta-id` | — |
 
-The first two Istio CRs simulate what the MCM controller would create after reconciling
-its MCM CR (a future feature). The last two are standalone "discovered" control planes
-with no MCM association.
+The first two Istio CRs are created by [`hack/setup-mesh-cps.sh`](hack/setup-mesh-cps.sh)
+based on their corresponding MCM CRs. The last two are standalone "discovered" control
+planes with no MCM association, created manually.
 
 ## Prerequisites
 
@@ -29,7 +29,6 @@ The following must already be deployed on the cluster:
 
 The following must NOT be present:
 
-- No Sail/OSSM operator (no CSV, no subscription, no `sailoperator.io` or `istio.io` CRDs)
 - No existing MultiClusterMesh CRs
 - No existing Istio CRs
 - No ManagedClusterSet bound for mesh use
@@ -37,13 +36,10 @@ The following must NOT be present:
 Verify the clean state:
 
 ```bash
-oc get csv --all-namespaces | grep -i servicemesh
-# Should return nothing
-
-oc get crd | grep -E 'sailoperator|istio'
-# Should return nothing
-
 oc get multiclustermesh --all-namespaces
+# Should return "No resources found"
+
+oc get istio --all-namespaces
 # Should return "No resources found"
 ```
 
@@ -61,18 +57,11 @@ oc label managedcluster local-cluster \
   cluster.open-cluster-management.io/clusterset=demo-cluster-set --overwrite
 ```
 
-## 2. Create namespaces
-
-Create 2 MCM namespaces, 4 control plane namespaces, and the IstioCNI namespace:
+## 2. Create MCM namespaces
 
 ```bash
 oc create namespace unsecure-mcm-ns
 oc create namespace secure-mcm-ns
-oc create namespace unsecure-ns
-oc create namespace secure-ns
-oc create namespace discovered-alpha-ns
-oc create namespace discovered-beta-ns
-oc create namespace istio-cni
 ```
 
 ## 3. Deploy cert-manager Issuer chain
@@ -160,74 +149,35 @@ spec:
 EOF
 ```
 
-## 5. Wait for Sail operator
+## 5. Create managed Istio control planes
 
-The MCM controller installs the Sail operator via a ManifestWork. Wait for it to
-complete before creating Istio CRs (the CRDs must exist first).
-
-```bash
-# Wait for the operator ManifestWork to be applied
-oc wait manifestwork multicluster-mesh-operator -n local-cluster \
-  --for=condition=Applied --timeout=180s
-
-# Wait for the Sail operator CSV to succeed
-until oc get csv -n openshift-operators 2>/dev/null | grep -q servicemeshoperator3; do
-  echo "Waiting for Sail operator CSV to appear..."
-  sleep 10
-done
-
-CSV=$(oc get csv -n openshift-operators -o name | grep servicemeshoperator3)
-oc wait ${CSV} -n openshift-operators \
-  --for=jsonpath='{.status.phase}'=Succeeded --timeout=300s
-
-# Verify the Istio CRD is available
-oc get crd istios.sailoperator.io
-```
-
-## 6. Create managed Istio CRs
-
-These simulate what the MCM controller would create after reconciling each MCM.
-Each targets the namespace matching its MCM's `spec.controlPlane.namespace`.
-The mesh ID follows the convention the controller will use: `<MCM namespace>-<MCM name>`.
+Use [`hack/setup-mesh-cps.sh`](hack/setup-mesh-cps.sh) to create Istio control planes
+for each MCM. The script waits for the Sail operator (installed by the controller via
+ManifestWork), transforms trust certificates to Istio format, creates Istio CRs and
+IstioCNI, and installs east-west gateways. Run it once per MCM:
 
 ```bash
-oc apply -f - <<'EOF'
-apiVersion: sailoperator.io/v1
-kind: Istio
-metadata:
-  name: unsecure-istio
-spec:
-  namespace: unsecure-ns
-  values:
-    global:
-      meshID: unsecure-mcm-ns-unsecure-mcm
-      multiCluster:
-        clusterName: local-cluster
-      network: network1
-EOF
-
-oc apply -f - <<'EOF'
-apiVersion: sailoperator.io/v1
-kind: Istio
-metadata:
-  name: secure-istio
-spec:
-  namespace: secure-ns
-  values:
-    global:
-      meshID: secure-mcm-ns-secure-mcm
-      multiCluster:
-        clusterName: local-cluster
-      network: network1
-EOF
+hack/setup-mesh-cps.sh -m unsecure-mcm -n unsecure-mcm-ns install
+hack/setup-mesh-cps.sh -m secure-mcm -n secure-mcm-ns --deploy-app true install
 ```
 
-## 7. Create standalone Istio CRs
+The `--deploy-app true` flag on the secure mesh deploys a browser-accessible test
+application (`mesh-hello`) that shows cluster identity, cross-cluster connectivity,
+and mTLS status. After the command completes, it prints a URL you can open in your
+browser (e.g. `http://mesh-hello-secure-mcm-....apps-crc.testing`).
+
+Run `hack/setup-mesh-cps.sh --help` for additional options (topology, Istio version).
+
+## 6. Create standalone Istio CRs
 
 These are independent control planes not associated with any MCM. The frontend
-discovers them but does not consider them "managed".
+discovers them but does not consider them "managed". The Sail operator must already
+be installed (step 5 does this via the MCM controller).
 
 ```bash
+oc create namespace discovered-alpha-ns --dry-run=client -o yaml | oc apply -f -
+oc create namespace discovered-beta-ns --dry-run=client -o yaml | oc apply -f -
+
 oc apply -f - <<'EOF'
 apiVersion: sailoperator.io/v1
 kind: Istio
@@ -259,33 +209,7 @@ spec:
 EOF
 ```
 
-## 8. Deploy IstioCNI (optional)
-
-Without an IstioCNI resource, control planes whose istiod is running show as **Degraded**
-in the frontend (`Ready: True` but `DependenciesHealthy: False`). Creating the IstioCNI
-moves them to **Healthy**. Skip this step to start the demo in the Degraded state — you
-can create and delete the IstioCNI at any time to toggle between states (see
-[Demo Tips](#demo-tips) below).
-
-```bash
-oc apply -f - <<'EOF'
-apiVersion: sailoperator.io/v1
-kind: IstioCNI
-metadata:
-  name: default
-spec:
-  namespace: istio-cni
-  version: v1.28.8
-EOF
-```
-
-Wait for the CNI to become ready:
-
-```bash
-oc wait istiocni default --for=condition=Ready --timeout=60s
-```
-
-## 9. Verification
+## 7. Verification
 
 ```bash
 # MCM CRs and their status
@@ -312,16 +236,10 @@ oc get multiclustermesh secure-mcm -n secure-mcm-ns -o jsonpath='{.status.cluste
 Expected results:
 
 - 2 MCMs with `OperatorInstalled: True` on `local-cluster`
-- 4 Istio CRs each targeting a unique namespace
+- 4 Istio CRs (2 managed by `setup-mesh-cps.sh`, 2 standalone) each targeting a unique namespace
+- IstioCNI deployed (created by `setup-mesh-cps.sh`)
 - cert-manager Certificate in `secure-mcm-ns` with Ready status
 - A `multicluster-mesh-cacerts` ManifestWork in `local-cluster` namespace for trust distribution
-
-Control plane status depends on whether IstioCNI was deployed (step 8):
-
-| Condition | Without IstioCNI | With IstioCNI |
-|-----------|------------------|---------------|
-| istiod running | Degraded (orange) | Healthy (green) |
-| istiod not schedulable | Not Ready (red) | Not Ready (red) |
 
 On resource-constrained environments (e.g. CRC) one or more control planes may remain
 Not Ready because their istiod pod cannot be scheduled due to insufficient memory.
@@ -360,25 +278,26 @@ Kubernetes watch.
 To remove everything created by this guide:
 
 ```bash
-# Delete IstioCNI (if deployed)
-oc delete istiocni default 2>/dev/null
+# Remove managed Istio control planes (Istio CRs, IstioCNI, east-west gateways, etc.)
+hack/setup-mesh-cps.sh -m unsecure-mcm -n unsecure-mcm-ns uninstall
+hack/setup-mesh-cps.sh -m secure-mcm -n secure-mcm-ns --deploy-app true uninstall
 
-# Delete Istio CRs
-oc delete istio unsecure-istio secure-istio discovered-alpha-istio discovered-beta-istio
+# Remove standalone Istio CRs
+oc delete istio discovered-alpha-istio discovered-beta-istio --ignore-not-found
 
-# Delete MCM CRs
-oc delete multiclustermesh unsecure-mcm -n unsecure-mcm-ns
-oc delete multiclustermesh secure-mcm -n secure-mcm-ns
+# Delete MCM CRs (let the controller clean up operator ManifestWorks)
+oc delete multiclustermesh unsecure-mcm -n unsecure-mcm-ns --ignore-not-found
+oc delete multiclustermesh secure-mcm -n secure-mcm-ns --ignore-not-found
 
 # Remove cluster label
 oc label managedcluster local-cluster cluster.open-cluster-management.io/clusterset-
 
 # Delete ManagedClusterSet
-oc delete managedclusterset demo-cluster-set
+oc delete managedclusterset demo-cluster-set --ignore-not-found
 
 # Delete namespaces
-oc delete namespace unsecure-mcm-ns secure-mcm-ns unsecure-ns secure-ns \
-  discovered-alpha-ns discovered-beta-ns istio-cni
+oc delete namespace unsecure-mcm-ns secure-mcm-ns \
+  discovered-alpha-ns discovered-beta-ns --ignore-not-found
 
 # Wait for the MCM controller to clean up the operator ManifestWork, then
 # remove the Sail operator if it remains
