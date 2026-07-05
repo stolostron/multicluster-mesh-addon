@@ -1,0 +1,10 @@
+apiVersion: addon.open-cluster-management.io/v1beta1
+kind: ClusterManagementAddOn
+metadata:
+  name: multicluster-mesh-addon
+spec:
+  addOnMeta:
+    displayName: Multi-Cluster Mesh Add-on
+    description: "Hub-side controller for orchestrating multi-cluster Istio service mesh deployments"
+  installStrategy:
+    type: Manual
