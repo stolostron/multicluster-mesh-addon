@@ -745,6 +745,75 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 		})
 	})
 
+	Context("Trust establishment status", func() {
+		When("trust is configured", func() {
+			BeforeEach(func() {
+				util.CreateK8sManagedCluster(ctx, k8sClient, clusterName, testClusterSet)
+				util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet, util.CertManagerSpec("mesh-issuer"))
+			})
+
+			It("should report WaitingForCertificate when cacerts secret does not exist", func() {
+				expectClusterTrustConditionReason(meshName, testNs, clusterName, meshv1alpha1.ReasonCertificateIssuancePending)
+				expectMeshNotReady(meshName, testNs)
+			})
+
+			It("should report WaitingForTrust when ManifestWork exists but is not applied", func() {
+				util.CreateCacertsSecret(ctx, k8sClient, testNs, clusterName, meshName, testNs)
+				expectCacertsManifestWork(clusterName)
+
+				expectClusterTrustConditionReason(meshName, testNs, clusterName, meshv1alpha1.ReasonCertificateDistributionPending)
+				expectMeshNotReady(meshName, testNs)
+			})
+
+			It("should report Established when ManifestWork is applied", func() {
+				util.CreateCacertsSecret(ctx, k8sClient, testNs, clusterName, meshName, testNs)
+				expectCacertsManifestWork(clusterName)
+
+				util.SetManifestWorkApplied(ctx, k8sClient, meshcontroller.ManifestWorkNameCacerts, clusterName)
+
+				expectClusterTrustConditionReason(meshName, testNs, clusterName, meshv1alpha1.ReasonTrustEstablished)
+			})
+
+			It("should require both operator installed and trust established for Ready", func() {
+				util.CreateCacertsSecret(ctx, k8sClient, testNs, clusterName, meshName, testNs)
+				expectCacertsManifestWork(clusterName)
+
+				By("operator installed but trust not established - mesh should not be ready")
+				util.SetManifestWorkFeedback(ctx, k8sClient,
+					meshcontroller.OperatorManifestWorkName, clusterName,
+					meshcontroller.FeedbackInstalledCSV, "sailoperator.v1.0.0")
+
+				expectClusterOperatorConditionReason(meshName, testNs, clusterName, meshv1alpha1.ReasonOperatorInstalled)
+				expectClusterTrustConditionReason(meshName, testNs, clusterName, meshv1alpha1.ReasonCertificateDistributionPending)
+				expectMeshNotReady(meshName, testNs)
+
+				By("both operator installed and trust established - mesh should be ready")
+				util.SetManifestWorkApplied(ctx, k8sClient, meshcontroller.ManifestWorkNameCacerts, clusterName)
+
+				expectClusterTrustConditionReason(meshName, testNs, clusterName, meshv1alpha1.ReasonTrustEstablished)
+				expectMeshReady(meshName, testNs)
+			})
+		})
+
+		When("trust is not configured", func() {
+			BeforeEach(func() {
+				util.CreateK8sManagedCluster(ctx, k8sClient, clusterName, testClusterSet)
+				util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet)
+			})
+
+			It("should not report TrustEstablished condition", func() {
+				expectOperatorManifestWork(clusterName)
+
+				util.SetManifestWorkFeedback(ctx, k8sClient,
+					meshcontroller.OperatorManifestWorkName, clusterName,
+					meshcontroller.FeedbackInstalledCSV, "sailoperator.v1.0.0")
+
+				expectMeshReady(meshName, testNs)
+				expectNoClusterTrustCondition(meshName, testNs, clusterName)
+			})
+		})
+	})
+
 	Context("Endpoint discovery", func() {
 		var cluster1, cluster2, cluster3 string
 
@@ -1179,6 +1248,36 @@ func expectNoClusterStatus(meshName, namespace, clusterName string) {
 		}
 		return true
 	}).Should(BeTrue())
+}
+
+func expectClusterTrustConditionReason(meshName, namespace, clusterName, reason string) {
+	Eventually(func(g Gomega) {
+		mesh := &meshv1alpha1.MultiClusterMesh{}
+		g.Expect(k8sClient.Get(ctx, key.Of(meshName, namespace), mesh)).To(Succeed())
+		for _, cs := range mesh.Status.ClusterStatus {
+			if cs.ClusterName == clusterName {
+				c := findCondition(g, cs.Conditions, meshv1alpha1.ConditionTrustEstablished)
+				g.Expect(c.Reason).To(Equal(reason))
+				g.Expect(c.ObservedGeneration).To(Equal(mesh.Generation))
+				return
+			}
+		}
+		g.Expect(false).To(BeTrue(), "cluster %s not found in status", clusterName)
+	}).Should(Succeed())
+}
+
+func expectNoClusterTrustCondition(meshName, namespace, clusterName string) {
+	Eventually(func(g Gomega) {
+		mesh := &meshv1alpha1.MultiClusterMesh{}
+		g.Expect(k8sClient.Get(ctx, key.Of(meshName, namespace), mesh)).To(Succeed())
+		for _, cs := range mesh.Status.ClusterStatus {
+			if cs.ClusterName == clusterName {
+				c := meta.FindStatusCondition(cs.Conditions, meshv1alpha1.ConditionTrustEstablished)
+				g.Expect(c).To(BeNil(), "expected no TrustEstablished condition on cluster %s", clusterName)
+				return
+			}
+		}
+	}).Should(Succeed())
 }
 
 func expectMeshConditionReason(meshName, namespace, conditionType, reason string) {
