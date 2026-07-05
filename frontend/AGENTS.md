@@ -213,6 +213,10 @@ Both `ServiceMeshPage.tsx` (Meshes) and `ControlPlanesPage.tsx` (Control Planes)
 5. Cell order doesn't need to match column order (matched by `id`), but keep them aligned for readability
 6. `ServiceMeshPage.tsx` operates on `FleetMeshItem` (the unified type covering managed and discovered meshes); `ControlPlanesPage.tsx` operates on `EnrichedControlPlane`
 
+## Skills
+
+- **[Track Backend Issues](docs/skills/track-backend-issues.md)** — Analyze open backend controller issues for frontend impact and create/update GitHub tracking issues with the `area/frontend` label. Run periodically (e.g., when new backend issues are filed or before sprint planning).
+
 ## Backend CRD Reference
 
 The `MultiClusterMesh` CRD is the primary resource. Key fields:
