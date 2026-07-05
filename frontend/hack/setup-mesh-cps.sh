@@ -34,9 +34,7 @@
 #          Example: oc login https://api.cluster1.example.com:6443 \
 #                     --kubeconfig=my-kubeconfigs/cluster1.config
 #
-#   5. (Optional) If trust is configured on the MultiClusterMesh, the
-#      controller will have distributed cacerts to each cluster. This
-#      script transforms those certificates into the format Istio expects.
+# This script is idempotent — it is safe to re-run at any time.
 #
 # USAGE
 #
@@ -253,13 +251,7 @@ To provide access, use one of:
 # is_openshift CLUSTER_NAME — returns 0 if the cluster is an OpenShift variant
 is_openshift() {
   local cluster="${1}"
-  local product
-  product=$("${CLIENT_EXE}" get managedcluster "${cluster}" \
-    -o jsonpath='{.status.clusterClaims[?(@.name=="product.open-cluster-management.io")].value}' 2>/dev/null || true)
-  case "${product}" in
-    OpenShift|ROSA|ARO|ROKS|OpenShiftDedicated) return 0 ;;
-    *) return 1 ;;
-  esac
+  [ "$(kube_on "${cluster}" api-resources --api-group=operator.openshift.io --no-headers 2>/dev/null | wc -l)" -gt 0 ]
 }
 
 ##############################################################################
