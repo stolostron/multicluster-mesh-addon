@@ -258,7 +258,6 @@ Potential additions include observability stack management and full addon framew
 [ManagedServiceAccount]: https://open-cluster-management.io/docs/getting-started/integration/managed-serviceaccount/
 [ManifestWork]: https://open-cluster-management.io/docs/concepts/work-distribution/manifestwork/
 [ManagedClusterSet]: https://open-cluster-management.io/docs/concepts/cluster-inventory/managedclusterset/
-[ClusterClaim]: https://open-cluster-management.io/docs/concepts/cluster-inventory/clusterclaim/
 [ManagedClusterView]: https://github.com/stolostron/cluster-lifecycle-api
 [ClusterManagementAddOn]: https://open-cluster-management.io/docs/concepts/addon/#clustermanagementaddon
 [Plug-in CA]: https://istio.io/latest/docs/tasks/security/cert-management/plugin-ca-cert/
