@@ -328,12 +328,16 @@ describe('enrichment cache functions', () => {
 
   it('getFromEnrichmentCache returns undefined after TTL expires', () => {
     rstest.useFakeTimers()
-    const istio = makeIstioForCache()
-    setInEnrichmentCache('cluster-a', 'default', istio)
-    expect(getFromEnrichmentCache('cluster-a', 'default')).toBe(istio)
+    try {
+      const istio = makeIstioForCache()
+      setInEnrichmentCache('cluster-a', 'default', istio)
+      expect(getFromEnrichmentCache('cluster-a', 'default')).toBe(istio)
 
-    rstest.setSystemTime(Date.now() + 160_000)
-    expect(getFromEnrichmentCache('cluster-a', 'default')).toBeUndefined()
+      rstest.setSystemTime(Date.now() + 160_000)
+      expect(getFromEnrichmentCache('cluster-a', 'default')).toBeUndefined()
+    } finally {
+      rstest.useRealTimers()
+    }
   })
 
   it('setInEnrichmentCache overwrites existing entries', () => {

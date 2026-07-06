@@ -176,6 +176,11 @@ export function useEnrichedControlPlanes(
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchKey])
 
+  // Reads from cache without TTL check: the enrichment effect above already
+  // TTL-filters entries before deciding what to re-fetch (lines 127-131).
+  // Entries here were just written or are within TTL. The scoped hook
+  // (useMeshControlPlanes) uses getFromEnrichmentCache (with TTL) in its memo
+  // instead — a cosmetic inconsistency that self-corrects on the next cycle.
   const enrichedBeforeCorrelation = useMemo(() => {
     return stableResults.map((r) => {
       const cached = enrichmentCache.get(`${r.cluster}/${r.metadata?.name}`)?.data

@@ -30,14 +30,14 @@ export const StatusDonutChart = memo<StatusDonutChartProps>(({ counts, subtitle 
     { x: t('Degraded'), y: counts.degraded },
     { x: t('Not Ready'), y: counts.notReady },
     { x: t('Unknown'), y: counts.unknown },
-  ], [counts.ready, counts.degraded, counts.notReady, counts.unknown, t])
+  ], [counts.ready, counts.degraded, counts.notReady, counts.unknown]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const legendData = useMemo(() => [
     { name: t('{{count}} Ready', { count: counts.ready }) },
     { name: t('{{count}} Degraded', { count: counts.degraded }) },
     { name: t('{{count}} Not Ready', { count: counts.notReady }) },
     { name: t('{{count}} Unknown', { count: counts.unknown }) },
-  ], [counts.ready, counts.degraded, counts.notReady, counts.unknown, t])
+  ], [counts.ready, counts.degraded, counts.notReady, counts.unknown]) // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div style={{ width: '100%' }}>
@@ -57,3 +57,4 @@ export const StatusDonutChart = memo<StatusDonutChartProps>(({ counts, subtitle 
     </div>
   )
 })
+StatusDonutChart.displayName = 'StatusDonutChart'

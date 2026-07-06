@@ -34,6 +34,12 @@ export function useMeshControlPlanes(
 
   const clusterKey = useMemo(() => [...clusterNames].sort().join(','), [clusterNames])
 
+  const prevClusterKey = useRef(clusterKey)
+  if (prevClusterKey.current !== clusterKey) {
+    prevClusterKey.current = clusterKey
+    initialEnrichmentDone.current = false
+  }
+
   const [data, searchLoaded, searchError] = useFleetSearchPoll<FleetIstio[]>({
     groupVersionKind: istioGroupVersionKind,
     isList: true,

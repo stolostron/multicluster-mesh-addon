@@ -63,6 +63,9 @@ const ControlPlaneDetailContent: FC<{ cluster: string; name: string; type: CpTyp
 
     fleetK8sGet<Istio>({ model: istioModel, name, cluster })
       .then((r) => {
+        // Cache write is intentionally outside the cancelled guard: valid data
+        // should warm the shared cache even if the user navigated away, so other
+        // pages benefit from the fetch without re-requesting.
         setInEnrichmentCache(cluster, name, r)
         if (!cancelled) { setIstio(r); setLoaded(true) }
       })
