@@ -106,4 +106,10 @@ func checkNoExistingResources(ctx context.Context, c client.Client) {
 	Expect(err).NotTo(HaveOccurred())
 	Expect(mwList.Items).To(BeEmpty(),
 		"existing ManifestWorks found; run 'make dev-clean-meshes' to clean up")
+
+	msaList := &msav1beta1.ManagedServiceAccountList{}
+	err = c.List(ctx, msaList, client.MatchingLabels{meshcontroller.ManagedByLabel: meshcontroller.ManagedByValue})
+	Expect(err).NotTo(HaveOccurred())
+	Expect(msaList.Items).To(BeEmpty(),
+		"existing ManagedServiceAccounts found; run 'make dev-clean-meshes' to clean up")
 }

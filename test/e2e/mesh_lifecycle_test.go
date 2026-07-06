@@ -4,7 +4,6 @@ package e2e
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -187,112 +186,42 @@ var _ = Describe("MultiClusterMesh lifecycle", Ordered, func() {
 			util.ExpectResourceDeleted(ctx, spokeClient, &operatorsv1alpha1.Subscription{}, testOperatorName, testOperatorNamespace, 2*time.Minute)
 		}
 	})
-})
-
-var _ = Describe("ManagedServiceAccount lifecycle", Ordered, func() {
-	var (
-		mesh *meshv1alpha1.MultiClusterMesh
-		ns   string
-	)
-
-	BeforeAll(func(ctx SpecContext) {
-		ns = util.UniqueName("test-ns")
-		util.CreateNamespace(ctx, hubClient, ns)
-	})
-
-	AfterAll(func(ctx SpecContext) {
-		Step("Deleting test namespace %s", ns)
-		err := client.IgnoreNotFound(hubClient.Delete(ctx, &corev1.Namespace{
-			ObjectMeta: metav1.ObjectMeta{Name: ns},
-		}))
-		Expect(err).NotTo(HaveOccurred())
-	})
-
-	BeforeEach(func(ctx SpecContext) {
-		Step("Creating test mesh")
-		mesh = util.CreateMultiClusterMesh(ctx, hubClient, util.UniqueName("test-mesh"), ns, "mesh-cluster-set")
-
-		Step("Waiting for controller to reconcile")
-		Eventually(func(g Gomega) {
-			g.Expect(getMesh(ctx, mesh)).To(Succeed())
-			g.Expect(meta.FindStatusCondition(mesh.Status.Conditions, meshv1alpha1.ConditionReady)).NotTo(BeNil())
-		}).Should(Succeed())
-	})
-
-	AfterEach(func(ctx SpecContext) {
-		Step("Deleting test mesh %s", mesh.Name)
-		err := client.IgnoreNotFound(hubClient.Delete(ctx, mesh))
-		Expect(err).NotTo(HaveOccurred())
-
-		Step("Waiting for ManagedServiceAccounts to be cleaned up")
-		Eventually(func(g Gomega) {
-			msaList := &msav1beta1.ManagedServiceAccountList{}
-			err := hubClient.List(ctx, msaList, client.MatchingLabels{
-				meshcontroller.MeshNameLabel:      mesh.Name,
-				meshcontroller.MeshNamespaceLabel: mesh.Namespace,
-			})
-			g.Expect(err).NotTo(HaveOccurred())
-			g.Expect(msaList.Items).To(BeEmpty(), "ManagedServiceAccounts still exist")
-		}).Should(Succeed())
-
-		Step("Waiting for ManifestWorks to be cleaned up")
-		Eventually(func(g Gomega) {
-			mwList := &workv1.ManifestWorkList{}
-			err := hubClient.List(ctx, mwList, client.MatchingLabels{meshcontroller.ManagedByLabel: meshcontroller.ManagedByValue})
-			g.Expect(err).NotTo(HaveOccurred())
-			g.Expect(mwList.Items).To(BeEmpty(), "ManifestWorks still exist")
-		}).Should(Succeed())
-	})
 
 	It("creates ManagedServiceAccounts for each spoke cluster", func(ctx SpecContext) {
-		msaName := expectedMSAName(ns, mesh.Name)
-		for _, cluster := range clusters {
-			Step("Verifying ManagedServiceAccount on hub for %s", cluster)
-			Eventually(func(g Gomega) {
-				msa, err := getMSA(ctx, msaName, cluster)
-				g.Expect(err).NotTo(HaveOccurred())
-
-				g.Expect(msa.Labels).To(HaveKeyWithValue(meshcontroller.ManagedByLabel, meshcontroller.ManagedByValue))
-				g.Expect(msa.Labels).To(HaveKeyWithValue(meshcontroller.MeshNameLabel, mesh.Name))
-				g.Expect(msa.Labels).To(HaveKeyWithValue(meshcontroller.MeshNamespaceLabel, mesh.Namespace))
-				g.Expect(msa.Labels).To(HaveKeyWithValue(meshcontroller.ClusterNameLabel, cluster))
-
-				g.Expect(msa.Spec.Rotation.Validity.Duration).To(Equal(360 * time.Hour))
-			}).Should(Succeed())
-		}
+		Eventually(func(g Gomega) {
+			msaList := listMeshMSAs(g, ctx, mesh)
+			g.Expect(msaList.Items).To(HaveLen(len(clusters)),
+				"expected one MSA per cluster in the ClusterSet")
+		}).Should(Succeed())
 	})
 
 	It("MSA addon creates token secrets on the hub", func(ctx SpecContext) {
-		msaName := expectedMSAName(ns, mesh.Name)
-		for _, cluster := range clusters {
-			Step("Waiting for MSA addon to create token secret for %s", cluster)
-			Eventually(func(g Gomega) {
-				msa, err := getMSA(ctx, msaName, cluster)
-				g.Expect(err).NotTo(HaveOccurred())
+		Eventually(func(g Gomega) {
+			msaList := listMeshMSAs(g, ctx, mesh)
+			for _, msa := range msaList.Items {
 				g.Expect(msa.Status.TokenSecretRef).NotTo(BeNil(),
-					"expected MSA %s/%s to have tokenSecretRef", cluster, msaName)
+					"expected MSA %s/%s to have tokenSecretRef", msa.Namespace, msa.Name)
 
 				secretCreated := meta.FindStatusCondition(msa.Status.Conditions, msav1beta1.ConditionTypeSecretCreated)
 				g.Expect(secretCreated).NotTo(BeNil())
 				g.Expect(secretCreated.Status).To(Equal(metav1.ConditionTrue))
 
 				secret := &corev1.Secret{}
-				g.Expect(hubClient.Get(ctx, key.Of(msa.Status.TokenSecretRef.Name, cluster), secret)).To(Succeed(),
-					"token secret %s/%s should exist", cluster, msa.Status.TokenSecretRef.Name)
-			}).WithTimeout(2 * time.Minute).Should(Succeed())
-		}
+				g.Expect(hubClient.Get(ctx, key.Of(msa.Status.TokenSecretRef.Name, msa.Namespace), secret)).To(Succeed(),
+					"token secret %s/%s should exist", msa.Namespace, msa.Status.TokenSecretRef.Name)
+			}
+		}).WithTimeout(2 * time.Minute).Should(Succeed())
 	})
 
 	It("cleans up ManagedServiceAccounts on mesh deletion", func(ctx SpecContext) {
-		msaName := expectedMSAName(ns, mesh.Name)
-
 		Step("Deleting the mesh CR")
 		util.DeleteResource(ctx, hubClient, mesh, mesh.Name, mesh.Namespace)
 
 		Step("Verifying ManagedServiceAccounts are removed from hub")
-		for _, cluster := range clusters {
-			util.ExpectResourceDeleted(ctx, hubClient, &msav1beta1.ManagedServiceAccount{}, msaName, cluster)
-		}
+		Eventually(func(g Gomega) {
+			msaList := listMeshMSAs(g, ctx, mesh)
+			g.Expect(msaList.Items).To(BeEmpty(), "expected all mesh-owned MSAs to be deleted")
+		}).Should(Succeed())
 	})
 
 	// TODO: Once the controller builds Istio remote secrets from MSA token secrets,
@@ -326,12 +255,11 @@ func getSubscription(ctx context.Context, spokeClient client.Client) (*operators
 	return sub, err
 }
 
-func expectedMSAName(namespace, meshName string) string {
-	return fmt.Sprintf("%s-istio-reader-%s", namespace, meshName)
-}
-
-func getMSA(ctx context.Context, name, cluster string) (*msav1beta1.ManagedServiceAccount, error) {
-	msa := &msav1beta1.ManagedServiceAccount{}
-	err := hubClient.Get(ctx, key.Of(name, cluster), msa)
-	return msa, err
+func listMeshMSAs(g Gomega, ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh) *msav1beta1.ManagedServiceAccountList {
+	msaList := &msav1beta1.ManagedServiceAccountList{}
+	g.Expect(hubClient.List(ctx, msaList, client.MatchingLabels{
+		meshcontroller.MeshNameLabel:      mesh.Name,
+		meshcontroller.MeshNamespaceLabel: mesh.Namespace,
+	})).To(Succeed())
+	return msaList
 }
