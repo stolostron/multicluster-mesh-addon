@@ -836,7 +836,7 @@ func CacertsManifestWorkName(meshName, meshNamespace string) string {
 // meshResourceName generates a unique, deterministic resource name for a per-mesh resource.
 // It appends an 8-char FNV-32a hash of "name=<name>,namespace=<namespace>" to avoid
 // collisions when name/namespace pairs differ only in hyphen boundaries (e.g. "a"/"ab" vs "aa"/"b").
-// If the result exceeds maxLen, the mesh name and namespace are truncated to fit.
+// If the result exceeds maxLen, the mesh name is truncated first to preserve the full namespace.
 func meshResourceName(prefix, meshName, meshNamespace string, maxLen int) string {
 	h := fnv.New32a()
 	fmt.Fprintf(h, "name=%s,namespace=%s", meshName, meshNamespace)
@@ -850,13 +850,14 @@ func meshResourceName(prefix, meshName, meshNamespace string, maxLen int) string
 	overhead := len(prefix) + 3 + 8
 	remaining := maxLen - overhead
 
-	nameMax := (remaining + 1) / 2
+	nsLen := len(meshNamespace)
+	if nsLen > remaining {
+		nsLen = remaining
+		meshNamespace = strings.TrimRight(meshNamespace[:nsLen], "-")
+	}
+	nameMax := remaining - nsLen
 	if len(meshName) > nameMax {
 		meshName = strings.TrimRight(meshName[:nameMax], "-")
-	}
-	nsMax := remaining - len(meshName)
-	if len(meshNamespace) > nsMax {
-		meshNamespace = strings.TrimRight(meshNamespace[:nsMax], "-")
 	}
 
 	return fmt.Sprintf("%s-%s-%s-%s", prefix, meshName, meshNamespace, hash)

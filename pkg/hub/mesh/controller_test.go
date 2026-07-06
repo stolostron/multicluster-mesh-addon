@@ -2,6 +2,7 @@ package mesh
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -141,5 +142,17 @@ func TestMeshResourceNameTruncatesLongNames(t *testing.T) {
 	result := meshResourceName("multicluster-mesh-cacerts", long, long, 63)
 	if len(result) > 63 {
 		t.Errorf("name exceeds maxLen: %q (len=%d)", result, len(result))
+	}
+}
+
+func TestMeshResourceNamePreservesNamespace(t *testing.T) {
+	longName := strings.Repeat("a", 253)
+	namespace := strings.Repeat("b", 63)
+	result := meshResourceName("multicluster-mesh-cacerts", longName, namespace, 188)
+	if len(result) > 188 {
+		t.Errorf("name exceeds maxLen: %q (len=%d)", result, len(result))
+	}
+	if !strings.Contains(result, namespace) {
+		t.Errorf("namespace was truncated: %q does not contain %q", result, namespace)
 	}
 }
