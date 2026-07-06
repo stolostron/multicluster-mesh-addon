@@ -187,17 +187,11 @@ var _ = Describe("MultiClusterMesh lifecycle", Ordered, func() {
 		}
 	})
 
-	It("creates ManagedServiceAccounts for each spoke cluster", func(ctx SpecContext) {
+	It("creates ManagedServiceAccounts with token secrets for each spoke cluster", func(ctx SpecContext) {
 		Eventually(func(g Gomega) {
 			msaList := listMeshMSAs(g, ctx, mesh)
 			g.Expect(msaList.Items).To(HaveLen(len(clusters)),
 				"expected one MSA per cluster in the ClusterSet")
-		}).Should(Succeed())
-	})
-
-	It("MSA addon creates token secrets on the hub", func(ctx SpecContext) {
-		Eventually(func(g Gomega) {
-			msaList := listMeshMSAs(g, ctx, mesh)
 			for _, msa := range msaList.Items {
 				g.Expect(msa.Status.TokenSecretRef).NotTo(BeNil(),
 					"expected MSA %s/%s to have tokenSecretRef", msa.Namespace, msa.Name)
