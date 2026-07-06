@@ -560,7 +560,7 @@ func (r *Reconciler) getClustersFromSet(ctx context.Context, clusterSetName stri
 func (r *Reconciler) buildOperatorManifestWork(mesh *meshv1alpha1.MultiClusterMesh, cluster *clusterv1.ManagedCluster) *workv1.ManifestWork {
 	config := mesh.Spec.Operator
 	manifests := []workv1.Manifest{
-		workv1.Manifest{
+		{
 			RawExtension: runtime.RawExtension{Object: &corev1.Namespace{
 				TypeMeta: metav1.TypeMeta{
 					APIVersion: "v1",
@@ -571,7 +571,7 @@ func (r *Reconciler) buildOperatorManifestWork(mesh *meshv1alpha1.MultiClusterMe
 				},
 			}},
 		},
-		workv1.Manifest{
+		{
 			RawExtension: runtime.RawExtension{Object: &operatorsv1.OperatorGroup{
 				TypeMeta: metav1.TypeMeta{
 					APIVersion: "operators.coreos.com/v1",
@@ -586,7 +586,7 @@ func (r *Reconciler) buildOperatorManifestWork(mesh *meshv1alpha1.MultiClusterMe
 				},
 			}},
 		},
-		workv1.Manifest{
+		{
 			RawExtension: runtime.RawExtension{Object: &operatorsv1alpha1.Subscription{
 				TypeMeta: metav1.TypeMeta{
 					APIVersion: "operators.coreos.com/v1alpha1",
