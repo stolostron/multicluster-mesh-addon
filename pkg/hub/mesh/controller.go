@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"reflect"
 	"slices"
 	"strings"
@@ -278,6 +279,10 @@ func (r *Reconciler) doReconcile(ctx context.Context, mesh *meshv1alpha1.MultiCl
 		return reconcile.Result{}, fmt.Errorf("failed to cleanup Certificates: %w", err)
 	}
 
+	if err := r.cleanupMeshOwnedManifestWorks(ctx, mesh, clusters, forceCleanupAll); err != nil {
+		return reconcile.Result{}, fmt.Errorf("failed to cleanup mesh-owned ManifestWorks: %w", err)
+	}
+
 	if err := r.cleanupManifestWorks(ctx, mesh.Spec.ClusterSet); err != nil {
 		return reconcile.Result{}, fmt.Errorf("failed to cleanup ManifestWorks: %w", err)
 	}
@@ -357,6 +362,10 @@ func (r *Reconciler) handleDeletion(ctx context.Context, mesh *meshv1alpha1.Mult
 	}
 
 	klog.Infof("Handling deletion for MultiClusterMesh %s/%s", mesh.Namespace, mesh.Name)
+	if err := r.cleanupMeshOwnedManifestWorks(ctx, mesh, nil, true); err != nil {
+		return reconcile.Result{}, fmt.Errorf("failed to cleanup mesh-owned ManifestWorks: %w", err)
+	}
+
 	if err := r.cleanupManifestWorks(ctx, mesh.Spec.ClusterSet); err != nil {
 		return reconcile.Result{}, fmt.Errorf("failed to cleanup ManifestWorks: %w", err)
 	}
@@ -396,6 +405,35 @@ func (r *Reconciler) cleanupManifestWorks(ctx context.Context, clusterSet string
 		}
 
 		klog.Infof("Deleting ManifestWork %s/%s (no mesh targets this cluster)", work.Namespace, work.Name)
+		if err := r.workApplier.Delete(ctx, work.Namespace, work.Name); err != nil {
+			return fmt.Errorf("failed to delete ManifestWork %s/%s: %w", work.Namespace, work.Name, err)
+		}
+	}
+
+	return nil
+}
+
+// cleanupMeshOwnedManifestWorks deletes mesh-owned ManifestWorks. When deleteAll is true, all ManifestWorks for the
+// mesh are removed (e.g. when the mesh is deleted or the issuer is cleared). Otherwise, only ManifestWorks for
+// clusters no longer in the ClusterSet are removed.
+func (r *Reconciler) cleanupMeshOwnedManifestWorks(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, clusters []clusterv1.ManagedCluster, deleteAll bool) error {
+	clusterNames := clusterNameSet(clusters)
+
+	workList := &workv1.ManifestWorkList{}
+	if err := r.List(ctx, workList, client.MatchingLabels{
+		ManagedByLabel:     ManagedByValue,
+		MeshNameLabel:      mesh.Name,
+		MeshNamespaceLabel: mesh.Namespace,
+	}); err != nil {
+		return fmt.Errorf("failed to list mesh-owned ManifestWorks: %w", err)
+	}
+
+	for _, work := range workList.Items {
+		if !deleteAll && clusterNames[work.Namespace] {
+			continue
+		}
+
+		klog.Infof("Deleting ManifestWork %s/%s", work.Namespace, work.Name)
 		if err := r.workApplier.Delete(ctx, work.Namespace, work.Name); err != nil {
 			return fmt.Errorf("failed to delete ManifestWork %s/%s: %w", work.Namespace, work.Name, err)
 		}
@@ -764,7 +802,7 @@ func (r *Reconciler) buildCacertsManifestWork(mesh *meshv1alpha1.MultiClusterMes
 
 	return &workv1.ManifestWork{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      ManifestWorkNameCacerts,
+			Name:      CacertsManifestWorkName(mesh.Name, mesh.Namespace),
 			Namespace: clusterName,
 			Labels:    meshOwnedLabels(mesh, clusterName),
 		},
@@ -786,4 +824,40 @@ func meshOwnedLabels(mesh *meshv1alpha1.MultiClusterMesh, clusterName string) ma
 		MeshNamespaceLabel: mesh.Namespace,
 		ClusterNameLabel:   clusterName,
 	}
+}
+
+// CacertsManifestWorkName returns the ManifestWork name for distributing cacerts for a mesh.
+// The 188-char limit comes from the Klusterlet creating an AppliedManifestWork named
+// "<64-char-hub-hash>-<manifestwork-name>", which must fit within the 253-char CRD name limit.
+func CacertsManifestWorkName(meshName, meshNamespace string) string {
+	return meshResourceName(ManifestWorkNameCacerts, meshName, meshNamespace, 188)
+}
+
+// meshResourceName generates a unique, deterministic resource name for a per-mesh resource.
+// It appends an 8-char FNV-32a hash of "name=<name>,namespace=<namespace>" to avoid
+// collisions when name/namespace pairs differ only in hyphen boundaries (e.g. "a"/"ab" vs "aa"/"b").
+// If the result exceeds maxLen, the mesh name and namespace are truncated to fit.
+func meshResourceName(prefix, meshName, meshNamespace string, maxLen int) string {
+	h := fnv.New32a()
+	fmt.Fprintf(h, "name=%s,namespace=%s", meshName, meshNamespace)
+	hash := fmt.Sprintf("%08x", h.Sum32())
+
+	full := fmt.Sprintf("%s-%s-%s-%s", prefix, meshName, meshNamespace, hash)
+	if len(full) <= maxLen {
+		return full
+	}
+
+	overhead := len(prefix) + 3 + 8
+	remaining := maxLen - overhead
+
+	nameMax := (remaining + 1) / 2
+	if len(meshName) > nameMax {
+		meshName = strings.TrimRight(meshName[:nameMax], "-")
+	}
+	nsMax := remaining - len(meshName)
+	if len(meshNamespace) > nsMax {
+		meshNamespace = strings.TrimRight(meshNamespace[:nsMax], "-")
+	}
+
+	return fmt.Sprintf("%s-%s-%s-%s", prefix, meshName, meshNamespace, hash)
 }

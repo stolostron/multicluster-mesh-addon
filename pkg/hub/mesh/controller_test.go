@@ -119,3 +119,27 @@ func meshWith(namespace, name string, ts metav1.Time) *meshv1alpha1.MultiCluster
 		},
 	}
 }
+
+func TestMeshResourceNameIsDeterministic(t *testing.T) {
+	a := meshResourceName("multicluster-mesh-cacerts", "my-mesh", "my-namespace", 188)
+	b := meshResourceName("multicluster-mesh-cacerts", "my-mesh", "my-namespace", 188)
+	if a != b {
+		t.Errorf("not deterministic: %q != %q", a, b)
+	}
+}
+
+func TestMeshResourceNameAvoidsBoundaryCollisions(t *testing.T) {
+	a := meshResourceName("multicluster-mesh-cacerts", "a", "ab", 188)
+	b := meshResourceName("multicluster-mesh-cacerts", "aa", "b", 188)
+	if a == b {
+		t.Errorf("boundary collision: %q == %q", a, b)
+	}
+}
+
+func TestMeshResourceNameTruncatesLongNames(t *testing.T) {
+	long := "abcdefghijklmnopqrstuvwxyz0123456789"
+	result := meshResourceName("multicluster-mesh-cacerts", long, long, 63)
+	if len(result) > 63 {
+		t.Errorf("name exceeds maxLen: %q (len=%d)", result, len(result))
+	}
+}
