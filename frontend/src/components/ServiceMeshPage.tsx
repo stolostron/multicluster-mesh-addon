@@ -26,65 +26,25 @@ import { clusterSetDetailLink } from '../utils/linkUtils'
 import { fuzzyCaseInsensitive } from '../utils/filterUtils'
 import type { RowSearchFilter } from '../utils/filterUtils'
 import { useMeshTranslation } from '../utils/i18nUtils'
+import { sortWithComparator } from '../utils/tableCallbacks'
+
+const compareMeshClusterCount = (a: FleetMeshItem, b: FleetMeshItem) => a.clusterCount - b.clusterCount
+const compareMeshClusterSet = (a: FleetMeshItem, b: FleetMeshItem) => (a.clusterSet ?? '').localeCompare(b.clusterSet ?? '')
+const compareMeshID = (a: FleetMeshItem, b: FleetMeshItem) => (a.meshID ?? '').localeCompare(b.meshID ?? '')
+const compareMeshName = (a: FleetMeshItem, b: FleetMeshItem) => a.metadata.name.localeCompare(b.metadata.name)
+const compareMeshStatusRank = (a: FleetMeshItem, b: FleetMeshItem) => a.statusRank - b.statusRank
+const compareMeshTrust = (a: FleetMeshItem, b: FleetMeshItem) => (a.trustIssuer ?? '').localeCompare(b.trustIssuer ?? '')
+const compareMeshType = (a: FleetMeshItem, b: FleetMeshItem) => a.kind.localeCompare(b.kind)
 
 function buildColumns(t: (key: string) => string): TableColumn<FleetMeshItem>[] {
   return [
-    {
-      title: t('Mesh ID'),
-      id: 'meshID',
-      sort: (data: FleetMeshItem[], sortDirection: string) => {
-        const dir = sortDirection === 'asc' ? 1 : -1
-        return [...data].sort((a, b) => dir * (a.meshID ?? '').localeCompare(b.meshID ?? ''))
-      },
-    },
-    {
-      title: t('Type'),
-      id: 'type',
-      sort: (data: FleetMeshItem[], sortDirection: string) => {
-        const dir = sortDirection === 'asc' ? 1 : -1
-        return [...data].sort((a, b) => dir * a.kind.localeCompare(b.kind))
-      },
-    },
-    {
-      title: t('Name'),
-      id: 'name',
-      sort: (data: FleetMeshItem[], sortDirection: string) => {
-        const dir = sortDirection === 'asc' ? 1 : -1
-        return [...data].sort((a, b) => dir * a.metadata.name.localeCompare(b.metadata.name))
-      },
-    },
-    {
-      title: t('Cluster Set'),
-      id: 'clusterSet',
-      sort: (data: FleetMeshItem[], sortDirection: string) => {
-        const dir = sortDirection === 'asc' ? 1 : -1
-        return [...data].sort((a, b) => dir * (a.clusterSet ?? '').localeCompare(b.clusterSet ?? ''))
-      },
-    },
-    {
-      title: t('Clusters'),
-      id: 'clusters',
-      sort: (data: FleetMeshItem[], sortDirection: string) => {
-        const dir = sortDirection === 'asc' ? 1 : -1
-        return [...data].sort((a, b) => dir * (a.clusterCount - b.clusterCount))
-      },
-    },
-    {
-      title: t('Trust'),
-      id: 'trust',
-      sort: (data: FleetMeshItem[], sortDirection: string) => {
-        const dir = sortDirection === 'asc' ? 1 : -1
-        return [...data].sort((a, b) => dir * (a.trustIssuer ?? '').localeCompare(b.trustIssuer ?? ''))
-      },
-    },
-    {
-      title: t('Status'),
-      id: 'status',
-      sort: (data: FleetMeshItem[], sortDirection: string) => {
-        const dir = sortDirection === 'asc' ? 1 : -1
-        return [...data].sort((a, b) => dir * (a.statusRank - b.statusRank))
-      },
-    },
+    { title: t('Mesh ID'), id: 'meshID', sort: (data: FleetMeshItem[], dir: string) => sortWithComparator(data, dir, compareMeshID) },
+    { title: t('Type'), id: 'type', sort: (data: FleetMeshItem[], dir: string) => sortWithComparator(data, dir, compareMeshType) },
+    { title: t('Name'), id: 'name', sort: (data: FleetMeshItem[], dir: string) => sortWithComparator(data, dir, compareMeshName) },
+    { title: t('Cluster Set'), id: 'clusterSet', sort: (data: FleetMeshItem[], dir: string) => sortWithComparator(data, dir, compareMeshClusterSet) },
+    { title: t('Clusters'), id: 'clusters', sort: (data: FleetMeshItem[], dir: string) => sortWithComparator(data, dir, compareMeshClusterCount) },
+    { title: t('Trust'), id: 'trust', sort: (data: FleetMeshItem[], dir: string) => sortWithComparator(data, dir, compareMeshTrust) },
+    { title: t('Status'), id: 'status', sort: (data: FleetMeshItem[], dir: string) => sortWithComparator(data, dir, compareMeshStatusRank) },
   ]
 }
 
@@ -181,8 +141,8 @@ const ServiceMeshPage: FC = () => {
     isFleetAvailable,
   } = useFleetMeshItems()
   const { t } = useMeshTranslation()
-  const columns = useMemo(() => buildColumns(t), [t])
-  const searchFilters = useMemo(() => buildSearchFilters(t), [t])
+  const columns = useMemo(() => buildColumns(t), []) // eslint-disable-line react-hooks/exhaustive-deps
+  const searchFilters = useMemo(() => buildSearchFilters(t), []) // eslint-disable-line react-hooks/exhaustive-deps
   const [staticData, filteredData, onFilterChange] = useListPageFilter(items, searchFilters as any)
   const [activeColumns, userSettingsLoaded] = useActiveColumns({
     columns,

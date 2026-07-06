@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
 import {
   Flex,
@@ -46,7 +46,13 @@ export function VirtualFilterTable<T>({
   const { t } = useMeshTranslation()
   const allKey = categoryLabels[0].key
   const [filter, setFilter] = useState(allKey)
-  const [search, setSearch] = useState('')
+  const [searchInput, setSearchInput] = useState('')
+  const [debouncedSearch, setDebouncedSearch] = useState('')
+
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearch(searchInput), 200)
+    return () => clearTimeout(timer)
+  }, [searchInput])
 
   const categoryMap = useMemo(() => {
     const map = new Map<string, string>()
@@ -68,10 +74,10 @@ export function VirtualFilterTable<T>({
   const filtered = useMemo(() => {
     return items.filter((item) => {
       if (filter !== allKey && categoryMap.get(rowKey(item)) !== filter) return false
-      if (search && !searchMatch(item, search)) return false
+      if (debouncedSearch && !searchMatch(item, debouncedSearch)) return false
       return true
     })
-  }, [items, categoryMap, filter, search, allKey, rowKey, searchMatch])
+  }, [items, categoryMap, filter, debouncedSearch, allKey, rowKey, searchMatch])
 
   const { visibleItems, topSpacer, bottomSpacer, containerRef } = useVirtualRows(filtered)
 
@@ -93,9 +99,9 @@ export function VirtualFilterTable<T>({
         <FlexItem grow={{ default: 'grow' }}>
           <SearchInput
             placeholder={t(searchPlaceholder)}
-            value={search}
-            onChange={(_event, value) => setSearch(value)}
-            onClear={() => setSearch('')}
+            value={searchInput}
+            onChange={(_event, value) => setSearchInput(value)}
+            onClear={() => { setSearchInput(''); setDebouncedSearch('') }}
           />
         </FlexItem>
       </Flex>

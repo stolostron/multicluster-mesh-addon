@@ -23,6 +23,19 @@ export interface UseFleetMeshItemsResult {
   searchLoaded: boolean
 }
 
+function buildManagedByIndex(planes: EnrichedControlPlane[]): Map<string, EnrichedControlPlane[]> {
+  const map = new Map<string, EnrichedControlPlane[]>()
+  for (const cp of planes) {
+    if (cp.managedBy) {
+      const key = `${cp.managedBy.namespace}/${cp.managedBy.name}`
+      const group = map.get(key)
+      if (group) group.push(cp)
+      else map.set(key, [cp])
+    }
+  }
+  return map
+}
+
 function collectManagedMeshIDs(enrichedPlanes: EnrichedControlPlane[]): Set<string> {
   const ids = new Set<string>()
   for (const cp of enrichedPlanes) {
@@ -39,14 +52,13 @@ function buildItems(
   if (!enrichmentLoaded) return []
 
   const managedMeshIDs = collectManagedMeshIDs(enrichedPlanes)
+  const managedByIndex = buildManagedByIndex(enrichedPlanes)
 
   const managedItems: FleetMeshItem[] = mcms.map((mcm): FleetMeshItem => {
     const ns = mcm.metadata?.namespace ?? ''
     const name = mcm.metadata?.name ?? ''
 
-    const correlatedPlanes = enrichedPlanes.filter(
-      (cp) => cp.managedBy?.name === name && cp.managedBy?.namespace === ns
-    )
+    const correlatedPlanes = [...(managedByIndex.get(`${ns}/${name}`) ?? [])]
 
     const { conditions, rank } = correlatedPlanes.length > 0 && correlatedPlanes.some(cp => cp.status?.conditions)
       ? worstConditions(correlatedPlanes)

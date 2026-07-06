@@ -29,43 +29,26 @@ import { clusterDetailLink } from '../utils/linkUtils'
 import { fuzzyCaseInsensitive } from '../utils/filterUtils'
 import type { RowSearchFilter } from '../utils/filterUtils'
 import { useMeshTranslation } from '../utils/i18nUtils'
+import { sortWithComparator } from '../utils/tableCallbacks'
+
+const compareCpMeshID = (a: EnrichedControlPlane, b: EnrichedControlPlane) =>
+  (a.meshID ?? '').localeCompare(b.meshID ?? '')
+const compareCpStatusRank = (a: EnrichedControlPlane, b: EnrichedControlPlane) =>
+  getStatusRank(a.status?.conditions) - getStatusRank(b.status?.conditions)
+const cpTypeRank = (cp: EnrichedControlPlane) => cp.managedBy ? 0 : cp.meshID ? 1 : 2
+const compareCpType = (a: EnrichedControlPlane, b: EnrichedControlPlane) =>
+  cpTypeRank(a) - cpTypeRank(b)
 
 function buildColumns(t: (key: string) => string): TableColumn<EnrichedControlPlane>[] {
   return [
-    {
-      title: t('Mesh ID'),
-      id: 'meshID',
-      sort: (data: EnrichedControlPlane[], sortDirection: string) => {
-        const dir = sortDirection === 'asc' ? 1 : -1
-        return [...data].sort((a, b) =>
-          dir * (a.meshID ?? '').localeCompare(b.meshID ?? ''),
-        )
-      },
-    },
-    {
-      title: t('Type'),
-      id: 'type',
-      sort: (data: EnrichedControlPlane[], sortDirection: string) => {
-        const dir = sortDirection === 'asc' ? 1 : -1
-        const typeRank = (cp: EnrichedControlPlane) => cp.managedBy ? 0 : cp.meshID ? 1 : 2
-        return [...data].sort((a, b) => dir * (typeRank(a) - typeRank(b)))
-      },
-    },
+    { title: t('Mesh ID'), id: 'meshID', sort: (data: EnrichedControlPlane[], dir: string) => sortWithComparator(data, dir, compareCpMeshID) },
+    { title: t('Type'), id: 'type', sort: (data: EnrichedControlPlane[], dir: string) => sortWithComparator(data, dir, compareCpType) },
     { title: t('Name'), id: 'name', sort: 'metadata.name' },
     { title: t('Cluster'), id: 'cluster', sort: 'clusterName' },
     { title: t('Namespace'), id: 'namespace', sort: 'controlPlaneNamespace' },
     { title: t('Version'), id: 'version', sort: 'version' },
     { title: t('Created'), id: 'created', sort: 'metadata.creationTimestamp' },
-    {
-      title: t('Status'),
-      id: 'status',
-      sort: (data: EnrichedControlPlane[], sortDirection: string) => {
-        const dir = sortDirection === 'asc' ? 1 : -1
-        return [...data].sort(
-          (a, b) => dir * (getStatusRank(a.status?.conditions) - getStatusRank(b.status?.conditions)),
-        )
-      },
-    },
+    { title: t('Status'), id: 'status', sort: (data: EnrichedControlPlane[], dir: string) => sortWithComparator(data, dir, compareCpStatusRank) },
   ]
 }
 
@@ -181,8 +164,8 @@ const ControlPlanesPage: FC = () => {
   const [mcms] = useMultiClusterMeshes()
   const [enrichedPlanes, , , enrichmentError] = useEnrichedControlPlanes(searchResults, mcms ?? [])
 
-  const columns = useMemo(() => buildColumns(t), [t])
-  const searchFilters = useMemo(() => buildSearchFilters(t), [t])
+  const columns = useMemo(() => buildColumns(t), []) // eslint-disable-line react-hooks/exhaustive-deps
+  const searchFilters = useMemo(() => buildSearchFilters(t), []) // eslint-disable-line react-hooks/exhaustive-deps
   const [staticData, filteredData, onFilterChange] = useListPageFilter(enrichedPlanes, searchFilters as any)
   const [activeColumns, userSettingsLoaded] = useActiveColumns({
     columns,

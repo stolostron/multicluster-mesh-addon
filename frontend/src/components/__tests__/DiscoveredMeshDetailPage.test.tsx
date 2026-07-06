@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { act, render, screen, fireEvent } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import DiscoveredMeshDetailPage from '../DiscoveredMeshDetailPage'
 import { useParams } from 'react-router-dom-v5-compat'
@@ -375,13 +375,18 @@ describe('DiscoveredMeshDetailPage', () => {
       expect(clusterLinks).toHaveLength(2)
     })
 
-    it('shows empty state when filter matches nothing', async () => {
-      const user = userEvent.setup()
-      mockDefaults({ enrichedPlanes: [cp1] })
-      render(<DiscoveredMeshDetailPage />)
-      const searchInputs = screen.getAllByPlaceholderText('Filter by cluster name')
-      await user.type(searchInputs[0], 'zzznomatch')
-      expect(screen.getAllByText('No clusters match the current filter.')).toHaveLength(1)
+    describe('search with debounce', () => {
+      beforeEach(() => { rstest.useFakeTimers() })
+      afterEach(() => { rstest.useRealTimers() })
+
+      it('shows empty state when filter matches nothing', () => {
+        mockDefaults({ enrichedPlanes: [cp1] })
+        render(<DiscoveredMeshDetailPage />)
+        const searchInputs = screen.getAllByPlaceholderText('Filter by cluster name')
+        fireEvent.change(searchInputs[0], { target: { value: 'zzznomatch' } })
+        act(() => { rstest.advanceTimersByTime(200) })
+        expect(screen.getAllByText('No clusters match the current filter.')).toHaveLength(1)
+      })
     })
   })
 })

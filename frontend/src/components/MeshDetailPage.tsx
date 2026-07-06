@@ -33,8 +33,7 @@ import type { MultiClusterMesh, ClusterMeshStatus } from '../types/multiClusterM
 import type { K8sCondition } from '../types/common'
 import { multiClusterMeshGroupVersionKind } from '../types/multiClusterMesh'
 import { useMultiClusterMeshes } from '../hooks/useMultiClusterMeshes'
-import { useDiscoveredControlPlanes } from '../hooks/useDiscoveredControlPlanes'
-import { useEnrichedControlPlanes } from '../hooks/useEnrichedControlPlanes'
+import { useMeshControlPlanes } from '../hooks/useMeshControlPlanes'
 import { useManagedClusterMap } from '../hooks/useManagedClusterMap'
 import type { ManagedCluster } from '../types/managedCluster'
 import { getClusterAvailability, availabilityColor, availabilityLabelKey } from '../types/managedCluster'
@@ -46,6 +45,7 @@ import { TrustStatusCard } from './TrustStatusCard'
 import { VirtualFilterTable } from './VirtualFilterTable'
 import type { CategoryLabel, VirtualFilterColumn } from './VirtualFilterTable'
 import { useMeshTranslation } from '../utils/i18nUtils'
+import { clusterMeshStatusRowKey, clusterMeshStatusSearchMatch } from '../utils/tableCallbacks'
 
 function conditionMessage(condition: K8sCondition): string {
   if (condition.message) return condition.message
@@ -154,8 +154,8 @@ export const ClusterStatusSection: FC<{
           columns={columns}
           emptyMessage="No clusters match the current filter."
           items={clusterStatuses}
-          rowKey={(cs) => cs.clusterName}
-          searchMatch={(cs, query) => cs.clusterName.toLowerCase().includes(query.toLowerCase())}
+          rowKey={clusterMeshStatusRowKey}
+          searchMatch={clusterMeshStatusSearchMatch}
           searchPlaceholder="Filter by cluster name"
         />
       </CardBody>
@@ -172,8 +172,11 @@ const MeshDetailContent: FC<{ ns: string; name: string }> = ({ ns, name }) => {
   })
   const [mcms] = useMultiClusterMeshes()
   const [managedClusterMap, managedClustersLoaded] = useManagedClusterMap()
-  const { results: searchResults } = useDiscoveredControlPlanes()
-  const [enrichedPlanes, , , enrichmentError] = useEnrichedControlPlanes(searchResults, mcms ?? [])
+  const clusterNames = useMemo(
+    () => (mesh?.status?.clusterStatus ?? []).map((cs) => cs.clusterName),
+    [mesh],
+  )
+  const [enrichedPlanes, , enrichmentError] = useMeshControlPlanes(clusterNames, mcms ?? [])
   const managedPlanes = useMemo(
     () => enrichedPlanes.filter((cp) => cp.managedBy?.name === name && cp.managedBy?.namespace === ns),
     [enrichedPlanes, name, ns],

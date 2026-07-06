@@ -16,6 +16,12 @@ import { cpTypeSegment } from '../utils/cpTypeSegment'
 import { clusterDetailLink } from '../utils/linkUtils'
 import { useMeshTranslation } from '../utils/i18nUtils'
 
+const cpRowKey = (cp: EnrichedControlPlane) => `${cp.clusterName}/${cp.metadata.name}`
+const cpSearchMatch = (cp: EnrichedControlPlane, query: string) => {
+  const q = query.toLowerCase()
+  return cp.clusterName.toLowerCase().includes(q) || cp.metadata.name.toLowerCase().includes(q)
+}
+
 const CATEGORY_LABELS: CategoryLabel[] = [
   { key: 'all', label: 'All ({{count}})' },
   { key: 'ready', label: 'Ready ({{count}})' },
@@ -55,7 +61,7 @@ const ControlPlanesCard: FC<{ planes: EnrichedControlPlane[] }> = ({ planes }) =
         : <Label color="grey">{t('Unknown')}</Label>,
       width: '20%',
     },
-  ], [t])
+  ], []) // eslint-disable-line react-hooks/exhaustive-deps
 
   if (planes.length === 0) return null
 
@@ -69,11 +75,8 @@ const ControlPlanesCard: FC<{ planes: EnrichedControlPlane[] }> = ({ planes }) =
           columns={columns}
           emptyMessage="No control planes match the current filter."
           items={planes}
-          rowKey={(cp) => `${cp.clusterName}/${cp.metadata.name}`}
-          searchMatch={(cp, query) => {
-            const q = query.toLowerCase()
-            return cp.clusterName.toLowerCase().includes(q) || cp.metadata.name.toLowerCase().includes(q)
-          }}
+          rowKey={cpRowKey}
+          searchMatch={cpSearchMatch}
           searchPlaceholder="Filter by cluster name"
         />
       </CardBody>

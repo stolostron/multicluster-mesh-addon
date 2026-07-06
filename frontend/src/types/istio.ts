@@ -39,6 +39,8 @@ export interface Istio extends K8sResourceCommon {
   status?: IstioStatus
 }
 
+export type FleetIstio = Istio & { cluster: string }
+
 // useListPageFilter from the Console SDK accesses metadata.name for its
 // built-in name filter, so EnrichedControlPlane must include metadata.
 export interface EnrichedControlPlane {

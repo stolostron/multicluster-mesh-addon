@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { act, render, screen, fireEvent } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { ControlPlanesCard } from '../ControlPlanesCard'
 import { makeEnrichedCP } from '../../__fixtures__/testFactories'
@@ -71,25 +71,30 @@ describe('ControlPlanesCard', () => {
     expect(screen.queryByText('cluster-b')).not.toBeInTheDocument()
   })
 
-  it('filters by search term matching cluster or name', async () => {
-    const user = userEvent.setup()
-    const planes = [
-      makeCp('cluster-a', 'default'),
-      makeCp('cluster-b', 'default'),
-    ]
-    render(<ControlPlanesCard planes={planes} />)
+  describe('search with debounce', () => {
+    beforeEach(() => { rstest.useFakeTimers() })
+    afterEach(() => { rstest.useRealTimers() })
 
-    await user.type(screen.getByPlaceholderText('Filter by cluster name'), 'cluster-a')
-    expect(screen.getByText('cluster-a')).toBeInTheDocument()
-    expect(screen.queryByText('cluster-b')).not.toBeInTheDocument()
-  })
+    it('filters by search term matching cluster or name', () => {
+      const planes = [
+        makeCp('cluster-a', 'default'),
+        makeCp('cluster-b', 'default'),
+      ]
+      render(<ControlPlanesCard planes={planes} />)
 
-  it('shows empty state when filter matches nothing', async () => {
-    const user = userEvent.setup()
-    render(<ControlPlanesCard planes={[makeCp('cluster-a', 'default')]} />)
+      fireEvent.change(screen.getByPlaceholderText('Filter by cluster name'), { target: { value: 'cluster-a' } })
+      act(() => { rstest.advanceTimersByTime(200) })
+      expect(screen.getByText('cluster-a')).toBeInTheDocument()
+      expect(screen.queryByText('cluster-b')).not.toBeInTheDocument()
+    })
 
-    await user.type(screen.getByPlaceholderText('Filter by cluster name'), 'zzznomatch')
-    expect(screen.getByText('No control planes match the current filter.')).toBeInTheDocument()
+    it('shows empty state when filter matches nothing', () => {
+      render(<ControlPlanesCard planes={[makeCp('cluster-a', 'default')]} />)
+
+      fireEvent.change(screen.getByPlaceholderText('Filter by cluster name'), { target: { value: 'zzznomatch' } })
+      act(() => { rstest.advanceTimersByTime(200) })
+      expect(screen.getByText('No control planes match the current filter.')).toBeInTheDocument()
+    })
   })
 
   it('shows Unknown label when CP has no conditions', () => {

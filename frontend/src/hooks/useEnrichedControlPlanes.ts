@@ -1,11 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { fleetK8sGet } from '@stolostron/multicluster-sdk'
-import type { Istio, EnrichedControlPlane } from '../types/istio'
+import type { FleetIstio, Istio, EnrichedControlPlane } from '../types/istio'
 import { istioModel } from '../types/istio'
 import type { MultiClusterMesh } from '../types/multiClusterMesh'
 import { buildMcmIndex, lookupMcm } from '../utils/correlateMCM'
-
-type FleetIstio = Istio & { cluster: string }
+import { toEnrichedControlPlane } from '../utils/enrichmentUtils'
 
 interface CacheEntry {
   data: Istio
@@ -19,8 +18,14 @@ interface CacheEntry {
 // tradeoff — see docs/DISCOVERY-OPTIONS.md for the design rationale.
 // Exit ramp: if ACM Search gains spec/status indexing for custom resources, or
 // if Istio CRs gain standardized labels for key fields, enrichment can be eliminated.
-const CACHE_TTL_MS = 150_000
-const CONCURRENCY_LIMIT = 10
+export const CACHE_TTL_MS = 150_000
+const CONCURRENCY_MIN = 10
+const CONCURRENCY_MAX = 25
+const MAX_CACHE_SIZE = 2000
+
+export function getConcurrencyLimit(pendingCount: number): number {
+  return Math.max(CONCURRENCY_MIN, Math.min(CONCURRENCY_MAX, Math.ceil(pendingCount / 20)))
+}
 
 // Module-level cache so enrichment data survives component unmounts. When a user
 // navigates from the list page to a detail page, the new component instance reads
@@ -36,15 +41,33 @@ export function __resetEnrichmentCache() {
   enrichmentCache.clear()
 }
 
+/** Reads a cached Istio CR if it exists and is within TTL. */
+export function getFromEnrichmentCache(cluster: string, name: string): Istio | undefined {
+  const entry = enrichmentCache.get(`${cluster}/${name}`)
+  if (entry && Date.now() - entry.fetchedAt <= CACHE_TTL_MS) return entry.data
+  return undefined
+}
+
+/** Writes an Istio CR to the shared cache for bidirectional cache warming. */
+export function setInEnrichmentCache(cluster: string, name: string, data: Istio): void {
+  const cacheKey = `${cluster}/${name}`
+  enrichmentCache.delete(cacheKey)
+  enrichmentCache.set(cacheKey, { data, fetchedAt: Date.now() })
+  if (enrichmentCache.size > MAX_CACHE_SIZE) {
+    const oldest = enrichmentCache.keys().next().value
+    if (oldest !== undefined) enrichmentCache.delete(oldest)
+  }
+}
+
 async function fetchInChunks(
   pending: { cluster: string; name: string }[],
-  cache: Map<string, CacheEntry>,
   onChunkProcessed: (n: number) => void,
   isCancelled: () => boolean,
 ) {
-  for (let i = 0; i < pending.length; i += CONCURRENCY_LIMIT) {
+  const chunkSize = getConcurrencyLimit(pending.length)
+  for (let i = 0; i < pending.length; i += chunkSize) {
     if (isCancelled()) return
-    const chunk = pending.slice(i, i + CONCURRENCY_LIMIT)
+    const chunk = pending.slice(i, i + chunkSize)
     const results = await Promise.allSettled(
       chunk.map(({ cluster, name }) =>
         fleetK8sGet<Istio>({ model: istioModel, name, cluster })
@@ -55,7 +78,7 @@ async function fetchInChunks(
     for (const result of results) {
       if (result.status === 'fulfilled') {
         const { cluster, name, data } = result.value
-        cache.set(`${cluster}/${name}`, { data, fetchedAt: Date.now() })
+        setInEnrichmentCache(cluster, name, data)
       }
     }
     onChunkProcessed(chunk.length)
@@ -116,7 +139,6 @@ export function useEnrichedControlPlanes(
 
     fetchInChunks(
       pending,
-      enrichmentCache,
       () => {
         if (!cancelled) {
           if (debounceRef.current) clearTimeout(debounceRef.current)
@@ -154,24 +176,15 @@ export function useEnrichedControlPlanes(
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchKey])
 
+  // Reads from cache without TTL check: the enrichment effect above already
+  // TTL-filters entries before deciding what to re-fetch (lines 127-131).
+  // Entries here were just written or are within TTL. The scoped hook
+  // (useMeshControlPlanes) uses getFromEnrichmentCache (with TTL) in its memo
+  // instead — a cosmetic inconsistency that self-corrects on the next cycle.
   const enrichedBeforeCorrelation = useMemo(() => {
-    return stableResults.map((r): EnrichedControlPlane => {
-      const key = `${r.cluster}/${r.metadata?.name}`
-      const cached = enrichmentCache.get(key)?.data
-      const spec = cached?.spec
-      return {
-        metadata: {
-          name: r.metadata?.name ?? '',
-          creationTimestamp: r.metadata?.creationTimestamp,
-          labels: r.metadata?.labels as Record<string, string> | undefined,
-        },
-        clusterName: r.cluster,
-        controlPlaneNamespace: spec?.namespace,
-        meshID: spec?.values?.global?.meshID,
-        network: spec?.values?.global?.network,
-        status: cached?.status,
-        version: spec?.version,
-      }
+    return stableResults.map((r) => {
+      const cached = enrichmentCache.get(`${r.cluster}/${r.metadata?.name}`)?.data
+      return toEnrichedControlPlane(r, cached)
     })
   }, [stableResults, enrichmentVersion])
 

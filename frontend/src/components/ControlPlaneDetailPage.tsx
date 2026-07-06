@@ -6,6 +6,7 @@ import {
   Timestamp,
 } from '@openshift-console/dynamic-plugin-sdk'
 import {
+  Alert,
   Breadcrumb,
   BreadcrumbItem,
   Card,
@@ -28,6 +29,7 @@ import {
 } from '@patternfly/react-core'
 import type { Istio } from '../types/istio'
 import { istioModel } from '../types/istio'
+import { getFromEnrichmentCache, setInEnrichmentCache } from '../hooks/useEnrichedControlPlanes'
 import { useMultiClusterMeshes } from '../hooks/useMultiClusterMeshes'
 import { buildMcmIndex, lookupMcm } from '../utils/correlateMCM'
 import { clusterDetailLink } from '../utils/linkUtils'
@@ -42,17 +44,38 @@ const ControlPlaneDetailContent: FC<{ cluster: string; name: string; type: CpTyp
   const [istio, setIstio] = useState<Istio | null>(null)
   const [loaded, setLoaded] = useState(false)
   const [error, setError] = useState<unknown>(null)
+  const [refreshError, setRefreshError] = useState<unknown>(null)
   const [mcms] = useMultiClusterMeshes()
   const mcmIndex = useMemo(() => buildMcmIndex(mcms ?? []), [mcms])
 
   useEffect(() => {
     let cancelled = false
-    setLoaded(false)
+    const cached = getFromEnrichmentCache(cluster, name)
+    if (cached) {
+      setIstio(cached)
+      setLoaded(true)
+    } else {
+      setIstio(null)
+      setLoaded(false)
+    }
     setError(null)
-    setIstio(null)
+    setRefreshError(null)
+
     fleetK8sGet<Istio>({ model: istioModel, name, cluster })
-      .then((r) => { if (!cancelled) { setIstio(r); setLoaded(true) } })
-      .catch((e) => { if (!cancelled) { console.error('Failed to load control plane:', e); setError(e); setLoaded(true) } })
+      .then((r) => {
+        // Cache write is intentionally outside the cancelled guard: valid data
+        // should warm the shared cache even if the user navigated away, so other
+        // pages benefit from the fetch without re-requesting.
+        setInEnrichmentCache(cluster, name, r)
+        if (!cancelled) { setIstio(r); setLoaded(true) }
+      })
+      .catch((e) => {
+        if (!cancelled) {
+          console.error('Failed to load control plane:', e)
+          if (!cached) { setError(e); setLoaded(true) }
+          else setRefreshError(e)
+        }
+      })
     return () => { cancelled = true }
   }, [cluster, name])
 
@@ -117,6 +140,11 @@ const ControlPlaneDetailContent: FC<{ cluster: string; name: string; type: CpTyp
 
       <PageSection>
         <Grid hasGutter>
+          {!!refreshError && (
+            <GridItem span={12}>
+              <Alert variant="warning" isInline title={t('Data may be stale — background refresh failed.')} />
+            </GridItem>
+          )}
           <GridItem span={5}>
             <Card isCompact>
               <CardBody>
