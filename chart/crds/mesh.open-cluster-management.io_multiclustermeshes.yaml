@@ -59,7 +59,7 @@ spec:
                     type: string
                 type: object
               operator:
-                description: Operator defines the Service Mesh Operator installation
+                description: Operator defines the service mesh operator installation
                   configuration
                 properties:
                   channel:
@@ -75,10 +75,14 @@ spec:
                     - Automatic
                     - Manual
                     type: string
+                  name:
+                    default: servicemeshoperator3
+                    description: Name is the OLM package name of the operator
+                    type: string
                   namespace:
                     default: multicluster-mesh-operator
                     description: |-
-                      Namespace is the namespace where the Service Mesh Operator will be installed.
+                      Namespace is the namespace where the operator will be installed.
                       This namespace may be deleted when the mesh is removed, so avoid
                       using a namespace that contains other resources.
                     type: string
@@ -90,14 +94,12 @@ spec:
                     - message: namespace must not be 'default'
                       rule: self != 'default'
                   source:
-                    description: |-
-                      Source is the CatalogSource name
-                      Defaults to "redhat-operators" on OpenShift, "operatorhubio-catalog" on vanilla Kubernetes
+                    default: redhat-operators
+                    description: Source is the CatalogSource name
                     type: string
                   sourceNamespace:
-                    description: |-
-                      SourceNamespace is the namespace of the CatalogSource
-                      Defaults to "openshift-marketplace" on OpenShift, "olm" on vanilla Kubernetes
+                    default: openshift-marketplace
+                    description: SourceNamespace is the namespace of the CatalogSource
                     type: string
                   startingCSV:
                     description: |-

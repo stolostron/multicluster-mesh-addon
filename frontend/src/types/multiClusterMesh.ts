@@ -1,8 +1,6 @@
 import type { K8sGroupVersionKind, K8sResourceCommon } from '@openshift-console/dynamic-plugin-sdk'
 import type { K8sCondition } from './common'
 
-export type { K8sCondition }
-
 export const multiClusterMeshGroupVersionKind: K8sGroupVersionKind = {
   group: 'mesh.open-cluster-management.io',
   version: 'v1alpha1',

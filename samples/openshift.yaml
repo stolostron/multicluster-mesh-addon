@@ -2,7 +2,6 @@ apiVersion: mesh.open-cluster-management.io/v1alpha1
 kind: MultiClusterMesh
 metadata:
   name: openshift-mesh
-  namespace: mesh-system
 spec:
   # Reference to the ManagedClusterSet that defines which clusters participate in the mesh
   # NOTE: Update this to match your ManagedClusterSet name
@@ -12,7 +11,7 @@ spec:
   controlPlane:
     namespace: istio-system
 
-  # OpenShift-specific operator configuration
+  # OSSM operator configuration (these values match the kubebuilder defaults)
   operator:
     # Dedicated namespace for the operator (default: multicluster-mesh-operator)
     namespace: multicluster-mesh-operator

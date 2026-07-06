@@ -10,7 +10,7 @@ Complete instructions to go from zero to a working Fleet Service Mesh ConsolePlu
 - `podman` installed
 - `jq` installed
 - `make` installed
-- Node.js 20+
+- Node.js `^20.19.0 || >=22.12.0`
 - Go toolchain
 
 ## 1. Get an OpenShift cluster with ACM
@@ -135,7 +135,7 @@ To test certificate and trust distribution, create a cert-manager Issuer and con
 cd <multicluster-mesh-addon-repo>
 
 # Create a cert-manager trust chain (ClusterIssuer -> root CA Certificate -> CA-backed Issuer)
-oc apply -f samples/cert-manager-issuer.yaml
+oc apply -n mesh-system -f samples/cert-manager-issuer.yaml
 
 # Configure the mesh to use it
 oc patch multiclustermesh my-mesh -n mesh-system --type=merge \
@@ -216,8 +216,9 @@ This builds a container image with the compiled plugin assets baked in (UBI9 ngi
 2. Log in as `kubeadmin`
 3. Click the perspective switcher (top-left dropdown)
 4. Select **Fleet Service Mesh**
-5. The **Fleet Meshes** table should show `my-mesh` with its status
-6. Click **Control Planes** in the left nav — it shows Istio CRs discovered across managed clusters
+5. The **Overview** page should appear with donut charts for Meshes and Control Planes health
+6. Click **Meshes** in the left nav — the table should show `my-mesh` with its status
+7. Click **Control Planes** in the left nav — it shows Istio CRs discovered across managed clusters
 
 ## 6a. (Optional) Create Istio CRs for the Control Planes page
 
@@ -267,7 +268,7 @@ spec:
   namespace: istio-system
   values:
     global:
-      meshID: mesh1
+      meshID: mesh-system-my-mesh
       multiCluster:
         clusterName: local-cluster
       network: network1
@@ -297,7 +298,7 @@ oc get crd -o name | grep -E 'sailoperator\.io|istio\.io' | xargs oc delete
 
 For day-to-day UI work, run the plugin locally with webpack and a local OpenShift Console bridge.
 
-**Prerequisites:** `oc login`, ACM and backend controller deployed on the cluster, Node.js 20+, `podman` or `docker`, and npm dependencies installed.
+**Prerequisites:** `oc login`, ACM and backend controller deployed on the cluster, Node.js `^20.19.0 || >=22.12.0`, `podman` or `docker`, and npm dependencies installed.
 
 ```bash
 cd <multicluster-mesh-addon-repo>/frontend

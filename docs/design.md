@@ -18,7 +18,7 @@
 
 The OCM Service Mesh Add-on automates multi-cluster Istio service mesh setup via [OCM]. It manages the `MultiClusterMesh` custom resource on the hub cluster to orchestrate three concerns across managed clusters:
 
-1. **Operator Lifecycle** - Installing and managing the [Sail]/OSSM operator
+1. **Operator Lifecycle** - Installing and managing the service mesh operator ([OSSM]/[Sail])
 2. **Trust Distribution** - Establishing mTLS trust via [cert-manager]
 3. **Endpoint Discovery** - Exchanging discovery credentials via [ManagedServiceAccount]
 
@@ -29,7 +29,9 @@ Without this add-on, multi-cluster mesh setup is a manual process involving cert
 The add-on follows OCM's hub-and-spoke model:
 
 - **Hub**: The Mesh Add-on controller watches `MultiClusterMesh` resources and creates [ManifestWorks][ManifestWork], orchestrates cert-manager and ManagedServiceAccount
-- **Spoke** (managed clusters): Receives ManifestWorks from the hub, runs the Sail/OSSM operator and Istio control plane
+- **Spoke** (managed clusters): Receives ManifestWorks from the hub, runs the service mesh operator and Istio control plane
+
+A [ClusterManagementAddOn] resource is deployed to register this addon with OCM's addon manager, but the addon uses manual installation strategy and does not leverage the framework's lifecycle management features (auto-deployment, per-cluster enable/disable via `ManagedClusterAddOn`).
 
 ```mermaid
 flowchart TD
@@ -98,7 +100,7 @@ flowchart TD
 
 ### What the add-on does (Plumbing)
 
-- Installs the Sail/OSSM operator on managed clusters via OLM
+- Installs the service mesh operator (OSSM by default) on managed clusters via OLM
 - Distributes intermediate CA certificates for mTLS trust
 - Exchanges discovery tokens between peer clusters
 - Handles lifecycle events (cluster add/remove, mesh creation/deletion)
@@ -128,10 +130,11 @@ The resource name (`metadata.name`) is limited to 63 characters because it is us
 |-------|----------|-------------|
 | `spec.clusterSet` | Yes | Name of the [ManagedClusterSet] defining cluster membership (immutable after creation) |
 | `spec.controlPlane.namespace` | No | Namespace where Istio is installed on each cluster (default: `istio-system`) |
+| `spec.operator.name` | No | OLM package name (default: `servicemeshoperator3`) |
 | `spec.operator.namespace` | No | Namespace where the operator is installed (default: `multicluster-mesh-operator`) |
 | `spec.operator.channel` | No | OLM subscription channel (default: `stable`) |
-| `spec.operator.source` | No | CatalogSource name (default: `redhat-operators` on OCP, `operatorhubio-catalog` on K8s) |
-| `spec.operator.sourceNamespace` | No | CatalogSource namespace (default: `openshift-marketplace` on OCP, `olm` on K8s) |
+| `spec.operator.source` | No | CatalogSource name (default: `redhat-operators`) |
+| `spec.operator.sourceNamespace` | No | CatalogSource namespace (default: `openshift-marketplace`) |
 | `spec.operator.startingCSV` | No | Pin to a specific operator version |
 | `spec.operator.installPlanApproval` | No | `Automatic` or `Manual` (default: `Automatic`) |
 | `spec.security.trust.certManager.issuerRef.name` | No | cert-manager Issuer name for Root CA |
@@ -151,6 +154,7 @@ spec:
   controlPlane:
     namespace: istio-system
   operator:
+    name: servicemeshoperator3
     channel: "stable"
     source: redhat-operators
     sourceNamespace: openshift-marketplace
@@ -172,13 +176,13 @@ The `spec.clusterSet` field is immutable after creation. With exclusive ClusterS
 
 `MultiClusterMesh` is namespace-scoped, enabling tenant isolation on the hub. Each mesh operates independently - its certificates, discovery tokens, and operator configuration are scoped to its namespace. Multiple meshes can target the same ClusterSet, provided they use different control plane namespaces. For example, Mesh A targets ClusterSet X with namespace `istio-system-a`, while Mesh B targets the same ClusterSet X with namespace `istio-system-b`. Each mesh gets its own trust domain, certificates, and discovery tokens. If two meshes target the same control plane namespace on the same ClusterSet, the older resource (by creation timestamp) wins and the newer one is rejected.
 
-The add-on detects the cluster platform via [OCM cluster claims][ClusterClaim]. OpenShift variants (OCP, ROSA, ARO, ROKS, OSD) get OSSM with OCP-specific defaults. Vanilla Kubernetes gets the Sail operator with upstream defaults. Detection happens per-cluster, so mixed ClusterSets work correctly.
+The add-on defaults to OSSM (OpenShift Service Mesh) operator configuration. All `spec.operator` fields can be overridden to use a different operator (e.g., upstream Sail on non-OCP clusters).
 
 Plumbing resources (ManifestWorks, ManagedServiceAccounts) must use a deterministic naming strategy scoped to the owning mesh, so that multiple meshes on the same cluster don't collide. The operator ManifestWork is an exception - it is shared across meshes since the operator is a cluster-wide singleton. See [#72] for the naming convention discussion.
 
 ## Operator Lifecycle
 
-The Sail/OSSM operator is a cluster-scoped singleton - only one instance can run per cluster. The operator is therefore a **shared resource** across meshes, not owned by any individual mesh. Multiple meshes targeting the same cluster share the operator installation. Cleanup is scoped to the ClusterSet: when a cluster is no longer needed by any mesh in its ClusterSet, the operator ManifestWork is removed. If the cluster moves to a different ClusterSet with a mesh, the new mesh bootstraps a fresh operator installation with its own configuration.
+The service mesh operator is a cluster-scoped singleton - only one instance can run per cluster. The operator is therefore a **shared resource** across meshes, not owned by any individual mesh. Multiple meshes targeting the same cluster share the operator installation. Cleanup is scoped to the ClusterSet: when a cluster is no longer needed by any mesh in its ClusterSet, the operator ManifestWork is removed. If the cluster moves to a different ClusterSet with a mesh, the new mesh bootstraps a fresh operator installation with its own configuration.
 
 The add-on follows a **Do No Harm** strategy: it never forcibly uninstalls or downgrades an existing operator. If the operator is already present with a compatible configuration, the add-on adopts it. If there's a conflict (e.g., different channel), the add-on reports an error and halts reconciliation for that cluster.
 
@@ -193,7 +197,7 @@ The add-on follows a **Do No Harm** strategy: it never forcibly uninstalls or do
 The controller handles two types of collisions:
 
 1. **Hub-side (between meshes)**: If two `MultiClusterMesh` resources target the same cluster but request different operator configurations (e.g., different channels or catalog sources), the oldest mesh (by creation timestamp) takes precedence. Newer meshes with conflicting configs are halted with a `ConfigurationConflict` status.
-2. **Spoke-side (pre-existing operator)**: If the ManagedClusterView detects an existing Subscription not created by the add-on, the controller compares the installed configuration against the resolved defaults for the requesting mesh. If compatible, the operator is adopted. If incompatible, the controller halts and reports a `ConfigurationConflict`.
+2. **Spoke-side (pre-existing operator)**: If the ManagedClusterView detects an existing Subscription not created by the add-on, the controller compares the installed configuration against the mesh's `spec.operator`. If compatible, the operator is adopted. If incompatible, the controller halts and reports a `ConfigurationConflict`.
 
 In both cases, the add-on will never forcibly uninstall, downgrade, or overwrite an existing operator. The user must resolve conflicts manually.
 
@@ -244,10 +248,11 @@ ArgoCD with ApplicationSets is the recommended approach for managing Istio confi
 
 **Phase 2 (Future)**: "Full" approach - the add-on also manages Istio custom resources centrally, automating topology configuration and enforcing consistency.
 
-Potential additions include ACM addon lifecycle integration (i.e. via `ClusterManagementAddOn` / `ManagedClusterAddOn`) and observability stack management.
+Potential additions include observability stack management and full addon framework integration (leveraging `ManagedClusterAddOn` for per-cluster enable/disable).
 
 <!-- Reference links -->
 [OCM]: https://open-cluster-management.io/
+[OSSM]: https://docs.openshift.com/service-mesh/
 [Sail]: https://github.com/istio-ecosystem/sail-operator
 [cert-manager]: https://cert-manager.io/
 [ManagedServiceAccount]: https://open-cluster-management.io/docs/getting-started/integration/managed-serviceaccount/
@@ -255,6 +260,7 @@ Potential additions include ACM addon lifecycle integration (i.e. via `ClusterMa
 [ManagedClusterSet]: https://open-cluster-management.io/docs/concepts/cluster-inventory/managedclusterset/
 [ClusterClaim]: https://open-cluster-management.io/docs/concepts/cluster-inventory/clusterclaim/
 [ManagedClusterView]: https://github.com/stolostron/cluster-lifecycle-api
+[ClusterManagementAddOn]: https://open-cluster-management.io/docs/concepts/addon/#clustermanagementaddon
 [Plug-in CA]: https://istio.io/latest/docs/tasks/security/cert-management/plugin-ca-cert/
 [Multi-Primary Multi-Network]: https://istio.io/latest/docs/setup/install/multicluster/multi-primary_multi-network/
 [#72]: https://github.com/stolostron/multicluster-mesh-addon/issues/72

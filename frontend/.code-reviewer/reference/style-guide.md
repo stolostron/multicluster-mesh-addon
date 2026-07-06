@@ -47,6 +47,40 @@ Components that fetch data must handle three states:
 
 Use optional chaining (`?.`) and nullish coalescing (`??`) for all Kubernetes object property access. K8s resources have many optional fields.
 
+### URL Encoding
+
+All dynamic route segments must use `encodeURIComponent()` when building links, and `decodeURIComponent()` when reading params on the target page. Example:
+```tsx
+<Link to={`/fleet-mesh/meshes/discovered/${encodeURIComponent(meshID)}`}>
+```
+
+### Discriminated Union Types for Unified Lists
+
+When a list page displays items from multiple data sources (e.g., managed + discovered meshes), use a discriminated union type with:
+- A `kind` field as the discriminator (e.g., `'managed' | 'discovered'`)
+- Flattened fields for column sorting and display (e.g., `statusRank`, `clusterCount`) — don't reach into nested source-specific objects in render/sort code
+- A pre-computed `detailLink` field with the full navigation URL — compute in the hook, not in the row component
+- Source-specific optional fields (e.g., `mcm?`, `controlPlanes?`) for detail access when needed
+
+See `FleetMeshItem` in `src/types/fleetMesh.ts` for the reference implementation.
+
+### Module-Level State
+
+Use module-level variables (instead of `useRef`) when state must survive component unmounts — e.g., caches that should stay warm across page navigation. Requirements:
+- The module-level variable must be bounded (TTL eviction, stale-key cleanup, or similar)
+- Expose a `__reset*()` function (double-underscore prefix) for test cleanup — this signals test-only use
+- Add a code comment explaining why module-level scope is needed and why stale-key cleanup is safe
+
+See `enrichmentCache` in `src/hooks/useEnrichedControlPlanes.ts` for the reference implementation.
+
+### Two-Phase Loading
+
+When a page depends on multiple async sources with different latencies, render the fast source immediately and update when the slow source completes. Don't block the entire UI on the slowest source. Example:
+- Show mesh donut chart with MCM-only counts immediately when `mcmsLoaded` is true
+- Update to include discovered meshes when `enrichmentLoaded` becomes true
+
+Use granular loading/error states in hook returns (e.g., `mcmsLoaded`, `mcmsError`, `enrichmentLoaded`, `enrichmentError`) so consumers can render each section independently.
+
 ## Documented Conventions (not enforced, for reference)
 
 ### Import Ordering
@@ -71,4 +105,5 @@ Separate `import type { ... }` from value imports.
 
 | Date | Change | Trigger |
 |------|--------|---------|
+| 2026-07-01 | Add URL encoding, discriminated unions, module-level state, two-phase loading conventions | /code-reviewer:setup refresh |
 | 2026-06-23 | Initial generation | /code-reviewer:setup |

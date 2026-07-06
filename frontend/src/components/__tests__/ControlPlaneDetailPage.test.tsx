@@ -38,13 +38,20 @@ describe('ControlPlaneDetailPage', () => {
       rstest.mocked(useParams).mockReturnValue({})
       render(<ControlPlaneDetailPage />)
       expect(screen.getByText('Not Found')).toBeInTheDocument()
-      expect(screen.getByText('Invalid control plane URL. Expected /mesh-control-planes/:cluster/:name.')).toBeInTheDocument()
+      expect(screen.getByText('Invalid URL. Expected /fleet-mesh/control-planes/:type/:cluster/:name.')).toBeInTheDocument()
+    })
+
+    it('shows Not Found when type param is invalid', () => {
+      rstest.mocked(useParams).mockReturnValue({ type: 'bogus', cluster: 'cluster-a', name: 'default' })
+      render(<ControlPlaneDetailPage />)
+      expect(screen.getByText('Not Found')).toBeInTheDocument()
+      expect(screen.getByText('Invalid URL. Expected /fleet-mesh/control-planes/:type/:cluster/:name.')).toBeInTheDocument()
     })
   })
 
   describe('loading state', () => {
     it('shows spinner while fleetK8sGet is pending', () => {
-      rstest.mocked(useParams).mockReturnValue({ cluster: 'cluster-a', name: 'default' })
+      rstest.mocked(useParams).mockReturnValue({ type: 'discovered', cluster: 'cluster-a', name: 'default' })
       rstest.mocked(fleetK8sGet).mockReturnValue(new Promise(() => {}))
       render(<ControlPlaneDetailPage />)
       expect(screen.getByLabelText('Loading control plane')).toBeInTheDocument()
@@ -53,7 +60,7 @@ describe('ControlPlaneDetailPage', () => {
 
   describe('error states', () => {
     it('shows generic error when fleetK8sGet rejects', async () => {
-      rstest.mocked(useParams).mockReturnValue({ cluster: 'cluster-a', name: 'default' })
+      rstest.mocked(useParams).mockReturnValue({ type: 'discovered', cluster: 'cluster-a', name: 'default' })
       rstest.mocked(fleetK8sGet).mockRejectedValue(new Error('network timeout'))
       render(<ControlPlaneDetailPage />)
       await waitFor(() => {
@@ -63,7 +70,7 @@ describe('ControlPlaneDetailPage', () => {
     })
 
     it('shows not-found message for 404 errors', async () => {
-      rstest.mocked(useParams).mockReturnValue({ cluster: 'cluster-a', name: 'default' })
+      rstest.mocked(useParams).mockReturnValue({ type: 'discovered', cluster: 'cluster-a', name: 'default' })
       const error404 = new Error('Not Found')
       ;(error404 as any).code = 404
       rstest.mocked(fleetK8sGet).mockRejectedValue(error404)
@@ -77,7 +84,7 @@ describe('ControlPlaneDetailPage', () => {
 
   describe('loaded state', () => {
     beforeEach(() => {
-      rstest.mocked(useParams).mockReturnValue({ cluster: 'cluster-a', name: 'default' })
+      rstest.mocked(useParams).mockReturnValue({ type: 'discovered', cluster: 'cluster-a', name: 'default' })
     })
 
     it('renders the breadcrumb and name heading', async () => {
@@ -101,7 +108,7 @@ describe('ControlPlaneDetailPage', () => {
       rstest.mocked(fleetK8sGet).mockResolvedValue(makeIstio())
       render(<ControlPlaneDetailPage />)
       await waitFor(() => {
-        expect(screen.getByText('mesh1')).toBeInTheDocument()
+        expect(screen.getAllByText('mesh1')).toHaveLength(1)
       })
     })
 
@@ -132,7 +139,7 @@ describe('ControlPlaneDetailPage', () => {
       })
     })
 
-    it('shows Managed By card when correlated to a MultiClusterMesh', async () => {
+    it('links mesh ID to managed mesh detail page when correlated to a MultiClusterMesh', async () => {
       const mcm = {
         metadata: { name: 'my-mesh', namespace: 'mesh-system' },
         spec: { clusterSet: 'global', controlPlane: { namespace: 'istio-system' } },
@@ -142,33 +149,47 @@ describe('ControlPlaneDetailPage', () => {
       rstest.mocked(fleetK8sGet).mockResolvedValue(makeIstio())
       render(<ControlPlaneDetailPage />)
       await waitFor(() => {
-        expect(screen.getByText('Managed By')).toBeInTheDocument()
-        expect(screen.getByRole('link', { name: 'my-mesh' })).toHaveAttribute(
+        expect(screen.getByRole('link', { name: 'mesh1' })).toHaveAttribute(
           'href',
-          '/service-mesh/mesh-system/my-mesh',
+          '/fleet-mesh/meshes/managed/mesh-system/my-mesh',
         )
       })
     })
 
-    it('does not show Managed By card when not correlated', async () => {
+    it('shows discovered mesh link when not correlated to a managed mesh', async () => {
       rstest.mocked(fleetK8sGet).mockResolvedValue(makeIstio())
       render(<ControlPlaneDetailPage />)
       await waitFor(() => {
-        expect(screen.getByText('Overview')).toBeInTheDocument()
+        expect(screen.getByText('Mesh ID')).toBeInTheDocument()
       })
-      expect(screen.queryByText('Managed By')).not.toBeInTheDocument()
+      expect(screen.queryByRole('link', { name: 'mesh1' })).toHaveAttribute(
+        'href',
+        '/fleet-mesh/meshes/discovered/mesh1',
+      )
+    })
+
+    it('shows dash for mesh ID when CP has no meshID and no MCM', async () => {
+      rstest.mocked(fleetK8sGet).mockResolvedValue(makeIstio({
+        spec: { namespace: 'istio-system' },
+      }))
+      render(<ControlPlaneDetailPage />)
+      await waitFor(() => {
+        expect(screen.getByText('Mesh ID')).toBeInTheDocument()
+      })
+      expect(screen.queryByRole('link', { name: 'mesh1' })).not.toBeInTheDocument()
     })
   })
 
-  describe('useEffect cleanup', () => {
+  describe('useEffect cancellation', () => {
     it('does not update state after unmount', async () => {
-      rstest.mocked(useParams).mockReturnValue({ cluster: 'cluster-a', name: 'default' })
+      rstest.mocked(useParams).mockReturnValue({ type: 'discovered', cluster: 'cluster-a', name: 'default' })
       let resolvePromise: (value: any) => void
       rstest.mocked(fleetK8sGet).mockReturnValue(new Promise((resolve) => { resolvePromise = resolve }))
       const { unmount } = render(<ControlPlaneDetailPage />)
       unmount()
       resolvePromise!(makeIstio())
-      // No assertion needed — the test passes if no "state update on unmounted component" warning occurs
+      await new Promise((r) => setTimeout(r, 0))
+      expect(screen.queryByText('default')).not.toBeInTheDocument()
     })
   })
 })

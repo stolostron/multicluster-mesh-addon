@@ -1,6 +1,6 @@
-import type { FC } from 'react'
+import type { FC, ReactNode } from 'react'
 import { Label } from '@patternfly/react-core'
-import type { K8sCondition } from '../types/multiClusterMesh'
+import type { K8sCondition } from '../types/common'
 import { useMeshTranslation } from '../utils/i18nUtils'
 
 export type StatusColor = 'green' | 'red' | 'orange' | 'grey'
@@ -24,6 +24,14 @@ export function deriveStatus(conditions?: K8sCondition[], conditionType?: string
   const target = conditions.find((c) => c.type === targetType)
   if (target) {
     if (target.status === 'True') {
+      if (targetType === 'Ready') {
+        const hasDegradedSecondary = conditions.some(
+          (c) => c.type !== targetType && c.status === 'False',
+        )
+        if (hasDegradedSecondary) {
+          return { label: 'Degraded', color: 'orange' }
+        }
+      }
       return { label: targetType, color: 'green' }
     }
     if (target.status === 'Unknown') {
@@ -50,14 +58,20 @@ export function getStatusRank(conditions?: K8sCondition[], conditionType?: strin
   return 3
 }
 
+export function statusIcon(status: string): ReactNode {
+  const color = status === 'True' ? 'green' : status === 'Unknown' ? 'grey' : 'red'
+  return <Label color={color} isCompact>{status}</Label>
+}
+
 interface MeshStatusProps {
   conditions?: K8sCondition[]
   conditionType?: string
+  isCompact?: boolean
 }
 
 /** Renders a colored PatternFly Label reflecting the status of a K8s condition (default: "Ready"). */
-export const MeshStatus: FC<MeshStatusProps> = ({ conditions, conditionType }) => {
+export const MeshStatus: FC<MeshStatusProps> = ({ conditions, conditionType, isCompact }) => {
   const { t } = useMeshTranslation()
   const { label, color } = deriveStatus(conditions, conditionType)
-  return <Label color={color}>{t(label)}</Label>
+  return <Label color={color} isCompact={isCompact}>{t(label)}</Label>
 }

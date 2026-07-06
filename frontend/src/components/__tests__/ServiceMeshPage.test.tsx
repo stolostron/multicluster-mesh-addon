@@ -1,90 +1,142 @@
 import { render, screen } from '@testing-library/react'
 import ServiceMeshPage from '../ServiceMeshPage'
-import { useMultiClusterMeshes } from '../../hooks/useMultiClusterMeshes'
-import type { MultiClusterMesh } from '../../types/multiClusterMesh'
+import { useFleetMeshItems } from '../../hooks/useFleetMeshItems'
+import type { FleetMeshItem } from '../../types/fleetMesh'
+import type { UseFleetMeshItemsResult } from '../../hooks/useFleetMeshItems'
 
-rstest.mock('../../hooks/useMultiClusterMeshes', { mock: true })
+rstest.mock('../../hooks/useFleetMeshItems', { mock: true })
 
-// consoleSdkMock provides useListPageFilter and useActiveColumns stubs that pass data through.
-// VirtualizedTable renders rows when loaded=true and data is non-empty.
-
-const makeMesh = (overrides: Partial<MultiClusterMesh> = {}): MultiClusterMesh => ({
-  apiVersion: 'mesh.open-cluster-management.io/v1alpha1',
-  kind: 'MultiClusterMesh',
-  metadata: { name: 'test-mesh', namespace: 'mesh-system' },
-  spec: { clusterSet: 'global' },
+const makeItem = (overrides: Partial<FleetMeshItem> = {}): FleetMeshItem => ({
+  metadata: { name: 'test-mesh' },
+  kind: 'managed',
+  detailLink: '/fleet-mesh/meshes/managed/mesh-system/test-mesh',
+  clusterCount: 1,
+  clusterSet: 'global',
+  mcmNamespace: 'mesh-system',
+  meshID: 'mesh-system-test-mesh',
+  statusRank: 0,
+  trustIssuer: undefined,
+  conditions: [{ type: 'Ready', status: 'True' }],
   ...overrides,
 })
+
+const defaultHookResult: UseFleetMeshItemsResult = {
+  items: [],
+  loaded: true,
+  enrichmentError: null,
+  isFleetAvailable: true,
+  mcms: [],
+  mcmsLoaded: true,
+  mcmsError: null,
+  enrichedPlanes: [],
+  enrichmentLoaded: true,
+  searchLoaded: true,
+  searchError: null,
+}
+
+function mockHook(overrides: Partial<UseFleetMeshItemsResult> = {}) {
+  rstest.mocked(useFleetMeshItems).mockReturnValue({ ...defaultHookResult, ...overrides })
+}
 
 describe('ServiceMeshPage', () => {
   afterEach(() => {
     rstest.clearAllMocks()
   })
 
-  it('renders the page header', () => {
-    rstest.mocked(useMultiClusterMeshes).mockReturnValue([[], true, null])
-    render(<ServiceMeshPage />)
-    expect(screen.getByText('Fleet Meshes')).toBeInTheDocument()
-  })
-
   it('shows empty state when no meshes exist and data is loaded', () => {
-    rstest.mocked(useMultiClusterMeshes).mockReturnValue([[], true, null])
+    mockHook()
     render(<ServiceMeshPage />)
-    expect(screen.getByText('No meshes have been created yet.')).toBeInTheDocument()
+    expect(screen.getByText('No managed or discovered meshes found.')).toBeInTheDocument()
   })
 
   it('shows loading state while data is not yet loaded', () => {
-    rstest.mocked(useMultiClusterMeshes).mockReturnValue([[], false, null])
+    mockHook({ loaded: false })
     render(<ServiceMeshPage />)
     expect(screen.getByTestId('loading')).toBeInTheDocument()
   })
 
-  it('shows error state when the watch returns an error', () => {
-    rstest.mocked(useMultiClusterMeshes).mockReturnValue([[], true, new Error('watch failed')])
-    render(<ServiceMeshPage />)
-    expect(screen.getByTestId('load-error')).toBeInTheDocument()
-  })
-
-  it('renders mesh rows with name links when meshes are loaded', () => {
-    const meshes = [makeMesh(), makeMesh({ metadata: { name: 'prod-mesh', namespace: 'mesh-system' } })]
-    rstest.mocked(useMultiClusterMeshes).mockReturnValue([meshes, true, null])
+  it('renders managed mesh rows with Mesh ID links to detail page', () => {
+    const items = [
+      makeItem(),
+      makeItem({ metadata: { name: 'prod-mesh' }, meshID: 'mesh-system-prod-mesh', detailLink: '/fleet-mesh/meshes/managed/mesh-system/prod-mesh' }),
+    ]
+    mockHook({ items })
     render(<ServiceMeshPage />)
     expect(screen.getByText('test-mesh')).toBeInTheDocument()
     expect(screen.getByText('prod-mesh')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'mesh-system-test-mesh' })).toHaveAttribute('href', '/fleet-mesh/meshes/managed/mesh-system/test-mesh')
+    expect(screen.getByRole('link', { name: 'mesh-system-prod-mesh' })).toHaveAttribute('href', '/fleet-mesh/meshes/managed/mesh-system/prod-mesh')
   })
 
-  it('links mesh names to their detail pages', () => {
-    const mesh = makeMesh()
-    rstest.mocked(useMultiClusterMeshes).mockReturnValue([[mesh], true, null])
+  it('renders discovered mesh rows with Mesh ID links to their detailLink', () => {
+    const items = [
+      makeItem({
+        metadata: { name: 'discovered-mesh' },
+        kind: 'discovered',
+        meshID: 'discovered-id',
+        detailLink: '/fleet-mesh/meshes/discovered/discovered-id',
+        mcmNamespace: undefined,
+        clusterSet: undefined,
+      }),
+    ]
+    mockHook({ items })
     render(<ServiceMeshPage />)
-    const link = screen.getByRole('link', { name: 'test-mesh' })
-    expect(link).toHaveAttribute('href', '/service-mesh/mesh-system/test-mesh')
+    const link = screen.getByRole('link', { name: 'discovered-id' })
+    expect(link).toHaveAttribute('href', '/fleet-mesh/meshes/discovered/discovered-id')
   })
 
-  it('links cluster set names to ACM cluster set detail pages', () => {
-    const mesh = makeMesh()
-    rstest.mocked(useMultiClusterMeshes).mockReturnValue([[mesh], true, null])
+  it('shows Mesh ID column values for managed and discovered items', () => {
+    const items = [
+      makeItem({ metadata: { name: 'managed-mesh' }, meshID: 'managed-id' }),
+      makeItem({
+        metadata: { name: 'discovered-mesh' },
+        kind: 'discovered',
+        meshID: 'discovered-id',
+        detailLink: '/fleet-mesh/meshes/discovered/discovered-id',
+      }),
+    ]
+    mockHook({ items })
     render(<ServiceMeshPage />)
-    const link = screen.getByRole('link', { name: 'global' })
-    expect(link).toHaveAttribute('href', '/multicloud/infrastructure/clusters/sets/details/global/overview')
+    expect(screen.getByText('managed-id')).toBeInTheDocument()
+    expect(screen.getByText('discovered-id')).toBeInTheDocument()
   })
 
-  it('shows Configured trust label when issuerRef is set', () => {
-    const mesh = makeMesh({
-      spec: {
-        clusterSet: 'global',
-        security: { trust: { certManager: { issuerRef: { name: 'my-issuer' } } } },
-      },
-    })
-    rstest.mocked(useMultiClusterMeshes).mockReturnValue([[mesh], true, null])
+  it('renders Type column with Managed for managed items and Discovered for discovered items', () => {
+    const items = [
+      makeItem({ metadata: { name: 'managed-mesh' }, meshID: 'managed-id' }),
+      makeItem({
+        metadata: { name: 'discovered-mesh' },
+        kind: 'discovered',
+        meshID: 'discovered-id',
+        detailLink: '/fleet-mesh/meshes/discovered/discovered-id',
+      }),
+    ]
+    mockHook({ items })
     render(<ServiceMeshPage />)
-    expect(screen.getByText('Configured')).toBeInTheDocument()
+    expect(screen.getByText('Managed')).toBeInTheDocument()
+    expect(screen.getByText('Discovered')).toBeInTheDocument()
   })
 
-  it('shows Not configured trust label when no issuerRef', () => {
-    const mesh = makeMesh()
-    rstest.mocked(useMultiClusterMeshes).mockReturnValue([[mesh], true, null])
+  it('shows ACM-unavailable banner when isFleetAvailable is false', () => {
+    mockHook({ isFleetAvailable: false })
     render(<ServiceMeshPage />)
-    expect(screen.getByText('Not configured')).toBeInTheDocument()
+    expect(
+      screen.getByText('Install Red Hat Advanced Cluster Management to discover unmanaged meshes across the fleet.'),
+    ).toBeInTheDocument()
+  })
+
+  it('shows enrichment error banner when enrichmentError is set', () => {
+    mockHook({ enrichmentError: new Error('search failed') })
+    render(<ServiceMeshPage />)
+    expect(
+      screen.getByText('Unable to load control plane data. Some meshes may not be shown.'),
+    ).toBeInTheDocument()
+  })
+
+  it('shows warning icon for managed item with meshIDConflict', () => {
+    const items = [makeItem({ meshIDConflict: true })]
+    mockHook({ items })
+    render(<ServiceMeshPage />)
+    expect(screen.getByText('Mesh ID Conflict')).toBeInTheDocument()
   })
 })

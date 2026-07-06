@@ -82,7 +82,7 @@ type MultiClusterMeshSpec struct {
 	// +optional
 	ControlPlane ControlPlaneConfig `json:"controlPlane,omitempty"`
 
-	// Operator defines the Service Mesh Operator installation configuration
+	// Operator defines the service mesh operator installation configuration
 	// +optional
 	Operator OperatorConfig `json:"operator,omitempty"`
 
@@ -99,9 +99,15 @@ type ControlPlaneConfig struct {
 	Namespace string `json:"namespace,omitempty"`
 }
 
-// OperatorConfig defines the Service Mesh Operator installation settings
+// OperatorConfig defines the service mesh operator installation settings.
+// Defaults target OSSM on OpenShift. Override fields to use a different operator variant (e.g. Sail).
 type OperatorConfig struct {
-	// Namespace is the namespace where the Service Mesh Operator will be installed.
+	// Name is the OLM package name of the operator
+	// +optional
+	// +kubebuilder:default="servicemeshoperator3"
+	Name string `json:"name,omitempty"`
+
+	// Namespace is the namespace where the operator will be installed.
 	// This namespace may be deleted when the mesh is removed, so avoid
 	// using a namespace that contains other resources.
 	// +optional
@@ -117,13 +123,13 @@ type OperatorConfig struct {
 	Channel string `json:"channel,omitempty"`
 
 	// Source is the CatalogSource name
-	// Defaults to "redhat-operators" on OpenShift, "operatorhubio-catalog" on vanilla Kubernetes
 	// +optional
+	// +kubebuilder:default="redhat-operators"
 	Source string `json:"source,omitempty"`
 
 	// SourceNamespace is the namespace of the CatalogSource
-	// Defaults to "openshift-marketplace" on OpenShift, "olm" on vanilla Kubernetes
 	// +optional
+	// +kubebuilder:default="openshift-marketplace"
 	SourceNamespace string `json:"sourceNamespace,omitempty"`
 
 	// StartingCSV is the specific operator version to install
@@ -199,14 +205,11 @@ const (
 	// ReasonClustersNotReady indicates that not all clusters have confirmed operator installation
 	ReasonClustersNotReady = "ClustersNotReady"
 
-	// ReasonManifestWorkCreated indicates the operator ManifestWork has been created
-	ReasonManifestWorkCreated = "ManifestWorkCreated"
+	// ReasonInstallationPending indicates the operator installation has been requested
+	ReasonInstallationPending = "InstallationPending"
 
 	// ReasonOperatorInstalled indicates the operator CSV has been successfully installed
 	ReasonOperatorInstalled = "Installed"
-
-	// ReasonMissingProductClaim indicates the cluster is missing its product claim
-	ReasonMissingProductClaim = "MissingProductClaim"
 
 	// ReasonReconcileError indicates an error occurred during reconciliation
 	ReasonReconcileError = "ReconcileError"

@@ -51,8 +51,18 @@ export interface EnrichedControlPlane {
   controlPlaneNamespace?: string
   managedBy?: { name: string; namespace: string }
   meshID?: string
-  multiClusterName?: string
   network?: string
   status?: IstioStatus
   version?: string
+}
+
+export type CpCategory = 'ready' | 'notReady' | 'unknown'
+export type CpFilterCategory = 'all' | CpCategory
+
+export function categorizeCp(cp: EnrichedControlPlane): CpCategory {
+  const ready = cp.status?.conditions?.find((c) => c.type === 'Ready')
+  if (!ready) return 'unknown'
+  if (ready.status === 'True') return 'ready'
+  if (ready.status === 'Unknown') return 'unknown'
+  return 'notReady'
 }

@@ -3,6 +3,7 @@ package util
 import (
 	"context"
 	"fmt"
+	"time"
 
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
@@ -69,9 +70,14 @@ func DeleteResource(ctx context.Context, k8sClient client.Client, obj client.Obj
 }
 
 // ExpectResourceDeleted waits for a resource to be fully removed (e.g. after a side-effect deletion by a controller).
-func ExpectResourceDeleted(ctx context.Context, k8sClient client.Client, obj client.Object, name, namespace string) {
-	Eventually(func() bool {
+// An optional timeout overrides the default Eventually timeout.
+func ExpectResourceDeleted(ctx context.Context, k8sClient client.Client, obj client.Object, name, namespace string, timeout ...time.Duration) {
+	e := Eventually(func() bool {
 		err := k8sClient.Get(ctx, key.Of(name, namespace), obj)
 		return errors.IsNotFound(err)
-	}).Should(BeTrue())
+	})
+	if len(timeout) > 0 {
+		e = e.WithTimeout(timeout[0])
+	}
+	e.Should(BeTrue())
 }

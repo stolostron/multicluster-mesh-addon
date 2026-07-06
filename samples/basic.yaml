@@ -2,11 +2,16 @@ apiVersion: mesh.open-cluster-management.io/v1alpha1
 kind: MultiClusterMesh
 metadata:
   name: basic-mesh
-  namespace: mesh-system
 spec:
   # Reference to the ManagedClusterSet that defines which clusters participate in the mesh
   # NOTE: Update this to match your ManagedClusterSet name
   clusterSet: mesh-cluster-set
+  # Sail Operator for KIND (overrides the OSSM kubebuilder defaults)
+  operator:
+    name: sailoperator
+    namespace: sail-operator
+    source: operatorhubio-catalog
+    sourceNamespace: olm
   # Minimal security configuration using cert-manager for trust
   security:
     trust:

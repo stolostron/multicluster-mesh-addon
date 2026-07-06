@@ -3,11 +3,12 @@ import { ConsolePluginBuildMetadata } from '@openshift-console/dynamic-plugin-sd
 export const pluginMetadata: ConsolePluginBuildMetadata = {
   name: 'ossm-acm',
   version: '0.1.0',
-  displayName: 'OpenShift Service Mesh — ACM Integration',
-  description: 'Adds Service Mesh visibility to the ACM Fleet Management console',
+  displayName: 'Fleet Service Mesh',
+  description: 'Adds a Fleet Service Mesh perspective for fleet-wide service mesh visibility across managed clusters',
   exposedModules: {
     controlPlaneDetailPage: './src/components/ControlPlaneDetailPage',
     controlPlanesPage: './src/components/ControlPlanesPage',
+    discoveredMeshDetailPage: './src/components/DiscoveredMeshDetailPage',
     meshDetailPage: './src/components/MeshDetailPage',
     overviewPage: './src/components/OverviewPage',
     serviceMeshPage: './src/components/ServiceMeshPage',

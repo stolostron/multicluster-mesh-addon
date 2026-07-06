@@ -3,7 +3,8 @@ import userEvent from '@testing-library/user-event'
 import MeshDetailPage, { ClusterStatusSection } from '../MeshDetailPage'
 import { useParams } from 'react-router-dom-v5-compat'
 import { useK8sWatchResource } from '@openshift-console/dynamic-plugin-sdk'
-import type { MultiClusterMesh, K8sCondition, ClusterMeshStatus } from '../../types/multiClusterMesh'
+import { makeMesh, makeCluster } from '../../__fixtures__/testFactories'
+import type { K8sCondition } from '../../types/common'
 
 // TrustStatusCard has its own test file; stub it here to avoid consuming
 // useK8sWatchResource mock slots meant for the mesh watch.
@@ -11,9 +12,31 @@ rstest.mock('../TrustStatusCard', () => ({
   TrustStatusCard: () => <div data-testid="trust-status-card" />,
 }))
 
-// ---------------------------------------------------------------------------
-// Test data factories
-// ---------------------------------------------------------------------------
+rstest.mock('../../hooks/useMultiClusterMeshes', () => ({
+  useMultiClusterMeshes: () => [[], true, null],
+}))
+rstest.mock('../../hooks/useDiscoveredControlPlanes', () => ({
+  useDiscoveredControlPlanes: () => ({ results: [], loaded: true, error: null, isFleetAvailable: true }),
+}))
+rstest.mock('../../hooks/useEnrichedControlPlanes', () => ({
+  useEnrichedControlPlanes: () => [[], undefined, true, null],
+}))
+rstest.mock('../../hooks/useManagedClusters', () => ({
+  useManagedClusters: () => [[
+    {
+      metadata: { name: 'cluster-a' },
+      status: { conditions: [{ type: 'ManagedClusterConditionAvailable', status: 'True' }] },
+    },
+    {
+      metadata: { name: 'cluster-b' },
+      status: { conditions: [{ type: 'ManagedClusterConditionAvailable', status: 'False' }] },
+    },
+    {
+      metadata: { name: 'cluster-c' },
+      status: { conditions: [{ type: 'ManagedClusterConditionAvailable', status: 'Unknown' }] },
+    },
+  ], true, null],
+}))
 
 const makeCondition = (
   type: string,
@@ -21,23 +44,6 @@ const makeCondition = (
   reason?: string,
   message?: string,
 ): K8sCondition => ({ type, status, reason, message })
-
-const makeMesh = (overrides: Partial<MultiClusterMesh> = {}): MultiClusterMesh => ({
-  apiVersion: 'mesh.open-cluster-management.io/v1alpha1',
-  kind: 'MultiClusterMesh',
-  metadata: { name: 'test-mesh', namespace: 'mesh-system' },
-  spec: { clusterSet: 'global' },
-  ...overrides,
-})
-
-const makeCluster = (
-  name: string,
-  status: 'True' | 'False' | 'Unknown',
-  reason?: string,
-): ClusterMeshStatus => ({
-  clusterName: name,
-  conditions: [makeCondition('OperatorInstalled', status, reason)],
-})
 
 // ---------------------------------------------------------------------------
 // MeshDetailPage — router shell
@@ -51,7 +57,7 @@ describe('MeshDetailPage', () => {
       rstest.mocked(useParams).mockReturnValue({})
       render(<MeshDetailPage />)
       expect(screen.getByText('Not Found')).toBeInTheDocument()
-      expect(screen.getByText('Invalid mesh URL. Expected /service-mesh/:namespace/:name.')).toBeInTheDocument()
+      expect(screen.getByText('Invalid mesh URL. Expected /fleet-mesh/meshes/managed/:namespace/:name.')).toBeInTheDocument()
     })
   })
 
@@ -85,8 +91,14 @@ describe('MeshDetailPage', () => {
     it('renders the breadcrumb and mesh name heading when loaded', () => {
       rstest.mocked(useK8sWatchResource).mockReturnValue([makeMesh(), true, null])
       render(<MeshDetailPage />)
-      expect(screen.getByRole('link', { name: 'Fleet Meshes' })).toBeInTheDocument()
+      expect(screen.getByRole('link', { name: 'Meshes' })).toBeInTheDocument()
       expect(screen.getByRole('heading', { name: 'test-mesh' })).toBeInTheDocument()
+    })
+
+    it('shows Managed in breadcrumb', () => {
+      rstest.mocked(useK8sWatchResource).mockReturnValue([makeMesh(), true, null])
+      render(<MeshDetailPage />)
+      expect(screen.getByText('Managed')).toBeInTheDocument()
     })
 
     it('links spec.clusterSet to the ACM cluster set detail page', () => {
@@ -170,6 +182,7 @@ describe('MeshDetailPage', () => {
       expect(screen.getByText('AllClustersReady')).toBeInTheDocument()
       expect(screen.getByText('All good')).toBeInTheDocument()
     })
+
   })
 })
 
@@ -218,7 +231,7 @@ describe('ClusterStatusSection', () => {
       makeCluster('cluster-b', 'False', 'ReconcileError'),
     ]
     render(<ClusterStatusSection clusterStatuses={clusters} />)
-    expect(screen.getByText('Cluster Status (2)')).toBeInTheDocument()
+    expect(screen.getByText('Clusters (2)')).toBeInTheDocument()
     expect(screen.getByText('cluster-a')).toBeInTheDocument()
     expect(screen.getByText('cluster-b')).toBeInTheDocument()
   })
@@ -230,9 +243,9 @@ describe('ClusterStatusSection', () => {
       makeCluster('cluster-c', 'Unknown'),
     ]
     render(<ClusterStatusSection clusterStatuses={clusters} />)
-    expect(screen.getByText('1 Ready')).toBeInTheDocument()
-    expect(screen.getByText('1 Not Ready')).toBeInTheDocument()
-    expect(screen.getByText('1 Unknown')).toBeInTheDocument()
+    expect(screen.getByText('Ready (1)')).toBeInTheDocument()
+    expect(screen.getByText('Not Ready (1)')).toBeInTheDocument()
+    expect(screen.getByText('Unknown (1)')).toBeInTheDocument()
   })
 
   it('links cluster names to ACM cluster detail pages', () => {
@@ -306,6 +319,32 @@ describe('ClusterStatusSection', () => {
       render(<ClusterStatusSection clusterStatuses={clusters} />)
       await user.type(screen.getByPlaceholderText('Filter by cluster name'), 'zzznomatch')
       expect(screen.getByText('No clusters match the current filter.')).toBeInTheDocument()
+    })
+  })
+
+  describe('cluster availability status', () => {
+    it('shows Available, Unavailable, and Unreachable labels from ManagedCluster data', () => {
+      const clusters = [
+        makeCluster('cluster-a', 'True'),
+        makeCluster('cluster-b', 'False'),
+        makeCluster('cluster-c', 'Unknown'),
+      ]
+      const managedClusterMap = new Map([
+        ['cluster-a', { metadata: { name: 'cluster-a' }, status: { conditions: [{ type: 'ManagedClusterConditionAvailable', status: 'True' }] } }],
+        ['cluster-b', { metadata: { name: 'cluster-b' }, status: { conditions: [{ type: 'ManagedClusterConditionAvailable', status: 'False' }] } }],
+        ['cluster-c', { metadata: { name: 'cluster-c' }, status: { conditions: [{ type: 'ManagedClusterConditionAvailable', status: 'Unknown' }] } }],
+      ]) as any
+      render(<ClusterStatusSection clusterStatuses={clusters} managedClusterMap={managedClusterMap} />)
+      expect(screen.getByText('Available')).toBeInTheDocument()
+      expect(screen.getByText('Unavailable')).toBeInTheDocument()
+      expect(screen.getByText('Unreachable')).toBeInTheDocument()
+    })
+
+    it('shows Unreachable when cluster is not in ManagedCluster map', () => {
+      const clusters = [makeCluster('missing-cluster', 'True')]
+      const managedClusterMap = new Map() as any
+      render(<ClusterStatusSection clusterStatuses={clusters} managedClusterMap={managedClusterMap} />)
+      expect(screen.getByText('Unreachable')).toBeInTheDocument()
     })
   })
 })

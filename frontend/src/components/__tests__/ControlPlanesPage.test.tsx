@@ -2,21 +2,18 @@ import { render, screen, waitFor, within } from '@testing-library/react'
 import ControlPlanesPage from '../ControlPlanesPage'
 import { useFleetSearchPoll, useIsFleetAvailable } from '@stolostron/multicluster-sdk'
 import { useK8sWatchResource } from '@openshift-console/dynamic-plugin-sdk'
+import { useEnrichedControlPlanes } from '../../hooks/useEnrichedControlPlanes'
+import { makeSearchResult, makeEnrichedCP } from '../../__fixtures__/testFactories'
 import type { EnrichedControlPlane } from '../../types/istio'
 
-const makeSearchResult = (cluster: string, name: string) => ({
-  apiVersion: 'sailoperator.io/v1',
-  kind: 'Istio',
-  metadata: { name, creationTimestamp: '2026-06-22T12:00:00Z' },
-  cluster,
-  spec: { namespace: 'istio-system' },
-})
+rstest.mock('../../hooks/useEnrichedControlPlanes', { mock: true })
 
 afterEach(() => rstest.clearAllMocks())
 
 beforeEach(() => {
   rstest.mocked(useIsFleetAvailable).mockReturnValue(true)
   rstest.mocked(useK8sWatchResource).mockReturnValue([[], true, null])
+  rstest.mocked(useEnrichedControlPlanes).mockReturnValue([[], false, false, null])
 })
 
 describe('ControlPlanesPage', () => {
@@ -43,7 +40,12 @@ describe('ControlPlanesPage', () => {
       makeSearchResult('cluster-a', 'default'),
       makeSearchResult('cluster-b', 'default'),
     ]
+    const enriched = [
+      makeEnrichedCP(),
+      makeEnrichedCP({ clusterName: 'cluster-b' }),
+    ]
     rstest.mocked(useFleetSearchPoll).mockReturnValue([results, true, undefined, rstest.fn()])
+    rstest.mocked(useEnrichedControlPlanes).mockReturnValue([enriched, true, true, null])
     render(<ControlPlanesPage />)
     await waitFor(() => {
       expect(screen.getByText('cluster-a')).toBeInTheDocument()
@@ -53,7 +55,9 @@ describe('ControlPlanesPage', () => {
 
   it('links cluster names to ACM cluster detail pages', async () => {
     const results = [makeSearchResult('cluster-a', 'default')]
+    const enriched = [makeEnrichedCP()]
     rstest.mocked(useFleetSearchPoll).mockReturnValue([results, true, undefined, rstest.fn()])
+    rstest.mocked(useEnrichedControlPlanes).mockReturnValue([enriched, true, true, null])
     render(<ControlPlanesPage />)
     await waitFor(() => {
       expect(screen.getByRole('link', { name: 'cluster-a' })).toHaveAttribute(
@@ -65,24 +69,45 @@ describe('ControlPlanesPage', () => {
 
   it('links CR names to control plane detail pages', async () => {
     const results = [makeSearchResult('cluster-a', 'myistio')]
+    const enriched = [makeEnrichedCP({ metadata: { name: 'myistio' } })]
     rstest.mocked(useFleetSearchPoll).mockReturnValue([results, true, undefined, rstest.fn()])
+    rstest.mocked(useEnrichedControlPlanes).mockReturnValue([enriched, true, true, null])
     render(<ControlPlanesPage />)
     await waitFor(() => {
       expect(screen.getByRole('link', { name: 'myistio' })).toHaveAttribute(
         'href',
-        '/mesh-control-planes/cluster-a/myistio',
+        '/fleet-mesh/control-planes/standalone/cluster-a/myistio',
       )
     })
   })
 
   it('shows dash for enrichment columns before enrichment completes', async () => {
     const results = [makeSearchResult('cluster-a', 'default')]
+    const enriched = [makeEnrichedCP()]
     rstest.mocked(useFleetSearchPoll).mockReturnValue([results, true, undefined, rstest.fn()])
+    rstest.mocked(useEnrichedControlPlanes).mockReturnValue([enriched, true, false, null])
     render(<ControlPlanesPage />)
     await waitFor(() => {
       const nameLink = screen.getByRole('link', { name: 'default' })
       const row = nameLink.closest('tr') as HTMLTableRowElement
-      expect(within(row).getAllByText('-').length).toBeGreaterThanOrEqual(4)
+      expect(within(row).getAllByText('-').length).toBeGreaterThanOrEqual(2)
+    })
+  })
+
+  describe('Mesh ID column', () => {
+    it('shows dash with no link for standalone CPs', async () => {
+      const results = [makeSearchResult('cluster-a', 'default')]
+      const enriched = [makeEnrichedCP()]
+      rstest.mocked(useFleetSearchPoll).mockReturnValue([results, true, undefined, rstest.fn()])
+      rstest.mocked(useEnrichedControlPlanes).mockReturnValue([enriched, true, true, null])
+      render(<ControlPlanesPage />)
+      await waitFor(() => {
+        const nameLink = screen.getByRole('link', { name: 'default' })
+        const row = nameLink.closest('tr') as HTMLTableRowElement
+        const meshIdCell = within(row).getAllByRole('cell')[0]
+        expect(meshIdCell).toHaveTextContent('-')
+        expect(within(meshIdCell).queryByRole('link')).not.toBeInTheDocument()
+      })
     })
   })
 
@@ -106,6 +131,64 @@ describe('ControlPlanesPage', () => {
       rstest.mocked(useIsFleetAvailable).mockReturnValue(false)
       render(<ControlPlanesPage />)
       expect(screen.queryByText('This page requires Red Hat Advanced Cluster Management.')).not.toBeInTheDocument()
+    })
+  })
+
+  describe('Type column', () => {
+    it('shows Managed type for CPs with managedBy', () => {
+      const cp = makeEnrichedCP({
+        managedBy: { name: 'my-mesh', namespace: 'mesh-system' },
+        meshID: 'mesh-system-my-mesh',
+      })
+      rstest.mocked(useFleetSearchPoll).mockReturnValue([[], true, undefined, rstest.fn()])
+      rstest.mocked(useEnrichedControlPlanes).mockReturnValue([[cp], true, true, null])
+      render(<ControlPlanesPage />)
+      expect(screen.getByText('Managed')).toBeInTheDocument()
+    })
+
+    it('shows Discovered type for CPs with meshID but no managedBy', () => {
+      const cp = makeEnrichedCP({
+        meshID: 'discovered-id',
+      })
+      rstest.mocked(useFleetSearchPoll).mockReturnValue([[], true, undefined, rstest.fn()])
+      rstest.mocked(useEnrichedControlPlanes).mockReturnValue([[cp], true, true, null])
+      render(<ControlPlanesPage />)
+      expect(screen.getByText('Discovered')).toBeInTheDocument()
+    })
+
+    it('shows Standalone type for CPs with no meshID and no managedBy', () => {
+      const cp = makeEnrichedCP()
+      rstest.mocked(useFleetSearchPoll).mockReturnValue([[], true, undefined, rstest.fn()])
+      rstest.mocked(useEnrichedControlPlanes).mockReturnValue([[cp], true, true, null])
+      render(<ControlPlanesPage />)
+      expect(screen.getByText('Standalone')).toBeInTheDocument()
+    })
+
+    it('links managed mesh ID to the managed mesh detail page', () => {
+      const cp = makeEnrichedCP({
+        managedBy: { name: 'my-mesh', namespace: 'mesh-system' },
+        meshID: 'mesh-system-my-mesh',
+      })
+      rstest.mocked(useFleetSearchPoll).mockReturnValue([[], true, undefined, rstest.fn()])
+      rstest.mocked(useEnrichedControlPlanes).mockReturnValue([[cp], true, true, null])
+      render(<ControlPlanesPage />)
+      expect(screen.getByRole('link', { name: 'mesh-system-my-mesh' })).toHaveAttribute(
+        'href',
+        '/fleet-mesh/meshes/managed/mesh-system/my-mesh',
+      )
+    })
+
+    it('links discovered mesh ID to the discovered mesh detail page', () => {
+      const cp = makeEnrichedCP({
+        meshID: 'discovered-id',
+      })
+      rstest.mocked(useFleetSearchPoll).mockReturnValue([[], true, undefined, rstest.fn()])
+      rstest.mocked(useEnrichedControlPlanes).mockReturnValue([[cp], true, true, null])
+      render(<ControlPlanesPage />)
+      expect(screen.getByRole('link', { name: 'discovered-id' })).toHaveAttribute(
+        'href',
+        '/fleet-mesh/meshes/discovered/discovered-id',
+      )
     })
   })
 })
