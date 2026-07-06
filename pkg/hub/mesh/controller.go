@@ -126,6 +126,12 @@ func RegisterController(mgr manager.Manager) error {
 				return obj.GetLabels()[MeshNameLabel] != "" && obj.GetLabels()[MeshNamespaceLabel] != ""
 			})),
 		).
+		Watches(&corev1.Secret{},
+			handler.EnqueueRequestsFromMapFunc(reconciler.findMeshesForMSASecret),
+			builder.WithPredicates(predicate.NewPredicateFuncs(func(obj client.Object) bool {
+				return obj.GetLabels()[MSASecretLabel] == "true"
+			})),
+		).
 		Watches(
 			&workv1.ManifestWork{},
 			handler.EnqueueRequestsFromMapFunc(reconciler.findMeshesForManifestWork),
@@ -209,7 +215,14 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		})
 	}
 
-	return reconcile.Result{}, errors.Join(reconcileErr, statusErr)
+	// Safety-net requeue if not all phases are complete yet. All phase transitions
+	// are event-driven via watches; this only fires if a watch event is missed.
+	result := reconcile.Result{}
+	if reconcileErr == nil && !meta.IsStatusConditionTrue(mesh.Status.Conditions, meshv1alpha1.ConditionReady) {
+		result.RequeueAfter = 5 * time.Minute
+	}
+
+	return result, errors.Join(reconcileErr, statusErr)
 }
 
 // validate checks for conflicts that prevent reconciliation.
@@ -249,46 +262,158 @@ func isOlderMesh(a, b *meshv1alpha1.MultiClusterMesh) bool {
 			key.For(a).String() < key.For(b).String())
 }
 
+// doReconcile runs the multi-phase reconciliation pipeline: operator install, trust distribution,
+// IstioCNI, Istio control plane, east-west gateway, and remote secrets. Phase ordering is
+// topology-dependent: MultiPrimary processes clusters independently, PrimaryRemote processes
+// the primary first so remotes can use its gateway address.
 func (r *Reconciler) doReconcile(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, clusters []clusterv1.ManagedCluster) error {
-	for _, cluster := range clusters {
+	// Existing plumbing: operator, MSA, certificates, cacerts
+	for i := range clusters {
+		cluster := &clusters[i]
 		klog.V(4).Infof("Reconciling cluster %s", cluster.Name)
 
-		work, err := r.workApplier.Apply(ctx, r.buildOperatorManifestWork(mesh, &cluster))
+		work, err := r.workApplier.Apply(ctx, r.buildOperatorManifestWork(mesh, cluster))
 		if err != nil {
 			return fmt.Errorf("failed to apply operator ManifestWork on cluster %s: %w", cluster.Name, err)
 		}
 		klog.V(4).Infof("Applied operator ManifestWork %s/%s", work.Namespace, work.Name)
 
-		// Create ManagedServiceAccount resources for each cluster.
-		if err := r.ensureManagedServiceAccountCreated(ctx, mesh, &cluster); err != nil {
+		if err := r.ensureManagedServiceAccountCreated(ctx, mesh, cluster); err != nil {
 			return fmt.Errorf("failed to create ManagedServiceAccounts: %w", err)
 		}
 
 		if mesh.Spec.Security.Trust.CertManager.IssuerRef.Name != "" {
-			if err := r.ensureCertificateForCluster(ctx, mesh, &cluster); err != nil {
+			if err := r.ensureCertificateForCluster(ctx, mesh, cluster); err != nil {
 				return fmt.Errorf("failed to ensure certificate for cluster %s: %w", cluster.Name, err)
 			}
-			if err := r.ensureCacertsManifestWork(ctx, mesh, &cluster); err != nil {
+			if err := r.ensureCacertsManifestWork(ctx, mesh, cluster); err != nil {
 				return fmt.Errorf("failed to ensure cacerts ManifestWork for cluster %s: %w", cluster.Name, err)
 			}
 		}
+
+		// Phase 1: IstioCNI (all clusters, no gating)
+		if err := r.ensureIstioCNI(ctx, mesh, cluster); err != nil {
+			return fmt.Errorf("failed to ensure IstioCNI on cluster %s: %w", cluster.Name, err)
+		}
 	}
 
+	// Phase 2+3: Control plane and gateway — topology determines ordering
+	var allPhasesComplete bool
+	var phaseErr error
+	if mesh.Spec.Topology.Type == meshv1alpha1.TopologyPrimaryRemote {
+		allPhasesComplete, phaseErr = r.reconcilePrimaryRemote(ctx, mesh, clusters)
+	} else {
+		allPhasesComplete, phaseErr = r.reconcileMultiPrimary(ctx, mesh, clusters)
+	}
+	if phaseErr != nil {
+		return phaseErr
+	}
+
+	// Phase 4: Remote secrets — topology-aware gating
+	if allPhasesComplete && r.areMSATokensAvailable(ctx, mesh, clusters) {
+		if err := r.ensureRemoteSecrets(ctx, mesh, clusters); err != nil {
+			return fmt.Errorf("failed to ensure remote secrets: %w", err)
+		}
+	}
+
+	// Cleanup
 	forceCleanupAll := mesh.Spec.Security.Trust.CertManager.IssuerRef.Name == ""
 	if err := r.cleanupCertificates(ctx, mesh, clusters, forceCleanupAll); err != nil {
 		return fmt.Errorf("failed to cleanup Certificates: %w", err)
 	}
-
-	if err := r.cleanupManifestWorks(ctx, mesh.Spec.ClusterSet); err != nil {
-		return fmt.Errorf("failed to cleanup ManifestWorks: %w", err)
+	if err := r.cleanupSharedManifestWorks(ctx, mesh.Spec.ClusterSet); err != nil {
+		return fmt.Errorf("failed to cleanup shared ManifestWorks: %w", err)
 	}
-
-	// Cleanup ManagedServiceAccount when the cluster(s) are removed from the ClusterSet.
+	if err := r.cleanupMeshManifestWorks(ctx, mesh, clusters); err != nil {
+		return fmt.Errorf("failed to cleanup mesh ManifestWorks: %w", err)
+	}
 	if err := r.cleanupManagedServiceAccounts(ctx, mesh, clusters); err != nil {
 		return fmt.Errorf("failed to cleanup ManagedServiceAccounts: %w", err)
 	}
 
 	return nil
+}
+
+// reconcileMultiPrimary processes all clusters independently through phases 2-3.
+func (r *Reconciler) reconcileMultiPrimary(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, clusters []clusterv1.ManagedCluster) (bool, error) {
+	allComplete := true
+	for i := range clusters {
+		complete, err := r.reconcileClusterPhases(ctx, mesh, clusters, &clusters[i])
+		if err != nil {
+			return false, err
+		}
+		if !complete {
+			allComplete = false
+		}
+	}
+	return allComplete, nil
+}
+
+// reconcilePrimaryRemote processes the primary cluster first, then remotes.
+func (r *Reconciler) reconcilePrimaryRemote(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, clusters []clusterv1.ManagedCluster) (bool, error) {
+	primary := getPrimaryCluster(mesh, clusters)
+	if primary == nil {
+		return false, fmt.Errorf("no primary cluster found for PrimaryRemote mesh %s/%s", mesh.Namespace, mesh.Name)
+	}
+
+	complete, err := r.reconcileClusterPhases(ctx, mesh, clusters, primary)
+	if err != nil {
+		return false, err
+	}
+	if !complete {
+		return false, nil
+	}
+
+	primaryGwAddr, err := r.getGatewayAddressForCluster(ctx, mesh, primary)
+	if err != nil {
+		return false, err
+	}
+	if primaryGwAddr == "" {
+		klog.Infof("Waiting for primary cluster %s gateway LB address", primary.Name)
+		return false, nil
+	}
+
+	allComplete := true
+	remotes := getRemoteClusters(mesh, clusters)
+	for _, remote := range remotes {
+		complete, err := r.reconcileClusterPhases(ctx, mesh, clusters, remote)
+		if err != nil {
+			return false, err
+		}
+		if !complete {
+			allComplete = false
+		}
+	}
+
+	return allComplete, nil
+}
+
+// reconcileClusterPhases runs phases 2-3 for a single cluster with gating.
+// Returns (true, nil) if all phases are complete for this cluster.
+func (r *Reconciler) reconcileClusterPhases(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, clusters []clusterv1.ManagedCluster, cluster *clusterv1.ManagedCluster) (bool, error) {
+	if !r.isOperatorInstalled(ctx, cluster) {
+		return false, nil
+	}
+
+	if err := r.ensureControlPlane(ctx, mesh, clusters, cluster); err != nil {
+		return false, fmt.Errorf("failed to ensure control plane on cluster %s: %w", cluster.Name, err)
+	}
+
+	if !r.isControlPlaneReady(ctx, mesh, cluster) {
+		klog.Infof("Waiting for control plane to be ready on cluster %s", cluster.Name)
+		return false, nil
+	}
+
+	if err := r.ensureGateway(ctx, mesh, clusters, cluster); err != nil {
+		return false, fmt.Errorf("failed to ensure gateway on cluster %s: %w", cluster.Name, err)
+	}
+
+	if !r.isGatewayReady(ctx, mesh, cluster) {
+		klog.Infof("Waiting for gateway to be ready on cluster %s", cluster.Name)
+		return false, nil
+	}
+
+	return true, nil
 }
 
 // forEachMeshInClusterSet lists all non-deleting meshes targeting the given ClusterSet and calls fn for each.
@@ -358,8 +483,12 @@ func (r *Reconciler) handleDeletion(ctx context.Context, mesh *meshv1alpha1.Mult
 	}
 
 	klog.Infof("Handling deletion for MultiClusterMesh %s/%s", mesh.Namespace, mesh.Name)
-	if err := r.cleanupManifestWorks(ctx, mesh.Spec.ClusterSet); err != nil {
-		return fmt.Errorf("failed to cleanup ManifestWorks: %w", err)
+
+	if err := r.cleanupMeshManifestWorks(ctx, mesh, nil); err != nil {
+		return fmt.Errorf("failed to cleanup mesh ManifestWorks: %w", err)
+	}
+	if err := r.cleanupSharedManifestWorks(ctx, mesh.Spec.ClusterSet); err != nil {
+		return fmt.Errorf("failed to cleanup shared ManifestWorks: %w", err)
 	}
 
 	if err := r.deleteAllManagedServiceAccounts(ctx, mesh); err != nil {
@@ -379,8 +508,9 @@ func (r *Reconciler) handleDeletion(ctx context.Context, mesh *meshv1alpha1.Mult
 	return nil
 }
 
-// cleanupManifestWorks deletes ManifestWorks on clusters that no mesh in the given ClusterSet needs anymore.
-func (r *Reconciler) cleanupManifestWorks(ctx context.Context, clusterSet string) error {
+// cleanupSharedManifestWorks deletes shared ManifestWorks (operator, IstioCNI) on clusters
+// that no mesh in the ClusterSet needs anymore.
+func (r *Reconciler) cleanupSharedManifestWorks(ctx context.Context, clusterSet string) error {
 	neededClusters, err := r.getMeshEnabledClusters(ctx, clusterSet)
 	if err != nil {
 		return fmt.Errorf("failed to determine needed clusters: %w", err)
@@ -395,8 +525,38 @@ func (r *Reconciler) cleanupManifestWorks(ctx context.Context, clusterSet string
 		if neededClusters[work.Namespace] {
 			continue
 		}
+		// Only delete shared ManifestWorks (no mesh-specific labels)
+		if work.Labels[MeshNameLabel] != "" {
+			continue
+		}
+		klog.Infof("Deleting shared ManifestWork %s/%s (no mesh targets this cluster)", work.Namespace, work.Name)
+		if err := r.workApplier.Delete(ctx, work.Namespace, work.Name); err != nil {
+			return fmt.Errorf("failed to delete ManifestWork %s/%s: %w", work.Namespace, work.Name, err)
+		}
+	}
 
-		klog.Infof("Deleting ManifestWork %s/%s (no mesh targets this cluster)", work.Namespace, work.Name)
+	return nil
+}
+
+// cleanupMeshManifestWorks deletes per-mesh ManifestWorks (CP, GW, RS) for clusters
+// no longer in the ClusterSet, or all ManifestWorks when clusters is nil (mesh deletion).
+func (r *Reconciler) cleanupMeshManifestWorks(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, clusters []clusterv1.ManagedCluster) error {
+	clusterNames := clusterNameSet(clusters)
+
+	workList := &workv1.ManifestWorkList{}
+	if err := r.List(ctx, workList, client.MatchingLabels{
+		ManagedByLabel:     ManagedByValue,
+		MeshNameLabel:      mesh.Name,
+		MeshNamespaceLabel: mesh.Namespace,
+	}); err != nil {
+		return fmt.Errorf("failed to list mesh ManifestWorks: %w", err)
+	}
+
+	for _, work := range workList.Items {
+		if clusters != nil && clusterNames[work.Namespace] {
+			continue
+		}
+		klog.Infof("Deleting mesh ManifestWork %s/%s", work.Namespace, work.Name)
 		if err := r.workApplier.Delete(ctx, work.Namespace, work.Name); err != nil {
 			return fmt.Errorf("failed to delete ManifestWork %s/%s: %w", work.Namespace, work.Name, err)
 		}
@@ -454,12 +614,18 @@ func (r *Reconciler) triggerReconcileForNotReadyMeshes(ctx context.Context, mesh
 	}
 }
 
+// determineStatus reads feedback from all ManifestWorks and sets per-cluster conditions
+// (OperatorInstalled, ControlPlaneReady, GatewayReady, DiscoveryReady) and the mesh-level
+// Ready condition. For PrimaryRemote, also populates PrimaryGatewayAddress for observability.
 func (r *Reconciler) determineStatus(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, clusters []clusterv1.ManagedCluster) error {
 	mesh.Status.ClusterStatus = make([]meshv1alpha1.ClusterMeshStatus, 0, len(clusters))
+	mesh.Status.PrimaryGatewayAddress = ""
 	allReady := len(clusters) > 0
 
-	for _, cluster := range clusters {
+	for i := range clusters {
+		cluster := &clusters[i]
 
+		// OperatorInstalled
 		operatorWork := &workv1.ManifestWork{}
 		if err := r.Get(ctx, key.Of(OperatorManifestWorkName, cluster.Name), operatorWork); err != nil {
 			return fmt.Errorf("failed to get operator ManifestWork for cluster %s: %w", cluster.Name, err)
@@ -472,6 +638,51 @@ func (r *Reconciler) determineStatus(ctx context.Context, mesh *meshv1alpha1.Mul
 			allReady = false
 			mesh.SetClusterCondition(cluster.Name, meshv1alpha1.ConditionOperatorInstalled, metav1.ConditionFalse,
 				meshv1alpha1.ReasonInstallationPending, "Operator installation is pending")
+		}
+
+		// ControlPlaneReady
+		if r.isControlPlaneReady(ctx, mesh, cluster) {
+			mesh.SetClusterCondition(cluster.Name, meshv1alpha1.ConditionControlPlaneReady, metav1.ConditionTrue,
+				meshv1alpha1.ReasonControlPlaneReady, "Istio control plane is ready")
+		} else {
+			allReady = false
+			mesh.SetClusterCondition(cluster.Name, meshv1alpha1.ConditionControlPlaneReady, metav1.ConditionFalse,
+				meshv1alpha1.ReasonControlPlaneNotReady, "Istio control plane is not ready")
+		}
+
+		// GatewayReady
+		if r.isGatewayReady(ctx, mesh, cluster) {
+			mesh.SetClusterCondition(cluster.Name, meshv1alpha1.ConditionGatewayReady, metav1.ConditionTrue,
+				meshv1alpha1.ReasonGatewayReady, "East-west gateway is ready")
+		} else {
+			allReady = false
+			mesh.SetClusterCondition(cluster.Name, meshv1alpha1.ConditionGatewayReady, metav1.ConditionFalse,
+				meshv1alpha1.ReasonGatewayNotReady, "East-west gateway is not ready")
+		}
+
+		// DiscoveryReady
+		rsWork := &workv1.ManifestWork{}
+		if err := r.Get(ctx, key.Of(getRSManifestWorkName(mesh), cluster.Name), rsWork); err == nil {
+			if meta.IsStatusConditionTrue(rsWork.Status.Conditions, "Applied") {
+				mesh.SetClusterCondition(cluster.Name, meshv1alpha1.ConditionDiscoveryReady, metav1.ConditionTrue,
+					meshv1alpha1.ReasonDiscoveryReady, "Cross-cluster endpoint discovery is configured")
+			} else {
+				allReady = false
+				mesh.SetClusterCondition(cluster.Name, meshv1alpha1.ConditionDiscoveryReady, metav1.ConditionFalse,
+					meshv1alpha1.ReasonDiscoveryNotReady, "Remote secret ManifestWork is not yet applied")
+			}
+		} else if !apierrors.IsNotFound(err) {
+			return fmt.Errorf("failed to get remote secret ManifestWork for cluster %s: %w", cluster.Name, err)
+		}
+	}
+
+	// PrimaryGatewayAddress for PrimaryRemote topology
+	if mesh.Spec.Topology.Type == meshv1alpha1.TopologyPrimaryRemote {
+		primary := getPrimaryCluster(mesh, clusters)
+		if primary != nil {
+			if addr, err := r.getGatewayAddressForCluster(ctx, mesh, primary); err == nil {
+				mesh.Status.PrimaryGatewayAddress = addr
+			}
 		}
 	}
 

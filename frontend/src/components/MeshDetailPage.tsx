@@ -56,11 +56,13 @@ function conditionMessage(condition: K8sCondition): string {
 type ClusterCategory = 'ready' | 'notReady' | 'unknown'
 
 function categorizeCluster(cs: ClusterMeshStatus): ClusterCategory {
-  const op = cs.conditions?.find((c) => c.type === 'OperatorInstalled')
-  if (!op) return 'unknown'
-  if (op.status === 'True') return 'ready'
-  if (op.status === 'Unknown') return 'unknown'
-  return 'notReady'
+  const conditions = cs.conditions ?? []
+  if (conditions.length === 0) return 'unknown'
+  const hasNotReady = conditions.some((c) => c.status === 'False')
+  const hasUnknown = conditions.some((c) => c.status === 'Unknown')
+  if (hasNotReady) return 'notReady'
+  if (hasUnknown) return 'unknown'
+  return 'ready'
 }
 
 const CONFLICT_REASONS = ['OperatorConfigConflict', 'NamespaceConflict']
@@ -93,7 +95,7 @@ export const ClusterStatusSection: FC<{
       render: (cs) => (
         <Link to={clusterDetailLink(cs.clusterName)}>{cs.clusterName}</Link>
       ),
-      width: '25%',
+      width: '15%',
     },
     {
       key: 'clusterStatus',
@@ -103,23 +105,31 @@ export const ClusterStatusSection: FC<{
         const availability = getClusterAvailability(managedClusterMap?.get(cs.clusterName))
         return <Label color={availabilityColor(availability)} isCompact>{t(availabilityLabelKey(availability))}</Label>
       },
-      width: '20%',
+      width: '13%',
     },
     {
       key: 'operatorStatus',
-      label: 'Operator Status',
+      label: 'Operator',
       render: (cs) => <MeshStatus conditions={cs.conditions} conditionType="OperatorInstalled" isCompact />,
-      width: '20%',
+      width: '18%',
     },
     {
-      key: 'message',
-      label: 'Message',
-      render: (cs) => {
-        const operatorCondition = cs.conditions?.find((c) => c.type === 'OperatorInstalled')
-        const msg = operatorCondition ? conditionMessage(operatorCondition) : '-'
-        return <Tooltip content={msg}><span>{msg}</span></Tooltip>
-      },
-      width: '35%',
+      key: 'controlPlaneStatus',
+      label: 'Control Plane',
+      render: (cs) => <MeshStatus conditions={cs.conditions} conditionType="ControlPlaneReady" isCompact />,
+      width: '18%',
+    },
+    {
+      key: 'gatewayStatus',
+      label: 'Gateway',
+      render: (cs) => <MeshStatus conditions={cs.conditions} conditionType="GatewayReady" isCompact />,
+      width: '18%',
+    },
+    {
+      key: 'discoveryStatus',
+      label: 'Discovery',
+      render: (cs) => <MeshStatus conditions={cs.conditions} conditionType="DiscoveryReady" isCompact />,
+      width: '18%',
     },
   ], [managedClusterMap, managedClustersLoaded, t])
 

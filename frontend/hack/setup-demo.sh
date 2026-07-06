@@ -2,40 +2,38 @@
 #
 # Creates (or tears down) demo resources for the Fleet Service Mesh console plugin.
 #
+# The backend controller automatically creates Istio CRs, IstioCNI, east-west
+# gateways, and remote secrets when a MultiClusterMesh CR is created. This script
+# sets up the infrastructure (ManagedClusterSet, trust chain) and creates the MCM
+# CRs, then waits for the controller to reconcile everything.
+#
 # Usage:
 #   hack/setup-demo.sh install     # create all demo resources
 #   hack/setup-demo.sh uninstall   # remove all demo resources
 #
 # Prerequisites (checked automatically on install):
-#   - ACM installed and MultiClusterHub in Running phase (DEV-INSTALL.md step 1)
-#   - cert-manager installed (DEV-INSTALL.md step 2)
-#   - Backend controller deployed in multicluster-mesh-system (DEV-INSTALL.md step 3)
-#   - Frontend ConsolePlugin 'ossm-acm' deployed (DEV-INSTALL.md step 5)
+#   - ACM 2.16+ installed and MultiClusterHub in Running phase
+#   - Backend controller deployed in multicluster-mesh-system
 #   - oc logged in with cluster-admin privileges
 #
 # What this creates:
 #   Infrastructure:
-#     mesh-cluster-set        - ManagedClusterSet with local-cluster bound to it
-#     mesh-system namespace   - home for MultiClusterMesh CRs and cert-manager trust chain
-#     OSSM 3.x Subscription   - Sail operator (if not already installed)
-#     cert-manager trust chain - self-signed root CA Issuer in mesh-system
+#     cert-manager            - installed if not already present (idempotent)
+#     demo-cluster-set        - ManagedClusterSet with local-cluster bound to it
+#     cert-manager trust chain - self-signed root CA Issuer in secure-mcm-ns
 #
-#   MCMs:
-#     my-mesh       - primary mesh with trust enabled, controlPlane.namespace: istio-system
-#     staging-mesh  - second mesh without trust, controlPlane.namespace: istio-staging
+#   MCMs (controller creates Istio CRs, IstioCNI, gateways, etc. automatically):
+#     secure-mcm    - mesh with trust enabled, in secure-mcm-ns, CP: secure-ns
+#     unsecure-mcm  - mesh without trust, in unsecure-mcm-ns, CP: unsecure-ns
 #
-#   Istio CRs (4 total, each in its own namespace):
-#     default        -> istio-system        -> managed by my-mesh
-#     staging        -> istio-staging       -> managed by staging-mesh
-#     dev-standalone -> istio-dev           -> standalone (unmanaged)
-#     experiments    -> istio-experiments   -> standalone (unmanaged)
+#   Standalone Istio CRs (created manually, not managed by any MCM):
+#     discovered-standalone -> istio-discovered -> "discovered" in the UI
 
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
-ISTIO_VERSION="${ISTIO_VERSION:-v1.28-latest}"
-OPERATOR_TIMEOUT="${OPERATOR_TIMEOUT:-180}"
+RECONCILE_TIMEOUT="${RECONCILE_TIMEOUT:-300}"
 
 die() { echo "ERROR: $*" >&2; exit 1; }
 
@@ -49,18 +47,16 @@ preflight() {
 
   local ok=true
 
-  # ACM installed and running
   local mch_phase
   mch_phase=$(oc get multiclusterhub -A -o jsonpath='{.items[0].status.phase}' 2>/dev/null || true)
   if [ "$mch_phase" = "Running" ]; then
     echo "  [ok] ACM MultiClusterHub is Running"
   else
     echo "  [FAIL] ACM is not installed or not ready (MultiClusterHub phase: ${mch_phase:-not found})"
-    echo "         See DEV-INSTALL.md step 1"
+    echo "         See DEV-INSTALL.md for ACM setup instructions"
     ok=false
   fi
 
-  # Backend controller deployed and running
   local backend_available
   backend_available=$(oc get deployment multicluster-mesh-controller \
     -n multicluster-mesh-system \
@@ -69,30 +65,7 @@ preflight() {
     echo "  [ok] Backend controller is running"
   else
     echo "  [FAIL] Backend controller is not deployed or not ready"
-    echo "         See DEV-INSTALL.md step 3"
-    ok=false
-  fi
-
-  # Frontend ConsolePlugin deployed and enabled
-  local plugin_state
-  plugin_state=$(oc get consoleplugin ossm-acm -o name 2>/dev/null || true)
-  if [ -n "$plugin_state" ]; then
-    echo "  [ok] Frontend ConsolePlugin 'ossm-acm' is registered"
-  else
-    echo "  [FAIL] Frontend ConsolePlugin 'ossm-acm' is not deployed"
-    echo "         Run 'make build deploy' from the frontend/ directory (see DEV-INSTALL.md step 5)"
-    ok=false
-  fi
-
-  # cert-manager installed
-  local cm_available
-  cm_available=$(oc get deployment cert-manager -n cert-manager \
-    -o jsonpath='{.status.availableReplicas}' 2>/dev/null || true)
-  if [ "${cm_available:-0}" -ge 1 ]; then
-    echo "  [ok] cert-manager is running"
-  else
-    echo "  [FAIL] cert-manager is not installed or not ready"
-    echo "         See DEV-INSTALL.md step 2"
+    echo "         See DEV-INSTALL.md for backend controller build/deploy instructions"
     ok=false
   fi
 
@@ -102,264 +75,252 @@ preflight() {
   echo ""
 }
 
-install_operator() {
-  echo "=== Installing OSSM 3.x operator ==="
+CERT_MANAGER_VERSION="${CERT_MANAGER_VERSION:-v1.20.2}"
+CERT_MANAGER_URL="https://github.com/cert-manager/cert-manager/releases/download/${CERT_MANAGER_VERSION}/cert-manager.yaml"
 
-  local current_csv
-  current_csv=$(oc get subscription.operators.coreos.com servicemeshoperator3 \
-    -n openshift-operators -o jsonpath='{.status.currentCSV}' 2>/dev/null || true)
-
-  if [ -n "$current_csv" ]; then
-    local phase
-    phase=$(oc get csv "$current_csv" -n openshift-operators \
-      -o jsonpath='{.status.phase}' 2>/dev/null || true)
-    if [ "$phase" = "Succeeded" ]; then
-      echo "  Sail operator already installed ($current_csv), skipping."
-      return
-    fi
+install_cert_manager() {
+  local cm_available
+  cm_available=$(oc get deployment cert-manager -n cert-manager \
+    -o jsonpath='{.status.availableReplicas}' 2>/dev/null || true)
+  if [ "${cm_available:-0}" -ge 1 ]; then
+    echo "  cert-manager already installed, skipping."
+    return
   fi
 
-  oc apply -f - <<'EOF'
-apiVersion: operators.coreos.com/v1alpha1
-kind: Subscription
-metadata:
-  name: servicemeshoperator3
-  namespace: openshift-operators
-spec:
-  channel: stable
-  installPlanApproval: Automatic
-  name: servicemeshoperator3
-  source: redhat-operators
-  sourceNamespace: openshift-marketplace
-EOF
+  echo "=== Installing cert-manager ${CERT_MANAGER_VERSION} ==="
+  oc apply -f "${CERT_MANAGER_URL}" || die "Failed to install cert-manager"
+  oc rollout status deployment/cert-manager -n cert-manager --timeout=120s \
+    || die "cert-manager did not become ready"
+  oc rollout status deployment/cert-manager-cainjector -n cert-manager --timeout=120s \
+    || die "cert-manager-cainjector did not become ready"
+  oc rollout status deployment/cert-manager-webhook -n cert-manager --timeout=120s \
+    || die "cert-manager-webhook did not become ready"
 
-  echo "  Waiting for subscription to resolve (timeout: ${OPERATOR_TIMEOUT}s)..."
+  echo "  Waiting for cert-manager webhook TLS to be provisioned..."
   local elapsed=0
-  while true; do
-    local current_csv
-    current_csv=$(oc get subscription.operators.coreos.com servicemeshoperator3 \
-      -n openshift-operators -o jsonpath='{.status.currentCSV}' 2>/dev/null || true)
-    if [ -n "$current_csv" ]; then
-      break
-    fi
-
-    local resolution_failed
-    resolution_failed=$(oc get subscription.operators.coreos.com servicemeshoperator3 \
-      -n openshift-operators \
-      -o jsonpath='{.status.conditions[?(@.type=="ResolutionFailed")].status}' 2>/dev/null || true)
-    if [ "$resolution_failed" = "True" ]; then
-      local msg
-      msg=$(oc get subscription.operators.coreos.com servicemeshoperator3 \
-        -n openshift-operators \
-        -o jsonpath='{.status.conditions[?(@.type=="ResolutionFailed")].message}' 2>/dev/null || true)
-      die "Subscription resolution failed: ${msg}"
-    fi
-
-    if [ "$elapsed" -ge "$OPERATOR_TIMEOUT" ]; then
-      die "Timed out waiting for subscription to resolve after ${OPERATOR_TIMEOUT}s"
+  until oc apply --dry-run=server -f - <<'PROBE' &>/dev/null 2>&1
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: webhook-probe
+  namespace: cert-manager
+spec:
+  selfSigned: {}
+PROBE
+  do
+    if [ "$elapsed" -ge 180 ]; then
+      die "cert-manager webhook not ready after 180s"
     fi
     sleep 5
     elapsed=$((elapsed + 5))
   done
-
-  local csv
-  csv=$(oc get subscription.operators.coreos.com servicemeshoperator3 \
-    -n openshift-operators -o jsonpath='{.status.currentCSV}')
-  echo "  Waiting for ${csv} to succeed..."
-  oc wait --for=jsonpath='{.status.phase}'=Succeeded \
-    csv/"${csv}" -n openshift-operators --timeout="${OPERATOR_TIMEOUT}s" \
-    || die "CSV ${csv} did not reach Succeeded phase within ${OPERATOR_TIMEOUT}s"
-
-  echo "  Waiting for Istio CRD to be registered..."
-  local crd_elapsed=0
-  until oc get crd istios.sailoperator.io &>/dev/null; do
-    if [ "$crd_elapsed" -ge 60 ]; then
-      die "Timed out waiting for Istio CRD after 60s"
-    fi
-    sleep 3
-    crd_elapsed=$((crd_elapsed + 3))
-  done
-  echo "  Sail operator installed."
+  echo "  [ok] cert-manager installed"
 }
 
-install_base_mesh() {
-  echo "=== Creating ManagedClusterSet and mesh-system namespace ==="
+uninstall_cert_manager() {
+  if ! oc get namespace cert-manager &>/dev/null; then
+    echo "  cert-manager not installed, skipping."
+    return
+  fi
+
+  echo "=== Removing cert-manager ==="
+  oc delete -f "${CERT_MANAGER_URL}" --ignore-not-found 2>/dev/null || true
+  oc delete namespace cert-manager --ignore-not-found 2>/dev/null || true
+  echo "  [ok] cert-manager removed"
+}
+
+wait_for_mesh_ready() {
+  local name=$1
+  local namespace=$2
+  local timeout=$3
+
+  echo "  Waiting for ${namespace}/${name} to be ready (timeout: ${timeout}s)..."
+  local elapsed=0
+  while true; do
+    local ready
+    ready=$(oc get multiclustermesh "$name" -n "$namespace" \
+      -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || true)
+    if [ "$ready" = "True" ]; then
+      echo "  [ok] ${name} is ready"
+      return 0
+    fi
+
+    local op cp gw
+    op=$(oc get multiclustermesh "$name" -n "$namespace" \
+      -o jsonpath='{.status.clusterStatus[0].conditions[?(@.type=="OperatorInstalled")].reason}' 2>/dev/null || true)
+    cp=$(oc get multiclustermesh "$name" -n "$namespace" \
+      -o jsonpath='{.status.clusterStatus[0].conditions[?(@.type=="ControlPlaneReady")].reason}' 2>/dev/null || true)
+    gw=$(oc get multiclustermesh "$name" -n "$namespace" \
+      -o jsonpath='{.status.clusterStatus[0].conditions[?(@.type=="GatewayReady")].reason}' 2>/dev/null || true)
+    echo "  ... Operator=${op:-pending} CP=${cp:-pending} GW=${gw:-pending} (${elapsed}s)"
+
+    if [ "$elapsed" -ge "$timeout" ]; then
+      echo "  [WARN] Timed out waiting for ${name} (may still be reconciling)"
+      return 1
+    fi
+    sleep 15
+    elapsed=$((elapsed + 15))
+  done
+}
+
+install_infrastructure() {
+  echo "=== Creating ManagedClusterSet ==="
   oc apply -f - <<'EOF' || die "Failed to create ManagedClusterSet"
 apiVersion: cluster.open-cluster-management.io/v1beta2
 kind: ManagedClusterSet
 metadata:
-  name: mesh-cluster-set
+  name: demo-cluster-set
 EOF
 
   oc label managedcluster local-cluster \
-    cluster.open-cluster-management.io/clusterset=mesh-cluster-set --overwrite \
+    cluster.open-cluster-management.io/clusterset=demo-cluster-set --overwrite \
     || die "Failed to label local-cluster"
 
-  oc create namespace mesh-system --dry-run=client -o yaml | oc apply -f - \
-    || die "Failed to create mesh-system namespace"
+  echo "=== Creating MCM namespaces ==="
+  oc create namespace secure-mcm-ns --dry-run=client -o yaml | oc apply -f -
+  oc create namespace unsecure-mcm-ns --dry-run=client -o yaml | oc apply -f -
+}
 
-  echo "=== Creating cert-manager trust chain ==="
-  oc apply -n mesh-system -f "${REPO_ROOT}/samples/cert-manager-issuer.yaml" \
+install_trust_chain() {
+  echo "=== Deploying cert-manager trust chain in secure-mcm-ns ==="
+  oc apply -n secure-mcm-ns -f "${REPO_ROOT}/samples/cert-manager-issuer.yaml" \
     || die "Failed to create cert-manager trust chain"
 
-  echo "=== Creating my-mesh MCM (with trust) ==="
-  oc apply -f - <<'EOF' || die "Failed to create my-mesh"
+  oc wait certificate mesh-root-ca -n secure-mcm-ns --for=condition=Ready --timeout=60s \
+    || die "Root CA certificate did not become ready"
+}
+
+install_meshes() {
+  echo "=== Creating secure-mcm (with trust, NodePort) ==="
+  oc apply -f - <<'EOF' || die "Failed to create secure-mcm"
 apiVersion: mesh.open-cluster-management.io/v1alpha1
 kind: MultiClusterMesh
 metadata:
-  name: my-mesh
-  namespace: mesh-system
+  name: secure-mcm
+  namespace: secure-mcm-ns
 spec:
-  clusterSet: mesh-cluster-set
+  clusterSet: demo-cluster-set
+  controlPlane:
+    namespace: secure-ns
+  gateway:
+    serviceType: NodePort
+  topology:
+    type: MultiPrimary
   security:
     trust:
       certManager:
         issuerRef:
           name: mesh-root-ca
 EOF
-}
 
-install_staging_mesh() {
-  echo "=== Creating staging-mesh MCM (no trust) ==="
-  oc apply -f - <<'EOF' || die "Failed to create staging-mesh"
+  echo "=== Creating unsecure-mcm (no trust, NodePort) ==="
+  oc apply -f - <<'EOF' || die "Failed to create unsecure-mcm"
 apiVersion: mesh.open-cluster-management.io/v1alpha1
 kind: MultiClusterMesh
 metadata:
-  name: staging-mesh
-  namespace: mesh-system
+  name: unsecure-mcm
+  namespace: unsecure-mcm-ns
 spec:
-  clusterSet: mesh-cluster-set
+  clusterSet: demo-cluster-set
   controlPlane:
-    namespace: istio-staging
+    namespace: unsecure-ns
+  gateway:
+    serviceType: NodePort
+  topology:
+    type: MultiPrimary
 EOF
+
+  echo ""
+  echo "=== Waiting for controller to reconcile ==="
+  wait_for_mesh_ready "secure-mcm" "secure-mcm-ns" "$RECONCILE_TIMEOUT"
+  wait_for_mesh_ready "unsecure-mcm" "unsecure-mcm-ns" "$RECONCILE_TIMEOUT"
 }
 
-install_istio_crs() {
-  echo "=== Creating control plane namespaces ==="
-  for ns in istio-system istio-staging istio-dev istio-experiments; do
-    oc create namespace "$ns" --dry-run=client -o yaml | oc apply -f - \
-      || die "Failed to create namespace $ns"
+install_discovered() {
+  echo "=== Creating standalone discovered Istio CR ==="
+  echo "  (Sail operator must be installed by the controller first)"
+
+  local elapsed=0
+  until oc get crd istios.sailoperator.io &>/dev/null; do
+    if [ "$elapsed" -ge 60 ]; then
+      die "Timed out waiting for Istio CRD (operator not installed yet?)"
+    fi
+    sleep 5
+    elapsed=$((elapsed + 5))
   done
 
-  echo "=== Creating Istio CR: default (managed by my-mesh) ==="
-  oc apply -f - <<EOF || die "Failed to create Istio CR 'default'"
+  oc create namespace istio-discovered --dry-run=client -o yaml | oc apply -f -
+
+  oc apply -f - <<'EOF' || die "Failed to create discovered Istio CR"
 apiVersion: sailoperator.io/v1
 kind: Istio
 metadata:
-  name: default
+  name: discovered-standalone
 spec:
-  namespace: istio-system
-  version: ${ISTIO_VERSION}
+  namespace: istio-discovered
   values:
     global:
-      meshID: production
+      meshID: standalone-mesh
       multiCluster:
         clusterName: local-cluster
-      network: network-prod
+      network: network-standalone
 EOF
-
-  echo "=== Creating Istio CR: staging (managed by staging-mesh) ==="
-  oc apply -f - <<EOF || die "Failed to create Istio CR 'staging'"
-apiVersion: sailoperator.io/v1
-kind: Istio
-metadata:
-  name: staging
-spec:
-  namespace: istio-staging
-  version: ${ISTIO_VERSION}
-  values:
-    global:
-      meshID: staging
-      multiCluster:
-        clusterName: local-cluster
-      network: network-staging
-EOF
-
-  echo "=== Creating Istio CR: dev-standalone (unmanaged) ==="
-  oc apply -f - <<EOF || die "Failed to create Istio CR 'dev-standalone'"
-apiVersion: sailoperator.io/v1
-kind: Istio
-metadata:
-  name: dev-standalone
-spec:
-  namespace: istio-dev
-  version: ${ISTIO_VERSION}
-  values:
-    global:
-      meshID: dev-sandbox
-      network: network-dev
-EOF
-
-  echo "=== Creating Istio CR: experiments (unmanaged) ==="
-  oc apply -f - <<EOF || die "Failed to create Istio CR 'experiments'"
-apiVersion: sailoperator.io/v1
-kind: Istio
-metadata:
-  name: experiments
-spec:
-  namespace: istio-experiments
-  version: ${ISTIO_VERSION}
-  values:
-    global:
-      meshID: experiments
-      network: network-lab
-EOF
+  echo "  [ok] Standalone Istio CR created"
 }
 
 install() {
   preflight
-  install_operator
-  install_base_mesh
-  install_staging_mesh
-  install_istio_crs
+  install_cert_manager
+  install_infrastructure
+  install_trust_chain
+  install_meshes
+  install_discovered
 
   echo ""
-  echo "=== Verifying ==="
-  oc get multiclustermesh -n mesh-system
+  echo "=== Verification ==="
   echo ""
-  oc get istio
+  echo "MCMs:"
+  oc get multiclustermesh -A
+  echo ""
+  echo "Istio CRs:"
+  oc get istios
+  echo ""
+  echo "ManifestWorks:"
+  oc get manifestwork -n local-cluster | grep multicluster-mesh
   echo ""
   echo "Done. ACM Search may take 1-2 minutes to index the Istio CRs."
-  echo "Override the Istio version with: ISTIO_VERSION=v1.27-latest hack/setup-demo.sh install"
 }
 
 uninstall() {
-  echo "=== Removing Istio CRs ==="
-  oc delete istio default staging dev-standalone experiments --ignore-not-found 2>/dev/null || true
+  echo "=== Removing standalone Istio CRs ==="
+  oc delete istio discovered-standalone --ignore-not-found 2>/dev/null || true
 
-  echo "=== Removing MCMs ==="
-  oc delete multiclustermesh my-mesh staging-mesh -n mesh-system --ignore-not-found 2>/dev/null || true
+  echo "=== Removing MCMs (controller auto-cleans ManifestWorks) ==="
+  oc delete multiclustermesh secure-mcm -n secure-mcm-ns --ignore-not-found 2>/dev/null || true
+  oc delete multiclustermesh unsecure-mcm -n unsecure-mcm-ns --ignore-not-found 2>/dev/null || true
+
+  echo "  Waiting for controller to clean up ManifestWorks..."
+  local elapsed=0
+  while oc get manifestwork -n local-cluster 2>/dev/null | grep -q multicluster-mesh; do
+    if [ "$elapsed" -ge 60 ]; then
+      echo "  [WARN] ManifestWorks still present after 60s, continuing cleanup"
+      break
+    fi
+    sleep 5
+    elapsed=$((elapsed + 5))
+  done
 
   echo "=== Removing cert-manager trust chain ==="
-  oc delete -n mesh-system -f "${REPO_ROOT}/samples/cert-manager-issuer.yaml" --ignore-not-found 2>/dev/null || true
+  oc delete -n secure-mcm-ns -f "${REPO_ROOT}/samples/cert-manager-issuer.yaml" --ignore-not-found 2>/dev/null || true
 
-  echo "=== Removing mesh-system namespace ==="
-  oc delete namespace mesh-system --ignore-not-found 2>/dev/null || true
+  echo "=== Removing namespaces ==="
+  oc delete namespace secure-mcm-ns unsecure-mcm-ns istio-discovered --ignore-not-found 2>/dev/null || true
 
-  echo "=== Removing control plane namespaces ==="
-  oc delete namespace istio-staging istio-dev istio-experiments --ignore-not-found 2>/dev/null || true
-
-  echo "=== Removing ManagedClusterSet binding and set ==="
+  echo "=== Removing ManagedClusterSet ==="
   oc label managedcluster local-cluster cluster.open-cluster-management.io/clusterset- 2>/dev/null || true
-  oc delete managedclusterset mesh-cluster-set --ignore-not-found 2>/dev/null || true
+  oc delete managedclusterset demo-cluster-set --ignore-not-found 2>/dev/null || true
 
-  echo "=== Removing istio-system namespace ==="
-  oc delete namespace istio-system --ignore-not-found 2>/dev/null || true
-
-  echo "=== Removing OSSM operator ==="
-  local csv
-  csv=$(oc get subscription.operators.coreos.com servicemeshoperator3 \
-    -n openshift-operators -o jsonpath='{.status.currentCSV}' 2>/dev/null || true)
-  oc delete subscription.operators.coreos.com servicemeshoperator3 \
-    -n openshift-operators --ignore-not-found 2>/dev/null || true
-  if [ -n "$csv" ]; then
-    oc delete csv "$csv" -n openshift-operators --ignore-not-found 2>/dev/null || true
-  fi
-  for orphan_csv in $(oc get csv -n openshift-operators -o name 2>/dev/null | grep servicemeshoperator3 || true); do
-    oc delete "$orphan_csv" -n openshift-operators --ignore-not-found 2>/dev/null || true
-  done
-  oc get crd -o name 2>/dev/null | grep -E 'sailoperator\.io|istio\.io' \
-    | xargs -r oc delete --ignore-not-found 2>/dev/null || true
+  uninstall_cert_manager
 
   echo ""
   echo "Done. All demo resources removed."

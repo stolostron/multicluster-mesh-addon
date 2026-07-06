@@ -11,7 +11,10 @@
 - [Operator Lifecycle](#operator-lifecycle)
 - [Trust Distribution](#trust-distribution)
 - [Endpoint Discovery](#endpoint-discovery)
+- [Control Plane Management](#control-plane-management)
+- [Topology Support](#topology-support)
 - [Lifecycle Events](#lifecycle-events)
+- [Known Limitations](#known-limitations)
 - [Phased Approach](#phased-approach)
 
 ## Overview
@@ -49,6 +52,12 @@ flowchart TD
         (MSA token, per cluster)"])
         addon --> mw_operator(["ManifestWork
         (operator)"])
+        addon --> mw_cni(["ManifestWork
+        (IstioCNI)"])
+        addon --> mw_cp(["ManifestWork
+        (Istio CR, per mesh)"])
+        addon --> mw_gw(["ManifestWork
+        (gateway, per mesh)"])
         casecret --> mw_cacerts(["ManifestWork
         (cacerts)"])
         tokensecret --> mw_remote(["ManifestWork
@@ -58,6 +67,10 @@ flowchart TD
     subgraph Managed Cluster
         agent[Work Agent - OCM] --> subscription(["Subscription
         (sail / OSSM operator)"])
+        agent --> istiocni(["IstioCNI"])
+        agent --> istiocr(["Istio CR"])
+        agent --> gw(["East-West Gateway
+        (Deployment + Service + Gateway)"])
         agent --> cacerts(["Secret
         (cacerts)"])
         agent --> remotesecret(["Secret
@@ -65,6 +78,9 @@ flowchart TD
     end
 
     mw_operator --> agent
+    mw_cni --> agent
+    mw_cp --> agent
+    mw_gw --> agent
     mw_cacerts --> agent
     mw_remote --> agent
 
@@ -91,23 +107,23 @@ flowchart TD
 
     %% OCM managed (orange)
     classDef ocm fill:#ffedd5,stroke:#f97316,color:#7c2d12
-    class agent,msa,mw_operator,mw_cacerts,mw_remote ocm
+    class agent,msa,mw_operator,mw_cni,mw_cp,mw_gw,mw_cacerts,mw_remote ocm
 
 ```
 
 
 ## Scope
 
-### What the add-on does (Plumbing)
+### What the add-on does (Plumbing + Configuration)
 
 - Installs the service mesh operator (OSSM by default) on managed clusters via OLM
 - Distributes intermediate CA certificates for mTLS trust
 - Exchanges discovery tokens between peer clusters
+- Creates IstioCNI, Istio CRs, east-west gateways, and remote secrets on managed clusters via ManifestWork
 - Handles lifecycle events (cluster add/remove, mesh creation/deletion)
 
-### What the add-on does not do (Configuration)
+### What the add-on does not do
 
-- Does not create or manage Istio custom resources (the user or GitOps owns this)
 - Does not patch existing Istio CRs on spoke clusters (this would conflict with ArgoCD/GitOps reconciliation)
 - Does not enforce control plane version consistency across clusters
 - Does not deploy monitoring, observability, or application workloads
@@ -117,7 +133,7 @@ flowchart TD
 
 ## Supported Topologies
 
-The MVP supports the [Multi-Primary Multi-Network] mesh topology. This aligns with OCM's model where each cluster runs its own control plane. Support for other topologies (e.g., Primary-Remote, External Control Plane) can be added with backwards-compatible API changes.
+The add-on supports two mesh topologies: [Multi-Primary Multi-Network] and Primary-Remote Multi-Network. See [Topology Support](#topology-support) for details on each topology and how they are configured.
 
 ## Custom Resource
 
@@ -130,6 +146,7 @@ The resource name (`metadata.name`) is limited to 63 characters because it is us
 |-------|----------|-------------|
 | `spec.clusterSet` | Yes | Name of the [ManagedClusterSet] defining cluster membership (immutable after creation) |
 | `spec.controlPlane.namespace` | No | Namespace where Istio is installed on each cluster (default: `istio-system`) |
+| `spec.controlPlane.version` | No | Pins the Istio control plane version (e.g. `v1.28.8`). If empty, the operator selects its default version |
 | `spec.operator.name` | No | OLM package name (default: `servicemeshoperator3`) |
 | `spec.operator.namespace` | No | Namespace where the operator is installed (default: `openshift-operators`) |
 | `spec.operator.channel` | No | OLM subscription channel (default: `stable`) |
@@ -140,6 +157,9 @@ The resource name (`metadata.name`) is limited to 63 characters because it is us
 | `spec.security.trust.certManager.issuerRef.name` | No | cert-manager Issuer name for Root CA |
 | `spec.security.trust.certManager.issuerRef.kind` | No | Kind of the cert-manager issuer (`Issuer` or `ClusterIssuer`, default: `Issuer`) |
 | `spec.security.discovery.tokenValidity` | No | ManagedServiceAccount token lifetime (default: `360h`, minimum value: `10m`) |
+| `spec.topology.type` | No | Mesh topology: `MultiPrimary` (default) or `PrimaryRemote` |
+| `spec.topology.primaryCluster` | No | Name of the primary cluster for `PrimaryRemote` topology. Defaults to first cluster alphabetically. Must be empty for `MultiPrimary` |
+| `status.primaryGatewayAddress` | - | LB address (IP or hostname) of the primary cluster's east-west gateway. Populated by the controller for `PrimaryRemote` topology; empty for `MultiPrimary` |
 
 ### Example
 
@@ -153,6 +173,7 @@ spec:
   clusterSet: finance-prod
   controlPlane:
     namespace: istio-system
+    version: v1.28.8
   operator:
     name: servicemeshoperator3
     channel: "stable"
@@ -166,6 +187,8 @@ spec:
           kind: Issuer
     discovery:
       tokenValidity: "168h"
+  topology:
+    type: MultiPrimary
 ```
 
 ## Cluster Selection and Multi-Tenancy
@@ -214,7 +237,7 @@ The add-on implements Istio's [Plug-in CA] pattern:
 3. Intermediate CAs are distributed to managed clusters as `cacerts` secrets in the control plane namespace
 4. The root CA private key never leaves the hub
 
-The trust domain is derived from the mesh name (one trust domain per mesh, not per cluster). In Phase 1, this is a naming convention: the controller sets the certificate CN accordingly, but the user must configure the matching `trustDomain` in their Istio CR. This simplifies multi-cluster mTLS - all clusters in a mesh share the same trust domain, so workloads can authenticate across clusters without additional configuration.
+The trust domain is derived from the mesh name (one trust domain per mesh, not per cluster). The controller sets the certificate CN and configures the matching `trustDomain` in the Istio CR automatically. This simplifies multi-cluster mTLS - all clusters in a mesh share the same trust domain, so workloads can authenticate across clusters without additional configuration.
 
 Certificate rotation is handled automatically by cert-manager. Updated certificates are propagated to clusters when they change.
 
@@ -228,14 +251,97 @@ For multi-primary mesh topologies, each control plane needs API access to its pe
 4. Token rotation is handled automatically by the OCM platform
 5. When a cluster is removed from the mesh, its MSA is deleted and its remote secrets are removed from all peers
 
+## Control Plane Management
+
+The controller centrally manages the Istio control plane on managed clusters through a phased deployment pipeline. Each phase gates on the previous phase's readiness, reported back to the hub via ManifestWork [FeedbackRules] and [ConditionRules].
+
+### Phase Ordering
+
+1. **Operator** - OLM Subscription applied via ManifestWork; gated on `installedCSV` feedback
+2. **IstioCNI** - `IstioCNI` CR applied on all clusters (see below); no readiness gate (uses [CreateOnly] update strategy)
+3. **Istio CR** - `Istio` CR applied via ManifestWork; gated on CEL ConditionRule checking `Ready=True` on the Istio status
+4. **Gateway** - East-west gateway Deployment, Service, and Istio Gateway resources; gated on LoadBalancer IP/hostname feedback
+5. **Remote Secrets** - Cross-cluster discovery secrets; gated on MSA token availability
+
+If any phase is not yet complete, the controller requeues with a 5-minute backoff and skips subsequent phases.
+
+### IstioCNI
+
+The controller creates an `IstioCNI` CR on every managed cluster. CNI is required on OpenShift (where pods cannot run with elevated privileges without it) and recommended for hardened Kubernetes clusters. The IstioCNI ManifestWork is a **shared resource** (like the operator), not scoped to an individual mesh. It uses the [CreateOnly] update strategy so that the first mesh to create it owns the version; subsequent meshes reuse the existing IstioCNI without overwriting it.
+
+### Istio CR
+
+The controller builds an `Istio` CR ([Sail Operator API][Sail]) per mesh per cluster, containing:
+
+- `meshID` derived from the mesh namespace and name
+- `clusterName` set to the managed cluster name
+- `network` set to `network-<clusterName>` (one network per cluster, multi-network model)
+- `trustDomain` set to the mesh name
+- `version` from `spec.controlPlane.version` (if specified)
+- DNS proxy metadata (`ISTIO_META_DNS_CAPTURE`, `ISTIO_META_DNS_AUTO_ALLOCATE`)
+- Topology-specific values: `remotePilotAddress` for remote clusters, `externalIstiod` for primary clusters, and `profile: remote` for remote clusters (see [Topology Support](#topology-support))
+
+The ManifestWork also includes a `ClusterRole` and `ClusterRoleBinding` granting the MSA service account read access to Kubernetes and Istio resources for cross-cluster discovery.
+
+### East-West Gateway
+
+Each cluster gets an east-west gateway consisting of:
+
+- A `ServiceAccount`, `Deployment`, and `Service` (type `LoadBalancer`) for the gateway proxy
+- A `cross-network-gateway` Istio Gateway resource with `AUTO_PASSTHROUGH` TLS on port 15443 for cross-network service traffic
+- For PrimaryRemote primary clusters: additional `istiod-gateway` and `istiod-vs` VirtualService resources that route remote cluster traffic to the primary's istiod
+
+The gateway Deployment uses sidecar injection (`inject.istio.io/templates: gateway`) with the appropriate revision label and network identity. The Service's LoadBalancer IP/hostname is reported back to the hub via ManifestWork FeedbackRules and used as the readiness signal.
+
+### Readiness Gating
+
+The controller uses two ManifestWork mechanisms for readiness gating:
+
+- **FeedbackRules** (JSONPaths): Extract status values from spoke-side resources and report them to the hub. Used for operator `installedCSV` and gateway `loadBalancer.ingress` address.
+- **ConditionRules** (CEL expressions): Evaluate conditions on spoke-side resources and surface them as manifest-level conditions on the ManifestWork status. Used for Istio CR `Ready` condition.
+
+## Topology Support
+
+The add-on supports two mesh topologies, configured via `spec.topology.type`.
+
+### MultiPrimary (default)
+
+Every cluster runs its own independent Istio control plane. All clusters are processed in parallel through the phase pipeline. Remote secrets are exchanged bidirectionally - every cluster gets a remote secret for every other cluster, enabling each control plane to discover services across the mesh.
+
+This aligns with OCM's model where each cluster is autonomous. It provides the highest resilience (no single point of failure for the control plane) at the cost of higher resource usage.
+
+### PrimaryRemote
+
+One cluster is designated as the **primary** and runs the only full control plane. All other clusters are **remotes** that connect to the primary's istiod via `remotePilotAddress` (the primary's east-west gateway LoadBalancer address). Remote clusters use `profile: remote` in their Istio CR.
+
+The controller enforces ordering: the primary cluster must complete all phases (operator → IstioCNI → Istio CR → gateway) and its gateway LoadBalancer must have an address before any remote cluster's Istio CR is created. This ensures remotes can be configured with the correct `remotePilotAddress`.
+
+Remote secrets are still exchanged bidirectionally - the primary needs to discover services on remotes, and remotes need their remote secrets installed for the primary to reach them.
+
+### Configuration Fields
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `spec.topology.type` | `MultiPrimary` | `MultiPrimary` or `PrimaryRemote` |
+| `spec.topology.primaryCluster` | First alphabetically | Name of the primary cluster for `PrimaryRemote`. Validated to be empty for `MultiPrimary` (CEL validation rule) |
+
+The `status.primaryGatewayAddress` field is populated by the controller for `PrimaryRemote` topology with the primary's east-west gateway LoadBalancer address (IP or hostname). This is for user observability; the controller reads the address live from ManifestWork feedback internally.
+
 ## Lifecycle Events
 
 - **Scale Up**: When a new cluster joins the ClusterSet, the controller automatically provisions the mesh plumbing for it: installs the operator, mints an intermediate CA, and distributes discovery tokens to all peers. This is the same process as the initial mesh bootstrap, applied incrementally to the new cluster.
 - **Scale Down**: When a cluster is removed from a set, the controller immediately revokes its access by removing the remote secrets from all peer clusters and cleaning up the local CA bundles.
 
+## Known Limitations
+
+- **LoadBalancer prerequisite**: Managed clusters must support `Service` type `LoadBalancer` for the east-west gateway. Clusters without LoadBalancer support (e.g., bare-metal without MetalLB) cannot join a mesh.
+- **Cross-ClusterSet namespace collision**: Multiple meshes targeting different ClusterSets can configure the same `controlPlane.namespace` on the same cluster (if the cluster moves between sets). The controller only detects namespace conflicts within a single ClusterSet.
+- **Version compatibility**: The controller does not validate compatibility between the Sail operator version and the requested `spec.controlPlane.version`. If the operator does not support the requested Istio version, the Istio CR will fail to reconcile on the spoke.
+- **IstioCNI version lock**: The IstioCNI ManifestWork uses the [CreateOnly] update strategy, so the first mesh to create it determines the version. Subsequent meshes with a different `spec.controlPlane.version` will not update the existing IstioCNI. If a version change is needed, the IstioCNI ManifestWork must be manually deleted and recreated.
+
 ## Phased Approach
 
-**Phase 1 (MVP)**: "Lean" approach - the add-on handles plumbing (operator, certificates, discovery).
+**Phase 1 (Implemented)**: "Lean" approach - the add-on handles plumbing (operator, certificates, discovery).
 
 The user is responsible for:
 
@@ -246,9 +352,9 @@ The user is responsible for:
 
 ArgoCD with ApplicationSets is the recommended approach for managing Istio configuration across clusters.
 
-**Phase 2 (Future)**: "Full" approach - the add-on also manages Istio custom resources centrally, automating topology configuration and enforcing consistency.
+**Phase 2 (Implemented)**: "Full" approach - the add-on also manages Istio custom resources centrally, automating topology configuration and enforcing consistency. The controller creates IstioCNI, Istio CRs, east-west gateways, and cross-network Gateway resources on managed clusters via ManifestWork, with phased ordering and readiness gating. Support for both MultiPrimary and PrimaryRemote topologies is included.
 
-Potential additions include observability stack management and full addon framework integration (leveraging `ManagedClusterAddOn` for per-cluster enable/disable).
+**Phase 3 (Future)**: Potential additions include observability stack management, `discoverySelectors` configuration for multi-tenant environments, and full addon framework integration (leveraging `ManagedClusterAddOn` for per-cluster enable/disable).
 
 <!-- Reference links -->
 [OCM]: https://open-cluster-management.io/
@@ -262,4 +368,7 @@ Potential additions include observability stack management and full addon framew
 [ClusterManagementAddOn]: https://open-cluster-management.io/docs/concepts/addon/#clustermanagementaddon
 [Plug-in CA]: https://istio.io/latest/docs/tasks/security/cert-management/plugin-ca-cert/
 [Multi-Primary Multi-Network]: https://istio.io/latest/docs/setup/install/multicluster/multi-primary_multi-network/
+[FeedbackRules]: https://open-cluster-management.io/docs/concepts/work-distribution/manifestwork/#scalability
+[ConditionRules]: https://open-cluster-management.io/docs/concepts/work-distribution/manifestwork/#scalability
+[CreateOnly]: https://open-cluster-management.io/docs/concepts/work-distribution/manifestwork/#update-strategy
 [#72]: https://github.com/stolostron/multicluster-mesh-addon/issues/72

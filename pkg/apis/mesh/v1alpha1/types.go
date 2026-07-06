@@ -89,14 +89,77 @@ type MultiClusterMeshSpec struct {
 	// Security defines the trust and discovery configuration
 	// +optional
 	Security SecurityConfig `json:"security,omitempty"`
+
+	// Gateway defines the east-west gateway configuration
+	// +optional
+	Gateway GatewayConfig `json:"gateway,omitempty"`
+
+	// Topology defines the mesh topology (MultiPrimary or PrimaryRemote)
+	// +optional
+	Topology TopologyConfig `json:"topology,omitempty"`
 }
 
-// ControlPlaneConfig defines where the mesh control plane will be installed
+// ControlPlaneConfig defines where and how the mesh control plane will be installed
 type ControlPlaneConfig struct {
 	// Namespace is the namespace where Istio will be installed on each cluster
 	// +optional
 	// +kubebuilder:default="istio-system"
 	Namespace string `json:"namespace,omitempty"`
+
+	// Version pins the Istio control plane version (e.g. "v1.28.8").
+	// If empty, the operator selects its default version.
+	// +optional
+	Version string `json:"version,omitempty"`
+}
+
+// GatewayServiceType defines the Kubernetes Service type for the east-west gateway
+type GatewayServiceType string
+
+const (
+	// GatewayServiceTypeLoadBalancer uses a cloud LoadBalancer for the east-west gateway.
+	// Requires a LoadBalancer controller (cloud provider, MetalLB, etc.) on the cluster.
+	GatewayServiceTypeLoadBalancer GatewayServiceType = "LoadBalancer"
+
+	// GatewayServiceTypeNodePort uses NodePort for the east-west gateway.
+	// Works on clusters without a LoadBalancer controller (CRC, Kind, bare-metal).
+	GatewayServiceTypeNodePort GatewayServiceType = "NodePort"
+)
+
+// GatewayConfig defines the east-west gateway configuration
+type GatewayConfig struct {
+	// ServiceType is the Kubernetes Service type for the east-west gateway.
+	// Use "NodePort" on clusters without a LoadBalancer controller (CRC, Kind, bare-metal).
+	// +optional
+	// +kubebuilder:default="LoadBalancer"
+	// +kubebuilder:validation:Enum=LoadBalancer;NodePort
+	ServiceType GatewayServiceType `json:"serviceType,omitempty"`
+}
+
+// TopologyType defines the mesh topology type
+type TopologyType string
+
+const (
+	// TopologyMultiPrimary is a multi-primary mesh where every cluster runs its own control plane
+	TopologyMultiPrimary TopologyType = "MultiPrimary"
+
+	// TopologyPrimaryRemote is a primary-remote mesh where one cluster runs the control plane
+	// and remote clusters connect to it
+	TopologyPrimaryRemote TopologyType = "PrimaryRemote"
+)
+
+// TopologyConfig defines the mesh topology
+// +kubebuilder:validation:XValidation:rule="self.type != 'MultiPrimary' || !has(self.primaryCluster) || size(self.primaryCluster) == 0",message="primaryCluster must be empty for MultiPrimary topology"
+type TopologyConfig struct {
+	// Type is the mesh topology
+	// +optional
+	// +kubebuilder:default="MultiPrimary"
+	// +kubebuilder:validation:Enum=MultiPrimary;PrimaryRemote
+	Type TopologyType `json:"type,omitempty"`
+
+	// PrimaryCluster is the name of the primary cluster for PrimaryRemote topology.
+	// If empty and type is PrimaryRemote, defaults to the first cluster alphabetically.
+	// +optional
+	PrimaryCluster string `json:"primaryCluster,omitempty"`
 }
 
 // OperatorConfig defines the service mesh operator installation settings.
@@ -191,6 +254,15 @@ const (
 	// ConditionReady indicates whether the mesh is fully operational
 	ConditionReady = "Ready"
 
+	// ConditionControlPlaneReady indicates whether the Istio control plane is ready on a cluster
+	ConditionControlPlaneReady = "ControlPlaneReady"
+
+	// ConditionDiscoveryReady indicates whether cross-cluster endpoint discovery is configured on a cluster
+	ConditionDiscoveryReady = "DiscoveryReady"
+
+	// ConditionGatewayReady indicates whether the east-west gateway is ready on a cluster
+	ConditionGatewayReady = "GatewayReady"
+
 	// ConditionOperatorInstalled indicates whether the operator is installed on a cluster
 	ConditionOperatorInstalled = "OperatorInstalled"
 
@@ -200,35 +272,66 @@ const (
 	// ReasonClustersNotReady indicates that not all clusters have confirmed operator installation
 	ReasonClustersNotReady = "ClustersNotReady"
 
+	// ReasonControlPlaneNotReady indicates the Istio control plane is not yet ready
+	ReasonControlPlaneNotReady = "ControlPlaneNotReady"
+
+	// ReasonControlPlaneReady indicates the Istio control plane is ready
+	ReasonControlPlaneReady = "ControlPlaneReady"
+
+	// ReasonDiscoveryNotReady indicates cross-cluster discovery is not yet configured
+	ReasonDiscoveryNotReady = "DiscoveryNotReady"
+
+	// ReasonDiscoveryReady indicates cross-cluster discovery is configured
+	ReasonDiscoveryReady = "DiscoveryReady"
+
+	// ReasonGatewayNotReady indicates the east-west gateway is not yet ready
+	ReasonGatewayNotReady = "GatewayNotReady"
+
+	// ReasonGatewayReady indicates the east-west gateway is ready
+	ReasonGatewayReady = "GatewayReady"
+
 	// ReasonInstallationPending indicates the operator installation has been requested
 	ReasonInstallationPending = "InstallationPending"
 
-	// ReasonOperatorInstalled indicates the operator CSV has been successfully installed
-	ReasonOperatorInstalled = "Installed"
+	// ReasonMissingProductClaim indicates the cluster is missing its product claim
+	ReasonMissingProductClaim = "MissingProductClaim"
 
-	// ReasonReconcileError indicates an error occurred during reconciliation
-	ReasonReconcileError = "ReconcileError"
+	// ReasonNamespaceConflict indicates a conflict with an older mesh's control plane namespace
+	ReasonNamespaceConflict = "NamespaceConflict"
 
 	// ReasonOperatorConfigConflict indicates a conflict with an older mesh's operator config
 	ReasonOperatorConfigConflict = "OperatorConfigConflict"
 
-	// ReasonNamespaceConflict indicates a conflict with an older mesh's control plane namespace
-	ReasonNamespaceConflict = "NamespaceConflict"
+	// ReasonOperatorInstalled indicates the operator CSV has been successfully installed
+	ReasonOperatorInstalled = "Installed"
+
+	// ReasonPhaseTimeout indicates a phase has been stuck for too long
+	ReasonPhaseTimeout = "PhaseTimeout"
+
+	// ReasonReconcileError indicates an error occurred during reconciliation
+	ReasonReconcileError = "ReconcileError"
 )
 
 // MultiClusterMeshStatus defines the observed state of MultiClusterMesh
 type MultiClusterMeshStatus struct {
+	// ClusterStatus tracks the status of each cluster in the mesh
+	// +listType=map
+	// +listMapKey=clusterName
+	// +optional
+	ClusterStatus []ClusterMeshStatus `json:"clusterStatus,omitempty"`
+
 	// Conditions represent the latest available observations of the mesh state
 	// +listType=map
 	// +listMapKey=type
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 
-	// ClusterStatus tracks the status of each cluster in the mesh
-	// +listType=map
-	// +listMapKey=clusterName
+	// PrimaryGatewayAddress is the LB address (IP or hostname) of the primary cluster's
+	// east-west gateway for PrimaryRemote topology. Empty for MultiPrimary.
+	// Populated by the controller for user observability; internal controller logic reads
+	// the address live from ManifestWork feedback.
 	// +optional
-	ClusterStatus []ClusterMeshStatus `json:"clusterStatus,omitempty"`
+	PrimaryGatewayAddress string `json:"primaryGatewayAddress,omitempty"`
 }
 
 // ClusterMeshStatus tracks the mesh status for a specific cluster

@@ -57,6 +57,24 @@ spec:
                     description: Namespace is the namespace where Istio will be installed
                       on each cluster
                     type: string
+                  version:
+                    description: |-
+                      Version pins the Istio control plane version (e.g. "v1.28.8").
+                      If empty, the operator selects its default version.
+                    type: string
+                type: object
+              gateway:
+                description: Gateway defines the east-west gateway configuration
+                properties:
+                  serviceType:
+                    default: LoadBalancer
+                    description: |-
+                      ServiceType is the Kubernetes Service type for the east-west gateway.
+                      Use "NodePort" on clusters without a LoadBalancer controller (CRC, Kind, bare-metal).
+                    enum:
+                    - LoadBalancer
+                    - NodePort
+                    type: string
                 type: object
               operator:
                 description: Operator defines the service mesh operator installation
@@ -142,6 +160,26 @@ spec:
                         type: object
                     type: object
                 type: object
+              topology:
+                description: Topology defines the mesh topology (MultiPrimary or PrimaryRemote)
+                properties:
+                  primaryCluster:
+                    description: |-
+                      PrimaryCluster is the name of the primary cluster for PrimaryRemote topology.
+                      If empty and type is PrimaryRemote, defaults to the first cluster alphabetically.
+                    type: string
+                  type:
+                    default: MultiPrimary
+                    description: Type is the mesh topology
+                    enum:
+                    - MultiPrimary
+                    - PrimaryRemote
+                    type: string
+                type: object
+                x-kubernetes-validations:
+                - message: primaryCluster must be empty for MultiPrimary topology
+                  rule: self.type != 'MultiPrimary' || !has(self.primaryCluster) ||
+                    size(self.primaryCluster) == 0
             required:
             - clusterSet
             type: object
@@ -288,6 +326,13 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
+              primaryGatewayAddress:
+                description: |-
+                  PrimaryGatewayAddress is the LB address (IP or hostname) of the primary cluster's
+                  east-west gateway for PrimaryRemote topology. Empty for MultiPrimary.
+                  Populated by the controller for user observability; internal controller logic reads
+                  the address live from ManifestWork feedback.
+                type: string
             type: object
         type: object
         x-kubernetes-validations:

@@ -2,30 +2,42 @@
 
 Instructions for setting up a 6-control-plane demo environment across two OpenShift clusters.
 Refer to [DEV-INSTALL.md](DEV-INSTALL.md) for general guidance on managing a dev install.
+If you only have a single CRC cluster, see [DEV-INSTALL.md](DEV-INSTALL.md) instead.
 
 This guide targets a real two-cluster ACM environment with a hub (`my-hub` context) and
 a spoke (`my-spoke` context). The hub auto-registers itself as `local-cluster`, giving
 two managed clusters in total. All MCM meshes span both clusters; standalone "discovered"
 Istio CRs are split across clusters to show the cross-cluster discovery story.
 
-This is a UI-only demo: control planes run on both clusters and the Fleet Service Mesh
-UI shows correct multi-cluster status, but cross-cluster service traffic is not configured
-(east-west gateways and remote secrets are omitted).
+The controller automatically installs the Sail operator, IstioCNI, Istio CRs, east-west
+gateways, and remote secrets on both clusters when MCM CRs are created. No manual Istio
+CR creation or namespace setup is required for managed meshes.
 
 ## Resource Layout
 
-| MCM CR | MCM Namespace | Istio CR | CP Namespace | Mesh ID | Trust | Clusters |
-|--------|---------------|----------|--------------|---------|-------|----------|
-| `unsecure-mcm` | `unsecure-mcm-ns` | `unsecure-istio` (on each cluster) | `unsecure-ns` | `unsecure-mcm-ns-unsecure-mcm` | No | local-cluster, my-spoke |
-| `secure-mcm` | `secure-mcm-ns` | `secure-istio` (on each cluster) | `secure-ns` | `secure-mcm-ns-secure-mcm` | Yes | local-cluster, my-spoke |
+| MCM CR | MCM Namespace | Istio CR (auto-created) | CP Namespace | Mesh ID | Trust | Clusters |
+|--------|---------------|-------------------------|--------------|---------|-------|----------|
+| `unsecure-mcm` | `unsecure-mcm-ns` | `unsecure-mcm-ns-unsecure-mcm-cp` (on each cluster) | `unsecure-ns` | `unsecure-mcm-ns-unsecure-mcm` | No | local-cluster, my-spoke |
+| `secure-mcm` | `secure-mcm-ns` | `secure-mcm-ns-secure-mcm-cp` (on each cluster) | `secure-ns` | `secure-mcm-ns-secure-mcm` | Yes | local-cluster, my-spoke |
 | — | — | `discovered-hub-istio` | `discovered-hub-ns` | `discovered-hub-id` | — | local-cluster only |
 | — | — | `discovered-spoke-istio` | `discovered-spoke-ns` | `discovered-spoke-id` | — | my-spoke only |
 
-The managed Istio CRs simulate what the MCM controller would create after reconciling
-each MCM CR (a future feature). Each managed mesh has one Istio CR per cluster with the
-same `meshID` but different `clusterName` and `network` values. The last two rows are
-standalone "discovered" control planes with no MCM association, each on a different
-cluster.
+The managed Istio CRs are created automatically by the controller when it reconciles
+each MCM CR. The controller creates a control plane ManifestWork per cluster with the
+same `meshID` but different `clusterName` and `network` values (multi-primary
+multi-network topology). The last two rows are standalone "discovered" control planes
+with no MCM association, each on a different cluster, created manually.
+
+### ManifestWorks created per cluster
+
+| ManifestWork | Created by | Per-mesh? |
+|--------------|------------|-----------|
+| `multicluster-mesh-operator` | First MCM reconcile | No (shared) |
+| `multicluster-mesh-istiocni` | First MCM reconcile | No (shared) |
+| `multicluster-mesh-cacerts` | MCM with trust config | No (shared) |
+| `multicluster-mesh-cp-{ns}-{name}` | Each MCM | Yes |
+| `multicluster-mesh-gw-{ns}-{name}` | Each MCM | Yes |
+| `multicluster-mesh-rs-{ns}-{name}` | Each MCM | Yes |
 
 ## Prerequisites
 
@@ -44,7 +56,7 @@ cluster.
 The following must already be in place:
 
 - Two OpenShift clusters accessible via kubeconfig contexts `my-hub` (hub) and `my-spoke` (spoke)
-- ACM installed on the hub with `my-spoke` imported as a managed cluster
+- ACM 2.16+ installed on the hub with `my-spoke` imported as a managed cluster
 - Both `local-cluster` and `my-spoke` showing as joined and available
 
 Verify ACM readiness:
@@ -215,47 +227,14 @@ oc --context=my-hub label managedcluster my-spoke \
   cluster.open-cluster-management.io/clusterset=demo-cluster-set --overwrite
 ```
 
-## 2. Create namespaces and label networks
+## 2. Create MCM namespaces
 
-Create MCM namespaces on the hub, control plane namespaces on both clusters, and label
-each CP namespace with its network identity so Istio knows these are different networks.
-
-**Hub namespaces:**
+Only MCM namespaces need to be created manually on the hub. Control plane namespaces
+are created automatically by the controller via ManifestWork on each cluster.
 
 ```bash
-# MCM namespaces (hub only)
 oc --context=my-hub create namespace unsecure-mcm-ns
 oc --context=my-hub create namespace secure-mcm-ns
-
-# CP namespaces on hub
-oc --context=my-hub create namespace unsecure-ns
-oc --context=my-hub create namespace secure-ns
-oc --context=my-hub create namespace discovered-hub-ns
-oc --context=my-hub create namespace istio-cni
-```
-
-**Spoke namespaces:**
-
-```bash
-# CP namespaces on spoke
-oc --context=my-spoke create namespace unsecure-ns
-oc --context=my-spoke create namespace secure-ns
-oc --context=my-spoke create namespace discovered-spoke-ns
-oc --context=my-spoke create namespace istio-cni
-```
-
-**Network labels:**
-
-```bash
-# Hub CP namespaces = network1
-oc --context=my-hub label namespace unsecure-ns topology.istio.io/network=network1
-oc --context=my-hub label namespace secure-ns topology.istio.io/network=network1
-oc --context=my-hub label namespace discovered-hub-ns topology.istio.io/network=network1
-
-# Spoke CP namespaces = network2
-oc --context=my-spoke label namespace unsecure-ns topology.istio.io/network=network2
-oc --context=my-spoke label namespace secure-ns topology.istio.io/network=network2
-oc --context=my-spoke label namespace discovered-spoke-ns topology.istio.io/network=network2
 ```
 
 ## 3. Deploy cert-manager Issuer chain
@@ -309,8 +288,15 @@ oc --context=my-hub wait certificate mesh-root-ca -n secure-mcm-ns \
 
 ## 4. Create MCM CRs
 
-Create both MultiClusterMesh CRs. The controller will reconcile them and install the
-Sail operator on both `local-cluster` and `my-spoke` via ManifestWork.
+Create both MultiClusterMesh CRs. The controller will reconcile them and automatically
+on both `local-cluster` and `my-spoke`:
+
+1. Install the Sail operator via ManifestWork
+2. Deploy IstioCNI
+3. Create control plane namespaces, Istio CRs, and RBAC
+4. Deploy east-west gateways with networking
+5. Configure remote secrets for cross-cluster endpoint discovery
+6. Distribute trust certificates (for `secure-mcm`)
 
 ```bash
 oc --context=my-hub apply -f - <<'EOF'
@@ -323,6 +309,10 @@ spec:
   clusterSet: demo-cluster-set
   controlPlane:
     namespace: unsecure-ns
+  gateway:
+    serviceType: LoadBalancer
+  topology:
+    type: MultiPrimary
 EOF
 
 oc --context=my-hub apply -f - <<'EOF'
@@ -335,20 +325,28 @@ spec:
   clusterSet: demo-cluster-set
   controlPlane:
     namespace: secure-ns
+  gateway:
+    serviceType: LoadBalancer
   security:
     trust:
       certManager:
         issuerRef:
           name: mesh-root-ca
+  topology:
+    type: MultiPrimary
 EOF
 ```
 
-## 5. Wait for Sail operator
+## 5. Monitor controller reconciliation
 
-The MCM controller installs the Sail operator via ManifestWork on both clusters. Wait
-for both to complete before creating Istio CRs (the CRDs must exist first).
+Watch the controller progress through its phases on both clusters. Each MCM progresses
+through: `OperatorInstalled` → `ControlPlaneReady` → `GatewayReady` → `DiscoveryReady`.
 
 ```bash
+# Watch ManifestWorks being created on both clusters
+oc --context=my-hub get manifestwork -n local-cluster -w &
+oc --context=my-hub get manifestwork -n my-spoke -w &
+
 # Wait for the operator ManifestWork on both clusters
 oc --context=my-hub wait manifestwork multicluster-mesh-operator -n local-cluster \
   --for=condition=Applied --timeout=180s
@@ -379,97 +377,26 @@ CSV_SPOKE=$(oc --context=my-spoke get csv -n openshift-operators -o name \
 oc --context=my-spoke wait ${CSV_SPOKE} -n openshift-operators \
   --for=jsonpath='{.status.phase}'=Succeeded --timeout=300s
 
-# Verify the Istio CRD is available on both clusters
-oc --context=my-hub get crd istios.sailoperator.io
-oc --context=my-spoke get crd istios.sailoperator.io
+# Watch per-cluster conditions progressing
+oc --context=my-hub get multiclustermesh unsecure-mcm -n unsecure-mcm-ns \
+  -o jsonpath='{.status.clusterStatus}' | jq .
+oc --context=my-hub get multiclustermesh secure-mcm -n secure-mcm-ns \
+  -o jsonpath='{.status.clusterStatus}' | jq .
 ```
 
-## 6. Create managed Istio CRs
-
-These simulate what the MCM controller would create after reconciling each MCM.
-Each targets the namespace matching its MCM's `spec.controlPlane.namespace`.
-The mesh ID follows the convention the controller will use: `<MCM namespace>-<MCM name>`.
-
-Each managed mesh gets one Istio CR per cluster with the same `meshID` but different
-`clusterName` and `network` values (multi-primary multi-network topology).
-
-**On the hub (local-cluster):**
-
-```bash
-oc --context=my-hub apply -f - <<'EOF'
-apiVersion: sailoperator.io/v1
-kind: Istio
-metadata:
-  name: unsecure-istio
-spec:
-  namespace: unsecure-ns
-  values:
-    global:
-      meshID: unsecure-mcm-ns-unsecure-mcm
-      multiCluster:
-        clusterName: local-cluster
-      network: network1
-EOF
-
-oc --context=my-hub apply -f - <<'EOF'
-apiVersion: sailoperator.io/v1
-kind: Istio
-metadata:
-  name: secure-istio
-spec:
-  namespace: secure-ns
-  values:
-    global:
-      meshID: secure-mcm-ns-secure-mcm
-      multiCluster:
-        clusterName: local-cluster
-      network: network1
-EOF
-```
-
-**On the spoke (my-spoke):**
-
-```bash
-oc --context=my-spoke apply -f - <<'EOF'
-apiVersion: sailoperator.io/v1
-kind: Istio
-metadata:
-  name: unsecure-istio
-spec:
-  namespace: unsecure-ns
-  values:
-    global:
-      meshID: unsecure-mcm-ns-unsecure-mcm
-      multiCluster:
-        clusterName: my-spoke
-      network: network2
-EOF
-
-oc --context=my-spoke apply -f - <<'EOF'
-apiVersion: sailoperator.io/v1
-kind: Istio
-metadata:
-  name: secure-istio
-spec:
-  namespace: secure-ns
-  values:
-    global:
-      meshID: secure-mcm-ns-secure-mcm
-      multiCluster:
-        clusterName: my-spoke
-      network: network2
-EOF
-```
-
-## 7. Create standalone Istio CRs
+## 6. Create standalone Istio CRs
 
 These are independent control planes not associated with any MCM. The frontend
 discovers them via ACM Search but does not consider them "managed". Each lives on a
-different cluster to demonstrate cross-cluster discovery.
+different cluster to demonstrate cross-cluster discovery. The Sail operator must already
+be installed (the controller does this when reconciling the MCM CRs).
 
 **On the hub:**
 
 ```bash
+oc --context=my-hub create namespace discovered-hub-ns \
+  --dry-run=client -o yaml | oc --context=my-hub apply -f -
+
 oc --context=my-hub apply -f - <<'EOF'
 apiVersion: sailoperator.io/v1
 kind: Istio
@@ -489,6 +416,9 @@ EOF
 **On the spoke:**
 
 ```bash
+oc --context=my-spoke create namespace discovered-spoke-ns \
+  --dry-run=client -o yaml | oc --context=my-spoke apply -f -
+
 oc --context=my-spoke apply -f - <<'EOF'
 apiVersion: sailoperator.io/v1
 kind: Istio
@@ -505,72 +435,38 @@ spec:
 EOF
 ```
 
-## 8. Deploy IstioCNI (optional)
-
-Without an IstioCNI resource, control planes whose istiod is running show as **Degraded**
-in the frontend (`Ready: True` but `DependenciesHealthy: False`). Creating the IstioCNI
-moves them to **Healthy**. Skip this step to start the demo in the Degraded state -- you
-can create and delete the IstioCNI at any time to toggle between states (see
-[Demo Tips](#demo-tips) below).
-
-Deploy on both clusters:
-
-```bash
-# Hub
-oc --context=my-hub apply -f - <<'EOF'
-apiVersion: sailoperator.io/v1
-kind: IstioCNI
-metadata:
-  name: default
-spec:
-  namespace: istio-cni
-  version: v1.28.8
-EOF
-
-oc --context=my-hub wait istiocni default --for=condition=Ready --timeout=60s
-
-# Spoke
-oc --context=my-spoke apply -f - <<'EOF'
-apiVersion: sailoperator.io/v1
-kind: IstioCNI
-metadata:
-  name: default
-spec:
-  namespace: istio-cni
-  version: v1.28.8
-EOF
-
-oc --context=my-spoke wait istiocni default --for=condition=Ready --timeout=60s
-```
-
-## 9. Verification
+## 7. Verification
 
 ```bash
 # MCM CRs and their status
 oc --context=my-hub get multiclustermesh --all-namespaces
 
-# All Istio CRs on hub
+# All Istio CRs on hub (should be 3: 2 auto-created + 1 standalone)
 oc --context=my-hub get istios
 
-# All Istio CRs on spoke
+# All Istio CRs on spoke (should be 3: 2 auto-created + 1 standalone)
 oc --context=my-spoke get istios
 
-# Namespaces on hub
+# Control plane namespaces on hub (auto-created by controller + manually created)
 oc --context=my-hub get namespaces | grep -E 'unsecure|secure|discovered'
 
-# Namespaces on spoke
+# Control plane namespaces on spoke (auto-created by controller + manually created)
 oc --context=my-spoke get namespaces | grep -E 'unsecure|secure|discovered'
 
 # Sail operator status on both clusters
 oc --context=my-hub get csv -n openshift-operators | grep servicemesh
 oc --context=my-spoke get csv -n openshift-operators | grep servicemesh
 
+# ManifestWorks on both clusters
+oc --context=my-hub get manifestwork -n local-cluster
+oc --context=my-hub get manifestwork -n my-spoke
+
 # Trust distribution (for secure-mcm)
 oc --context=my-hub get certificates -n secure-mcm-ns
 oc --context=my-hub get manifestwork -n local-cluster | grep cacerts
 oc --context=my-hub get manifestwork -n my-spoke | grep cacerts
 
-# Per-cluster operator status from MCM (should show both local-cluster and my-spoke)
+# Per-cluster conditions (all 4 condition types on both clusters)
 oc --context=my-hub get multiclustermesh unsecure-mcm -n unsecure-mcm-ns \
   -o jsonpath='{.status.clusterStatus}' | jq .
 oc --context=my-hub get multiclustermesh secure-mcm -n secure-mcm-ns \
@@ -579,56 +475,78 @@ oc --context=my-hub get multiclustermesh secure-mcm -n secure-mcm-ns \
 
 Expected results:
 
-- 2 MCMs with `OperatorInstalled: True` on both `local-cluster` and `my-spoke`
-- 3 Istio CRs on the hub (`unsecure-istio`, `secure-istio`, `discovered-hub-istio`)
-- 3 Istio CRs on the spoke (`unsecure-istio`, `secure-istio`, `discovered-spoke-istio`)
+- 2 MCMs with all 4 conditions on both `local-cluster` and `my-spoke`:
+  - `OperatorInstalled: True`
+  - `ControlPlaneReady: True`
+  - `GatewayReady: True`
+  - `DiscoveryReady: True`
+- 3 Istio CRs on the hub (2 auto-created by controller + `discovered-hub-istio`)
+- 3 Istio CRs on the spoke (2 auto-created by controller + `discovered-spoke-istio`)
+- IstioCNI deployed on both clusters (auto-created by controller via ManifestWork)
+- East-west gateways deployed on both clusters (auto-created by controller via ManifestWork)
+- Remote secrets configured for cross-cluster endpoint discovery
 - cert-manager Certificate in `secure-mcm-ns` with Ready status
 - `multicluster-mesh-cacerts` ManifestWork in both `local-cluster` and `my-spoke` namespaces
-
-Control plane status depends on whether IstioCNI was deployed (step 8):
-
-| Condition | Without IstioCNI | With IstioCNI |
-|-----------|------------------|---------------|
-| istiod running | Degraded (orange) | Healthy (green) |
-| istiod not schedulable | Not Ready (red) | Not Ready (red) |
 
 6 Istio CRs means 6 istiod instances across 2 clusters (3 per cluster). On
 resource-constrained clusters, some control planes may remain Not Ready because their
 istiod pod cannot be scheduled due to insufficient memory. Which control planes are
 affected (if any) depends on scheduling order and available resources.
 
+## 8. (Optional) Deploy the mesh-hello test application
+
+Deploy a browser-accessible test app that shows cluster identity, cross-cluster
+connectivity, and mTLS status. On a multi-cluster setup, the frontend and backend
+pods run on the same cluster but communicate through the Istio mesh, demonstrating
+sidecar injection and mTLS.
+
+```bash
+cd <multicluster-mesh-addon-repo>/frontend
+
+# Deploy into the secure-mcm mesh (with trust — shows mTLS details)
+hack/deploy-mesh-hello.sh -m secure-mcm -n secure-mcm-ns install
+```
+
+This creates a `secure-mcm-testapp` namespace with Istio sidecar injection,
+deploys frontend and backend services, and prints a URL (OpenShift Route) you
+can open in your browser (e.g. `http://mesh-hello-secure-mcm-secure-mcm-testapp.apps.hub.example.com/`).
+The page auto-refreshes every 10 seconds.
+
+To remove:
+
+```bash
+hack/deploy-mesh-hello.sh -m secure-mcm -n secure-mcm-ns uninstall
+```
+
 ## Demo Tips
 
 ### Toggling Degraded / Healthy per cluster
 
-You can toggle IstioCNI independently on each cluster to show per-cluster status
-differences within the same mesh.
+The IstioCNI is managed by the controller via the `multicluster-mesh-istiocni`
+ManifestWork. Deleting the IstioCNI resource directly will put running control planes
+into the Degraded state, but the controller will restore it on its next reconcile.
 
-Delete IstioCNI on the spoke only (hub stays healthy, spoke goes degraded):
+To toggle the state persistently, delete the ManifestWork on the target cluster:
+
+Delete the IstioCNI ManifestWork on the spoke only (hub stays healthy, spoke goes degraded):
 
 ```bash
-oc --context=my-spoke delete istiocni default
+oc --context=my-hub delete manifestwork multicluster-mesh-istiocni -n my-spoke
 ```
 
-Re-create it to move the spoke back to healthy:
+Delete the IstioCNI ManifestWork on both clusters to put all control planes into the
+Degraded state:
 
 ```bash
-oc --context=my-spoke apply -f - <<'EOF'
-apiVersion: sailoperator.io/v1
-kind: IstioCNI
-metadata:
-  name: default
-spec:
-  namespace: istio-cni
-  version: v1.28.8
-EOF
+oc --context=my-hub delete manifestwork multicluster-mesh-istiocni -n local-cluster
+oc --context=my-hub delete manifestwork multicluster-mesh-istiocni -n my-spoke
 ```
 
-Delete IstioCNI on both clusters to put all control planes into the Degraded state:
+Re-create the ManifestWorks by triggering a reconcile (e.g. annotate an MCM):
 
 ```bash
-oc --context=my-hub delete istiocni default
-oc --context=my-spoke delete istiocni default
+oc --context=my-hub annotate multiclustermesh unsecure-mcm -n unsecure-mcm-ns \
+  reconcile-trigger="$(date +%s)" --overwrite
 ```
 
 The transition takes ~30 seconds. The frontend will update automatically via its
@@ -636,22 +554,27 @@ Kubernetes watch.
 
 ## Teardown
 
-To remove everything created by this guide:
+Deleting the MCM CRs triggers automatic cleanup of all controller-managed ManifestWorks
+(operator, IstioCNI, Istio CRs, gateways, remote secrets, trust certificates) on both
+clusters.
 
 ```bash
-# Delete IstioCNI on both clusters (if deployed)
-oc --context=my-hub delete istiocni default 2>/dev/null
-oc --context=my-spoke delete istiocni default 2>/dev/null
+# Delete standalone Istio CRs (not managed by the controller)
+oc --context=my-hub delete istio discovered-hub-istio --ignore-not-found
+oc --context=my-spoke delete istio discovered-spoke-istio --ignore-not-found
 
-# Delete Istio CRs on hub
-oc --context=my-hub delete istio unsecure-istio secure-istio discovered-hub-istio
+# Delete MCM CRs (controller cleans up all ManifestWorks automatically)
+oc --context=my-hub delete multiclustermesh unsecure-mcm -n unsecure-mcm-ns --ignore-not-found
+oc --context=my-hub delete multiclustermesh secure-mcm -n secure-mcm-ns --ignore-not-found
 
-# Delete Istio CRs on spoke
-oc --context=my-spoke delete istio unsecure-istio secure-istio discovered-spoke-istio
-
-# Delete MCM CRs
-oc --context=my-hub delete multiclustermesh unsecure-mcm -n unsecure-mcm-ns
-oc --context=my-hub delete multiclustermesh secure-mcm -n secure-mcm-ns
+# Wait for controller-managed ManifestWorks to be cleaned up on both clusters
+until [ "$(oc --context=my-hub get manifestwork -n local-cluster -o name 2>/dev/null \
+  | grep multicluster-mesh | wc -l)" -eq 0 ] && \
+  [ "$(oc --context=my-hub get manifestwork -n my-spoke -o name 2>/dev/null \
+  | grep multicluster-mesh | wc -l)" -eq 0 ]; do
+  echo "Waiting for ManifestWork cleanup..."
+  sleep 5
+done
 
 # Remove cluster labels
 oc --context=my-hub label managedcluster local-cluster \
@@ -660,18 +583,16 @@ oc --context=my-hub label managedcluster my-spoke \
   cluster.open-cluster-management.io/clusterset-
 
 # Delete ManagedClusterSet
-oc --context=my-hub delete managedclusterset demo-cluster-set
+oc --context=my-hub delete managedclusterset demo-cluster-set --ignore-not-found
 
-# Delete namespaces on hub
+# Delete namespaces on hub (MCM namespaces + standalone discovered namespace)
 oc --context=my-hub delete namespace unsecure-mcm-ns secure-mcm-ns \
-  unsecure-ns secure-ns discovered-hub-ns istio-cni
+  discovered-hub-ns --ignore-not-found
 
-# Delete namespaces on spoke
-oc --context=my-spoke delete namespace unsecure-ns secure-ns \
-  discovered-spoke-ns istio-cni
+# Delete standalone discovered namespace on spoke
+oc --context=my-spoke delete namespace discovered-spoke-ns --ignore-not-found
 
-# Wait for the MCM controller to clean up the operator ManifestWorks, then
-# remove the Sail operator if it remains on either cluster
+# Remove the Sail operator if it remains on either cluster after ManifestWork cleanup
 CSV_HUB=$(oc --context=my-hub get csv -n openshift-operators -o name 2>/dev/null \
   | grep servicemeshoperator3)
 if [ -n "${CSV_HUB}" ]; then
