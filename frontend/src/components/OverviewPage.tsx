@@ -19,18 +19,24 @@ import {
 } from '@patternfly/react-core'
 import { TopologyIcon, ServerIcon } from '@patternfly/react-icons'
 import { useFleetMeshItems } from '../hooks/useFleetMeshItems'
-import type { MultiClusterMesh, K8sCondition } from '../types/multiClusterMesh'
+import type { MultiClusterMesh } from '../types/multiClusterMesh'
+import type { K8sCondition } from '../types/common'
 import type { EnrichedControlPlane } from '../types/istio'
 import type { StatusColor } from './MeshStatus'
 import { deriveStatus } from './MeshStatus'
 import { StatusDonutChart } from './StatusDonutChart'
 import type { StatusCounts } from './StatusDonutChart'
+import { cpTypeSegment } from '../utils/cpTypeSegment'
 import { useMeshTranslation } from '../utils/i18nUtils'
 
-function countByStatus(items: { conditions?: K8sCondition[] }[], conditionType?: string): StatusCounts {
+function countByStatus<T>(
+  items: T[],
+  getConditions: (item: T) => K8sCondition[] | undefined,
+  conditionType?: string,
+): StatusCounts {
   const counts = { degraded: 0, notReady: 0, ready: 0, unknown: 0 }
   for (const item of items) {
-    const { color } = deriveStatus(item.conditions, conditionType)
+    const { color } = deriveStatus(getConditions(item), conditionType)
     if (color === 'green') counts.ready++
     else if (color === 'orange') counts.degraded++
     else if (color === 'grey') counts.unknown++
@@ -51,26 +57,61 @@ interface RecentIssue {
 }
 
 const MAX_ISSUES = 5
+const TOP_K_THRESHOLD = 100
+
+function insertTopK(buffer: RecentIssue[], issue: RecentIssue, k: number): void {
+  if (buffer.length < k) {
+    buffer.push(issue)
+    return
+  }
+  let oldestIdx = 0
+  let oldestTime = buffer[0].lastTransitionTime ?? ''
+  for (let i = 1; i < buffer.length; i++) {
+    const t = buffer[i].lastTransitionTime ?? ''
+    if (t < oldestTime) { oldestTime = t; oldestIdx = i }
+  }
+  if ((issue.lastTransitionTime ?? '') > oldestTime) buffer[oldestIdx] = issue
+}
+
+const sortByNewest = (a: RecentIssue, b: RecentIssue) => {
+  if (!a.lastTransitionTime) return 1
+  if (!b.lastTransitionTime) return -1
+  return b.lastTransitionTime.localeCompare(a.lastTransitionTime)
+}
 
 function collectRecentIssues(meshes: MultiClusterMesh[], controlPlanes: EnrichedControlPlane[]): RecentIssue[] {
   const issues: RecentIssue[] = []
+  let useTopK = false
+
+  const addIssue = (issue: RecentIssue) => {
+    if (useTopK) {
+      insertTopK(issues, issue, MAX_ISSUES)
+    } else {
+      issues.push(issue)
+      if (issues.length >= TOP_K_THRESHOLD) {
+        useTopK = true
+        issues.sort(sortByNewest)
+        issues.length = MAX_ISSUES
+      }
+    }
+  }
 
   for (const mesh of meshes) {
     const meshName = mesh.metadata?.name ?? ''
     const meshNamespace = mesh.metadata?.namespace ?? ''
-    const meshLink = `/fleet-mesh/meshes/${encodeURIComponent(meshNamespace)}/${encodeURIComponent(meshName)}`
+    const meshLink = `/fleet-mesh/meshes/managed/${encodeURIComponent(meshNamespace)}/${encodeURIComponent(meshName)}`
 
     for (const c of mesh.status?.conditions ?? []) {
       if (c.status === 'True') continue
       const { label, color } = deriveStatus([c], c.type)
-      issues.push({ kind: 'mesh', source: meshName, link: meshLink, label, color, lastTransitionTime: c.lastTransitionTime })
+      addIssue({ kind: 'mesh', source: meshName, link: meshLink, label, color, lastTransitionTime: c.lastTransitionTime })
     }
 
     for (const cs of mesh.status?.clusterStatus ?? []) {
       for (const c of cs.conditions ?? []) {
         if (c.status === 'True') continue
         const { label, color } = deriveStatus([c], c.type)
-        issues.push({
+        addIssue({
           kind: 'mesh',
           source: `${meshName} / ${cs.clusterName}`,
           link: meshLink,
@@ -86,10 +127,10 @@ function collectRecentIssues(meshes: MultiClusterMesh[], controlPlanes: Enriched
     for (const c of cp.status?.conditions ?? []) {
       if (c.status === 'True') continue
       const { label, color } = deriveStatus([c], c.type)
-      issues.push({
+      addIssue({
         kind: 'controlPlane',
         source: `${cp.clusterName} / ${cp.metadata.name}`,
-        link: `/fleet-mesh/control-planes/${encodeURIComponent(cp.clusterName)}/${encodeURIComponent(cp.metadata.name)}`,
+        link: `/fleet-mesh/control-planes/${cpTypeSegment(cp)}/${encodeURIComponent(cp.clusterName)}/${encodeURIComponent(cp.metadata.name)}`,
         label,
         color,
         lastTransitionTime: c.lastTransitionTime,
@@ -97,18 +138,12 @@ function collectRecentIssues(meshes: MultiClusterMesh[], controlPlanes: Enriched
     }
   }
 
-  issues.sort((a, b) => {
-    if (!a.lastTransitionTime) return 1
-    if (!b.lastTransitionTime) return -1
-    return b.lastTransitionTime.localeCompare(a.lastTransitionTime)
-  })
-
+  issues.sort(sortByNewest)
   return issues.slice(0, MAX_ISSUES)
 }
 
 const OverviewPage: FC = () => {
   const { t } = useMeshTranslation()
-
   const {
     items,
     mcms,
@@ -126,8 +161,8 @@ const OverviewPage: FC = () => {
   const meshCount = enrichmentLoaded ? items.length : mcms.length
   const meshStatusCounts = useMemo(
     () => enrichmentLoaded
-      ? countByStatus(items)
-      : countByStatus(mcms.map((m) => ({ conditions: m.status?.conditions }))),
+      ? countByStatus(items, (i) => i.conditions)
+      : countByStatus(mcms, (m) => m.status?.conditions),
     [items, mcms, enrichmentLoaded],
   )
 
@@ -136,7 +171,7 @@ const OverviewPage: FC = () => {
   const cpCount = enrichedPlanes.length
 
   const cpStatusCounts = useMemo(
-    () => countByStatus(enrichedPlanes.map((cp) => ({ conditions: cp.status?.conditions }))),
+    () => countByStatus(enrichedPlanes, (cp) => cp.status?.conditions),
     [enrichedPlanes],
   )
 

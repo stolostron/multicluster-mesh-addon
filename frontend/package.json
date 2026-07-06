@@ -2,6 +2,9 @@
   "name": "ossm-acm-ui",
   "version": "0.1.0",
   "private": true,
+  "engines": {
+    "node": "^20.19.0 || >=22.12.0"
+  },
   "scripts": {
     "build": "ts-node -O '{\"module\":\"commonjs\"}' node_modules/.bin/webpack --mode production",
     "start": "ts-node -O '{\"module\":\"commonjs\"}' node_modules/.bin/webpack serve --mode development",

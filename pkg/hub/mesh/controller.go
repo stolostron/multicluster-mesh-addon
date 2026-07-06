@@ -42,18 +42,9 @@ import (
 )
 
 const (
-	OperatorNameOSSM = "servicemeshoperator3"
-	OperatorNameSail = "sailoperator"
-
-	DefaultOCPOperatorNs = "openshift-operators"
-	DefaultOperatorNs    = "sail-operator"
-
-	DefaultOCPCatalogSource = "redhat-operators"
-	DefaultOCPCatalogNs     = "openshift-marketplace"
-	DefaultCatalogSource    = "operatorhubio-catalog"
-	DefaultCatalogNs        = "olm"
-
-	DefaultChannel = "stable"
+	// BuiltinOperatorNamespace is the namespace that already has a global OperatorGroup on OCP.
+	// When the operator targets this namespace, the controller skips creating Namespace and OperatorGroup.
+	BuiltinOperatorNamespace = "openshift-operators"
 
 	OperatorManifestWorkName = "multicluster-mesh-operator"
 	ManifestWorkNameCacerts  = "multicluster-mesh-cacerts"
@@ -70,15 +61,7 @@ const (
 	MeshNameLabel      = "mesh.open-cluster-management.io/mesh-name"
 	MeshNamespaceLabel = "mesh.open-cluster-management.io/mesh-namespace"
 
-	ClusterSetLabel     = "cluster.open-cluster-management.io/clusterset"
-	clusterClaimProduct = "product.open-cluster-management.io"
-
-	// Product claim values from github.com/stolostron/multicloud-operators-foundation/pkg/klusterlet/clusterclaim
-	ProductOCP  = "OpenShift"
-	ProductROSA = "ROSA"
-	ProductARO  = "ARO"
-	ProductROKS = "ROKS"
-	ProductOSD  = "OpenShiftDedicated"
+	ClusterSetLabel = "cluster.open-cluster-management.io/clusterset"
 
 	Day = 24 * time.Hour
 )
@@ -245,7 +228,7 @@ func (r *Reconciler) validate(ctx context.Context, mesh *meshv1alpha1.MultiClust
 			conflict = true
 			return
 		}
-		if r.operatorConfigConflicts(mesh.Spec.Operator, other.Spec.Operator) {
+		if mesh.Spec.Operator != other.Spec.Operator {
 			mesh.SetReadyCondition(metav1.ConditionFalse, meshv1alpha1.ReasonOperatorConfigConflict,
 				"operator config conflicts with older mesh %s/%s targeting the same ClusterSet %s",
 				other.Namespace, other.Name, mesh.Spec.ClusterSet)
@@ -265,20 +248,8 @@ func isOlderMesh(a, b *meshv1alpha1.MultiClusterMesh) bool {
 			key.For(a).String() < key.For(b).String())
 }
 
-// operatorConfigConflicts compares two operator configs after applying defaults to detect real conflicts.
-// This avoids false positives when one mesh explicitly sets a value that matches the other's default.
-func (r *Reconciler) operatorConfigConflicts(a, b meshv1alpha1.OperatorConfig) bool {
-	return r.applyOperatorDefaults(a, false) != r.applyOperatorDefaults(b, false) ||
-		r.applyOperatorDefaults(a, true) != r.applyOperatorDefaults(b, true)
-}
-
 func (r *Reconciler) doReconcile(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, clusters []clusterv1.ManagedCluster) (reconcile.Result, error) {
 	for _, cluster := range clusters {
-		if getProductClaim(&cluster) == "" {
-			klog.V(4).Infof("Cluster %s missing product claim (needed for platform detection), skipping", cluster.Name)
-			continue
-		}
-
 		klog.V(4).Infof("Reconciling cluster %s", cluster.Name)
 
 		work, err := r.workApplier.Apply(ctx, r.buildOperatorManifestWork(mesh, &cluster))
@@ -487,12 +458,6 @@ func (r *Reconciler) determineStatus(ctx context.Context, mesh *meshv1alpha1.Mul
 	allReady := len(clusters) > 0
 
 	for _, cluster := range clusters {
-		if getProductClaim(&cluster) == "" {
-			allReady = false
-			mesh.SetClusterCondition(cluster.Name, meshv1alpha1.ConditionOperatorInstalled, metav1.ConditionFalse,
-				meshv1alpha1.ReasonMissingProductClaim, "Cluster is missing product claim, cannot determine platform")
-			continue
-		}
 
 		operatorWork := &workv1.ManifestWork{}
 		if err := r.Get(ctx, key.Of(OperatorManifestWorkName, cluster.Name), operatorWork); err != nil {
@@ -562,16 +527,6 @@ func clusterNameSet(clusters []clusterv1.ManagedCluster) map[string]bool {
 	return set
 }
 
-// getProductClaim returns the value for the cluster, or empty string if not found
-func getProductClaim(cluster *clusterv1.ManagedCluster) string {
-	for _, claim := range cluster.Status.ClusterClaims {
-		if claim.Name == clusterClaimProduct {
-			return claim.Value
-		}
-	}
-	return ""
-}
-
 func (r *Reconciler) getClustersFromSet(ctx context.Context, clusterSetName string) ([]clusterv1.ManagedCluster, error) {
 	clusterSet := &clusterv1beta2.ManagedClusterSet{}
 	if err := r.Get(ctx, key.Of(clusterSetName), clusterSet); err != nil {
@@ -607,17 +562,10 @@ func (r *Reconciler) getClustersFromSet(ctx context.Context, clusterSetName stri
 }
 
 func (r *Reconciler) buildOperatorManifestWork(mesh *meshv1alpha1.MultiClusterMesh, cluster *clusterv1.ManagedCluster) *workv1.ManifestWork {
+	config := mesh.Spec.Operator
 	manifests := []workv1.Manifest{}
-	isOCP := false
-	switch getProductClaim(cluster) {
-	case ProductOCP, ProductROSA, ProductARO, ProductROKS, ProductOSD:
-		isOCP = true
-	}
 
-	config := r.applyOperatorDefaults(mesh.Spec.Operator, isOCP)
-
-	// openshift-operators exists by default on OCP and already has a global OperatorGroup
-	if config.Namespace != DefaultOCPOperatorNs {
+	if config.Namespace != BuiltinOperatorNamespace {
 		manifests = append(manifests, workv1.Manifest{
 			RawExtension: runtime.RawExtension{Object: &corev1.Namespace{
 				TypeMeta: metav1.TypeMeta{
@@ -647,11 +595,6 @@ func (r *Reconciler) buildOperatorManifestWork(mesh *meshv1alpha1.MultiClusterMe
 		})
 	}
 
-	packageName := OperatorNameSail
-	if isOCP {
-		packageName = OperatorNameOSSM
-	}
-
 	manifests = append(manifests, workv1.Manifest{
 		RawExtension: runtime.RawExtension{Object: &operatorsv1alpha1.Subscription{
 			TypeMeta: metav1.TypeMeta{
@@ -659,13 +602,13 @@ func (r *Reconciler) buildOperatorManifestWork(mesh *meshv1alpha1.MultiClusterMe
 				Kind:       "Subscription",
 			},
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      packageName,
+				Name:      config.Name,
 				Namespace: config.Namespace,
 			},
 			Spec: &operatorsv1alpha1.SubscriptionSpec{
 				Channel:                config.Channel,
 				InstallPlanApproval:    config.InstallPlanApproval,
-				Package:                packageName,
+				Package:                config.Name,
 				CatalogSource:          config.Source,
 				CatalogSourceNamespace: config.SourceNamespace,
 				StartingCSV:            config.StartingCSV,
@@ -693,7 +636,7 @@ func (r *Reconciler) buildOperatorManifestWork(mesh *meshv1alpha1.MultiClusterMe
 				ResourceIdentifier: workv1.ResourceIdentifier{
 					Group:     "operators.coreos.com",
 					Resource:  "subscriptions",
-					Name:      packageName,
+					Name:      config.Name,
 					Namespace: config.Namespace,
 				},
 				FeedbackRules: []workv1.FeedbackRule{{
@@ -706,43 +649,6 @@ func (r *Reconciler) buildOperatorManifestWork(mesh *meshv1alpha1.MultiClusterMe
 			}},
 		},
 	}
-}
-
-// applyOperatorDefaults applies platform-specific defaults for the given cluster to the operator config
-func (r *Reconciler) applyOperatorDefaults(config meshv1alpha1.OperatorConfig, isOCP bool) meshv1alpha1.OperatorConfig {
-	if config.Namespace == "" {
-		if isOCP {
-			config.Namespace = DefaultOCPOperatorNs
-		} else {
-			config.Namespace = DefaultOperatorNs
-		}
-	}
-
-	if config.Source == "" {
-		if isOCP {
-			config.Source = DefaultOCPCatalogSource
-		} else {
-			config.Source = DefaultCatalogSource
-		}
-	}
-
-	if config.SourceNamespace == "" {
-		if isOCP {
-			config.SourceNamespace = DefaultOCPCatalogNs
-		} else {
-			config.SourceNamespace = DefaultCatalogNs
-		}
-	}
-
-	if config.Channel == "" {
-		config.Channel = DefaultChannel
-	}
-
-	if config.InstallPlanApproval == "" {
-		config.InstallPlanApproval = operatorsv1alpha1.ApprovalAutomatic
-	}
-
-	return config
 }
 
 // mapSecretToMesh maps a Secret to the MultiClusterMesh that owns it

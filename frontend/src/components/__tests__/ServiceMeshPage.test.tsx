@@ -9,10 +9,11 @@ rstest.mock('../../hooks/useFleetMeshItems', { mock: true })
 const makeItem = (overrides: Partial<FleetMeshItem> = {}): FleetMeshItem => ({
   metadata: { name: 'test-mesh' },
   kind: 'managed',
-  detailLink: '/fleet-mesh/meshes/mesh-system/test-mesh',
+  detailLink: '/fleet-mesh/meshes/managed/mesh-system/test-mesh',
   clusterCount: 1,
   clusterSet: 'global',
   mcmNamespace: 'mesh-system',
+  meshID: 'mesh-system-test-mesh',
   statusRank: 0,
   trustIssuer: undefined,
   conditions: [{ type: 'Ready', status: 'True' }],
@@ -42,12 +43,6 @@ describe('ServiceMeshPage', () => {
     rstest.clearAllMocks()
   })
 
-  it('renders the page header', () => {
-    mockHook()
-    render(<ServiceMeshPage />)
-    expect(screen.getByText('Meshes')).toBeInTheDocument()
-  })
-
   it('shows empty state when no meshes exist and data is loaded', () => {
     mockHook()
     render(<ServiceMeshPage />)
@@ -60,49 +55,66 @@ describe('ServiceMeshPage', () => {
     expect(screen.getByTestId('loading')).toBeInTheDocument()
   })
 
-  it('renders managed mesh rows with name links', () => {
+  it('renders managed mesh rows with Mesh ID links to detail page', () => {
     const items = [
       makeItem(),
-      makeItem({ metadata: { name: 'prod-mesh' }, detailLink: '/fleet-mesh/meshes/mesh-system/prod-mesh' }),
+      makeItem({ metadata: { name: 'prod-mesh' }, meshID: 'mesh-system-prod-mesh', detailLink: '/fleet-mesh/meshes/managed/mesh-system/prod-mesh' }),
     ]
     mockHook({ items })
     render(<ServiceMeshPage />)
     expect(screen.getByText('test-mesh')).toBeInTheDocument()
     expect(screen.getByText('prod-mesh')).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: 'test-mesh' })).toHaveAttribute('href', '/fleet-mesh/meshes/mesh-system/test-mesh')
-    expect(screen.getByRole('link', { name: 'prod-mesh' })).toHaveAttribute('href', '/fleet-mesh/meshes/mesh-system/prod-mesh')
+    expect(screen.getByRole('link', { name: 'mesh-system-test-mesh' })).toHaveAttribute('href', '/fleet-mesh/meshes/managed/mesh-system/test-mesh')
+    expect(screen.getByRole('link', { name: 'mesh-system-prod-mesh' })).toHaveAttribute('href', '/fleet-mesh/meshes/managed/mesh-system/prod-mesh')
   })
 
-  it('renders discovered mesh rows with name links to their detailLink', () => {
+  it('renders discovered mesh rows with Mesh ID links to their detailLink', () => {
     const items = [
       makeItem({
         metadata: { name: 'discovered-mesh' },
         kind: 'discovered',
-        detailLink: '/fleet-mesh/control-planes/cluster1/default',
+        meshID: 'discovered-id',
+        detailLink: '/fleet-mesh/meshes/discovered/discovered-id',
         mcmNamespace: undefined,
         clusterSet: undefined,
       }),
     ]
     mockHook({ items })
     render(<ServiceMeshPage />)
-    const link = screen.getByRole('link', { name: 'discovered-mesh' })
-    expect(link).toHaveAttribute('href', '/fleet-mesh/control-planes/cluster1/default')
+    const link = screen.getByRole('link', { name: 'discovered-id' })
+    expect(link).toHaveAttribute('href', '/fleet-mesh/meshes/discovered/discovered-id')
   })
 
-  it('shows Mesh ID column with blue managed and purple discovered labels', () => {
+  it('shows Mesh ID column values for managed and discovered items', () => {
     const items = [
       makeItem({ metadata: { name: 'managed-mesh' }, meshID: 'managed-id' }),
       makeItem({
         metadata: { name: 'discovered-mesh' },
         kind: 'discovered',
         meshID: 'discovered-id',
-        detailLink: '/fleet-mesh/control-planes/c1/cp',
+        detailLink: '/fleet-mesh/meshes/discovered/discovered-id',
       }),
     ]
     mockHook({ items })
     render(<ServiceMeshPage />)
     expect(screen.getByText('managed-id')).toBeInTheDocument()
     expect(screen.getByText('discovered-id')).toBeInTheDocument()
+  })
+
+  it('renders Type column with Managed for managed items and Discovered for discovered items', () => {
+    const items = [
+      makeItem({ metadata: { name: 'managed-mesh' }, meshID: 'managed-id' }),
+      makeItem({
+        metadata: { name: 'discovered-mesh' },
+        kind: 'discovered',
+        meshID: 'discovered-id',
+        detailLink: '/fleet-mesh/meshes/discovered/discovered-id',
+      }),
+    ]
+    mockHook({ items })
+    render(<ServiceMeshPage />)
+    expect(screen.getByText('Managed')).toBeInTheDocument()
+    expect(screen.getByText('Discovered')).toBeInTheDocument()
   })
 
   it('shows ACM-unavailable banner when isFleetAvailable is false', () => {

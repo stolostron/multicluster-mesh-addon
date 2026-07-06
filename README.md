@@ -4,13 +4,13 @@ A pluggable addon working on [Open Cluster Management (OCM)](https://open-cluste
 
 ## What is Multi Cluster Mesh Add On?
 
-The Multi Cluster Mesh Add On automates the complex setup of multi-cluster service mesh deployments using the [Sail Operator](https://github.com/istio-ecosystem/sail-operator/).
+The Multi Cluster Mesh Add On automates the complex setup of multi-cluster service mesh deployments by managing OLM-installed service mesh operators such as OSSM and [Sail](https://github.com/istio-ecosystem/sail-operator/).
 It eliminates the manual, error-prone process of establishing trust between clusters, installing mesh components, and sharing credentials for endpoint discovery.
 
 The addon acts as an infrastructure provisioner and federation broker, automating:
 
 - **Trust Distribution**: Establishes mTLS trust between clusters using cert-manager to distribute intermediate CAs
-- **Operator Lifecycle**: Installs and manages the Sail Operator (Istio) on managed clusters via OLM
+- **Operator Lifecycle**: Installs and manages the service mesh operator on managed clusters via OLM
 - **Endpoint Discovery**: Automates secure, rotatable token exchange between control planes using ManagedServiceAccount
 
 ## Architecture
@@ -176,7 +176,7 @@ kubectl apply -n mesh-system -f samples/basic.yaml
 
 For more configuration options, see the [samples](./samples/) directory:
 
-- **[basic.yaml](./samples/basic.yaml)** - Minimal configuration using defaults
+- **[basic.yaml](./samples/basic.yaml)** - Minimal configuration for K8s clusters (Sail operator)
 - **[complete.yaml](./samples/complete.yaml)** - All available fields with documentation
 - **[openshift.yaml](./samples/openshift.yaml)** - OpenShift-specific configuration
 - **[pinned-version.yaml](./samples/pinned-version.yaml)** - Version pinning with manual approval
@@ -185,7 +185,7 @@ For more configuration options, see the [samples](./samples/) directory:
 #### What the Addon Does
 
 The addon will:
-1. Install the Sail Operator on all clusters in the referenced ManagedClusterSet
+1. Install the configured service mesh operator on all clusters in the referenced ManagedClusterSet
 2. Generate and distribute intermediate CA certificates to establish trust
 3. Exchange discovery tokens between clusters for endpoint resolution
 4. Manage automatic rotation of certificates and tokens

@@ -23,9 +23,14 @@ Related links:
 - `src/types/fleetMesh.ts` — FleetMeshItem type for the unified mesh list (managed + discovered)
 - `src/types/managedCluster.ts` — ManagedCluster type, GVK, and cluster availability helpers
 - `src/components/` — React page and card components (OverviewPage, ServiceMeshPage, MeshDetailPage, DiscoveredMeshDetailPage, ControlPlanesPage, ControlPlaneDetailPage, ControlPlanesCard, MeshStatus, StatusDonutChart, TrustStatusCard)
-- `src/hooks/` — Data fetching hooks (useMultiClusterMeshes, useManagedClusters, useFleetMeshItems, useDiscoveredControlPlanes, useEnrichedControlPlanes)
+- `src/hooks/` — Data fetching hooks (useMultiClusterMeshes, useManagedClusters, useManagedClusterMap, useFleetMeshItems, useDiscoveredControlPlanes, useEnrichedControlPlanes, useVirtualRows)
+- `src/utils/cpTypeSegment.ts` — Control plane type segment helper (managed/discovered/standalone)
+- `src/utils/correlateMCM.ts` — Correlates control planes with their managing MultiClusterMesh CR
 - `src/utils/filterUtils.ts` — Case-insensitive filter utility for multi-field list filtering
 - `src/utils/i18nUtils.ts` — i18n hook (`useMeshTranslation`) and namespace constant
+- `src/utils/linkUtils.ts` — URL builders for cross-perspective navigation links
+- `src/utils/oldestTimestamp.ts` — Finds the oldest timestamp from a collection of conditions
+- `src/utils/worstConditions.ts` — Extracts the worst (most severe) conditions for status display
 - `src/locales/en/plugin__ossm-acm.json` — English translation strings
 - `src/__mocks__/` — Rstest mocks for Console SDK, multicluster-sdk, react-router, and react-charts
 - `src/setupTests.tsx` — Rstest setup (jest-dom matchers via expect.extend, i18n mock, jsdom stubs, cleanup)
@@ -53,6 +58,11 @@ Run `make help` to see all available targets.
 
 Override `IMG` to push to an external registry: `make build IMG=quay.io/myorg/ossm-acm-console-plugin:v1`
 
+## Dependency Notes
+
+- `classnames` — Transitive runtime dependency of `@stolostron/multicluster-sdk` (used in `FleetResourceLink.js`). Not listed as a peer dependency of the SDK, so this project must provide it. Do not remove it even though no source file in this project imports it directly.
+- `victory-*` sub-packages (16 packages) — Optional peer dependencies of `@patternfly/react-charts` required at runtime for Victory-based chart components (e.g. `ChartDonut`). Listed as direct dependencies so they are available at runtime. Do not remove without verifying PatternFly charts still render correctly.
+
 ## Key Architecture Decisions
 
 ### OpenShift Console Plugin SDK
@@ -77,7 +87,7 @@ export default PerspectiveIcon
 
 ### Route registration order
 
-The detail route (`/fleet-mesh/meshes/:ns/:name`) must be registered BEFORE the list route (`/fleet-mesh/meshes`) in `console-extensions.ts`. React Router v5 matches the first route whose path prefix matches.
+Detail routes (`/fleet-mesh/meshes/managed/:ns/:name`, `/fleet-mesh/meshes/discovered/:meshID`, `/fleet-mesh/control-planes/:type/:cluster/:name`) must be registered BEFORE their respective list routes (`/fleet-mesh/meshes`, `/fleet-mesh/control-planes`) in `console-extensions.ts`. React Router v5 matches the first route whose path prefix matches.
 
 ### Data sources
 
@@ -135,6 +145,7 @@ The build uses **SWC** (`swc-loader` + `@swc/core`) for TypeScript transpilation
 Run tests with `make test`. Tests use **Rstest** (`@rstest/core`) — an Rspack-powered test runner with Jest-compatible APIs. Tests live in `__tests__/` subdirectories alongside source, using `*.test.tsx` naming.
 
 - `@openshift-console/dynamic-plugin-sdk` is mocked via `resolve.alias` in `rstest.config.ts`, pointing to `src/__mocks__/consoleSdkMock.tsx`. Override hook return values with `mockReturnValue()` in individual tests.
+- `@stolostron/multicluster-sdk` is mocked via `resolve.alias` in `rstest.config.ts`, pointing to `src/__mocks__/multiclusterSdkMock.tsx`.
 - `react-router-dom-v5-compat` is mocked via `resolve.alias` in `rstest.config.ts`, pointing to `src/__mocks__/routerMock.tsx` (`Link` renders `<a>`, `useParams` returns `{}`).
 - `@patternfly/react-charts/victory` is mocked via `resolve.alias` in `rstest.config.ts`, pointing to `src/__mocks__/chartsMock.tsx`.
 - `react-i18next` is mocked globally in `src/setupTests.tsx` via `rs.mock()` — `t(key)` returns the English key string with `{{variable}}` interpolations substituted. Tests can assert directly on English source strings.
@@ -201,6 +212,10 @@ Both `ServiceMeshPage.tsx` (Meshes) and `ControlPlanesPage.tsx` (Control Planes)
 4. Add a `<TableData id="..." activeColumnIDs={activeColumnIDs}>` cell to the row component
 5. Cell order doesn't need to match column order (matched by `id`), but keep them aligned for readability
 6. `ServiceMeshPage.tsx` operates on `FleetMeshItem` (the unified type covering managed and discovered meshes); `ControlPlanesPage.tsx` operates on `EnrichedControlPlane`
+
+## Skills
+
+- **[Track Backend Issues](docs/skills/track-backend-issues.md)** — Analyze open backend controller issues for frontend impact and create/update GitHub tracking issues with the `area/frontend` label. Run periodically (e.g., when new backend issues are filed or before sprint planning).
 
 ## Backend CRD Reference
 

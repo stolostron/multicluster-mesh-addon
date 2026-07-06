@@ -3,6 +3,7 @@ import ControlPlaneDetailPage from '../ControlPlaneDetailPage'
 import { useParams } from 'react-router-dom-v5-compat'
 import { useK8sWatchResource } from '@openshift-console/dynamic-plugin-sdk'
 import { fleetK8sGet } from '@stolostron/multicluster-sdk'
+import { setInEnrichmentCache, __resetEnrichmentCache } from '../../hooks/useEnrichedControlPlanes'
 import type { Istio } from '../../types/istio'
 
 const makeIstio = (overrides: Partial<Istio> = {}): Istio => ({
@@ -26,7 +27,7 @@ const makeIstio = (overrides: Partial<Istio> = {}): Istio => ({
   ...overrides,
 })
 
-afterEach(() => rstest.clearAllMocks())
+afterEach(() => { rstest.clearAllMocks(); __resetEnrichmentCache() })
 
 beforeEach(() => {
   rstest.mocked(useK8sWatchResource).mockReturnValue([[], true, null])
@@ -38,13 +39,20 @@ describe('ControlPlaneDetailPage', () => {
       rstest.mocked(useParams).mockReturnValue({})
       render(<ControlPlaneDetailPage />)
       expect(screen.getByText('Not Found')).toBeInTheDocument()
-      expect(screen.getByText('Invalid URL. Expected /fleet-mesh/control-planes/:cluster/:name.')).toBeInTheDocument()
+      expect(screen.getByText('Invalid URL. Expected /fleet-mesh/control-planes/:type/:cluster/:name.')).toBeInTheDocument()
+    })
+
+    it('shows Not Found when type param is invalid', () => {
+      rstest.mocked(useParams).mockReturnValue({ type: 'bogus', cluster: 'cluster-a', name: 'default' })
+      render(<ControlPlaneDetailPage />)
+      expect(screen.getByText('Not Found')).toBeInTheDocument()
+      expect(screen.getByText('Invalid URL. Expected /fleet-mesh/control-planes/:type/:cluster/:name.')).toBeInTheDocument()
     })
   })
 
   describe('loading state', () => {
     it('shows spinner while fleetK8sGet is pending', () => {
-      rstest.mocked(useParams).mockReturnValue({ cluster: 'cluster-a', name: 'default' })
+      rstest.mocked(useParams).mockReturnValue({ type: 'discovered', cluster: 'cluster-a', name: 'default' })
       rstest.mocked(fleetK8sGet).mockReturnValue(new Promise(() => {}))
       render(<ControlPlaneDetailPage />)
       expect(screen.getByLabelText('Loading control plane')).toBeInTheDocument()
@@ -53,7 +61,7 @@ describe('ControlPlaneDetailPage', () => {
 
   describe('error states', () => {
     it('shows generic error when fleetK8sGet rejects', async () => {
-      rstest.mocked(useParams).mockReturnValue({ cluster: 'cluster-a', name: 'default' })
+      rstest.mocked(useParams).mockReturnValue({ type: 'discovered', cluster: 'cluster-a', name: 'default' })
       rstest.mocked(fleetK8sGet).mockRejectedValue(new Error('network timeout'))
       render(<ControlPlaneDetailPage />)
       await waitFor(() => {
@@ -63,7 +71,7 @@ describe('ControlPlaneDetailPage', () => {
     })
 
     it('shows not-found message for 404 errors', async () => {
-      rstest.mocked(useParams).mockReturnValue({ cluster: 'cluster-a', name: 'default' })
+      rstest.mocked(useParams).mockReturnValue({ type: 'discovered', cluster: 'cluster-a', name: 'default' })
       const error404 = new Error('Not Found')
       ;(error404 as any).code = 404
       rstest.mocked(fleetK8sGet).mockRejectedValue(error404)
@@ -77,7 +85,7 @@ describe('ControlPlaneDetailPage', () => {
 
   describe('loaded state', () => {
     beforeEach(() => {
-      rstest.mocked(useParams).mockReturnValue({ cluster: 'cluster-a', name: 'default' })
+      rstest.mocked(useParams).mockReturnValue({ type: 'discovered', cluster: 'cluster-a', name: 'default' })
     })
 
     it('renders the breadcrumb and name heading', async () => {
@@ -101,7 +109,7 @@ describe('ControlPlaneDetailPage', () => {
       rstest.mocked(fleetK8sGet).mockResolvedValue(makeIstio())
       render(<ControlPlaneDetailPage />)
       await waitFor(() => {
-        expect(screen.getAllByText('mesh1').length).toBeGreaterThanOrEqual(1)
+        expect(screen.getAllByText('mesh1')).toHaveLength(1)
       })
     })
 
@@ -132,95 +140,36 @@ describe('ControlPlaneDetailPage', () => {
       })
     })
 
-    it('shows Managed Mesh row in overview when correlated to a MultiClusterMesh', async () => {
+    it('links mesh ID to managed mesh detail page when correlated to a MultiClusterMesh', async () => {
       const mcm = {
         metadata: { name: 'my-mesh', namespace: 'mesh-system' },
         spec: { clusterSet: 'global', controlPlane: { namespace: 'istio-system' } },
         status: { clusterStatus: [{ clusterName: 'cluster-a' }] },
       }
       rstest.mocked(useK8sWatchResource).mockReturnValue([[mcm], true, null])
-      rstest.mocked(fleetK8sGet).mockResolvedValue(makeIstio())
-      render(<ControlPlaneDetailPage />)
-      await waitFor(() => {
-        expect(screen.getByText('Managed Mesh')).toBeInTheDocument()
-        expect(screen.getByRole('link', { name: 'my-mesh' })).toHaveAttribute(
-          'href',
-          '/fleet-mesh/meshes/mesh-system/my-mesh',
-        )
-      })
-    })
-
-    it('does not show Managed Mesh row when not correlated', async () => {
-      rstest.mocked(fleetK8sGet).mockResolvedValue(makeIstio())
-      render(<ControlPlaneDetailPage />)
-      await waitFor(() => {
-        expect(screen.getByText('Mesh ID')).toBeInTheDocument()
-      })
-      expect(screen.queryByText('Managed Mesh')).not.toBeInTheDocument()
-    })
-
-    it('shows blue Managed label when CP is managed by MCM', async () => {
-      const mcm = {
-        metadata: { name: 'my-mesh', namespace: 'mesh-system' },
-        spec: { clusterSet: 'global', controlPlane: { namespace: 'istio-system' } },
-        status: { clusterStatus: [{ clusterName: 'cluster-a' }] },
-      }
-      rstest.mocked(useK8sWatchResource).mockReturnValue([[mcm], true, null])
-      rstest.mocked(fleetK8sGet).mockResolvedValue(makeIstio())
-      render(<ControlPlaneDetailPage />)
-      await waitFor(() => {
-        expect(screen.getByText('Managed')).toBeInTheDocument()
-      })
-    })
-
-    it('shows purple Discovered label when CP has meshID but no MCM', async () => {
-      rstest.mocked(fleetK8sGet).mockResolvedValue(makeIstio())
-      render(<ControlPlaneDetailPage />)
-      await waitFor(() => {
-        expect(screen.getByText('Discovered')).toBeInTheDocument()
-      })
-    })
-
-    it('shows no kind label when CP has no meshID and no MCM', async () => {
-      rstest.mocked(fleetK8sGet).mockResolvedValue(makeIstio({
-        spec: { namespace: 'istio-system' },
-      }))
-      render(<ControlPlaneDetailPage />)
-      await waitFor(() => {
-        expect(screen.getByText('Mesh ID')).toBeInTheDocument()
-      })
-      expect(screen.queryByText('Managed')).not.toBeInTheDocument()
-      expect(screen.queryByText('Discovered')).not.toBeInTheDocument()
-    })
-
-    it('links mesh ID to discovered mesh page when CP has meshID but no MCM', async () => {
       rstest.mocked(fleetK8sGet).mockResolvedValue(makeIstio())
       render(<ControlPlaneDetailPage />)
       await waitFor(() => {
         expect(screen.getByRole('link', { name: 'mesh1' })).toHaveAttribute(
           'href',
-          '/fleet-mesh/meshes/discovered/mesh1',
+          '/fleet-mesh/meshes/managed/mesh-system/my-mesh',
         )
       })
     })
 
-    it('shows mesh ID as plain text when CP is managed by MCM', async () => {
-      const mcm = {
-        metadata: { name: 'my-mesh', namespace: 'mesh-system' },
-        spec: { clusterSet: 'global', controlPlane: { namespace: 'istio-system' } },
-        status: { clusterStatus: [{ clusterName: 'cluster-a' }] },
-      }
-      rstest.mocked(useK8sWatchResource).mockReturnValue([[mcm], true, null])
+    it('shows discovered mesh link when not correlated to a managed mesh', async () => {
       rstest.mocked(fleetK8sGet).mockResolvedValue(makeIstio())
       render(<ControlPlaneDetailPage />)
       await waitFor(() => {
-        expect(screen.getByText('Managed Mesh')).toBeInTheDocument()
-        expect(screen.getByText('mesh1')).toBeInTheDocument()
+        expect(screen.getByText('Mesh ID')).toBeInTheDocument()
       })
-      expect(screen.queryByRole('link', { name: 'mesh1' })).not.toBeInTheDocument()
+      expect(screen.queryByRole('link', { name: 'mesh1' })).toHaveAttribute(
+        'href',
+        '/fleet-mesh/meshes/discovered/mesh1',
+      )
     })
 
-    it('does not show Managed Mesh row when CP has no meshID and no MCM', async () => {
+    it('shows dash for mesh ID when CP has no meshID and no MCM', async () => {
       rstest.mocked(fleetK8sGet).mockResolvedValue(makeIstio({
         spec: { namespace: 'istio-system' },
       }))
@@ -228,19 +177,85 @@ describe('ControlPlaneDetailPage', () => {
       await waitFor(() => {
         expect(screen.getByText('Mesh ID')).toBeInTheDocument()
       })
-      expect(screen.queryByText('Managed Mesh')).not.toBeInTheDocument()
+      expect(screen.queryByRole('link', { name: 'mesh1' })).not.toBeInTheDocument()
     })
   })
 
-  describe('useEffect cleanup', () => {
+  describe('useEffect cancellation', () => {
     it('does not update state after unmount', async () => {
-      rstest.mocked(useParams).mockReturnValue({ cluster: 'cluster-a', name: 'default' })
+      rstest.mocked(useParams).mockReturnValue({ type: 'discovered', cluster: 'cluster-a', name: 'default' })
       let resolvePromise: (value: any) => void
       rstest.mocked(fleetK8sGet).mockReturnValue(new Promise((resolve) => { resolvePromise = resolve }))
       const { unmount } = render(<ControlPlaneDetailPage />)
       unmount()
       resolvePromise!(makeIstio())
-      // No assertion needed — the test passes if no "state update on unmounted component" warning occurs
+      await new Promise((r) => setTimeout(r, 0))
+      expect(screen.queryByText('default')).not.toBeInTheDocument()
+    })
+  })
+
+  describe('stale-while-revalidate', () => {
+    beforeEach(() => {
+      rstest.mocked(useParams).mockReturnValue({ type: 'discovered', cluster: 'cluster-a', name: 'default' })
+    })
+
+    it('renders cached data immediately without waiting for network', () => {
+      setInEnrichmentCache('cluster-a', 'default', makeIstio())
+      rstest.mocked(fleetK8sGet).mockReturnValue(new Promise(() => {}))
+      render(<ControlPlaneDetailPage />)
+      expect(screen.getByRole('heading', { name: 'default' })).toBeInTheDocument()
+      expect(screen.getByText('v1.24.0')).toBeInTheDocument()
+      expect(screen.queryByLabelText('Loading control plane')).not.toBeInTheDocument()
+    })
+
+    it('shows spinner when cache has no entry for the requested CP', () => {
+      rstest.mocked(fleetK8sGet).mockReturnValue(new Promise(() => {}))
+      render(<ControlPlaneDetailPage />)
+      expect(screen.getByLabelText('Loading control plane')).toBeInTheDocument()
+    })
+
+    it('shows refresh error banner when cached data is shown but background refresh fails', async () => {
+      setInEnrichmentCache('cluster-a', 'default', makeIstio())
+      rstest.mocked(fleetK8sGet).mockRejectedValue(new Error('network timeout'))
+      render(<ControlPlaneDetailPage />)
+      await waitFor(() => {
+        expect(screen.getByText('Data may be stale — background refresh failed.')).toBeInTheDocument()
+      })
+      expect(screen.getByRole('heading', { name: 'default' })).toBeInTheDocument()
+    })
+
+    it('does not show refresh error banner when cache miss and refresh fails', async () => {
+      rstest.mocked(fleetK8sGet).mockRejectedValue(new Error('network timeout'))
+      render(<ControlPlaneDetailPage />)
+      await waitFor(() => {
+        expect(screen.getByText('Error loading control plane')).toBeInTheDocument()
+      })
+      expect(screen.queryByText('Data may be stale — background refresh failed.')).not.toBeInTheDocument()
+    })
+
+    it('updates data when background refresh succeeds after cache hit', async () => {
+      const oldIstio = makeIstio({ spec: { namespace: 'istio-system', version: 'v1.23.0' } })
+      setInEnrichmentCache('cluster-a', 'default', oldIstio)
+      rstest.mocked(fleetK8sGet).mockResolvedValue(makeIstio())
+      render(<ControlPlaneDetailPage />)
+      expect(screen.getByText('v1.23.0')).toBeInTheDocument()
+      await waitFor(() => {
+        expect(screen.getByText('v1.24.0')).toBeInTheDocument()
+      })
+    })
+
+    it('clears stale data on route change when new CP has no cache entry', async () => {
+      setInEnrichmentCache('cluster-a', 'default', makeIstio())
+      rstest.mocked(fleetK8sGet).mockReturnValue(new Promise(() => {}))
+      const { rerender } = render(<ControlPlaneDetailPage />)
+      expect(screen.getByRole('heading', { name: 'default' })).toBeInTheDocument()
+
+      rstest.mocked(useParams).mockReturnValue({ type: 'discovered', cluster: 'cluster-b', name: 'other' })
+      rstest.mocked(fleetK8sGet).mockReturnValue(new Promise(() => {}))
+      rerender(<ControlPlaneDetailPage />)
+
+      expect(screen.queryByText('v1.24.0')).not.toBeInTheDocument()
+      expect(screen.getByLabelText('Loading control plane')).toBeInTheDocument()
     })
   })
 })

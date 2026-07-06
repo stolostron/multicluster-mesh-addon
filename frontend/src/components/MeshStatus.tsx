@@ -1,6 +1,6 @@
 import type { FC, ReactNode } from 'react'
 import { Label } from '@patternfly/react-core'
-import type { K8sCondition } from '../types/multiClusterMesh'
+import type { K8sCondition } from '../types/common'
 import { useMeshTranslation } from '../utils/i18nUtils'
 
 export type StatusColor = 'green' | 'red' | 'orange' | 'grey'

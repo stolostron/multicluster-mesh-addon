@@ -246,23 +246,6 @@ join_clusters() {
     on "${HUB}" "${CLUSTERADM}" create clusterset mesh-cluster-set
     on "${HUB}" "${CLUSTERADM}" clusterset set mesh-cluster-set --clusters "${CLUSTER1},${CLUSTER2}"
 
-    # On OpenShift, the product ClusterClaim is created automatically by the
-    # klusterlet agent. On vanilla Kind clusters there is no such agent,
-    # so we create it manually. The OCM registration agent syncs it to
-    # ManagedCluster.status.clusterClaims on the hub, which the addon controller
-    # uses for platform detection.
-    for cluster in "${CLUSTER1}" "${CLUSTER2}"; do
-        log "Creating product ClusterClaim on ${cluster}"
-        on "${cluster}" kubectl apply -f "${SCRIPT_DIR}/hack/kind/product-clusterclaim.yaml"
-    done
-
-    for cluster in "${CLUSTER1}" "${CLUSTER2}"; do
-        log "Waiting for product claim on ${cluster} to propagate to the hub..."
-        on "${HUB}" retry kubectl wait managedcluster/"${cluster}" \
-            --for='jsonpath={.status.clusterClaims[?(@.name=="product.open-cluster-management.io")].value}=Kind' \
-            --timeout=60s
-    done
-
     log "OCM topology ready"
     on "${HUB}" kubectl get managedclusters
     on "${HUB}" kubectl get managedclustersets

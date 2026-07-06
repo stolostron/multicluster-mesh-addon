@@ -1,16 +1,9 @@
 import { renderHook, waitFor, act } from '@testing-library/react'
-import { useEnrichedControlPlanes, __resetEnrichmentCache } from '../useEnrichedControlPlanes'
+import { useEnrichedControlPlanes, __resetEnrichmentCache, getFromEnrichmentCache, setInEnrichmentCache, getConcurrencyLimit } from '../useEnrichedControlPlanes'
 import { fleetK8sGet } from '@stolostron/multicluster-sdk'
+import { makeSearchResult } from '../../__fixtures__/testFactories'
 import type { Istio } from '../../types/istio'
 import type { MultiClusterMesh } from '../../types/multiClusterMesh'
-
-const makeSearchResult = (cluster: string, name: string) => ({
-  apiVersion: 'sailoperator.io/v1',
-  kind: 'Istio',
-  metadata: { name, creationTimestamp: '2026-06-22T12:00:00Z' },
-  cluster,
-  spec: { namespace: 'istio-system' },
-})
 
 const makeIstio = (namespace = 'istio-system', meshID?: string): Istio => ({
   apiVersion: 'sailoperator.io/v1',
@@ -252,6 +245,39 @@ describe('useEnrichedControlPlanes', () => {
     expect(result2.current[0][0].version).toBe('v1.24.0')
   })
 
+  it('handles partial enrichment failure — successful CPs are enriched, failed CPs remain undefined', async () => {
+    rstest.mocked(fleetK8sGet).mockImplementation(({ cluster }: any) => {
+      if (cluster === 'cluster-a') return Promise.resolve(makeIstio('istio-system', 'mesh1'))
+      return Promise.reject(new Error('cluster unreachable'))
+    })
+    const results = [
+      makeSearchResult('cluster-a', 'default'),
+      makeSearchResult('cluster-b', 'secondary'),
+      makeSearchResult('cluster-c', 'tertiary'),
+    ]
+    const { result } = renderHook(() => useEnrichedControlPlanes(results as any, []))
+
+    await waitFor(() => expect(result.current[2]).toBe(true))
+
+    const [planes, , enrichmentLoaded] = result.current
+    expect(enrichmentLoaded).toBe(true)
+
+    const cpA = planes.find((p) => p.clusterName === 'cluster-a')!
+    expect(cpA.version).toBe('v1.24.0')
+    expect(cpA.meshID).toBe('mesh1')
+    expect(cpA.controlPlaneNamespace).toBe('istio-system')
+
+    const cpB = planes.find((p) => p.clusterName === 'cluster-b')!
+    expect(cpB.version).toBeUndefined()
+    expect(cpB.meshID).toBeUndefined()
+    expect(cpB.controlPlaneNamespace).toBeUndefined()
+
+    const cpC = planes.find((p) => p.clusterName === 'cluster-c')!
+    expect(cpC.version).toBeUndefined()
+    expect(cpC.meshID).toBeUndefined()
+    expect(cpC.controlPlaneNamespace).toBeUndefined()
+  })
+
   it('does not reset enrichmentLoaded on subsequent search poll updates', async () => {
     rstest.mocked(fleetK8sGet).mockResolvedValue(makeIstio())
     const results1 = [makeSearchResult('cluster-a', 'default')]
@@ -278,5 +304,81 @@ describe('useEnrichedControlPlanes', () => {
       expect(rstest.mocked(fleetK8sGet).mock.calls.length).toBeGreaterThanOrEqual(2)
     })
     expect(result.current[2]).toBe(true)
+  })
+})
+
+describe('enrichment cache functions', () => {
+  const makeIstioForCache = (namespace = 'istio-system'): Istio => ({
+    apiVersion: 'sailoperator.io/v1',
+    kind: 'Istio',
+    metadata: { name: 'default' },
+    spec: { namespace },
+    status: { conditions: [{ type: 'Ready', status: 'True' as const }] },
+  })
+
+  it('getFromEnrichmentCache returns undefined on cache miss', () => {
+    expect(getFromEnrichmentCache('cluster-a', 'default')).toBeUndefined()
+  })
+
+  it('setInEnrichmentCache writes and getFromEnrichmentCache reads back', () => {
+    const istio = makeIstioForCache()
+    setInEnrichmentCache('cluster-a', 'default', istio)
+    expect(getFromEnrichmentCache('cluster-a', 'default')).toBe(istio)
+  })
+
+  it('getFromEnrichmentCache returns undefined after TTL expires', () => {
+    rstest.useFakeTimers()
+    try {
+      const istio = makeIstioForCache()
+      setInEnrichmentCache('cluster-a', 'default', istio)
+      expect(getFromEnrichmentCache('cluster-a', 'default')).toBe(istio)
+
+      rstest.setSystemTime(Date.now() + 160_000)
+      expect(getFromEnrichmentCache('cluster-a', 'default')).toBeUndefined()
+    } finally {
+      rstest.useRealTimers()
+    }
+  })
+
+  it('setInEnrichmentCache overwrites existing entries', () => {
+    const istio1 = makeIstioForCache('ns-1')
+    const istio2 = makeIstioForCache('ns-2')
+    setInEnrichmentCache('cluster-a', 'default', istio1)
+    setInEnrichmentCache('cluster-a', 'default', istio2)
+    expect(getFromEnrichmentCache('cluster-a', 'default')).toBe(istio2)
+  })
+
+  it('different cluster/name keys are independent', () => {
+    const istioA = makeIstioForCache('ns-a')
+    const istioB = makeIstioForCache('ns-b')
+    setInEnrichmentCache('cluster-a', 'cp-a', istioA)
+    setInEnrichmentCache('cluster-b', 'cp-b', istioB)
+    expect(getFromEnrichmentCache('cluster-a', 'cp-a')).toBe(istioA)
+    expect(getFromEnrichmentCache('cluster-b', 'cp-b')).toBe(istioB)
+    expect(getFromEnrichmentCache('cluster-a', 'cp-b')).toBeUndefined()
+  })
+})
+
+describe('getConcurrencyLimit', () => {
+  it('returns minimum (10) for small fleets', () => {
+    expect(getConcurrencyLimit(5)).toBe(10)
+    expect(getConcurrencyLimit(50)).toBe(10)
+    expect(getConcurrencyLimit(199)).toBe(10)
+  })
+
+  it('scales up for larger fleets', () => {
+    expect(getConcurrencyLimit(200)).toBe(10)
+    expect(getConcurrencyLimit(400)).toBe(20)
+    expect(getConcurrencyLimit(420)).toBe(21)
+  })
+
+  it('caps at maximum (25)', () => {
+    expect(getConcurrencyLimit(500)).toBe(25)
+    expect(getConcurrencyLimit(1000)).toBe(25)
+    expect(getConcurrencyLimit(5000)).toBe(25)
+  })
+
+  it('returns minimum for zero pending', () => {
+    expect(getConcurrencyLimit(0)).toBe(10)
   })
 })

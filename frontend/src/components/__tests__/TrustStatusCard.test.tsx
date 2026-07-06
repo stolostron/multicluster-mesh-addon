@@ -1,10 +1,11 @@
-import { render, screen } from '@testing-library/react'
+import { act, render, screen, fireEvent } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { TrustStatusCard } from '../TrustStatusCard'
 import { useK8sWatchResource } from '@openshift-console/dynamic-plugin-sdk'
 import type { Certificate } from '../../types/certManager'
 import type { ManifestWork } from '../../types/manifestWork'
-import type { ClusterMeshStatus, K8sCondition } from '../../types/multiClusterMesh'
+import type { ClusterMeshStatus } from '../../types/multiClusterMesh'
+import type { K8sCondition } from '../../types/common'
 
 const CLUSTER_NAME_LABEL = 'mesh.open-cluster-management.io/cluster-name'
 const MESH_NAME_LABEL = 'mesh.open-cluster-management.io/mesh-name'
@@ -98,7 +99,7 @@ afterEach(() => rstest.clearAllMocks())
 // ---------------------------------------------------------------------------
 
 describe('TrustStatusCard — no issuer', () => {
-  it('renders the not-configured message and does not start any watches', () => {
+  it('renders the not-configured message (i18nKey) and does not start any watches', () => {
     render(<TrustStatusCard {...defaultProps} issuerName="" clusterStatuses={[]} />)
     expect(screen.getByText('Trust Status')).toBeInTheDocument()
     expect(screen.getByText('trustNotConfiguredMessage')).toBeInTheDocument()
@@ -279,20 +280,24 @@ describe('TrustStatusCard — search', () => {
   const certs = [makeCert('alpha-cluster', 'True'), makeCert('beta-cluster', 'True')]
   const mws = [makeMW('alpha-cluster', true, true), makeMW('beta-cluster', true, true)]
 
-  beforeEach(() => setupWatches(certs, mws))
+  beforeEach(() => {
+    setupWatches(certs, mws)
+    rstest.useFakeTimers()
+  })
+  afterEach(() => { rstest.useRealTimers() })
 
-  it('narrows results to the matching cluster', async () => {
-    const user = userEvent.setup()
+  it('narrows results to the matching cluster', () => {
     render(<TrustStatusCard {...defaultProps} clusterStatuses={clusters} />)
-    await user.type(screen.getByPlaceholderText('Filter by cluster name'), 'alpha')
+    fireEvent.change(screen.getByPlaceholderText('Filter by cluster name'), { target: { value: 'alpha' } })
+    act(() => { rstest.advanceTimersByTime(200) })
     expect(screen.getByText('alpha-cluster')).toBeInTheDocument()
     expect(screen.queryByText('beta-cluster')).not.toBeInTheDocument()
   })
 
-  it('shows no-match row when search has no results', async () => {
-    const user = userEvent.setup()
+  it('shows no-match row when search has no results', () => {
     render(<TrustStatusCard {...defaultProps} clusterStatuses={clusters} />)
-    await user.type(screen.getByPlaceholderText('Filter by cluster name'), 'zzznomatch')
+    fireEvent.change(screen.getByPlaceholderText('Filter by cluster name'), { target: { value: 'zzznomatch' } })
+    act(() => { rstest.advanceTimersByTime(200) })
     expect(screen.getByText('No clusters match the current filter.')).toBeInTheDocument()
   })
 })

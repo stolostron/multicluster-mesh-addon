@@ -1,4 +1,4 @@
-import type { FC } from 'react'
+import { memo, useMemo } from 'react'
 import { ChartDonut } from '@patternfly/react-charts/victory'
 import { useMeshTranslation } from '../utils/i18nUtils'
 
@@ -21,23 +21,23 @@ const colorScale = [
   'var(--pf-v6-chart-color-black-300, #d2d2d2)',
 ]
 
-export const StatusDonutChart: FC<StatusDonutChartProps> = ({ counts, subtitle }) => {
+export const StatusDonutChart = memo<StatusDonutChartProps>(({ counts, subtitle }) => {
   const { t } = useMeshTranslation()
   const total = counts.ready + counts.degraded + counts.notReady + counts.unknown
 
-  const data = [
+  const data = useMemo(() => [
     { x: t('Ready'), y: counts.ready },
     { x: t('Degraded'), y: counts.degraded },
     { x: t('Not Ready'), y: counts.notReady },
     { x: t('Unknown'), y: counts.unknown },
-  ]
+  ], [counts.ready, counts.degraded, counts.notReady, counts.unknown]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const legendData = [
+  const legendData = useMemo(() => [
     { name: t('{{count}} Ready', { count: counts.ready }) },
     { name: t('{{count}} Degraded', { count: counts.degraded }) },
     { name: t('{{count}} Not Ready', { count: counts.notReady }) },
     { name: t('{{count}} Unknown', { count: counts.unknown }) },
-  ]
+  ], [counts.ready, counts.degraded, counts.notReady, counts.unknown]) // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div style={{ width: '100%' }}>
@@ -56,4 +56,5 @@ export const StatusDonutChart: FC<StatusDonutChartProps> = ({ counts, subtitle }
       />
     </div>
   )
-}
+})
+StatusDonutChart.displayName = 'StatusDonutChart'

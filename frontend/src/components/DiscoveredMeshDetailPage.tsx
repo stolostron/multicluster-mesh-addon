@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import type { FC } from 'react'
 import { useParams, Link } from 'react-router-dom-v5-compat'
 import {
@@ -24,37 +24,40 @@ import {
   GridItem,
   Label,
   PageSection,
-  SearchInput,
   Spinner,
   Title,
-  ToggleGroup,
-  ToggleGroupItem,
   Tooltip,
 } from '@patternfly/react-core'
 import { useMultiClusterMeshes } from '../hooks/useMultiClusterMeshes'
 import { useDiscoveredControlPlanes } from '../hooks/useDiscoveredControlPlanes'
 import { useEnrichedControlPlanes } from '../hooks/useEnrichedControlPlanes'
-import { useManagedClusters } from '../hooks/useManagedClusters'
+import { useManagedClusterMap } from '../hooks/useManagedClusterMap'
 import type { EnrichedControlPlane } from '../types/istio'
 import type { K8sCondition } from '../types/common'
-import type { ManagedCluster } from '../types/managedCluster'
+import type { ClusterAvailability } from '../types/managedCluster'
 import { getClusterAvailability, availabilityColor, availabilityLabelKey } from '../types/managedCluster'
+import { oldestTimestamp } from '../utils/oldestTimestamp'
+import { worstConditions } from '../utils/worstConditions'
+import { clusterDetailLink } from '../utils/linkUtils'
 import { ControlPlanesCard } from './ControlPlanesCard'
-import { MeshStatus, getStatusRank, statusIcon } from './MeshStatus'
+import { MeshStatus, statusIcon } from './MeshStatus'
+import { VirtualFilterTable } from './VirtualFilterTable'
+import type { CategoryLabel, VirtualFilterColumn } from './VirtualFilterTable'
+import { useVirtualRows } from '../hooks/useVirtualRows'
 import { useMeshTranslation } from '../utils/i18nUtils'
 
-function aggregateStatus(planes: EnrichedControlPlane[]): K8sCondition[] | undefined {
-  let worstRank = -1
-  let worstConditions: K8sCondition[] | undefined
-  for (const cp of planes) {
-    const rank = getStatusRank(cp.status?.conditions)
-    if (rank > worstRank) {
-      worstRank = rank
-      worstConditions = cp.status?.conditions
-    }
-  }
-  return worstConditions
-}
+const CONDITION_COL_WIDTHS = ['12%', '12%', '14%', '10%', '12%', '25%', '15%']
+
+const discoveredClusterRowKey = (name: string) => name
+const discoveredClusterSearchMatch = (name: string, query: string) =>
+  name.toLowerCase().includes(query.toLowerCase())
+
+const DISCOVERED_CLUSTER_CATEGORIES: CategoryLabel[] = [
+  { key: 'all', label: 'All ({{count}})' },
+  { key: 'available', label: 'Available ({{count}})' },
+  { key: 'unavailable', label: 'Unavailable ({{count}})' },
+  { key: 'unreachable', label: 'Unreachable ({{count}})' },
+]
 
 function uniqueNetworks(planes: EnrichedControlPlane[]): string[] {
   const networks = new Set<string>()
@@ -64,24 +67,11 @@ function uniqueNetworks(planes: EnrichedControlPlane[]): string[] {
   return [...networks].sort()
 }
 
-function oldestTimestamp(planes: EnrichedControlPlane[]): string | undefined {
-  let oldest: string | undefined
-  for (const cp of planes) {
-    const ts = cp.metadata.creationTimestamp
-    if (ts && (!oldest || ts < oldest)) oldest = ts
-  }
-  return oldest
-}
-
-type ClusterAvailabilityCategory = 'all' | 'available' | 'unavailable' | 'unreachable'
-
 const DiscoveredMeshDetailContent: FC<{ meshID: string }> = ({ meshID }) => {
   const { t } = useMeshTranslation()
   const [showAllConditions, setShowAllConditions] = useState(false)
-  const [clusterFilter, setClusterFilter] = useState<ClusterAvailabilityCategory>('all')
-  const [clusterSearch, setClusterSearch] = useState('')
   const [mcms] = useMultiClusterMeshes()
-  const [managedClusters] = useManagedClusters()
+  const [managedClusterMap] = useManagedClusterMap()
   const { results: searchResults, loaded: searchLoaded, error: searchError } = useDiscoveredControlPlanes()
   const [enrichedPlanes, , enrichmentLoaded, enrichmentError] = useEnrichedControlPlanes(searchResults, mcms ?? [])
 
@@ -90,14 +80,6 @@ const DiscoveredMeshDetailContent: FC<{ meshID: string }> = ({ meshID }) => {
     [enrichedPlanes, meshID],
   )
 
-  const managedClusterMap = useMemo(() => {
-    const map = new Map<string, ManagedCluster>()
-    for (const mc of managedClusters ?? []) {
-      if (mc.metadata?.name) map.set(mc.metadata.name, mc)
-    }
-    return map
-  }, [managedClusters])
-
   const uniqueClusterNames = useMemo(() => {
     const names = new Set<string>()
     for (const cp of matchingPlanes) names.add(cp.clusterName)
@@ -105,26 +87,58 @@ const DiscoveredMeshDetailContent: FC<{ meshID: string }> = ({ meshID }) => {
   }, [matchingPlanes])
 
   const clusterAvailabilityMap = useMemo(() => {
-    const map = new Map<string, ClusterAvailabilityCategory>()
+    const map = new Map<string, ClusterAvailability>()
     for (const name of uniqueClusterNames) {
-      map.set(name, getClusterAvailability(managedClusterMap.get(name)) as ClusterAvailabilityCategory)
+      map.set(name, getClusterAvailability(managedClusterMap.get(name)))
     }
     return map
   }, [uniqueClusterNames, managedClusterMap])
 
-  const clusterCounts = useMemo(() => {
-    const result = { available: 0, unavailable: 0, unreachable: 0 }
-    clusterAvailabilityMap.forEach((cat) => { if (cat !== 'all') result[cat]++ })
-    return result
-  }, [clusterAvailabilityMap])
+  const discoveredClusterCategorize = useCallback(
+    (name: string) => clusterAvailabilityMap.get(name) ?? 'unreachable',
+    [clusterAvailabilityMap],
+  )
 
-  const filteredClusters = useMemo(() => {
-    return uniqueClusterNames.filter((name) => {
-      if (clusterFilter !== 'all' && clusterAvailabilityMap.get(name) !== clusterFilter) return false
-      if (clusterSearch && !name.toLowerCase().includes(clusterSearch.toLowerCase())) return false
-      return true
-    })
-  }, [uniqueClusterNames, clusterAvailabilityMap, clusterFilter, clusterSearch])
+  const clusterColumns = useMemo<VirtualFilterColumn<string>[]>(() => [
+    {
+      key: 'cluster',
+      label: 'Cluster',
+      render: (clusterName) => (
+        <Link to={clusterDetailLink(clusterName)}>{clusterName}</Link>
+      ),
+      width: '60%',
+    },
+    {
+      key: 'clusterStatus',
+      label: 'Cluster Status',
+      render: (clusterName) => {
+        const availability = clusterAvailabilityMap.get(clusterName) ?? 'unreachable'
+        return <Label color={availabilityColor(availability)} isCompact>{t(availabilityLabelKey(availability))}</Label>
+      },
+      width: '40%',
+    },
+  ], [clusterAvailabilityMap, t])
+
+  const worstConds = useMemo(() => worstConditions(matchingPlanes).conditions, [matchingPlanes])
+  const networks = useMemo(() => uniqueNetworks(matchingPlanes), [matchingPlanes])
+  const created = useMemo(() => oldestTimestamp(matchingPlanes), [matchingPlanes])
+
+  const hasConflict = useMemo(
+    () => enrichedPlanes.some((cp) => cp.managedBy && cp.meshID === meshID),
+    [enrichedPlanes, meshID],
+  )
+
+  const visibleConditions = useMemo(() => {
+    const all: { clusterName: string; cpName: string; condition: K8sCondition }[] = []
+    for (const cp of matchingPlanes) {
+      for (const c of cp.status?.conditions ?? []) {
+        all.push({ clusterName: cp.clusterName, cpName: cp.metadata.name, condition: c })
+      }
+    }
+    return showAllConditions ? all : all.filter((entry) => entry.condition.status !== 'True')
+  }, [matchingPlanes, showAllConditions])
+
+  const { visibleItems: visibleConditionRows, topSpacer: condTopSpacer, bottomSpacer: condBottomSpacer, containerRef: condContainerRef } = useVirtualRows(visibleConditions)
 
   const loaded = searchLoaded && enrichmentLoaded
 
@@ -162,23 +176,6 @@ const DiscoveredMeshDetailContent: FC<{ meshID: string }> = ({ meshID }) => {
     )
   }
 
-  const worstConditions = aggregateStatus(matchingPlanes)
-  const networks = uniqueNetworks(matchingPlanes)
-  const created = oldestTimestamp(matchingPlanes)
-
-  // Check for meshID conflict with managed meshes
-  const hasConflict = enrichedPlanes.some((cp) => cp.managedBy && cp.meshID === meshID)
-
-  const allConditions: { clusterName: string; cpName: string; condition: K8sCondition }[] = []
-  for (const cp of matchingPlanes) {
-    for (const c of cp.status?.conditions ?? []) {
-      allConditions.push({ clusterName: cp.clusterName, cpName: cp.metadata.name, condition: c })
-    }
-  }
-  const visibleConditions = showAllConditions
-    ? allConditions
-    : allConditions.filter((entry) => entry.condition.status !== 'True')
-
   const networkDisplay = networks.length === 0
     ? '-'
     : networks.length <= 2
@@ -196,6 +193,7 @@ const DiscoveredMeshDetailContent: FC<{ meshID: string }> = ({ meshID }) => {
           <BreadcrumbItem>
             <Link to="/fleet-mesh/meshes">{t('Meshes')}</Link>
           </BreadcrumbItem>
+          <BreadcrumbItem>{t('Discovered')}</BreadcrumbItem>
           <BreadcrumbItem isActive>{meshID}</BreadcrumbItem>
         </Breadcrumb>
         <Flex alignItems={{ default: 'alignItemsCenter' }} style={{ marginTop: '1rem' }}>
@@ -203,10 +201,7 @@ const DiscoveredMeshDetailContent: FC<{ meshID: string }> = ({ meshID }) => {
             <Title headingLevel="h1">{meshID}</Title>
           </FlexItem>
           <FlexItem>
-            <MeshStatus conditions={worstConditions} conditionType="Ready" />
-          </FlexItem>
-          <FlexItem>
-            <Label color="purple">{t('Discovered')}</Label>
+            <MeshStatus conditions={worstConds} conditionType="Ready" />
           </FlexItem>
         </Flex>
       </PageSection>
@@ -266,76 +261,16 @@ const DiscoveredMeshDetailContent: FC<{ meshID: string }> = ({ meshID }) => {
             <Card isCompact>
               <CardTitle><strong>{t('Clusters ({{count}})', { count: uniqueClusterNames.length })}</strong></CardTitle>
               <CardBody>
-                <Flex style={{ marginBottom: '1rem' }}>
-                  <FlexItem>
-                    <ToggleGroup>
-                      <ToggleGroupItem
-                        text={t('All ({{count}})', { count: uniqueClusterNames.length })}
-                        isSelected={clusterFilter === 'all'}
-                        onChange={() => setClusterFilter('all')}
-                      />
-                      <ToggleGroupItem
-                        text={t('Available ({{count}})', { count: clusterCounts.available })}
-                        isSelected={clusterFilter === 'available'}
-                        onChange={() => setClusterFilter('available')}
-                      />
-                      <ToggleGroupItem
-                        text={t('Unavailable ({{count}})', { count: clusterCounts.unavailable })}
-                        isSelected={clusterFilter === 'unavailable'}
-                        onChange={() => setClusterFilter('unavailable')}
-                      />
-                      <ToggleGroupItem
-                        text={t('Unreachable ({{count}})', { count: clusterCounts.unreachable })}
-                        isSelected={clusterFilter === 'unreachable'}
-                        onChange={() => setClusterFilter('unreachable')}
-                      />
-                    </ToggleGroup>
-                  </FlexItem>
-                  <FlexItem grow={{ default: 'grow' }}>
-                    <SearchInput
-                      placeholder={t('Filter by cluster name')}
-                      value={clusterSearch}
-                      onChange={(_event, value) => setClusterSearch(value)}
-                      onClear={() => setClusterSearch('')}
-                    />
-                  </FlexItem>
-                </Flex>
-
-                <div style={{ maxHeight: '400px', overflowY: 'auto' }}>
-                  <table className="pf-v6-c-table pf-m-grid-md pf-m-compact" role="grid">
-                    <thead className="pf-v6-c-table__thead" style={{ position: 'sticky', top: 0, zIndex: 1 }}>
-                      <tr className="pf-v6-c-table__tr">
-                        <th className="pf-v6-c-table__th" scope="col">{t('Cluster')}</th>
-                        <th className="pf-v6-c-table__th" scope="col">{t('Cluster Status')}</th>
-                      </tr>
-                    </thead>
-                    <tbody className="pf-v6-c-table__tbody">
-                      {filteredClusters.length === 0 ? (
-                        <tr className="pf-v6-c-table__tr">
-                          <td className="pf-v6-c-table__td" colSpan={2} style={{ textAlign: 'center' }}>
-                            {t('No clusters match the current filter.')}
-                          </td>
-                        </tr>
-                      ) : (
-                        filteredClusters.map((clusterName) => {
-                          const availability = clusterAvailabilityMap.get(clusterName) ?? 'unreachable'
-                          return (
-                            <tr className="pf-v6-c-table__tr" key={clusterName}>
-                              <td className="pf-v6-c-table__td">
-                                <Link to={`/multicloud/infrastructure/clusters/details/${clusterName}/${clusterName}/overview`}>
-                                  {clusterName}
-                                </Link>
-                              </td>
-                              <td className="pf-v6-c-table__td">
-                                <Label color={availabilityColor(availability)} isCompact>{t(availabilityLabelKey(availability))}</Label>
-                              </td>
-                            </tr>
-                          )
-                        })
-                      )}
-                    </tbody>
-                  </table>
-                </div>
+                <VirtualFilterTable
+                  categorize={discoveredClusterCategorize}
+                  categoryLabels={DISCOVERED_CLUSTER_CATEGORIES}
+                  columns={clusterColumns}
+                  emptyMessage="No clusters match the current filter."
+                  items={uniqueClusterNames}
+                  rowKey={discoveredClusterRowKey}
+                  searchMatch={discoveredClusterSearchMatch}
+                  searchPlaceholder="Filter by cluster name"
+                />
               </CardBody>
             </Card>
           </GridItem>
@@ -344,7 +279,7 @@ const DiscoveredMeshDetailContent: FC<{ meshID: string }> = ({ meshID }) => {
             <ControlPlanesCard planes={matchingPlanes} />
           </GridItem>
 
-          {allConditions.length > 0 && (
+          {matchingPlanes.some((cp) => cp.status?.conditions?.length) && (
             <GridItem span={12}>
               <Card isCompact>
                 <CardTitle>
@@ -366,34 +301,45 @@ const DiscoveredMeshDetailContent: FC<{ meshID: string }> = ({ meshID }) => {
                       <EmptyStateBody>{t('No issues detected.')}</EmptyStateBody>
                     </EmptyState>
                   ) : (
-                    <table className="pf-v6-c-table pf-m-grid-md pf-m-compact" role="grid">
+                    <>
+                    <table className="pf-v6-c-table pf-m-grid-md pf-m-compact" role="grid" style={{ tableLayout: 'fixed' }}>
                       <thead className="pf-v6-c-table__thead">
                         <tr className="pf-v6-c-table__tr">
-                          <th className="pf-v6-c-table__th" scope="col">{t('Cluster')}</th>
-                          <th className="pf-v6-c-table__th" scope="col">{t('Control Plane')}</th>
-                          <th className="pf-v6-c-table__th" scope="col">{t('Type')}</th>
-                          <th className="pf-v6-c-table__th" scope="col">{t('Status')}</th>
-                          <th className="pf-v6-c-table__th" scope="col">{t('Reason')}</th>
-                          <th className="pf-v6-c-table__th" scope="col">{t('Message')}</th>
-                          <th className="pf-v6-c-table__th" scope="col">{t('Last Transition')}</th>
+                          <th className="pf-v6-c-table__th" scope="col" style={{ width: CONDITION_COL_WIDTHS[0] }}>{t('Cluster')}</th>
+                          <th className="pf-v6-c-table__th" scope="col" style={{ width: CONDITION_COL_WIDTHS[1] }}>{t('Control Plane')}</th>
+                          <th className="pf-v6-c-table__th" scope="col" style={{ width: CONDITION_COL_WIDTHS[2] }}>{t('Type')}</th>
+                          <th className="pf-v6-c-table__th" scope="col" style={{ width: CONDITION_COL_WIDTHS[3] }}>{t('Status')}</th>
+                          <th className="pf-v6-c-table__th" scope="col" style={{ width: CONDITION_COL_WIDTHS[4] }}>{t('Reason')}</th>
+                          <th className="pf-v6-c-table__th" scope="col" style={{ width: CONDITION_COL_WIDTHS[5] }}>{t('Message')}</th>
+                          <th className="pf-v6-c-table__th" scope="col" style={{ width: CONDITION_COL_WIDTHS[6] }}>{t('Last Transition')}</th>
                         </tr>
                       </thead>
-                      <tbody className="pf-v6-c-table__tbody">
-                        {visibleConditions.map((entry, i) => (
-                          <tr className="pf-v6-c-table__tr" key={`${entry.clusterName}-${entry.cpName}-${entry.condition.type}-${i}`}>
-                            <td className="pf-v6-c-table__td">{entry.clusterName}</td>
-                            <td className="pf-v6-c-table__td">{entry.cpName}</td>
-                            <td className="pf-v6-c-table__td">{entry.condition.type}</td>
-                            <td className="pf-v6-c-table__td">{statusIcon(entry.condition.status)}</td>
-                            <td className="pf-v6-c-table__td">{entry.condition.reason ?? '-'}</td>
-                            <td className="pf-v6-c-table__td">{entry.condition.message ?? '-'}</td>
-                            <td className="pf-v6-c-table__td">
-                              {entry.condition.lastTransitionTime ? <Timestamp timestamp={entry.condition.lastTransitionTime} /> : '-'}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
                     </table>
+                    <div ref={condContainerRef} style={{ maxHeight: '368px', overflowY: 'auto' }}>
+                      <table className="pf-v6-c-table pf-m-grid-md pf-m-compact" role="grid" style={{ tableLayout: 'fixed' }}>
+                        <colgroup>
+                          {CONDITION_COL_WIDTHS.map((w, i) => <col key={i} style={{ width: w }} />)}
+                        </colgroup>
+                        <tbody className="pf-v6-c-table__tbody">
+                          {condTopSpacer > 0 && <tr><td colSpan={7} style={{ height: condTopSpacer, padding: 0, border: 'none' }} /></tr>}
+                          {visibleConditionRows.map((entry, i) => (
+                            <tr className="pf-v6-c-table__tr" key={`${entry.clusterName}-${entry.cpName}-${entry.condition.type}-${i}`}>
+                              <td className="pf-v6-c-table__td" style={{ width: CONDITION_COL_WIDTHS[0] }}>{entry.clusterName}</td>
+                              <td className="pf-v6-c-table__td" style={{ width: CONDITION_COL_WIDTHS[1] }}>{entry.cpName}</td>
+                              <td className="pf-v6-c-table__td" style={{ width: CONDITION_COL_WIDTHS[2] }}>{entry.condition.type}</td>
+                              <td className="pf-v6-c-table__td" style={{ width: CONDITION_COL_WIDTHS[3] }}>{statusIcon(entry.condition.status)}</td>
+                              <td className="pf-v6-c-table__td" style={{ width: CONDITION_COL_WIDTHS[4] }}>{entry.condition.reason ?? '-'}</td>
+                              <td className="pf-v6-c-table__td" style={{ width: CONDITION_COL_WIDTHS[5], overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{entry.condition.message ?? '-'}</td>
+                              <td className="pf-v6-c-table__td" style={{ width: CONDITION_COL_WIDTHS[6] }}>
+                                {entry.condition.lastTransitionTime ? <Timestamp timestamp={entry.condition.lastTransitionTime} /> : '-'}
+                              </td>
+                            </tr>
+                          ))}
+                          {condBottomSpacer > 0 && <tr><td colSpan={7} style={{ height: condBottomSpacer, padding: 0, border: 'none' }} /></tr>}
+                        </tbody>
+                      </table>
+                    </div>
+                    </>
                   )}
                 </CardBody>
               </Card>

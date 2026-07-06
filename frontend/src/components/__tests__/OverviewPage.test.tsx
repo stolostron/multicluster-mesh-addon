@@ -2,30 +2,15 @@ import { render, screen } from '@testing-library/react'
 import OverviewPage from '../OverviewPage'
 import { useFleetMeshItems } from '../../hooks/useFleetMeshItems'
 import type { UseFleetMeshItemsResult } from '../../hooks/useFleetMeshItems'
-import type { MultiClusterMesh } from '../../types/multiClusterMesh'
-import type { EnrichedControlPlane } from '../../types/istio'
 import type { FleetMeshItem } from '../../types/fleetMesh'
+import { makeMesh, makeEnrichedCP } from '../../__fixtures__/testFactories'
 
 rstest.mock('../../hooks/useFleetMeshItems', { mock: true })
-
-const makeMesh = (overrides: Partial<MultiClusterMesh> = {}): MultiClusterMesh => ({
-  apiVersion: 'mesh.open-cluster-management.io/v1alpha1',
-  kind: 'MultiClusterMesh',
-  metadata: { name: 'test-mesh', namespace: 'mesh-system' },
-  spec: { clusterSet: 'global' },
-  ...overrides,
-})
-
-const makeEnrichedCP = (overrides: Partial<EnrichedControlPlane> = {}): EnrichedControlPlane => ({
-  metadata: { name: 'default' },
-  clusterName: 'cluster-a',
-  ...overrides,
-})
 
 const makeItem = (overrides: Partial<FleetMeshItem> = {}): FleetMeshItem => ({
   metadata: { name: 'test-mesh' },
   kind: 'managed',
-  detailLink: '/fleet-mesh/meshes/mesh-system/test-mesh',
+  detailLink: '/fleet-mesh/meshes/managed/mesh-system/test-mesh',
   clusterCount: 1,
   statusRank: 0,
   conditions: [{ type: 'Ready', status: 'True' }],
@@ -72,27 +57,27 @@ describe('OverviewPage', () => {
     expect(screen.getByLabelText('Loading recent issues')).toBeInTheDocument()
   })
 
-  it('shows Meshes card title with count from items when enrichmentLoaded', () => {
+  it('renders Meshes card when enrichment is loaded', () => {
     const items = [makeItem(), makeItem({ metadata: { name: 'mesh-2' } })]
     mockDefaults({ items, enrichmentLoaded: true })
     render(<OverviewPage />)
     expect(screen.getByText('Meshes')).toBeInTheDocument()
   })
 
-  it('shows Meshes card title with count from mcms when enrichmentLoaded is false', () => {
+  it('renders Meshes card before enrichment using MCM data', () => {
     const mcms = [makeMesh(), makeMesh({ metadata: { name: 'mesh-2', namespace: 'mesh-system' } })]
     mockDefaults({ mcms, enrichmentLoaded: false, items: [] })
     render(<OverviewPage />)
     expect(screen.getByText('Meshes')).toBeInTheDocument()
   })
 
-  it('shows Meshes title without count while loading', () => {
+  it('renders Meshes card while MCMs are loading', () => {
     mockDefaults({ mcmsLoaded: false })
     render(<OverviewPage />)
     expect(screen.getByText('Meshes')).toBeInTheDocument()
   })
 
-  it('shows Control Planes card title with count when loaded', () => {
+  it('renders Control Planes card when search is loaded', () => {
     const enrichedPlanes = [
       makeEnrichedCP({ clusterName: 'cluster-a' }),
       makeEnrichedCP({ clusterName: 'cluster-b', metadata: { name: 'cp-2' } }),
@@ -199,7 +184,7 @@ describe('OverviewPage', () => {
     render(<OverviewPage />)
     expect(screen.getByText('Clusters Not Ready')).toBeInTheDocument()
     const link = screen.getByRole('link', { name: 'test-mesh' })
-    expect(link).toHaveAttribute('href', '/fleet-mesh/meshes/mesh-system/test-mesh')
+    expect(link).toHaveAttribute('href', '/fleet-mesh/meshes/managed/mesh-system/test-mesh')
   })
 
   it('shows control plane issues in recent issues card', () => {
@@ -218,7 +203,7 @@ describe('OverviewPage', () => {
     render(<OverviewPage />)
     expect(screen.getByText('Reconcile Error')).toBeInTheDocument()
     const link = screen.getByRole('link', { name: 'cluster-a / default' })
-    expect(link).toHaveAttribute('href', '/fleet-mesh/control-planes/cluster-a/default')
+    expect(link).toHaveAttribute('href', '/fleet-mesh/control-planes/standalone/cluster-a/default')
   })
 
   it('shows per-cluster mesh issues in recent issues card', () => {
@@ -241,7 +226,7 @@ describe('OverviewPage', () => {
     render(<OverviewPage />)
     expect(screen.getByText('Reconcile Error')).toBeInTheDocument()
     const link = screen.getByRole('link', { name: 'test-mesh / cluster-a' })
-    expect(link).toHaveAttribute('href', '/fleet-mesh/meshes/mesh-system/test-mesh')
+    expect(link).toHaveAttribute('href', '/fleet-mesh/meshes/managed/mesh-system/test-mesh')
   })
 
   it('shows both mesh and control plane issues together sorted by time', () => {
@@ -272,9 +257,9 @@ describe('OverviewPage', () => {
     expect(screen.getByText('Reconcile Error')).toBeInTheDocument()
 
     const meshLink = screen.getByRole('link', { name: 'test-mesh' })
-    expect(meshLink).toHaveAttribute('href', '/fleet-mesh/meshes/mesh-system/test-mesh')
+    expect(meshLink).toHaveAttribute('href', '/fleet-mesh/meshes/managed/mesh-system/test-mesh')
     const cpLink = screen.getByRole('link', { name: 'cluster-a / default' })
-    expect(cpLink).toHaveAttribute('href', '/fleet-mesh/control-planes/cluster-a/default')
+    expect(cpLink).toHaveAttribute('href', '/fleet-mesh/control-planes/standalone/cluster-a/default')
 
     const rows = screen.getAllByRole('row')
     const dataRows = rows.filter((r) => r.querySelector('td'))
