@@ -12,24 +12,24 @@ spec:
     # Namespace where Istio will be installed on each cluster
     namespace: istio-system
 
-  # Sail Operator installation configuration
+  # Operator installation configuration (overrides the OSSM kubebuilder defaults)
   operator:
-    # Namespace where the Sail Operator will be installed
-    # Defaults to "openshift-operators" on OpenShift, "sail-operator" on vanilla Kubernetes
+    # OLM package name
+    name: sailoperator
+
+    # Namespace where the operator will be installed
     namespace: sail-operator
 
     # OLM subscription channel
     channel: stable
 
     # CatalogSource name
-    # Defaults to "redhat-operators" on OpenShift, "operatorhubio-catalog" on vanilla Kubernetes
     source: operatorhubio-catalog
 
     # CatalogSource namespace
-    # Defaults to "openshift-marketplace" on OpenShift, "olm" on vanilla Kubernetes
     sourceNamespace: olm
 
-    # Specific operator version (optional - pins to a specific CSV)
+    # Specific operator version (optional, pins to a specific CSV)
     # startingCSV: sail-operator.v1.23.0
 
     # Install plan approval strategy

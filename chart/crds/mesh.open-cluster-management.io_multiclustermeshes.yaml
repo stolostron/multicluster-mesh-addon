@@ -59,7 +59,8 @@ spec:
                     type: string
                 type: object
               operator:
-                description: Operator defines the Sail Operator installation configuration
+                description: Operator defines the service mesh operator installation
+                  configuration
                 properties:
                   channel:
                     default: stable
@@ -74,20 +75,22 @@ spec:
                     - Automatic
                     - Manual
                     type: string
+                  name:
+                    default: servicemeshoperator3
+                    description: Name is the OLM package name of the operator
+                    type: string
                   namespace:
-                    description: |-
-                      Namespace is the namespace where the Sail Operator will be installed
-                      Defaults to "openshift-operators" on OpenShift, "sail-operator" on vanilla Kubernetes
+                    default: openshift-operators
+                    description: Namespace is the namespace where the operator will
+                      be installed
                     type: string
                   source:
-                    description: |-
-                      Source is the CatalogSource name
-                      Defaults to "redhat-operators" on OpenShift, "operatorhubio-catalog" on vanilla Kubernetes
+                    default: redhat-operators
+                    description: Source is the CatalogSource name
                     type: string
                   sourceNamespace:
-                    description: |-
-                      SourceNamespace is the namespace of the CatalogSource
-                      Defaults to "openshift-marketplace" on OpenShift, "olm" on vanilla Kubernetes
+                    default: openshift-marketplace
+                    description: SourceNamespace is the namespace of the CatalogSource
                     type: string
                   startingCSV:
                     description: |-

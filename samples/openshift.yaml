@@ -11,7 +11,7 @@ spec:
   controlPlane:
     namespace: istio-system
 
-  # OpenShift-specific operator configuration
+  # OSSM operator configuration (these values match the kubebuilder defaults)
   operator:
     # On OpenShift, the operator is typically installed in openshift-operators
     namespace: openshift-operators
