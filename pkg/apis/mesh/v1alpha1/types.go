@@ -28,6 +28,13 @@ func (m *MultiClusterMesh) GetTrustDomain() string {
 	return m.Name
 }
 
+// IsNoneMode returns true when the controller should skip mesh resource creation
+// and only handle foundational plumbing (operator, MSA, trust certs).
+func (m *MultiClusterMesh) IsNoneMode() bool {
+	return m.Spec.ControlPlane.TemplateSource != nil &&
+		m.Spec.ControlPlane.TemplateSource.None != nil
+}
+
 // GetControlPlaneNamespace returns the control plane namespace, defaulting to "istio-system".
 func (m *MultiClusterMesh) GetControlPlaneNamespace() string {
 	if m.Spec.ControlPlane.Namespace == "" {
@@ -106,10 +113,110 @@ type ControlPlaneConfig struct {
 	// +kubebuilder:default="istio-system"
 	Namespace string `json:"namespace,omitempty"`
 
+	// TemplateSource defines where the Istio CR template comes from.
+	// If omitted, a built-in basic template is used (suitable for demos).
+	// +optional
+	TemplateSource *TemplateSourceConfig `json:"templateSource,omitempty"`
+
 	// Version pins the Istio control plane version (e.g. "v1.28.8").
 	// If empty, the operator selects its default version.
 	// +optional
 	Version string `json:"version,omitempty"`
+}
+
+// TemplateSourceConfig defines the source of the Istio CR template.
+// Exactly one field must be set. The controller deep-merges its own
+// managed fields (meshID, network, trustDomain, etc.) on top of
+// whatever the source provides.
+// +kubebuilder:validation:XValidation:rule="(has(self.basic) ? 1 : 0) + (has(self.none) ? 1 : 0) + (has(self.configMapRef) ? 1 : 0) + (has(self.git) ? 1 : 0) == 1",message="exactly one of basic, none, configMapRef, or git must be set"
+type TemplateSourceConfig struct {
+	// Basic uses the controller's built-in Istio CR template with sensible
+	// defaults (DNS proxy metadata enabled). Suitable for demos and quick starts.
+	// This is also the behavior when templateSource is omitted entirely.
+	// +optional
+	Basic *BasicTemplateSource `json:"basic,omitempty"`
+
+	// ConfigMapRef references a ConfigMap containing the Istio CR template YAML.
+	// The ConfigMap must be in the same namespace as the MultiClusterMesh resource.
+	// +optional
+	ConfigMapRef *ConfigMapTemplateRef `json:"configMapRef,omitempty"`
+
+	// Git pulls the Istio CR template from a git repository.
+	// +optional
+	Git *GitTemplateSource `json:"git,omitempty"`
+
+	// None signals the controller to skip mesh resource creation
+	// (IstioCNI, Istio CR, gateway, remote secrets). Only foundational
+	// plumbing is reconciled: operator install, MSA, and trust certs.
+	// Use this when managing mesh resources externally (e.g. via ArgoCD).
+	// +optional
+	None *NoneTemplateSource `json:"none,omitempty"`
+}
+
+// BasicTemplateSource selects the controller's built-in Istio CR template.
+type BasicTemplateSource struct{}
+
+// NoneTemplateSource is a sentinel type indicating the controller should skip
+// mesh resource creation. The controller still handles operator install, MSA,
+// and trust certificate distribution.
+type NoneTemplateSource struct{}
+
+// ConfigMapTemplateRef references a ConfigMap containing Istio CR template YAML.
+type ConfigMapTemplateRef struct {
+	// Key is the ConfigMap data key containing the Istio CR YAML.
+	// +optional
+	// +kubebuilder:default="istio.yaml"
+	Key string `json:"key,omitempty"`
+
+	// Name is the ConfigMap name.
+	// +required
+	// +kubebuilder:validation:MinLength=1
+	Name string `json:"name"`
+}
+
+// GitTemplateSource pulls an Istio CR template from a git repository.
+type GitTemplateSource struct {
+	// Path is the file path within the repository to the Istio CR YAML.
+	// +required
+	// +kubebuilder:validation:MinLength=1
+	Path string `json:"path"`
+
+	// Ref specifies the git reference to resolve. Defaults to branch "main".
+	// +optional
+	Ref *GitRef `json:"ref,omitempty"`
+
+	// SecretRef references a Secret containing git credentials for private repos.
+	// For HTTPS: username + password (or token). For SSH: ssh-privatekey + known_hosts.
+	// +optional
+	SecretRef *SecretRef `json:"secretRef,omitempty"`
+
+	// URL is the git repository URL.
+	// +required
+	// +kubebuilder:validation:MinLength=1
+	URL string `json:"url"`
+}
+
+// GitRef specifies a git reference to resolve.
+type GitRef struct {
+	// Branch name to track.
+	// +optional
+	Branch string `json:"branch,omitempty"`
+
+	// Commit SHA to pin to.
+	// +optional
+	Commit string `json:"commit,omitempty"`
+
+	// Tag name to track.
+	// +optional
+	Tag string `json:"tag,omitempty"`
+}
+
+// SecretRef references a Secret by name.
+type SecretRef struct {
+	// Name of the Secret.
+	// +required
+	// +kubebuilder:validation:MinLength=1
+	Name string `json:"name"`
 }
 
 // GatewayServiceType defines the Kubernetes Service type for the east-west gateway
@@ -310,6 +417,10 @@ const (
 
 	// ReasonReconcileError indicates an error occurred during reconciliation
 	ReasonReconcileError = "ReconcileError"
+
+	// ReasonTemplateSourceUnavailable indicates the Istio CR template source
+	// could not be resolved (ConfigMap missing, git clone failed, invalid YAML, etc.)
+	ReasonTemplateSourceUnavailable = "TemplateSourceUnavailable"
 )
 
 // MultiClusterMeshStatus defines the observed state of MultiClusterMesh

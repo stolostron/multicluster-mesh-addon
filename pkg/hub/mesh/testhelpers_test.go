@@ -1,14 +1,15 @@
 package mesh
 
 import (
+	meshv1alpha1 "github.com/stolostron/multicluster-mesh-addon/pkg/apis/mesh/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	clusterv1 "open-cluster-management.io/api/cluster/v1"
 	clusterv1beta2 "open-cluster-management.io/api/cluster/v1beta2"
 	workv1 "open-cluster-management.io/api/work/v1"
-
-	meshv1alpha1 "github.com/stolostron/multicluster-mesh-addon/pkg/apis/mesh/v1alpha1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
 
 func newTestScheme() *runtime.Scheme {
@@ -41,6 +42,14 @@ func newTestCluster(name string) *clusterv1.ManagedCluster {
 	return &clusterv1.ManagedCluster{
 		ObjectMeta: metav1.ObjectMeta{Name: name},
 	}
+}
+
+func newTestReconciler(scheme *runtime.Scheme, objs ...client.Object) *Reconciler {
+	builder := fake.NewClientBuilder().WithScheme(scheme)
+	if len(objs) > 0 {
+		builder = builder.WithObjects(objs...).WithStatusSubresource(objs...)
+	}
+	return &Reconciler{Client: builder.Build(), Scheme: scheme, templateCache: newTemplateCache()}
 }
 
 func newTestClusterWithURL(name, clusterSet, apiServerURL string) *clusterv1.ManagedCluster {

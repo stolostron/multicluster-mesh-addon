@@ -57,6 +57,90 @@ spec:
                     description: Namespace is the namespace where Istio will be installed
                       on each cluster
                     type: string
+                  templateSource:
+                    description: |-
+                      TemplateSource defines where the Istio CR template comes from.
+                      If omitted, a built-in basic template is used (suitable for demos).
+                    properties:
+                      basic:
+                        description: |-
+                          Basic uses the controller's built-in Istio CR template with sensible
+                          defaults (DNS proxy metadata enabled). Suitable for demos and quick starts.
+                          This is also the behavior when templateSource is omitted entirely.
+                        type: object
+                      configMapRef:
+                        description: |-
+                          ConfigMapRef references a ConfigMap containing the Istio CR template YAML.
+                          The ConfigMap must be in the same namespace as the MultiClusterMesh resource.
+                        properties:
+                          key:
+                            default: istio.yaml
+                            description: Key is the ConfigMap data key containing
+                              the Istio CR YAML.
+                            type: string
+                          name:
+                            description: Name is the ConfigMap name.
+                            minLength: 1
+                            type: string
+                        required:
+                        - name
+                        type: object
+                      git:
+                        description: Git pulls the Istio CR template from a git repository.
+                        properties:
+                          path:
+                            description: Path is the file path within the repository
+                              to the Istio CR YAML.
+                            minLength: 1
+                            type: string
+                          ref:
+                            description: Ref specifies the git reference to resolve.
+                              Defaults to branch "main".
+                            properties:
+                              branch:
+                                description: Branch name to track.
+                                type: string
+                              commit:
+                                description: Commit SHA to pin to.
+                                type: string
+                              tag:
+                                description: Tag name to track.
+                                type: string
+                            type: object
+                          secretRef:
+                            description: |-
+                              SecretRef references a Secret containing git credentials for private repos.
+                              For HTTPS: username + password (or token). For SSH: ssh-privatekey + known_hosts.
+                            properties:
+                              name:
+                                description: Name of the Secret.
+                                minLength: 1
+                                type: string
+                            required:
+                            - name
+                            type: object
+                          url:
+                            description: URL is the git repository URL.
+                            minLength: 1
+                            type: string
+                        required:
+                        - path
+                        - url
+                        type: object
+                      none:
+                        description: |-
+                          None signals the controller to skip mesh resource creation
+                          (IstioCNI, Istio CR, gateway, remote secrets). Only foundational
+                          plumbing is reconciled: operator install, MSA, and trust certs.
+                          Use this when managing mesh resources externally (e.g. via ArgoCD).
+                        type: object
+                    type: object
+                    x-kubernetes-validations:
+                    - message: exactly one of basic, none, configMapRef, or git must
+                        be set
+                      rule: '(has(self.basic) ? 1 : 0) + (has(self.none) ? 1 : 0)
+                        + (has(self.configMapRef) ? 1 : 0) + (has(self.git) ? 1 :
+                        0) == 1'
                   version:
                     description: |-
                       Version pins the Istio control plane version (e.g. "v1.28.8").

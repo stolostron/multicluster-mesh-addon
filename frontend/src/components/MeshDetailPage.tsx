@@ -29,7 +29,7 @@ import {
   Title,
   Tooltip,
 } from '@patternfly/react-core'
-import type { MultiClusterMesh, ClusterMeshStatus } from '../types/multiClusterMesh'
+import type { MultiClusterMesh, ClusterMeshStatus, TemplateSourceConfig } from '../types/multiClusterMesh'
 import type { K8sCondition } from '../types/common'
 import { multiClusterMeshGroupVersionKind } from '../types/multiClusterMesh'
 import { useMultiClusterMeshes } from '../hooks/useMultiClusterMeshes'
@@ -51,6 +51,15 @@ function conditionMessage(condition: K8sCondition): string {
   if (condition.message) return condition.message
   if (condition.reason) return condition.reason
   return condition.status
+}
+
+function templateSourceLabel(ts?: TemplateSourceConfig): string {
+  if (!ts) return 'Basic (default)'
+  if (ts.basic) return 'Basic'
+  if (ts.configMapRef) return `ConfigMap: ${ts.configMapRef.name}`
+  if (ts.git) return `Git: ${ts.git.url}`
+  if (ts.none) return 'None (externally managed)'
+  return 'Basic (default)'
 }
 
 type ClusterCategory = 'ready' | 'notReady' | 'unknown'
@@ -289,6 +298,12 @@ const MeshDetailContent: FC<{ ns: string; name: string }> = ({ ns, name }) => {
                     <DescriptionListTerm><strong>{t('Control Plane Namespace')}</strong></DescriptionListTerm>
                     <DescriptionListDescription>
                       {spec.controlPlane?.namespace || 'istio-system'}
+                    </DescriptionListDescription>
+                  </DescriptionListGroup>
+                  <DescriptionListGroup>
+                    <DescriptionListTerm><strong>{t('Template Source')}</strong></DescriptionListTerm>
+                    <DescriptionListDescription>
+                      {templateSourceLabel(spec.controlPlane?.templateSource)}
                     </DescriptionListDescription>
                   </DescriptionListGroup>
                   <DescriptionListGroup>

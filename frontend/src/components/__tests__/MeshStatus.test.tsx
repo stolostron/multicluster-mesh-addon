@@ -43,6 +43,7 @@ describe('MeshStatus', () => {
       ['ManifestWorkCreated', 'Installing'],
       ['MissingProductClaim', 'Missing Product Claim'],
       ['ReconcileError', 'Reconcile Error'],
+      ['TemplateSourceUnavailable', 'Template Source Unavailable'],
     ]
 
     test.each(cases)('maps reason %s to "%s"', (reason, label) => {
@@ -95,6 +96,25 @@ describe('MeshStatus', () => {
     ]
     render(<MeshStatus conditions={conditions} conditionType="OperatorInstalled" />)
     expect(screen.getByText('OperatorInstalled')).toBeInTheDocument()
+  })
+
+  it('shows N/A when a non-default conditionType is absent from conditions', () => {
+    const conditions: K8sCondition[] = [
+      { type: 'OperatorInstalled', status: 'True' },
+    ]
+    render(<MeshStatus conditions={conditions} conditionType="ControlPlaneReady" />)
+    expect(screen.getByText('N/A')).toBeInTheDocument()
+  })
+
+  it('shows N/A for all mesh resource conditions in None mode', () => {
+    const conditions: K8sCondition[] = [
+      { type: 'OperatorInstalled', status: 'True' },
+    ]
+    for (const type of ['ControlPlaneReady', 'GatewayReady', 'DiscoveryReady']) {
+      const { unmount } = render(<MeshStatus conditions={conditions} conditionType={type} />)
+      expect(screen.getByText('N/A')).toBeInTheDocument()
+      unmount()
+    }
   })
 
   it('shows Healthy when all non-target conditions are True', () => {

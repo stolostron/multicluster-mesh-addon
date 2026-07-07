@@ -69,16 +69,39 @@ const (
 // Reconciler reconciles MultiClusterMesh resources
 type Reconciler struct {
 	client.Client
-	Scheme      *runtime.Scheme
-	workApplier *applier.WorkApplier
+	Scheme        *runtime.Scheme
+	templateCache *templateCache
+	workApplier   *applier.WorkApplier
 }
 
 // RegisterController registers the MultiClusterMesh controller with the manager
 func RegisterController(mgr manager.Manager) error {
-	if err := mgr.GetFieldIndexer().IndexField(context.Background(), &meshv1alpha1.MultiClusterMesh{}, "spec.clusterSet", func(obj client.Object) []string {
+	indexer := mgr.GetFieldIndexer()
+
+	if err := indexer.IndexField(context.Background(), &meshv1alpha1.MultiClusterMesh{}, "spec.clusterSet", func(obj client.Object) []string {
 		return []string{obj.(*meshv1alpha1.MultiClusterMesh).Spec.ClusterSet}
 	}); err != nil {
-		return fmt.Errorf("failed to create field index: %w", err)
+		return fmt.Errorf("failed to create clusterSet field index: %w", err)
+	}
+
+	if err := indexer.IndexField(context.Background(), &meshv1alpha1.MultiClusterMesh{}, "spec.controlPlane.templateSource.configMapRef.name", func(obj client.Object) []string {
+		mesh := obj.(*meshv1alpha1.MultiClusterMesh)
+		if mesh.Spec.ControlPlane.TemplateSource == nil || mesh.Spec.ControlPlane.TemplateSource.ConfigMapRef == nil {
+			return nil
+		}
+		return []string{mesh.Spec.ControlPlane.TemplateSource.ConfigMapRef.Name}
+	}); err != nil {
+		return fmt.Errorf("failed to create configMapRef field index: %w", err)
+	}
+
+	if err := indexer.IndexField(context.Background(), &meshv1alpha1.MultiClusterMesh{}, "spec.controlPlane.templateSource.git.secretRef.name", func(obj client.Object) []string {
+		mesh := obj.(*meshv1alpha1.MultiClusterMesh)
+		if mesh.Spec.ControlPlane.TemplateSource == nil || mesh.Spec.ControlPlane.TemplateSource.Git == nil || mesh.Spec.ControlPlane.TemplateSource.Git.SecretRef == nil {
+			return nil
+		}
+		return []string{mesh.Spec.ControlPlane.TemplateSource.Git.SecretRef.Name}
+	}); err != nil {
+		return fmt.Errorf("failed to create git secretRef field index: %w", err)
 	}
 
 	workClient, err := workclient.NewForConfig(mgr.GetConfig())
@@ -103,9 +126,10 @@ func RegisterController(mgr manager.Manager) error {
 	}
 
 	reconciler := &Reconciler{
-		Client:      mgr.GetClient(),
-		Scheme:      mgr.GetScheme(),
-		workApplier: applier.NewWorkApplierWithTypedClient(workClient, workLister),
+		Client:        mgr.GetClient(),
+		Scheme:        mgr.GetScheme(),
+		templateCache: newTemplateCache(),
+		workApplier:   applier.NewWorkApplierWithTypedClient(workClient, workLister),
 	}
 
 	return ctrl.NewControllerManagedBy(mgr).
@@ -139,6 +163,19 @@ func RegisterController(mgr manager.Manager) error {
 				return obj.GetLabels()[ManagedByLabel] == ManagedByValue
 			})),
 		).
+		// No predicate on ConfigMap watch: user-created ConfigMaps have no mesh-specific
+		// labels we can filter on. The mapper uses a field index and returns nil quickly
+		// for unrelated ConfigMaps, so the overhead is a List per ConfigMap event.
+		Watches(&corev1.ConfigMap{},
+			handler.EnqueueRequestsFromMapFunc(reconciler.findMeshesForTemplateConfigMap),
+		).
+		Watches(&corev1.Secret{},
+			handler.EnqueueRequestsFromMapFunc(reconciler.findMeshesForGitSecret),
+			builder.WithPredicates(predicate.NewPredicateFuncs(func(obj client.Object) bool {
+				labels := obj.GetLabels()
+				return labels[MSASecretLabel] == "" && labels[MeshNameLabel] == ""
+			})),
+		).
 		Complete(reconciler)
 }
 
@@ -150,6 +187,7 @@ func RegisterController(mgr manager.Manager) error {
 //+kubebuilder:rbac:groups=work.open-cluster-management.io,resources=manifestworks,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=cert-manager.io,resources=certificates,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=authentication.open-cluster-management.io,resources=managedserviceaccounts,verbs=get;list;watch;create;update;delete
+//+kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch
 //+kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
 
 // Reconcile implements the reconcile loop for MultiClusterMesh resources
@@ -198,7 +236,12 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 
 		if reconcileErr != nil {
 			klog.Errorf("Encountered an error while reconciling MultiClusterMesh %s/%s: %v", mesh.Namespace, mesh.Name, reconcileErr)
-			mesh.SetReadyCondition(metav1.ConditionFalse, meshv1alpha1.ReasonReconcileError, "%v", reconcileErr)
+			reason := meshv1alpha1.ReasonReconcileError
+			var tsErr *TemplateSourceError
+			if errors.As(reconcileErr, &tsErr) {
+				reason = meshv1alpha1.ReasonTemplateSourceUnavailable
+			}
+			mesh.SetReadyCondition(metav1.ConditionFalse, reason, "%v", reconcileErr)
 		}
 	}
 
@@ -266,8 +309,23 @@ func isOlderMesh(a, b *meshv1alpha1.MultiClusterMesh) bool {
 // IstioCNI, Istio control plane, east-west gateway, and remote secrets. Phase ordering is
 // topology-dependent: MultiPrimary processes clusters independently, PrimaryRemote processes
 // the primary first so remotes can use its gateway address.
+//
+// In None mode, only foundational plumbing is reconciled (operator, MSA, trust certs).
+// Mesh resources (IstioCNI, CP, GW, RS) are skipped, and any existing per-mesh
+// ManifestWorks are torn down.
 func (r *Reconciler) doReconcile(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, clusters []clusterv1.ManagedCluster) error {
-	// Existing plumbing: operator, MSA, certificates, cacerts
+	noneMode := mesh.IsNoneMode()
+
+	// None mode teardown: delete per-mesh ManifestWorks that may exist from a
+	// previous non-None mode. Passing nil deletes all per-mesh ManifestWorks
+	// regardless of cluster membership (same as handleDeletion).
+	if noneMode {
+		if err := r.cleanupMeshManifestWorks(ctx, mesh, nil); err != nil {
+			return fmt.Errorf("failed to teardown mesh ManifestWorks for None mode: %w", err)
+		}
+	}
+
+	// Foundational plumbing: operator, MSA, certificates, cacerts
 	for i := range clusters {
 		cluster := &clusters[i]
 		klog.V(4).Infof("Reconciling cluster %s", cluster.Name)
@@ -291,32 +349,49 @@ func (r *Reconciler) doReconcile(ctx context.Context, mesh *meshv1alpha1.MultiCl
 			}
 		}
 
-		// Phase 1: IstioCNI (all clusters, no gating)
-		if err := r.ensureIstioCNI(ctx, mesh, cluster); err != nil {
-			return fmt.Errorf("failed to ensure IstioCNI on cluster %s: %w", cluster.Name, err)
+		if !noneMode {
+			if err := r.ensureIstioCNI(ctx, mesh, cluster); err != nil {
+				return fmt.Errorf("failed to ensure IstioCNI on cluster %s: %w", cluster.Name, err)
+			}
 		}
 	}
 
-	// Phase 2+3: Control plane and gateway — topology determines ordering
+	if noneMode {
+		return r.cleanupNonMeshResources(ctx, mesh, clusters)
+	}
+
+	// Resolve the Istio CR template once per reconcile (not per cluster)
+	template, err := r.resolveIstioCRTemplate(ctx, mesh)
+	if err != nil {
+		return err
+	}
+
+	// Control plane and gateway — topology determines ordering
 	var allPhasesComplete bool
 	var phaseErr error
 	if mesh.Spec.Topology.Type == meshv1alpha1.TopologyPrimaryRemote {
-		allPhasesComplete, phaseErr = r.reconcilePrimaryRemote(ctx, mesh, clusters)
+		allPhasesComplete, phaseErr = r.reconcilePrimaryRemote(ctx, mesh, clusters, template)
 	} else {
-		allPhasesComplete, phaseErr = r.reconcileMultiPrimary(ctx, mesh, clusters)
+		allPhasesComplete, phaseErr = r.reconcileMultiPrimary(ctx, mesh, clusters, template)
 	}
 	if phaseErr != nil {
 		return phaseErr
 	}
 
-	// Phase 4: Remote secrets — topology-aware gating
+	// Remote secrets — topology-aware gating
 	if allPhasesComplete && r.areMSATokensAvailable(ctx, mesh, clusters) {
 		if err := r.ensureRemoteSecrets(ctx, mesh, clusters); err != nil {
 			return fmt.Errorf("failed to ensure remote secrets: %w", err)
 		}
 	}
 
-	// Cleanup
+	return r.cleanupNonMeshResources(ctx, mesh, clusters)
+}
+
+// cleanupNonMeshResources handles cleanup of certificates, shared ManifestWorks,
+// per-mesh ManifestWorks (in non-None mode), and ManagedServiceAccounts for clusters
+// that are no longer in the ClusterSet.
+func (r *Reconciler) cleanupNonMeshResources(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, clusters []clusterv1.ManagedCluster) error {
 	forceCleanupAll := mesh.Spec.Security.Trust.CertManager.IssuerRef.Name == ""
 	if err := r.cleanupCertificates(ctx, mesh, clusters, forceCleanupAll); err != nil {
 		return fmt.Errorf("failed to cleanup Certificates: %w", err)
@@ -324,21 +399,22 @@ func (r *Reconciler) doReconcile(ctx context.Context, mesh *meshv1alpha1.MultiCl
 	if err := r.cleanupSharedManifestWorks(ctx, mesh.Spec.ClusterSet); err != nil {
 		return fmt.Errorf("failed to cleanup shared ManifestWorks: %w", err)
 	}
-	if err := r.cleanupMeshManifestWorks(ctx, mesh, clusters); err != nil {
-		return fmt.Errorf("failed to cleanup mesh ManifestWorks: %w", err)
+	if !mesh.IsNoneMode() {
+		if err := r.cleanupMeshManifestWorks(ctx, mesh, clusters); err != nil {
+			return fmt.Errorf("failed to cleanup mesh ManifestWorks: %w", err)
+		}
 	}
 	if err := r.cleanupManagedServiceAccounts(ctx, mesh, clusters); err != nil {
 		return fmt.Errorf("failed to cleanup ManagedServiceAccounts: %w", err)
 	}
-
 	return nil
 }
 
 // reconcileMultiPrimary processes all clusters independently through phases 2-3.
-func (r *Reconciler) reconcileMultiPrimary(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, clusters []clusterv1.ManagedCluster) (bool, error) {
+func (r *Reconciler) reconcileMultiPrimary(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, clusters []clusterv1.ManagedCluster, template map[string]any) (bool, error) {
 	allComplete := true
 	for i := range clusters {
-		complete, err := r.reconcileClusterPhases(ctx, mesh, clusters, &clusters[i])
+		complete, err := r.reconcileClusterPhases(ctx, mesh, clusters, &clusters[i], template)
 		if err != nil {
 			return false, err
 		}
@@ -350,13 +426,13 @@ func (r *Reconciler) reconcileMultiPrimary(ctx context.Context, mesh *meshv1alph
 }
 
 // reconcilePrimaryRemote processes the primary cluster first, then remotes.
-func (r *Reconciler) reconcilePrimaryRemote(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, clusters []clusterv1.ManagedCluster) (bool, error) {
+func (r *Reconciler) reconcilePrimaryRemote(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, clusters []clusterv1.ManagedCluster, template map[string]any) (bool, error) {
 	primary := getPrimaryCluster(mesh, clusters)
 	if primary == nil {
 		return false, fmt.Errorf("no primary cluster found for PrimaryRemote mesh %s/%s", mesh.Namespace, mesh.Name)
 	}
 
-	complete, err := r.reconcileClusterPhases(ctx, mesh, clusters, primary)
+	complete, err := r.reconcileClusterPhases(ctx, mesh, clusters, primary, template)
 	if err != nil {
 		return false, err
 	}
@@ -376,7 +452,7 @@ func (r *Reconciler) reconcilePrimaryRemote(ctx context.Context, mesh *meshv1alp
 	allComplete := true
 	remotes := getRemoteClusters(mesh, clusters)
 	for _, remote := range remotes {
-		complete, err := r.reconcileClusterPhases(ctx, mesh, clusters, remote)
+		complete, err := r.reconcileClusterPhases(ctx, mesh, clusters, remote, template)
 		if err != nil {
 			return false, err
 		}
@@ -390,12 +466,12 @@ func (r *Reconciler) reconcilePrimaryRemote(ctx context.Context, mesh *meshv1alp
 
 // reconcileClusterPhases runs phases 2-3 for a single cluster with gating.
 // Returns (true, nil) if all phases are complete for this cluster.
-func (r *Reconciler) reconcileClusterPhases(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, clusters []clusterv1.ManagedCluster, cluster *clusterv1.ManagedCluster) (bool, error) {
+func (r *Reconciler) reconcileClusterPhases(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, clusters []clusterv1.ManagedCluster, cluster *clusterv1.ManagedCluster, template map[string]any) (bool, error) {
 	if !r.isOperatorInstalled(ctx, cluster) {
 		return false, nil
 	}
 
-	if err := r.ensureControlPlane(ctx, mesh, clusters, cluster); err != nil {
+	if err := r.ensureControlPlane(ctx, mesh, clusters, cluster, template); err != nil {
 		return false, fmt.Errorf("failed to ensure control plane on cluster %s: %w", cluster.Name, err)
 	}
 
@@ -462,17 +538,57 @@ func (r *Reconciler) findMeshesForClusterSet(ctx context.Context, obj client.Obj
 	return r.reconcileRequestsForClusterSet(ctx, clusterSet.Name)
 }
 
-// findMeshesForManifestWork returns a list of all meshes to reconcile following a ManifestWork change
+// findMeshesForManifestWork returns a list of all meshes to reconcile following a ManifestWork change.
+// Reads the ClusterSet directly from the ManifestWork's labels (all controller-managed ManifestWorks
+// carry ClusterSetLabel), avoiding a ManagedCluster API lookup.
 func (r *Reconciler) findMeshesForManifestWork(ctx context.Context, obj client.Object) []reconcile.Request {
-	cluster := &clusterv1.ManagedCluster{}
-	if err := r.Get(ctx, key.Of(obj.GetNamespace()), cluster); err != nil {
-		if !apierrors.IsNotFound(err) {
-			klog.Errorf("Failed to get ManagedCluster %s for ManifestWork %s: %v", obj.GetNamespace(), obj.GetName(), err)
-		}
+	clusterSet := obj.GetLabels()[ClusterSetLabel]
+	if clusterSet == "" {
+		return nil
+	}
+	return r.reconcileRequestsForClusterSet(ctx, clusterSet)
+}
+
+// findMeshesForTemplateConfigMap maps ConfigMap changes to mesh reconcile requests
+// using the configMapRef field index.
+func (r *Reconciler) findMeshesForTemplateConfigMap(ctx context.Context, obj client.Object) []reconcile.Request {
+	meshList := &meshv1alpha1.MultiClusterMeshList{}
+	if err := r.List(ctx, meshList,
+		client.InNamespace(obj.GetNamespace()),
+		client.MatchingFields{"spec.controlPlane.templateSource.configMapRef.name": obj.GetName()},
+	); err != nil {
+		klog.Errorf("Failed to list meshes for template ConfigMap %s/%s: %v", obj.GetNamespace(), obj.GetName(), err)
 		return nil
 	}
 
-	return r.findMeshesForCluster(ctx, cluster)
+	requests := make([]reconcile.Request, 0, len(meshList.Items))
+	for i := range meshList.Items {
+		klog.V(4).Infof("Template ConfigMap %s/%s changed, reconciling mesh %s/%s",
+			obj.GetNamespace(), obj.GetName(), meshList.Items[i].Namespace, meshList.Items[i].Name)
+		requests = append(requests, reconcile.Request{NamespacedName: key.For(&meshList.Items[i])})
+	}
+	return requests
+}
+
+// findMeshesForGitSecret maps git credential Secret changes to mesh reconcile requests
+// using the git secretRef field index.
+func (r *Reconciler) findMeshesForGitSecret(ctx context.Context, obj client.Object) []reconcile.Request {
+	meshList := &meshv1alpha1.MultiClusterMeshList{}
+	if err := r.List(ctx, meshList,
+		client.InNamespace(obj.GetNamespace()),
+		client.MatchingFields{"spec.controlPlane.templateSource.git.secretRef.name": obj.GetName()},
+	); err != nil {
+		klog.Errorf("Failed to list meshes for git Secret %s/%s: %v", obj.GetNamespace(), obj.GetName(), err)
+		return nil
+	}
+
+	requests := make([]reconcile.Request, 0, len(meshList.Items))
+	for i := range meshList.Items {
+		klog.V(4).Infof("Git Secret %s/%s changed, reconciling mesh %s/%s",
+			obj.GetNamespace(), obj.GetName(), meshList.Items[i].Namespace, meshList.Items[i].Name)
+		requests = append(requests, reconcile.Request{NamespacedName: key.For(&meshList.Items[i])})
+	}
+	return requests
 }
 
 // handleDeletion handles cleanup when the MultiClusterMesh is being deleted
@@ -617,18 +733,26 @@ func (r *Reconciler) triggerReconcileForNotReadyMeshes(ctx context.Context, mesh
 // determineStatus reads feedback from all ManifestWorks and sets per-cluster conditions
 // (OperatorInstalled, ControlPlaneReady, GatewayReady, DiscoveryReady) and the mesh-level
 // Ready condition. For PrimaryRemote, also populates PrimaryGatewayAddress for observability.
+// In None mode, only OperatorInstalled is checked — CP/GW/Discovery conditions are skipped.
 func (r *Reconciler) determineStatus(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, clusters []clusterv1.ManagedCluster) error {
 	mesh.Status.ClusterStatus = make([]meshv1alpha1.ClusterMeshStatus, 0, len(clusters))
 	mesh.Status.PrimaryGatewayAddress = ""
+	noneMode := mesh.IsNoneMode()
 	allReady := len(clusters) > 0
 
 	for i := range clusters {
 		cluster := &clusters[i]
 
-		// OperatorInstalled
+		// OperatorInstalled — handle not-found gracefully (race on first reconcile)
 		operatorWork := &workv1.ManifestWork{}
 		if err := r.Get(ctx, key.Of(OperatorManifestWorkName, cluster.Name), operatorWork); err != nil {
-			return fmt.Errorf("failed to get operator ManifestWork for cluster %s: %w", cluster.Name, err)
+			if !apierrors.IsNotFound(err) {
+				return fmt.Errorf("failed to get operator ManifestWork for cluster %s: %w", cluster.Name, err)
+			}
+			allReady = false
+			mesh.SetClusterCondition(cluster.Name, meshv1alpha1.ConditionOperatorInstalled, metav1.ConditionFalse,
+				meshv1alpha1.ReasonInstallationPending, "Operator installation is pending")
+			continue
 		}
 
 		if installedCSV := getManifestWorkFeedback(operatorWork); installedCSV != nil {
@@ -638,6 +762,10 @@ func (r *Reconciler) determineStatus(ctx context.Context, mesh *meshv1alpha1.Mul
 			allReady = false
 			mesh.SetClusterCondition(cluster.Name, meshv1alpha1.ConditionOperatorInstalled, metav1.ConditionFalse,
 				meshv1alpha1.ReasonInstallationPending, "Operator installation is pending")
+		}
+
+		if noneMode {
+			continue
 		}
 
 		// ControlPlaneReady
@@ -676,8 +804,8 @@ func (r *Reconciler) determineStatus(ctx context.Context, mesh *meshv1alpha1.Mul
 		}
 	}
 
-	// PrimaryGatewayAddress for PrimaryRemote topology
-	if mesh.Spec.Topology.Type == meshv1alpha1.TopologyPrimaryRemote {
+	// PrimaryGatewayAddress for PrimaryRemote topology (not applicable in None mode)
+	if !noneMode && mesh.Spec.Topology.Type == meshv1alpha1.TopologyPrimaryRemote {
 		primary := getPrimaryCluster(mesh, clusters)
 		if primary != nil {
 			if addr, err := r.getGatewayAddressForCluster(ctx, mesh, primary); err == nil {

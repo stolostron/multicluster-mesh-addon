@@ -23,8 +23,8 @@ import (
 // The ManifestWork contains the Istio CR, control plane namespace, and RBAC resources for
 // cross-cluster discovery. For PrimaryRemote remotes, the Istio CR includes remotePilotAddress
 // read from the primary cluster's gateway ManifestWork feedback.
-func (r *Reconciler) ensureControlPlane(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, clusters []clusterv1.ManagedCluster, cluster *clusterv1.ManagedCluster) error {
-	work, err := r.buildControlPlaneManifestWork(ctx, mesh, clusters, cluster)
+func (r *Reconciler) ensureControlPlane(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, clusters []clusterv1.ManagedCluster, cluster *clusterv1.ManagedCluster, template map[string]any) error {
+	work, err := r.buildControlPlaneManifestWork(ctx, mesh, clusters, cluster, template)
 	if err != nil {
 		return fmt.Errorf("failed to build control plane ManifestWork for cluster %s: %w", cluster.Name, err)
 	}
@@ -41,7 +41,7 @@ func (r *Reconciler) ensureControlPlane(ctx context.Context, mesh *meshv1alpha1.
 // buildControlPlaneManifestWork constructs the ManifestWork containing the Istio CR (with
 // FeedbackRules and CEL ConditionRules for readiness gating), the control plane namespace
 // with network topology label, and ClusterRole/ClusterRoleBinding for MSA-based discovery.
-func (r *Reconciler) buildControlPlaneManifestWork(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, clusters []clusterv1.ManagedCluster, cluster *clusterv1.ManagedCluster) (*workv1.ManifestWork, error) {
+func (r *Reconciler) buildControlPlaneManifestWork(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, clusters []clusterv1.ManagedCluster, cluster *clusterv1.ManagedCluster, template map[string]any) (*workv1.ManifestWork, error) {
 	cpNamespace := mesh.GetControlPlaneNamespace()
 	meshID := getMeshID(mesh)
 	clusterName := cluster.Name
@@ -60,7 +60,7 @@ func (r *Reconciler) buildControlPlaneManifestWork(ctx context.Context, mesh *me
 		},
 	}
 
-	istioCR, err := r.buildIstioCR(ctx, mesh, clusters, cluster)
+	istioCR, err := r.buildIstioCR(ctx, mesh, clusters, cluster, template)
 	if err != nil {
 		return nil, err
 	}
@@ -159,75 +159,11 @@ func (r *Reconciler) buildControlPlaneManifestWork(ctx context.Context, mesh *me
 	}, nil
 }
 
-// buildIstioCR constructs the sailoperator.io/v1 Istio CR as an unstructured object.
-// Topology-aware: MultiPrimary gets a standard CR, PrimaryRemote primary gets externalIstiod,
-// PrimaryRemote remotes get profile:remote with remotePilotAddress from the primary's gateway.
-func (r *Reconciler) buildIstioCR(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, clusters []clusterv1.ManagedCluster, cluster *clusterv1.ManagedCluster) (*unstructured.Unstructured, error) {
-	clusterName := cluster.Name
-	isPrimaryRemote := mesh.Spec.Topology.Type == meshv1alpha1.TopologyPrimaryRemote
-	primary := getPrimaryCluster(mesh, clusters)
-	isPrimary := primary != nil && primary.Name == clusterName
-
-	values := map[string]any{
-		"global": map[string]any{
-			"meshID": getMeshID(mesh),
-			"multiCluster": map[string]any{
-				"clusterName": clusterName,
-			},
-			"network": getNetworkID(clusterName),
-		},
-		"meshConfig": map[string]any{
-			"defaultConfig": map[string]any{
-				"proxyMetadata": map[string]any{
-					"ISTIO_META_DNS_AUTO_ALLOCATE": "true",
-					"ISTIO_META_DNS_CAPTURE":       "true",
-				},
-			},
-			"trustDomain": mesh.Name,
-		},
-	}
-
-	globalValues := values["global"].(map[string]any)
-
-	if isPrimaryRemote && isPrimary {
-		globalValues["externalIstiod"] = true
-	}
-
-	if isPrimaryRemote && !isPrimary {
-		addr, err := r.getGatewayAddressForCluster(ctx, mesh, primary)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get gateway address for primary cluster %s: %w", primary.Name, err)
-		}
-		if addr != "" {
-			globalValues["remotePilotAddress"] = addr
-		}
-	}
-
-	spec := map[string]any{
-		"namespace": mesh.GetControlPlaneNamespace(),
-		"values":    values,
-	}
-
-	if mesh.Spec.ControlPlane.Version != "" {
-		spec["version"] = mesh.Spec.ControlPlane.Version
-	}
-
-	if isPrimaryRemote && !isPrimary {
-		spec["profile"] = "remote"
-	}
-
-	obj := &unstructured.Unstructured{
-		Object: map[string]any{
-			"apiVersion": "sailoperator.io/v1",
-			"kind":       "Istio",
-			"metadata": map[string]any{
-				"name": getIstioCRName(mesh),
-			},
-			"spec": spec,
-		},
-	}
-
-	return obj, nil
+// buildIstioCR applies controller-managed fields (meshID, network, trustDomain, etc.)
+// to a deep copy of the pre-resolved template. Each cluster gets its own copy since
+// applyControllerManagedFields sets cluster-specific values (clusterName, network, etc.).
+func (r *Reconciler) buildIstioCR(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, clusters []clusterv1.ManagedCluster, cluster *clusterv1.ManagedCluster, template map[string]any) (*unstructured.Unstructured, error) {
+	return r.applyControllerManagedFields(ctx, copyMap(template), mesh, clusters, cluster)
 }
 
 // getGatewayAddressForCluster reads the gateway ManifestWork from the hub and

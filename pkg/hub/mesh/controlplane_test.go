@@ -60,12 +60,9 @@ func TestBuildIstioCR_MultiPrimary(t *testing.T) {
 	cluster := newTestCluster("cluster-a")
 	clusters := []clusterv1.ManagedCluster{*cluster}
 
-	r := &Reconciler{
-		Client: fake.NewClientBuilder().WithScheme(scheme).Build(),
-		Scheme: scheme,
-	}
+	r := newTestReconciler(scheme)
 
-	cr, err := r.buildIstioCR(context.Background(), mesh, clusters, cluster)
+	cr, err := r.buildIstioCR(context.Background(), mesh, clusters, cluster, buildBasicTemplate())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -112,7 +109,7 @@ func TestBuildIstioCR_MultiPrimary(t *testing.T) {
 
 	t.Run("version included when set", func(t *testing.T) {
 		mesh.Spec.ControlPlane.Version = "v1.28.8"
-		cr, err := r.buildIstioCR(context.Background(), mesh, clusters, cluster)
+		cr, err := r.buildIstioCR(context.Background(), mesh, clusters, cluster, buildBasicTemplate())
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -132,12 +129,9 @@ func TestBuildIstioCR_PrimaryRemotePrimary(t *testing.T) {
 	remote := newTestCluster("remote")
 	clusters := []clusterv1.ManagedCluster{*primary, *remote}
 
-	r := &Reconciler{
-		Client: fake.NewClientBuilder().WithScheme(scheme).Build(),
-		Scheme: scheme,
-	}
+	r := newTestReconciler(scheme)
 
-	cr, err := r.buildIstioCR(context.Background(), mesh, clusters, primary)
+	cr, err := r.buildIstioCR(context.Background(), mesh, clusters, primary, buildBasicTemplate())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -189,16 +183,9 @@ func TestBuildIstioCR_PrimaryRemoteRemote(t *testing.T) {
 		},
 	}
 
-	r := &Reconciler{
-		Client: fake.NewClientBuilder().
-			WithScheme(scheme).
-			WithObjects(gwWork).
-			WithStatusSubresource(&workv1.ManifestWork{}).
-			Build(),
-		Scheme: scheme,
-	}
+	r := newTestReconciler(scheme, gwWork)
 
-	cr, err := r.buildIstioCR(context.Background(), mesh, clusters, remote)
+	cr, err := r.buildIstioCR(context.Background(), mesh, clusters, remote, buildBasicTemplate())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -225,12 +212,9 @@ func TestBuildControlPlaneManifestWork(t *testing.T) {
 	cluster := newTestCluster("cluster-a")
 	clusters := []clusterv1.ManagedCluster{*cluster}
 
-	r := &Reconciler{
-		Client: fake.NewClientBuilder().WithScheme(scheme).Build(),
-		Scheme: scheme,
-	}
+	r := newTestReconciler(scheme)
 
-	work, err := r.buildControlPlaneManifestWork(context.Background(), mesh, clusters, cluster)
+	work, err := r.buildControlPlaneManifestWork(context.Background(), mesh, clusters, cluster, buildBasicTemplate())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

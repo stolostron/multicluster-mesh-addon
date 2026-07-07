@@ -84,6 +84,9 @@ oc create namespace ${BACKEND_NAMESPACE} --dry-run=client -o yaml | oc apply -f 
 make images IMG=${REGISTRY}/${BACKEND_NAMESPACE}/${BACKEND_IMAGE_NAME}:${BACKEND_IMAGE_TAG}
 podman push --tls-verify=false ${REGISTRY}/${BACKEND_NAMESPACE}/${BACKEND_IMAGE_NAME}:${BACKEND_IMAGE_TAG}
 
+# Update the CRD (Helm does not update CRDs on upgrade, only on first install)
+oc apply -f chart/crds/mesh.open-cluster-management.io_multiclustermeshes.yaml
+
 # Deploy the controller using Helm with the internal registry image
 helm upgrade --install ${BACKEND_IMAGE_NAME} chart/ \
   --create-namespace \
@@ -92,7 +95,10 @@ helm upgrade --install ${BACKEND_IMAGE_NAME} chart/ \
   --set image.tag=${BACKEND_IMAGE_TAG} \
   --wait --timeout 180s
 
-# Verify the controller is running
+# Restart the controller to ensure it picks up the new image
+# (required because the image tag "dev" doesn't change between rebuilds)
+oc rollout restart deployment/multicluster-mesh-controller \
+  -n ${BACKEND_NAMESPACE}
 oc rollout status deployment/multicluster-mesh-controller \
   -n ${BACKEND_NAMESPACE} --timeout=120s
 ```
@@ -162,7 +168,9 @@ operator, IstioCNI, Istio CRs, east-west gateways, and trust certificates on
 all clusters in the set.
 
 ```bash
-# secure-mcm: mesh with trust enabled
+# secure-mcm: mesh with trust enabled, using the built-in basic template
+# - templateSource.basic: uses the controller's built-in Istio CR template
+#   (suitable for demos). To customize, use configMapRef, git, or none. See step 7a.
 # - topology.type: MultiPrimary (every cluster runs its own control plane;
 #   use PrimaryRemote if you want one primary and the rest as remotes)
 # - gateway.serviceType: NodePort (CRC has no LoadBalancer controller;
@@ -177,6 +185,8 @@ spec:
   clusterSet: demo-cluster-set
   controlPlane:
     namespace: secure-ns
+    templateSource:
+      basic: {}
   gateway:
     serviceType: NodePort
   topology:
@@ -188,7 +198,7 @@ spec:
           name: mesh-root-ca
 EOF
 
-# unsecure-mcm: mesh without trust
+# unsecure-mcm: mesh without trust, using the built-in basic template
 oc apply -f - <<'EOF'
 apiVersion: mesh.open-cluster-management.io/v1alpha1
 kind: MultiClusterMesh
@@ -199,6 +209,8 @@ spec:
   clusterSet: demo-cluster-set
   controlPlane:
     namespace: unsecure-ns
+    templateSource:
+      basic: {}
   gateway:
     serviceType: NodePort
   topology:
@@ -218,6 +230,77 @@ oc get multiclustermesh unsecure-mcm -n unsecure-mcm-ns \
 # Check ManifestWorks created by the controller
 oc get manifestwork -n local-cluster | grep multicluster-mesh
 ```
+
+## 7a. (Optional) Template source alternatives
+
+The meshes above use `templateSource.basic`, the controller's built-in Istio CR
+template. The controller supports three other template sources for customizing
+the Istio CR that gets deployed to managed clusters.
+
+**ConfigMap** — provide custom Istio CR YAML in a ConfigMap:
+
+```bash
+# Create a ConfigMap with a custom Istio CR template
+oc apply -n secure-mcm-ns -f - <<'EOF'
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: my-istio-template
+data:
+  istio.yaml: |
+    apiVersion: sailoperator.io/v1
+    kind: Istio
+    spec:
+      values:
+        pilot:
+          resources:
+            requests:
+              cpu: 500m
+              memory: 2Gi
+        meshConfig:
+          accessLogFile: /dev/stdout
+EOF
+
+# Then set templateSource.configMapRef in the MCM spec:
+oc patch multiclustermesh secure-mcm -n secure-mcm-ns --type merge -p '
+spec:
+  controlPlane:
+    templateSource:
+      configMapRef:
+        name: my-istio-template
+'
+```
+
+**Git** — pull the template from a git repository:
+
+```yaml
+spec:
+  controlPlane:
+    templateSource:
+      git:
+        url: https://github.com/myorg/mesh-configs.git
+        path: istio/production/istio.yaml
+        ref:
+          branch: main
+        # secretRef is optional — omit for public repos
+        # secretRef:
+        #   name: git-credentials
+```
+
+**None** — skip mesh resource creation entirely (for ArgoCD/Flux users who
+manage their own Istio CRs). The controller only installs the operator, creates
+ManagedServiceAccounts, and distributes trust certificates:
+
+```yaml
+spec:
+  controlPlane:
+    templateSource:
+      none: {}
+```
+
+In all cases, the controller deep-merges its required fields (meshID, network,
+trustDomain, topology) on top of whatever the template provides. See
+[docs/design.md](../docs/design.md) for details.
 
 ## 8. (Optional) Create a standalone discovered Istio CR
 
@@ -336,7 +419,7 @@ make build deploy
 
 ## Backend Development
 
-After modifying backend Go code, rebuild the image, push it to the cluster registry, and restart the controller:
+After modifying backend Go code, rebuild the image, push it to the cluster registry, update the CRD if it changed, and restart the controller:
 
 ```bash
 cd <multicluster-mesh-addon-repo>
@@ -350,6 +433,9 @@ BACKEND_IMAGE_TAG=dev
 make images IMG=${REGISTRY}/${BACKEND_NAMESPACE}/${BACKEND_IMAGE_NAME}:${BACKEND_IMAGE_TAG}
 podman push --tls-verify=false \
   ${REGISTRY}/${BACKEND_NAMESPACE}/${BACKEND_IMAGE_NAME}:${BACKEND_IMAGE_TAG}
+
+# Update the CRD if types.go changed (Helm does not update CRDs on upgrade)
+oc apply -f chart/crds/mesh.open-cluster-management.io_multiclustermeshes.yaml
 
 oc rollout restart deployment/multicluster-mesh-controller \
   -n ${BACKEND_NAMESPACE}

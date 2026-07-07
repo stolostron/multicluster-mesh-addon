@@ -146,6 +146,7 @@ The resource name (`metadata.name`) is limited to 63 characters because it is us
 |-------|----------|-------------|
 | `spec.clusterSet` | Yes | Name of the [ManagedClusterSet] defining cluster membership (immutable after creation) |
 | `spec.controlPlane.namespace` | No | Namespace where Istio is installed on each cluster (default: `istio-system`) |
+| `spec.controlPlane.templateSource` | No | Where the Istio CR template comes from. If omitted, a built-in basic template is used. Set `none: {}` to skip mesh resource creation. Set `configMapRef` or `git` to provide a custom template. See [Template Source](#template-source). |
 | `spec.controlPlane.version` | No | Pins the Istio control plane version (e.g. `v1.28.8`). If empty, the operator selects its default version |
 | `spec.operator.name` | No | OLM package name (default: `servicemeshoperator3`) |
 | `spec.operator.namespace` | No | Namespace where the operator is installed (default: `openshift-operators`) |
@@ -282,6 +283,34 @@ The controller builds an `Istio` CR ([Sail Operator API][Sail]) per mesh per clu
 - Topology-specific values: `remotePilotAddress` for remote clusters, `externalIstiod` for primary clusters, and `profile: remote` for remote clusters (see [Topology Support](#topology-support))
 
 The ManifestWork also includes a `ClusterRole` and `ClusterRoleBinding` granting the MSA service account read access to Kubernetes and Istio resources for cross-cluster discovery.
+
+#### Template Source
+
+The Istio CR content is resolved from a **pluggable template source** configured via `spec.controlPlane.templateSource`. This decouples the MCM CRD from the Istio CRD schema — users provide their desired Istio CR configuration externally, and the controller deep-merges only the fields it must own.
+
+Four source types are supported:
+
+| Type | Config | Description |
+|------|--------|-------------|
+| **Basic** | `templateSource` omitted | Built-in minimal Istio CR with DNS proxy metadata. Zero-config, suitable for demos. |
+| **ConfigMap** | `templateSource.configMapRef` | User creates a ConfigMap in the mesh's namespace containing Istio CR YAML. Controller reads it on each reconcile. |
+| **Git** | `templateSource.git` | Controller clones a git repository (in-memory, 30s timeout) and reads the template from a specified file path. Supports branch, tag, or commit pinning. Auth via Secret reference (HTTPS or SSH). |
+| **None** | `templateSource.none: {}` | Controller skips mesh resource creation (IstioCNI, Istio CR, gateway, remote secrets). Only foundational plumbing is reconciled: operator install, MSA, and trust certs. For users managing mesh resources via ArgoCD or similar. |
+
+**Merge strategy:** The controller deep-merges its managed fields on top of the user's template. Controller-managed fields always win:
+
+- `metadata.name`, `spec.namespace`, `spec.version`
+- `spec.values.global.meshID`, `spec.values.global.multiCluster.clusterName`, `spec.values.global.network`
+- `spec.values.meshConfig.trustDomain`
+- Topology-specific: `spec.profile`, `spec.values.global.externalIstiod`, `spec.values.global.remotePilotAddress`
+
+Everything else from the user's template is preserved (pilot resources, telemetry config, access logging, proxy tuning, etc.). Arrays are replaced entirely, not element-merged.
+
+**Validation:** After parsing, the controller checks that `apiVersion` is `sailoperator.io/v1` and `kind` is `Istio`. Invalid templates set `Ready=False` with `ReasonTemplateSourceUnavailable`.
+
+**ConfigMap constraint:** The ConfigMap must be in the same namespace as the `MultiClusterMesh` resource (no cross-namespace references).
+
+**None mode behavior:** When `templateSource.none` is set, `doReconcile` skips mesh resource creation and tears down any existing per-mesh ManifestWorks (CP, GW, RS) from a previous non-None mode. `determineStatus` only checks `OperatorInstalled` — CP/GW/Discovery conditions are not evaluated. The mesh is `Ready` when all clusters have the operator installed. Users in None mode are responsible for deploying IstioCNI and Istio CRs themselves.
 
 ### East-West Gateway
 
