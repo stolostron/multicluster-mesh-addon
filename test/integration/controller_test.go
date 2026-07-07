@@ -622,7 +622,7 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 				expectCacertsManifestWork(meshName, testNs, clusterName)
 
 				secret := &corev1.Secret{}
-				Expect(k8sClient.Get(ctx, key.Of(fmt.Sprintf("cacerts-%s", clusterName), testNs), secret)).To(Succeed())
+				Expect(k8sClient.Get(ctx, key.Of(meshcontroller.CacertsSecretAndCertName(meshName, clusterName), testNs), secret)).To(Succeed())
 
 				secret.Data["tls.crt"] = []byte("updated-cert-data")
 				Expect(k8sClient.Update(ctx, secret)).To(Succeed())
@@ -747,7 +747,7 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 				updateClusterSetLabel(clusterName, "")
 
 				util.ExpectResourceDeleted(ctx, k8sClient, &certmanagerv1.Certificate{},
-					fmt.Sprintf("cacerts-%s", clusterName), testNs)
+					meshcontroller.CacertsSecretAndCertName(meshName, clusterName), testNs)
 			})
 		})
 
@@ -762,7 +762,7 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 				})
 
 				util.ExpectResourceDeleted(ctx, k8sClient, &certmanagerv1.Certificate{},
-					fmt.Sprintf("cacerts-%s", clusterName), testNs)
+					meshcontroller.CacertsSecretAndCertName(meshName, clusterName), testNs)
 			})
 		})
 
@@ -1003,7 +1003,7 @@ func expectCertificate(namespace, clusterName, meshName, issuerName, issuerKind 
 
 	cert := &certList.Items[0]
 	Expect(cert.Labels[meshcontroller.ManagedByLabel]).To(Equal(meshcontroller.ManagedByValue))
-	Expect(cert.Spec.SecretName).To(Equal(fmt.Sprintf("cacerts-%s", clusterName)))
+	Expect(cert.Spec.SecretName).To(Equal(meshcontroller.CacertsSecretAndCertName(meshName, clusterName)))
 	Expect(cert.Spec.IsCA).To(BeTrue())
 	Expect(cert.Spec.IssuerRef.Name).To(Equal(issuerName))
 	Expect(cert.Spec.IssuerRef.Kind).To(Equal(issuerKind))

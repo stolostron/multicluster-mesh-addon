@@ -710,14 +710,26 @@ func (r *Reconciler) mapSecretToMesh(_ context.Context, obj client.Object) []rec
 	return []reconcile.Request{{NamespacedName: key.Of(meshName, meshNamespace)}}
 }
 
-// getCacertsName returns the name for the certificate and secret for a specific cluster
-func getCacertsName(clusterName string) string {
-	return fmt.Sprintf("cacerts-%s", clusterName)
+// CacertsSecretAndCertName returns the Certificate and Secret name for a specific (mesh, cluster) pair.
+// The name includes an FNV-32a hash of the mesh/cluster identity to prevent collisions when two meshes
+// in the same namespace target the same clusters.
+func CacertsSecretAndCertName(meshName, clusterName string) string {
+	h := fnv.New32a()
+	fmt.Fprintf(h, "mesh=%s,cluster=%s", meshName, clusterName)
+	hash := fmt.Sprintf("%08x", h.Sum32())
+
+	full := fmt.Sprintf("cacerts-%s-%s", clusterName, hash)
+	if len(full) <= 253 {
+		return full
+	}
+
+	maxCluster := 253 - len("cacerts-") - 1 - 8
+	return fmt.Sprintf("cacerts-%s-%s", strings.TrimRight(clusterName[:maxCluster], "-"), hash)
 }
 
 // ensureCertificateForCluster applies the desired Certificate state for a specific cluster using server-side apply.
 func (r *Reconciler) ensureCertificateForCluster(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, cluster *clusterv1.ManagedCluster) error {
-	certName := getCacertsName(cluster.Name)
+	certName := CacertsSecretAndCertName(mesh.Name, cluster.Name)
 
 	gvk, err := r.GroupVersionKindFor(mesh)
 	if err != nil {
@@ -764,7 +776,7 @@ func (r *Reconciler) ensureCertificateForCluster(ctx context.Context, mesh *mesh
 
 // ensureCacertsManifestWork creates a ManifestWork to distribute the cacerts secret to a cluster
 func (r *Reconciler) ensureCacertsManifestWork(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, cluster *clusterv1.ManagedCluster) error {
-	secretName := getCacertsName(cluster.Name)
+	secretName := CacertsSecretAndCertName(mesh.Name, cluster.Name)
 	secret := &corev1.Secret{}
 	err := r.Get(ctx, key.Of(secretName, mesh.Namespace), secret)
 
