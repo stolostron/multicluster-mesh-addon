@@ -91,12 +91,11 @@ var _ = Describe("MultiClusterMesh lifecycle", Ordered, func() {
 					SourceNamespace: testCatalogNamespace,
 				}})
 
-		Step("Waiting for controller to reconcile")
+		Step("Waiting for mesh to become ready")
 		Eventually(func(g Gomega) {
 			g.Expect(getMesh(ctx, mesh)).To(Succeed())
-			// TODO(mkolesni): Once feedback rules are implemented (#89), check for Status=True instead of just existence.
-			g.Expect(meta.FindStatusCondition(mesh.Status.Conditions, meshv1alpha1.ConditionReady)).NotTo(BeNil())
-		}).Should(Succeed())
+			g.Expect(meta.IsStatusConditionTrue(mesh.Status.Conditions, meshv1alpha1.ConditionReady)).To(BeTrue())
+		}).WithTimeout(2 * time.Minute).Should(Succeed())
 	})
 
 	AfterEach(func(ctx SpecContext) {
@@ -113,18 +112,13 @@ var _ = Describe("MultiClusterMesh lifecycle", Ordered, func() {
 		}).Should(Succeed())
 	})
 
-	// TODO(mkolesni): Once feedback rules are implemented (#89), replace MW/spoke checks
-	// with mesh status assertions (ConditionOperatorInstalled=True per cluster).
 	It("creates operator resources on spoke clusters", func(ctx SpecContext) {
 		for cluster, spokeClient := range spokeClients {
-			Step("Verifying ManifestWork is Available on hub for %s", cluster)
-			Eventually(func(g Gomega) {
-				mw, err := getOperatorMW(ctx, cluster)
-				g.Expect(err).NotTo(HaveOccurred())
-				available := meta.FindStatusCondition(mw.Status.Conditions, string(workv1.WorkAvailable))
-				g.Expect(available).NotTo(BeNil())
-				g.Expect(available.Status).To(Equal(metav1.ConditionTrue))
-			}).Should(Succeed())
+			Step("Verifying OperatorInstalled condition for %s", cluster)
+			cs := findClusterStatus(mesh, cluster)
+			Expect(cs).NotTo(BeNil(), "missing cluster status for %s", cluster)
+			Expect(meta.IsStatusConditionTrue(cs.Conditions, meshv1alpha1.ConditionOperatorInstalled)).To(BeTrue(),
+				"expected OperatorInstalled=True for %s", cluster)
 
 			Step("Verifying operator namespace exists on %s", cluster)
 			err := spokeClient.Get(ctx, key.Of(testOperatorNamespace), &corev1.Namespace{})
@@ -179,14 +173,17 @@ var _ = Describe("MultiClusterMesh lifecycle", Ordered, func() {
 	})
 })
 
-func getMesh(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh) error {
-	return hubClient.Get(ctx, key.For(mesh), mesh)
+func findClusterStatus(mesh *meshv1alpha1.MultiClusterMesh, clusterName string) *meshv1alpha1.ClusterMeshStatus {
+	for _, cs := range mesh.Status.ClusterStatus {
+		if cs.ClusterName == clusterName {
+			return &cs
+		}
+	}
+	return nil
 }
 
-func getOperatorMW(ctx context.Context, cluster string) (*workv1.ManifestWork, error) {
-	mw := &workv1.ManifestWork{}
-	err := hubClient.Get(ctx, key.Of(meshcontroller.OperatorManifestWorkName, cluster), mw)
-	return mw, err
+func getMesh(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh) error {
+	return hubClient.Get(ctx, key.For(mesh), mesh)
 }
 
 func getSubscription(ctx context.Context, spokeClient client.Client) (*operatorsv1alpha1.Subscription, error) {
