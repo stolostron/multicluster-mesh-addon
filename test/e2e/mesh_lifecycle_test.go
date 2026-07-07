@@ -188,34 +188,53 @@ var _ = Describe("MultiClusterMesh lifecycle", Ordered, func() {
 	})
 
 	It("creates ManagedServiceAccounts with token secrets for each spoke cluster", func(ctx SpecContext) {
-		Eventually(func(g Gomega) {
-			msaList := listMeshMSAs(g, ctx, mesh)
-			g.Expect(msaList.Items).To(HaveLen(len(clusters)),
-				"expected one MSA per cluster in the ClusterSet")
-			for _, msa := range msaList.Items {
+		for _, cluster := range clusters {
+			Step("Verifying ManagedServiceAccount and token secret for %s", cluster)
+			Eventually(func(g Gomega) {
+				msaList := listMeshMSAs(g, ctx, mesh, client.InNamespace(cluster))
+				g.Expect(msaList.Items).To(HaveLen(1),
+					"expected exactly one MSA for cluster %s", cluster)
+
+				msa := msaList.Items[0]
 				g.Expect(msa.Status.TokenSecretRef).NotTo(BeNil(),
 					"expected MSA %s/%s to have tokenSecretRef", msa.Namespace, msa.Name)
-
-				secretCreated := meta.FindStatusCondition(msa.Status.Conditions, msav1beta1.ConditionTypeSecretCreated)
-				g.Expect(secretCreated).NotTo(BeNil())
-				g.Expect(secretCreated.Status).To(Equal(metav1.ConditionTrue))
+				g.Expect(meta.IsStatusConditionTrue(msa.Status.Conditions, msav1beta1.ConditionTypeSecretCreated)).To(BeTrue())
 
 				secret := &corev1.Secret{}
-				g.Expect(hubClient.Get(ctx, key.Of(msa.Status.TokenSecretRef.Name, msa.Namespace), secret)).To(Succeed(),
-					"token secret %s/%s should exist", msa.Namespace, msa.Status.TokenSecretRef.Name)
-			}
-		}).WithTimeout(2 * time.Minute).Should(Succeed())
+				g.Expect(hubClient.Get(ctx, key.Of(msa.Status.TokenSecretRef.Name, cluster), secret)).To(Succeed(),
+					"token secret %s/%s should exist", cluster, msa.Status.TokenSecretRef.Name)
+			}).WithTimeout(2 * time.Minute).Should(Succeed())
+		}
 	})
 
-	It("cleans up ManagedServiceAccounts on mesh deletion", func(ctx SpecContext) {
+	It("cleans up ManagedServiceAccounts and token secrets on mesh deletion", func(ctx SpecContext) {
+		Step("Collecting token secret names before deletion")
+		var tokenSecretKeys []client.ObjectKey
+		msaList := listMeshMSAs(Default, ctx, mesh)
+		for _, msa := range msaList.Items {
+			if msa.Status.TokenSecretRef != nil {
+				tokenSecretKeys = append(tokenSecretKeys, client.ObjectKey{
+					Name: msa.Status.TokenSecretRef.Name, Namespace: msa.Namespace,
+				})
+			}
+		}
+
 		Step("Deleting the mesh CR")
 		util.DeleteResource(ctx, hubClient, mesh, mesh.Name, mesh.Namespace)
 
 		Step("Verifying ManagedServiceAccounts are removed from hub")
-		Eventually(func(g Gomega) {
-			msaList := listMeshMSAs(g, ctx, mesh)
-			g.Expect(msaList.Items).To(BeEmpty(), "expected all mesh-owned MSAs to be deleted")
-		}).Should(Succeed())
+		for _, cluster := range clusters {
+			Eventually(func(g Gomega) {
+				msaList := listMeshMSAs(g, ctx, mesh, client.InNamespace(cluster))
+				g.Expect(msaList.Items).To(BeEmpty(),
+					"expected MSA to be deleted in cluster %s", cluster)
+			}).Should(Succeed())
+		}
+
+		Step("Verifying token secrets are removed from hub")
+		for _, secretKey := range tokenSecretKeys {
+			util.ExpectResourceDeleted(ctx, hubClient, &corev1.Secret{}, secretKey.Name, secretKey.Namespace)
+		}
 	})
 
 	// TODO: Once the controller builds Istio remote secrets from MSA token secrets,
@@ -224,13 +243,12 @@ var _ = Describe("MultiClusterMesh lifecycle", Ordered, func() {
 	// the spoke API server URL and the token from the MSA token secret.
 	PIt("constructs Istio remote secrets from MSA token secrets")
 
-	// TODO: Once the controller distributes remote secrets to peer clusters via
-	// ManifestWork, verify that for N clusters each cluster receives (N-1) remote secret
-	// ManifestWorks. Assert the ManifestWork payload contains the peer's remote secret.
+	// TODO: Once the controller distributes remote secrets to peer clusters,
+	// verify that for N clusters each cluster receives (N-1) remote secrets.
 	// Verify the Secret actually appears on the spoke cluster (using spokeClients).
 	// Also verify that when a cluster is removed, its remote secrets are cleaned up from
 	// all remaining peers.
-	PIt("distributes remote secrets to peer clusters via ManifestWork")
+	PIt("distributes remote secrets to peer clusters")
 })
 
 func getMesh(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh) error {
@@ -249,11 +267,12 @@ func getSubscription(ctx context.Context, spokeClient client.Client) (*operators
 	return sub, err
 }
 
-func listMeshMSAs(g Gomega, ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh) *msav1beta1.ManagedServiceAccountList {
+func listMeshMSAs(g Gomega, ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, opts ...client.ListOption) *msav1beta1.ManagedServiceAccountList {
 	msaList := &msav1beta1.ManagedServiceAccountList{}
-	g.Expect(hubClient.List(ctx, msaList, client.MatchingLabels{
+	listOpts := append([]client.ListOption{client.MatchingLabels{
 		meshcontroller.MeshNameLabel:      mesh.Name,
 		meshcontroller.MeshNamespaceLabel: mesh.Namespace,
-	})).To(Succeed())
+	}}, opts...)
+	g.Expect(hubClient.List(ctx, msaList, listOpts...)).To(Succeed())
 	return msaList
 }
