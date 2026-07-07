@@ -454,10 +454,11 @@ func (r *Reconciler) triggerReconcileForNotReadyMeshes(ctx context.Context, mesh
 }
 
 func (r *Reconciler) determineStatus(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, clusters []clusterv1.ManagedCluster) error {
-	mesh.Status.ClusterStatus = make([]meshv1alpha1.ClusterMeshStatus, 0, len(clusters))
 	allReady := len(clusters) > 0
 
+	activeClusterNames := make(map[string]bool, len(clusters))
 	for _, cluster := range clusters {
+		activeClusterNames[cluster.Name] = true
 
 		operatorWork := &workv1.ManifestWork{}
 		if err := r.Get(ctx, key.Of(OperatorManifestWorkName, cluster.Name), operatorWork); err != nil {
@@ -473,6 +474,10 @@ func (r *Reconciler) determineStatus(ctx context.Context, mesh *meshv1alpha1.Mul
 				meshv1alpha1.ReasonInstallationPending, "Operator installation is pending")
 		}
 	}
+
+	mesh.Status.ClusterStatus = slices.DeleteFunc(mesh.Status.ClusterStatus, func(cs meshv1alpha1.ClusterMeshStatus) bool {
+		return !activeClusterNames[cs.ClusterName]
+	})
 
 	if allReady {
 		mesh.SetReadyCondition(metav1.ConditionTrue,

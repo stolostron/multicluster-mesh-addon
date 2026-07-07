@@ -150,6 +150,50 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 				expectClusterOperatorConditionReason(meshName, testNs, cluster2Name, meshv1alpha1.ReasonOperatorInstalled)
 				expectMeshReady(meshName, testNs)
 			})
+
+			It("should preserve per-cluster condition LastTransitionTime when status is unchanged", func() {
+				expectClusterOperatorConditionReason(meshName, testNs, clusterName, meshv1alpha1.ReasonInstallationPending)
+
+				var initialTime metav1.Time
+				Eventually(func(g Gomega) {
+					mesh := &meshv1alpha1.MultiClusterMesh{}
+					g.Expect(k8sClient.Get(ctx, key.Of(meshName, testNs), mesh)).To(Succeed())
+					for _, cs := range mesh.Status.ClusterStatus {
+						if cs.ClusterName == clusterName {
+							c := findCondition(g, cs.Conditions, meshv1alpha1.ConditionOperatorInstalled)
+							initialTime = c.LastTransitionTime
+							g.Expect(initialTime.IsZero()).To(BeFalse())
+							return
+						}
+					}
+					g.Expect(false).To(BeTrue(), "cluster %s not found in status", clusterName)
+				}).Should(Succeed())
+
+				time.Sleep(2 * time.Second)
+
+				mesh := &meshv1alpha1.MultiClusterMesh{}
+				Expect(k8sClient.Get(ctx, key.Of(meshName, testNs), mesh)).To(Succeed())
+				if mesh.Annotations == nil {
+					mesh.Annotations = map[string]string{}
+				}
+				mesh.Annotations["trigger-reconcile"] = "true"
+				Expect(k8sClient.Update(ctx, mesh)).To(Succeed())
+
+				Consistently(func(g Gomega) {
+					mesh := &meshv1alpha1.MultiClusterMesh{}
+					g.Expect(k8sClient.Get(ctx, key.Of(meshName, testNs), mesh)).To(Succeed())
+					for _, cs := range mesh.Status.ClusterStatus {
+						if cs.ClusterName == clusterName {
+							c := findCondition(g, cs.Conditions, meshv1alpha1.ConditionOperatorInstalled)
+							g.Expect(c.LastTransitionTime).To(Equal(initialTime),
+								"LastTransitionTime changed from %v — determineStatus is not preserving existing conditions",
+								initialTime)
+							return
+						}
+					}
+					g.Expect(false).To(BeTrue(), "cluster %s not found in status", clusterName)
+				}, 3*time.Second, 500*time.Millisecond).Should(Succeed())
+			})
 		})
 
 		It("should use custom operator configuration when specified", func() {
