@@ -254,12 +254,11 @@ DEV_ENV_SCRIPT := $(CURDIR)/hack/dev-env.sh
 export DEV_KUBE_DIR K8S_VERSION OLM_VERSION CERT_MANAGER_VERSION MSA_VERSION
 export KIND CLUSTERADM HELM
 
-# PARALLEL=1 runs independent dev-env steps concurrently
-ifdef PARALLEL
-MAKEFLAGS += --output-sync=line
-ifeq ($(filter -j% --jobs%,$(MAKEFLAGS)),)
-MAKEFLAGS += -j$(shell echo $$(( ($$(getconf _NPROCESSORS_ONLN) + 1) / 2 )))
-endif
+# PARALLEL controls concurrent job count for dev-env/dev-clean (default: half of CPU cores).
+# Set PARALLEL=1 or PARALLEL=0 to run sequentially.
+PARALLEL ?= $(shell echo $$(( $$(getconf _NPROCESSORS_ONLN) / 2 )))
+ifeq ($(PARALLEL),0)
+override PARALLEL := 1
 endif
 
 log = @echo "==> $(1)"
@@ -267,7 +266,7 @@ log = @echo "==> $(1)"
 .PHONY: dev-env
 dev-env: ## Provision full dev environment (Kind + OCM + addon)
 	$(DEV_ENV_SCRIPT) check-host
-	$(MAKE) --no-print-directory install-olm install-cert-manager install-managed-serviceaccount deploy-addon
+	$(MAKE) --no-print-directory -j$(PARALLEL) --output-sync=line install-olm install-cert-manager install-managed-serviceaccount deploy-addon
 	$(call log,Dev environment ready. Use KUBECONFIG=$(HUB_KUBECONFIG) to interact with the hub.)
 
 .PHONY: create-clusters
@@ -337,7 +336,8 @@ dev-clean-meshes: ## Delete all mesh resources, cert-manager trust chain, and me
 	kubectl --kubeconfig=$(HUB_KUBECONFIG) delete namespace mesh-system --ignore-not-found=true
 
 .PHONY: dev-clean
-dev-clean: $(addprefix delete-,$(CLUSTERS)) ## Destroy dev clusters and remove .kube/ folder
+dev-clean: ## Destroy dev clusters and remove .kube/ folder
+	$(MAKE) --no-print-directory -j$(PARALLEL) --output-sync=line $(addprefix delete-,$(CLUSTERS))
 	rm -rf $(DEV_KUBE_DIR)
 	$(call log,Dev environment cleaned)
 
