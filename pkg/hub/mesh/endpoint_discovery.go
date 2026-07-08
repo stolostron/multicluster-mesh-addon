@@ -3,6 +3,7 @@ package mesh
 import (
 	"context"
 	"fmt"
+	"maps"
 
 	meshv1alpha1 "github.com/stolostron/multicluster-mesh-addon/pkg/apis/mesh/v1alpha1"
 	"github.com/stolostron/multicluster-mesh-addon/pkg/key"
@@ -14,8 +15,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-// ensureManagedServiceAccountCreated creates ManagedServiceAccount resources using the mesh.Spec.Security.Discovery.TokenValidity value.
-func (r *Reconciler) ensureManagedServiceAccountCreated(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, cluster *clusterv1.ManagedCluster) error {
+// ensureManagedServiceAccount applies the desired ManagedServiceAccount state for a specific cluster using mesh's TokenValidity.
+func (r *Reconciler) ensureManagedServiceAccount(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, cluster *clusterv1.ManagedCluster) error {
 	msaName := fmt.Sprintf("%s-%s-%s", mesh.Namespace, "istio-reader", mesh.Name)
 	existing := &msav1beta1.ManagedServiceAccount{}
 	if err := r.Get(ctx, key.Of(msaName, cluster.Name), existing); err == nil {
@@ -87,21 +88,21 @@ func (r *Reconciler) deleteAllManagedServiceAccounts(ctx context.Context, mesh *
 	return nil
 }
 
-// ensureManagedServiceAccountUpdated updates an existing ManagedServiceAccount with the mesh's spec.Security.Discovery.TokenValidity value
 func (r *Reconciler) ensureManagedServiceAccountUpdated(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, existing *msav1beta1.ManagedServiceAccount) error {
-	if existing.Labels[MeshNameLabel] != mesh.Name || existing.Labels[MeshNamespaceLabel] != mesh.Namespace {
-		return fmt.Errorf("ManagedServiceAccount %s/%s exists but is not owned by mesh %s/%s", existing.Namespace, existing.Name, mesh.Namespace, mesh.Name)
-	}
+	desiredLabels := meshOwnedLabels(mesh, existing.Namespace)
+	desiredValidity := *mesh.Spec.Security.Discovery.TokenValidity
 
-	if existing.Spec.Rotation.Validity == *mesh.Spec.Security.Discovery.TokenValidity {
+	if maps.Equal(existing.Labels, desiredLabels) && existing.Spec.Rotation.Validity == desiredValidity {
 		return nil
 	}
-	existing.Spec.Rotation.Validity = *mesh.Spec.Security.Discovery.TokenValidity
+
+	existing.Labels = desiredLabels
+	existing.Spec.Rotation.Validity = desiredValidity
 
 	if err := r.Update(ctx, existing); err != nil {
-		return fmt.Errorf("failed to update a ManagedServiceAccount %s/%s: %w", existing.Namespace, existing.Name, err)
+		return fmt.Errorf("failed to update ManagedServiceAccount %s/%s: %w", existing.Namespace, existing.Name, err)
 	}
 
-	klog.V(4).Infof("Successfully updated a ManagedServiceAccount %s/%s", existing.Namespace, existing.Name)
+	klog.V(4).Infof("Updated ManagedServiceAccount %s/%s", existing.Namespace, existing.Name)
 	return nil
 }
