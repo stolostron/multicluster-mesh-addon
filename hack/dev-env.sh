@@ -4,7 +4,7 @@
 #
 # Usage: hack/dev-env.sh <action> [args...]
 # Actions: check-host, create-cluster <name>, install-olm <name>, install-cert-manager,
-#          install-managed-serviceaccount, init-ocm, join-clusters, setup-mesh, clean
+#          install-managed-serviceaccount, init-ocm, join-clusters, setup-mesh
 
 set -euo pipefail
 
@@ -306,21 +306,6 @@ setup_mesh() {
     log "Monitor progress: $(on "${HUB}" echo kubectl get multiclustermesh -n mesh-system)"
 }
 
-clean() {
-    log "Deleting Kind clusters..."
-    for cluster in "${HUB}" "${CLUSTER1}" "${CLUSTER2}"; do
-        if ${KIND} get clusters 2>/dev/null | grep -qx "${cluster}"; then
-            log "Deleting cluster: ${cluster}"
-            ${KIND} delete cluster --name "${cluster}" || true
-        fi
-    done
-
-    log "Removing dev environment state..."
-    rm -rf "${DEV_KUBE_DIR}"
-
-    log "Clean complete"
-}
-
 ACTION="${1:-}"
 case "${ACTION}" in
     check-host)                      check_host ;;
@@ -331,7 +316,6 @@ case "${ACTION}" in
     init-ocm)                        init_ocm ;;
     join-clusters)                   join_clusters ;;
     setup-mesh)                      setup_mesh ;;
-    clean)                           clean ;;
     *)
-        err "Unknown action: '${ACTION}'. Valid: check-host, create-cluster, install-olm, install-cert-manager, install-managed-serviceaccount, init-ocm, join-clusters, setup-mesh, clean" ;;
+        err "Unknown action: '${ACTION}'. Valid: check-host, create-cluster, install-olm, install-cert-manager, install-managed-serviceaccount, init-ocm, join-clusters, setup-mesh" ;;
 esac

@@ -337,5 +337,10 @@ dev-clean-meshes: ## Delete all mesh resources, cert-manager trust chain, and me
 	kubectl --kubeconfig=$(HUB_KUBECONFIG) delete namespace mesh-system --ignore-not-found=true
 
 .PHONY: dev-clean
-dev-clean: ## Destroy dev clusters and remove .kube/ folder
-	$(DEV_ENV_SCRIPT) clean
+dev-clean: $(addprefix delete-,$(CLUSTERS)) ## Destroy dev clusters and remove .kube/ folder
+	rm -rf $(DEV_KUBE_DIR)
+	$(call log,Dev environment cleaned)
+
+.PHONY: $(addprefix delete-,$(CLUSTERS))
+$(addprefix delete-,$(CLUSTERS)): delete-%: $(KIND)
+	$(KIND) delete cluster --name $*
