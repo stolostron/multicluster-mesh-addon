@@ -717,7 +717,7 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 
 		When("a MultiClusterMesh is updated with custom TokenValidity", func() {
 			It("should update ManagedServiceAccount Validity when the mesh spec changes", func() {
-				util.CreateK8sManagedCluster(ctx, k8sClient, clusterName, testClusterSet)
+				util.CreateManagedCluster(ctx, k8sClient, clusterName, testClusterSet)
 				util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet)
 
 				msa := expectManagedServiceAccount(testNs, meshName, clusterName)
