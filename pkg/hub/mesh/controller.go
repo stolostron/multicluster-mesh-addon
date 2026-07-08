@@ -426,7 +426,7 @@ func (r *Reconciler) cleanupCertificates(ctx context.Context, mesh *meshv1alpha1
 		}
 
 		klog.Infof("Deleting Certificate %s/%s (cluster %s no longer in ClusterSet %s)", cert.Namespace, cert.Name, clusterName, mesh.Spec.ClusterSet)
-		if err := r.Delete(ctx, &cert); err != nil {
+		if err := client.IgnoreNotFound(r.Delete(ctx, &cert)); err != nil {
 			return fmt.Errorf("failed to delete Certificate %s/%s: %w", cert.Namespace, cert.Name, err)
 		}
 	}
