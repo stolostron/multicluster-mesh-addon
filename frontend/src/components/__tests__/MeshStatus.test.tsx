@@ -1,6 +1,6 @@
 import { render, screen } from '@testing-library/react'
 import { MeshStatus, getStatusRank } from '../MeshStatus'
-import type { K8sCondition } from '../../types/multiClusterMesh'
+import type { K8sCondition } from '../../types/common'
 
 // i18n is mocked in setupTests.ts: t(key) returns the key (pass-through)
 
@@ -12,13 +12,8 @@ const operatorFailed: K8sCondition = { type: 'OperatorInstalled', status: 'False
 
 describe('MeshStatus', () => {
   describe('with no conditions', () => {
-    it('shows Unknown', () => {
+    it('shows Unknown when no conditions provided', () => {
       render(<MeshStatus />)
-      expect(screen.getByText('Unknown')).toBeInTheDocument()
-    })
-
-    it('shows Unknown when conditions is empty', () => {
-      render(<MeshStatus conditions={[]} />)
       expect(screen.getByText('Unknown')).toBeInTheDocument()
     })
   })
@@ -73,6 +68,33 @@ describe('MeshStatus', () => {
       render(<MeshStatus conditions={[operatorFailed]} conditionType="OperatorInstalled" />)
       expect(screen.getByText('Reconcile Error')).toBeInTheDocument()
     })
+  })
+
+  it('shows Degraded when Ready=True but a secondary condition is False', () => {
+    const conditions: K8sCondition[] = [
+      { type: 'Ready', status: 'True' },
+      { type: 'DependenciesHealthy', status: 'False', reason: 'IstioCNINotFound' },
+    ]
+    render(<MeshStatus conditions={conditions} />)
+    expect(screen.getByText('Degraded')).toBeInTheDocument()
+  })
+
+  it('does not show Degraded when Ready=True and secondary condition is Unknown', () => {
+    const conditions: K8sCondition[] = [
+      { type: 'Ready', status: 'True' },
+      { type: 'Progressing', status: 'Unknown' },
+    ]
+    render(<MeshStatus conditions={conditions} />)
+    expect(screen.getByText('Ready')).toBeInTheDocument()
+  })
+
+  it('does not show Degraded for non-Ready conditionType even when secondary is False', () => {
+    const conditions: K8sCondition[] = [
+      { type: 'OperatorInstalled', status: 'True' },
+      { type: 'Other', status: 'False' },
+    ]
+    render(<MeshStatus conditions={conditions} conditionType="OperatorInstalled" />)
+    expect(screen.getByText('OperatorInstalled')).toBeInTheDocument()
   })
 
   it('shows Healthy when all non-target conditions are True', () => {

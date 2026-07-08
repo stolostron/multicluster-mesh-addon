@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState } from 'react'
-import type { FC, ReactNode } from 'react'
+import type { FC } from 'react'
 import { useParams, Link } from 'react-router-dom-v5-compat'
 import { fleetK8sGet } from '@stolostron/multicluster-sdk'
 import {
   Timestamp,
 } from '@openshift-console/dynamic-plugin-sdk'
 import {
+  Alert,
   Breadcrumb,
   BreadcrumbItem,
   Card,
@@ -28,33 +29,53 @@ import {
 } from '@patternfly/react-core'
 import type { Istio } from '../types/istio'
 import { istioModel } from '../types/istio'
-import type { K8sCondition } from '../types/common'
+import { getFromEnrichmentCache, setInEnrichmentCache } from '../hooks/useEnrichedControlPlanes'
 import { useMultiClusterMeshes } from '../hooks/useMultiClusterMeshes'
 import { buildMcmIndex, lookupMcm } from '../utils/correlateMCM'
+import { clusterDetailLink } from '../utils/linkUtils'
+import { ConditionsTable } from './ConditionsTable'
 import { MeshStatus } from './MeshStatus'
+import { CP_TYPES } from '../utils/cpTypeSegment'
+import type { CpType } from '../utils/cpTypeSegment'
 import { useMeshTranslation } from '../utils/i18nUtils'
 
-function statusIcon(status: string): ReactNode {
-  const color = status === 'True' ? 'green' : status === 'Unknown' ? 'grey' : 'red'
-  return <Label color={color}>{status}</Label>
-}
-
-const ControlPlaneDetailContent: FC<{ cluster: string; name: string }> = ({ cluster, name }) => {
+const ControlPlaneDetailContent: FC<{ cluster: string; name: string; type: CpType }> = ({ cluster, name, type }) => {
   const { t } = useMeshTranslation()
   const [istio, setIstio] = useState<Istio | null>(null)
   const [loaded, setLoaded] = useState(false)
   const [error, setError] = useState<unknown>(null)
+  const [refreshError, setRefreshError] = useState<unknown>(null)
   const [mcms] = useMultiClusterMeshes()
   const mcmIndex = useMemo(() => buildMcmIndex(mcms ?? []), [mcms])
 
   useEffect(() => {
     let cancelled = false
-    setLoaded(false)
+    const cached = getFromEnrichmentCache(cluster, name)
+    if (cached) {
+      setIstio(cached)
+      setLoaded(true)
+    } else {
+      setIstio(null)
+      setLoaded(false)
+    }
     setError(null)
-    setIstio(null)
+    setRefreshError(null)
+
     fleetK8sGet<Istio>({ model: istioModel, name, cluster })
-      .then((r) => { if (!cancelled) { setIstio(r); setLoaded(true) } })
-      .catch((e) => { if (!cancelled) { console.error('Failed to load control plane:', e); setError(e); setLoaded(true) } })
+      .then((r) => {
+        // Cache write is intentionally outside the cancelled guard: valid data
+        // should warm the shared cache even if the user navigated away, so other
+        // pages benefit from the fetch without re-requesting.
+        setInEnrichmentCache(cluster, name, r)
+        if (!cancelled) { setIstio(r); setLoaded(true) }
+      })
+      .catch((e) => {
+        if (!cancelled) {
+          console.error('Failed to load control plane:', e)
+          if (!cached) { setError(e); setLoaded(true) }
+          else setRefreshError(e)
+        }
+      })
     return () => { cancelled = true }
   }, [cluster, name])
 
@@ -98,8 +119,9 @@ const ControlPlaneDetailContent: FC<{ cluster: string; name: string }> = ({ clus
       <PageSection>
         <Breadcrumb>
           <BreadcrumbItem>
-            <Link to="/mesh-control-planes">{t('Control Planes')}</Link>
+            <Link to="/fleet-mesh/control-planes">{t('Control Planes')}</Link>
           </BreadcrumbItem>
+          <BreadcrumbItem>{({ managed: t('Managed'), discovered: t('Discovered'), standalone: t('Standalone') })[type]}</BreadcrumbItem>
           <BreadcrumbItem isActive>{`${cluster} / ${name}`}</BreadcrumbItem>
         </Breadcrumb>
         <Flex alignItems={{ default: 'alignItemsCenter' }} style={{ marginTop: '1rem' }}>
@@ -118,101 +140,68 @@ const ControlPlaneDetailContent: FC<{ cluster: string; name: string }> = ({ clus
 
       <PageSection>
         <Grid hasGutter>
-          <GridItem span={6}>
+          {!!refreshError && (
+            <GridItem span={12}>
+              <Alert variant="warning" isInline title={t('Data may be stale — background refresh failed.')} />
+            </GridItem>
+          )}
+          <GridItem span={5}>
             <Card isCompact>
-              <CardTitle>{t('Overview')}</CardTitle>
               <CardBody>
-                <DescriptionList isHorizontal isCompact>
+                <DescriptionList isCompact columnModifier={{ default: '2Col' }}>
                   <DescriptionListGroup>
-                    <DescriptionListTerm>{t('Cluster')}</DescriptionListTerm>
+                    <DescriptionListTerm><strong>{t('Mesh ID')}</strong></DescriptionListTerm>
                     <DescriptionListDescription>
-                      <Link to={`/multicloud/infrastructure/clusters/details/${cluster}/${cluster}/overview`}>
+                      {meshID
+                        ? (matchedMCM
+                            ? <Link to={`/fleet-mesh/meshes/managed/${encodeURIComponent(matchedMCM.namespace)}/${encodeURIComponent(matchedMCM.name)}`}>{meshID}</Link>
+                            : <Link to={`/fleet-mesh/meshes/discovered/${encodeURIComponent(meshID)}`}>{meshID}</Link>)
+                        : '-'}
+                    </DescriptionListDescription>
+                  </DescriptionListGroup>
+                  <DescriptionListGroup>
+                    <DescriptionListTerm><strong>{t('Network')}</strong></DescriptionListTerm>
+                    <DescriptionListDescription>{network ?? '-'}</DescriptionListDescription>
+                  </DescriptionListGroup>
+                  <DescriptionListGroup>
+                    <DescriptionListTerm><strong>{t('Cluster')}</strong></DescriptionListTerm>
+                    <DescriptionListDescription>
+                      <Link to={clusterDetailLink(cluster)}>
                         {cluster}
                       </Link>
                     </DescriptionListDescription>
                   </DescriptionListGroup>
                   <DescriptionListGroup>
-                    <DescriptionListTerm>{t('Control Plane Namespace')}</DescriptionListTerm>
+                    <DescriptionListTerm><strong>{t('Control Plane Namespace')}</strong></DescriptionListTerm>
                     <DescriptionListDescription>{spec.namespace}</DescriptionListDescription>
                   </DescriptionListGroup>
                   <DescriptionListGroup>
-                    <DescriptionListTerm>{t('Version')}</DescriptionListTerm>
+                    <DescriptionListTerm><strong>{t('Version')}</strong></DescriptionListTerm>
                     <DescriptionListDescription>{spec.version ?? '-'}</DescriptionListDescription>
                   </DescriptionListGroup>
                   <DescriptionListGroup>
-                    <DescriptionListTerm>{t('Mesh ID')}</DescriptionListTerm>
-                    <DescriptionListDescription>{meshID ?? '-'}</DescriptionListDescription>
-                  </DescriptionListGroup>
-                  <DescriptionListGroup>
-                    <DescriptionListTerm>{t('Network')}</DescriptionListTerm>
-                    <DescriptionListDescription>{network ?? '-'}</DescriptionListDescription>
-                  </DescriptionListGroup>
-                  {multiClusterName && (
-                    <DescriptionListGroup>
-                      <DescriptionListTerm>{t('Cluster Name (Istio)')}</DescriptionListTerm>
-                      <DescriptionListDescription>{multiClusterName}</DescriptionListDescription>
-                    </DescriptionListGroup>
-                  )}
-                  <DescriptionListGroup>
-                    <DescriptionListTerm>{t('Created')}</DescriptionListTerm>
+                    <DescriptionListTerm><strong>{t('Created')}</strong></DescriptionListTerm>
                     <DescriptionListDescription>
                       <Timestamp timestamp={istio.metadata?.creationTimestamp} />
                     </DescriptionListDescription>
                   </DescriptionListGroup>
+                  {multiClusterName && (
+                    <DescriptionListGroup>
+                      <DescriptionListTerm><strong>{t('Cluster Name (Istio)')}</strong></DescriptionListTerm>
+                      <DescriptionListDescription>{multiClusterName}</DescriptionListDescription>
+                    </DescriptionListGroup>
+                  )}
                 </DescriptionList>
               </CardBody>
             </Card>
           </GridItem>
 
-          {matchedMCM && (
-            <GridItem span={6}>
-              <Card isCompact>
-                <CardTitle>{t('Managed By')}</CardTitle>
-                <CardBody>
-                  <DescriptionList isHorizontal isCompact>
-                    <DescriptionListGroup>
-                      <DescriptionListTerm>{t('Fleet Mesh')}</DescriptionListTerm>
-                      <DescriptionListDescription>
-                        <Link to={`/service-mesh/${matchedMCM.namespace}/${matchedMCM.name}`}>
-                          {matchedMCM.name}
-                        </Link>
-                      </DescriptionListDescription>
-                    </DescriptionListGroup>
-                  </DescriptionList>
-                </CardBody>
-              </Card>
-            </GridItem>
-          )}
-
           {conditions.length > 0 && (
             <GridItem span={12}>
-              <Card>
-                <CardTitle>{t('Conditions')}</CardTitle>
+              <Card isCompact>
+                <CardTitle><strong>{t('Conditions')}</strong></CardTitle>
                 <CardBody>
-                  <table className="pf-v6-c-table pf-m-grid-md pf-m-compact" role="grid">
-                    <thead className="pf-v6-c-table__thead">
-                      <tr className="pf-v6-c-table__tr">
-                        <th className="pf-v6-c-table__th" scope="col">{t('Type')}</th>
-                        <th className="pf-v6-c-table__th" scope="col">{t('Status')}</th>
-                        <th className="pf-v6-c-table__th" scope="col">{t('Reason')}</th>
-                        <th className="pf-v6-c-table__th" scope="col">{t('Message')}</th>
-                        <th className="pf-v6-c-table__th" scope="col">{t('Last Transition')}</th>
-                      </tr>
-                    </thead>
-                    <tbody className="pf-v6-c-table__tbody">
-                      {conditions.map((c: K8sCondition, i: number) => (
-                        <tr className="pf-v6-c-table__tr" key={`${c.type}-${i}`}>
-                          <td className="pf-v6-c-table__td">{c.type}</td>
-                          <td className="pf-v6-c-table__td">{statusIcon(c.status)}</td>
-                          <td className="pf-v6-c-table__td">{c.reason ?? '-'}</td>
-                          <td className="pf-v6-c-table__td">{c.message ?? '-'}</td>
-                          <td className="pf-v6-c-table__td">
-                            {c.lastTransitionTime ? <Timestamp timestamp={c.lastTransitionTime} /> : '-'}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                  <ConditionsTable conditions={conditions} />
                 </CardBody>
               </Card>
             </GridItem>
@@ -225,23 +214,23 @@ const ControlPlaneDetailContent: FC<{ cluster: string; name: string }> = ({ clus
 
 const ControlPlaneDetailPage: FC = () => {
   const { t } = useMeshTranslation()
-  const { cluster, name } = useParams<{ cluster: string; name: string }>()
+  const { type, cluster, name } = useParams<{ type: string; cluster: string; name: string }>()
 
-  if (!cluster || !name) {
+  if (!type || !cluster || !name || !CP_TYPES.includes(type as CpType)) {
     return (
       <PageSection>
         <EmptyState>
           <Title headingLevel="h2" size="lg">{t('Not Found')}</Title>
           <EmptyStateBody>
-            {t('Invalid control plane URL. Expected /mesh-control-planes/:cluster/:name.')}
+            {t('Invalid URL. Expected /fleet-mesh/control-planes/:type/:cluster/:name.')}
           </EmptyStateBody>
         </EmptyState>
       </PageSection>
     )
   }
 
-  return <ControlPlaneDetailContent cluster={cluster} name={name} />
+  return <ControlPlaneDetailContent cluster={cluster} name={name} type={type as CpType} />
 }
 
-/** Detail page for a single Istio control plane, reached via /mesh-control-planes/:cluster/:name. */
+/** Detail page for a single Istio control plane, reached via /fleet-mesh/control-planes/:type/:cluster/:name. */
 export default ControlPlaneDetailPage

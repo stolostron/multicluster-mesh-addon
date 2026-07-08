@@ -27,7 +27,11 @@ export function buildMcmIndex(mcms: MultiClusterMesh[]): Map<string, McmInfo> {
   for (const mcm of mcms) {
     const cpNs = mcm.spec.controlPlane?.namespace ?? 'istio-system'
     for (const cs of mcm.status?.clusterStatus ?? []) {
-      map.set(`${cs.clusterName}/${cpNs}`, {
+      const key = `${cs.clusterName}/${cpNs}`
+      if (map.has(key)) {
+        console.warn(`MCM index collision: [${key}] claimed by both [${map.get(key)!.name}] and [${mcm.metadata?.name}]`)
+      }
+      map.set(key, {
         name: mcm.metadata?.name ?? '',
         namespace: mcm.metadata?.namespace ?? '',
       })

@@ -77,7 +77,7 @@ deps: go.mod go.sum
 
 .PHONY: fmt
 fmt: ## Format Go code
-	go fmt ./...
+	gofmt -s -w $$(git ls-files '*.go')
 
 .PHONY: gen-code
 gen-code: ## Generate DeepCopy code

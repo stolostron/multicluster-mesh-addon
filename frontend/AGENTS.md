@@ -2,12 +2,12 @@
 
 ## Project Overview
 
-OpenShift ConsolePlugin that adds a "Fleet Service Mesh" perspective to the OpenShift Console. Provides fleet-wide visibility into `MultiClusterMesh` resources managed by the [multicluster-mesh-addon](https://github.com/stolostron/multicluster-mesh-addon) backend controller.
+OpenShift ConsolePlugin that adds a "Fleet Service Mesh" perspective to the OpenShift Console. Provides fleet-wide visibility into both managed (`MultiClusterMesh`) and discovered (unmanaged) service meshes across managed clusters via the [multicluster-mesh-addon](https://github.com/stolostron/multicluster-mesh-addon) backend controller.
 
 Related links:
 - [OSSM-12887](https://redhat.atlassian.net/browse/OSSM-12887) — Epic: OSSM/Kiali ACM console integration developer preview
 - [OCPSTRAT-2989](https://redhat.atlassian.net/browse/OCPSTRAT-2989) — Feature: Fleet-wide service mesh console integration with ACM
-- [docs/ROADMAP.md](docs/ROADMAP.md) — Current status and future plans
+- [docs/ROADMAP.md](docs/ROADMAP.md) — Future plans and backlog
 - [docs/INITIAL-SPIKE.md](docs/INITIAL-SPIKE.md) — Original spike research and architecture notes
 - [DEV-INSTALL.md](DEV-INSTALL.md) — End-to-end dev setup on CRC
 
@@ -19,12 +19,20 @@ Related links:
 - `rstest.config.ts` — Rstest test runner config (jsdom environment, module aliases, setup files, SWC JSX transform)
 - `hack/start-console.sh` — Runs local OpenShift Console (`origin-console`) pointed at webpack dev server
 - `deploy/` — Kubernetes manifests (ConsolePlugin CR, Deployment/Service, nginx config)
-- `src/types/` — TypeScript types for K8s resources (MultiClusterMesh, Certificate, ManifestWork, Istio)
-- `src/components/` — React page and card components (ServiceMeshPage, MeshDetailPage, ControlPlanesPage, ControlPlaneDetailPage, MeshStatus, TrustStatusCard)
-- `src/hooks/` — Data fetching hooks (useMultiClusterMeshes, useDiscoveredControlPlanes, useEnrichedControlPlanes)
+- `src/types/` — TypeScript types for K8s resources (MultiClusterMesh, Certificate, ManifestWork, Istio, ManagedCluster)
+- `src/types/fleetMesh.ts` — FleetMeshItem type for the unified mesh list (managed + discovered)
+- `src/types/managedCluster.ts` — ManagedCluster type, GVK, and cluster availability helpers
+- `src/components/` — React page and card components (OverviewPage, ServiceMeshPage, MeshDetailPage, DiscoveredMeshDetailPage, ControlPlanesPage, ControlPlaneDetailPage, ControlPlanesCard, MeshStatus, StatusDonutChart, TrustStatusCard)
+- `src/hooks/` — Data fetching hooks (useMultiClusterMeshes, useManagedClusters, useManagedClusterMap, useFleetMeshItems, useDiscoveredControlPlanes, useEnrichedControlPlanes, useVirtualRows)
+- `src/utils/cpTypeSegment.ts` — Control plane type segment helper (managed/discovered/standalone)
+- `src/utils/correlateMCM.ts` — Correlates control planes with their managing MultiClusterMesh CR
+- `src/utils/filterUtils.ts` — Case-insensitive filter utility for multi-field list filtering
 - `src/utils/i18nUtils.ts` — i18n hook (`useMeshTranslation`) and namespace constant
+- `src/utils/linkUtils.ts` — URL builders for cross-perspective navigation links
+- `src/utils/oldestTimestamp.ts` — Finds the oldest timestamp from a collection of conditions
+- `src/utils/worstConditions.ts` — Extracts the worst (most severe) conditions for status display
 - `src/locales/en/plugin__ossm-acm.json` — English translation strings
-- `src/__mocks__/` — Rstest mocks for Console SDK, multicluster-sdk, react-router, and static assets
+- `src/__mocks__/` — Rstest mocks for Console SDK, multicluster-sdk, react-router, and react-charts
 - `src/setupTests.tsx` — Rstest setup (jest-dom matchers via expect.extend, i18n mock, jsdom stubs, cleanup)
 - `src/rstest-globals.d.ts` — Type declarations for rstest globals (`describe`, `it`, `expect`, `rstest`, etc.)
 
@@ -50,6 +58,11 @@ Run `make help` to see all available targets.
 
 Override `IMG` to push to an external registry: `make build IMG=quay.io/myorg/ossm-acm-console-plugin:v1`
 
+## Dependency Notes
+
+- `classnames` — Transitive runtime dependency of `@stolostron/multicluster-sdk` (used in `FleetResourceLink.js`). Not listed as a peer dependency of the SDK, so this project must provide it. Do not remove it even though no source file in this project imports it directly.
+- `victory-*` sub-packages (16 packages) — Optional peer dependencies of `@patternfly/react-charts` required at runtime for Victory-based chart components (e.g. `ChartDonut`). Listed as direct dependencies so they are available at runtime. Do not remove without verifying PatternFly charts still render correctly.
+
 ## Key Architecture Decisions
 
 ### OpenShift Console Plugin SDK
@@ -74,7 +87,7 @@ export default PerspectiveIcon
 
 ### Route registration order
 
-The detail route (`/service-mesh/:ns/:name`) must be registered BEFORE the list route (`/service-mesh`) in `console-extensions.ts`. React Router v5 matches the first route whose path prefix matches.
+Detail routes (`/fleet-mesh/meshes/managed/:ns/:name`, `/fleet-mesh/meshes/discovered/:meshID`, `/fleet-mesh/control-planes/:type/:cluster/:name`) must be registered BEFORE their respective list routes (`/fleet-mesh/meshes`, `/fleet-mesh/control-planes`) in `console-extensions.ts`. React Router v5 matches the first route whose path prefix matches.
 
 ### Data sources
 
@@ -83,6 +96,7 @@ All data comes from the hub cluster Kubernetes API via `useK8sWatchResource`:
 | Resource | Where it lives | What it shows |
 |----------|---------------|---------------|
 | `MultiClusterMesh` | Mesh namespace (e.g. `mesh-system`) | Mesh spec, status, per-cluster conditions |
+| `ManagedCluster` (cluster.open-cluster-management.io/v1) | Cluster-scoped | Cluster availability (Available/Unavailable/Unreachable) |
 | `Certificate` (cert-manager.io/v1) | Mesh namespace | Per-cluster cert status, expiry, renewal |
 | `ManifestWork` (work.open-cluster-management.io/v1) | Per-cluster namespace (e.g. `local-cluster`) | Trust distribution status |
 
@@ -92,7 +106,7 @@ The Control Planes page uses `@stolostron/multicluster-sdk` for cross-cluster da
 |----------|---------|---------------|
 | `Istio` (sailoperator.io/v1) | `useFleetSearchPoll` (discovery) + `fleetK8sGet` (enrichment) | Per-cluster control plane version, meshID, health |
 
-The enrichment hook (`useEnrichedControlPlanes`) caches `fleetK8sGet` results in a `useRef<Map>` with a 2.5-minute TTL, fetches in batches of 10, and correlates with `MultiClusterMesh` CRs from `useMultiClusterMeshes`. See [docs/DISCOVERY-OPTIONS.md](docs/DISCOVERY-OPTIONS.md) for the full architecture.
+The enrichment hook (`useEnrichedControlPlanes`) caches `fleetK8sGet` results in a module-level `Map` with a 2.5-minute TTL, fetches in batches of 10, and correlates with `MultiClusterMesh` CRs from `useMultiClusterMeshes`. See [docs/DISCOVERY-OPTIONS.md](docs/DISCOVERY-OPTIONS.md) for the full architecture.
 
 ### MeshStatus component
 
@@ -113,7 +127,7 @@ const MyComponent: FC = () => {
 
 For strings with interpolated values, use `{{variable}}` syntax:
 ```typescript
-t('Cluster Status ({{count}})', { count: clusterStatuses.length })
+t('Clusters ({{count}})', { count: clusterStatuses.length })
 ```
 
 For navigation and perspective names in `console-extensions.ts`, use the `consoleName()` helper which produces `%plugin__ossm-acm~Title%` markers for the Console's own i18n system (separate from react-i18next).
@@ -131,7 +145,9 @@ The build uses **SWC** (`swc-loader` + `@swc/core`) for TypeScript transpilation
 Run tests with `make test`. Tests use **Rstest** (`@rstest/core`) — an Rspack-powered test runner with Jest-compatible APIs. Tests live in `__tests__/` subdirectories alongside source, using `*.test.tsx` naming.
 
 - `@openshift-console/dynamic-plugin-sdk` is mocked via `resolve.alias` in `rstest.config.ts`, pointing to `src/__mocks__/consoleSdkMock.tsx`. Override hook return values with `mockReturnValue()` in individual tests.
+- `@stolostron/multicluster-sdk` is mocked via `resolve.alias` in `rstest.config.ts`, pointing to `src/__mocks__/multiclusterSdkMock.tsx`.
 - `react-router-dom-v5-compat` is mocked via `resolve.alias` in `rstest.config.ts`, pointing to `src/__mocks__/routerMock.tsx` (`Link` renders `<a>`, `useParams` returns `{}`).
+- `@patternfly/react-charts/victory` is mocked via `resolve.alias` in `rstest.config.ts`, pointing to `src/__mocks__/chartsMock.tsx`.
 - `react-i18next` is mocked globally in `src/setupTests.tsx` via `rs.mock()` — `t(key)` returns the English key string with `{{variable}}` interpolations substituted. Tests can assert directly on English source strings.
 
 When mocking a hook in a test, use `rstest.mocked()` (preferred) or `import type { Mock }`:
@@ -161,9 +177,10 @@ Rstest uses `>` as snapshot separator vs Jest's `:` — relevant if snapshot tes
 - No comments unless the WHY is non-obvious
 - Use PatternFly components for all UI — `Card`, `DescriptionList`, `Label`, `Grid`, `Flex`, `PageSection`, etc.
 - Tables in scrollable containers (max 400px) use sticky `<thead>` for column visibility
-- Cards showing per-cluster data should include summary labels, toggle filters, search, and scroll for scale (5-500 clusters)
-- Condition status uses three colors: green (True), red (False), grey (Unknown)
+- Cards showing per-cluster data should include toggle filters (All/Ready/Not Ready/Unknown), search, and scroll for scale (5-500 clusters)
+- Condition status uses four colors: green (True/Ready), orange (Degraded — Ready but secondary conditions failing), red (False), grey (Unknown)
 - Trust distribution status uses: green "Distributed", orange "Applied", red with reason, grey "Pending"
+- A cluster can host multiple control planes (for different meshes, different namespaces, or redundancy). Never assume a 1:1 relationship between clusters and control planes. Use unique cluster names (via `Set`) when counting clusters, and include CP identity (name or namespace) when attributing data to avoid ambiguity.
 - Empty states should distinguish "no data exists" from "filter matched nothing"
 - Sign commits with `-s` flag
 - Never amend or rewrite existing commits unless explicitly asked
@@ -185,13 +202,20 @@ Rstest uses `>` as snapshot separator vs Jest's `:` — relevant if snapshot tes
 4. Handle three states: loading (spinner), error (message), loaded (render)
 5. For cross-namespace watches, omit the `namespace` field (requires cluster-level RBAC)
 
-### Adding a column to the list page
+### Adding a column to a list page
 
-1. Add entry to `buildColumns()` in `ServiceMeshPage.tsx` with `title: t('...')`, `id`, and optionally `sort`
-2. `sort` can be a dot-path string or a function — if using a function, add explicit types: `(data: MultiClusterMesh[], sortDirection: string) => MultiClusterMesh[]`
+Both `ServiceMeshPage.tsx` (Meshes) and `ControlPlanesPage.tsx` (Control Planes) follow the same pattern:
+
+1. Add entry to `buildColumns()` with `title: t('...')`, `id`, and optionally `sort`
+2. `sort` can be a dot-path string or a function — if using a function, add explicit types: `(data: T[], sortDirection: string) => T[]`
 3. Add the new string key to `src/locales/en/plugin__ossm-acm.json`
-4. Add a `<TableData id="..." activeColumnIDs={activeColumnIDs}>` cell to `MeshRow`
+4. Add a `<TableData id="..." activeColumnIDs={activeColumnIDs}>` cell to the row component
 5. Cell order doesn't need to match column order (matched by `id`), but keep them aligned for readability
+6. `ServiceMeshPage.tsx` operates on `FleetMeshItem` (the unified type covering managed and discovered meshes); `ControlPlanesPage.tsx` operates on `EnrichedControlPlane`
+
+## Skills
+
+- **[Track Backend Issues](docs/skills/track-backend-issues.md)** — Analyze open backend controller issues for frontend impact and create/update GitHub tracking issues with the `area/frontend` label. Run periodically (e.g., when new backend issues are filed or before sprint planning).
 
 ## Backend CRD Reference
 

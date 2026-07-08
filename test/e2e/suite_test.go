@@ -16,9 +16,11 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/tools/clientcmd"
+	addonv1beta1 "open-cluster-management.io/api/addon/v1beta1"
 	clusterv1 "open-cluster-management.io/api/cluster/v1"
 	clusterv1beta2 "open-cluster-management.io/api/cluster/v1beta2"
 	workv1 "open-cluster-management.io/api/work/v1"
+	msav1beta1 "open-cluster-management.io/managed-serviceaccount/apis/authentication/v1beta1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	meshv1alpha1 "github.com/stolostron/multicluster-mesh-addon/pkg/apis/mesh/v1alpha1"
@@ -47,6 +49,8 @@ var _ = BeforeSuite(func(ctx context.Context) {
 		workv1.Install,
 		operatorsv1.AddToScheme,
 		operatorsv1alpha1.AddToScheme,
+		msav1beta1.AddToScheme,
+		addonv1beta1.Install,
 	)
 
 	hubKubeconfig := env("HUB_KUBECONFIG", ".kube/hub.config")
@@ -102,4 +106,10 @@ func checkNoExistingResources(ctx context.Context, c client.Client) {
 	Expect(err).NotTo(HaveOccurred())
 	Expect(mwList.Items).To(BeEmpty(),
 		"existing ManifestWorks found; run 'make dev-clean-meshes' to clean up")
+
+	msaList := &msav1beta1.ManagedServiceAccountList{}
+	err = c.List(ctx, msaList, client.MatchingLabels{meshcontroller.ManagedByLabel: meshcontroller.ManagedByValue})
+	Expect(err).NotTo(HaveOccurred())
+	Expect(msaList.Items).To(BeEmpty(),
+		"existing ManagedServiceAccounts found; run 'make dev-clean-meshes' to clean up")
 }
