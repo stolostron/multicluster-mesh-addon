@@ -12,10 +12,19 @@ export interface ClusterMeshStatus {
   conditions?: K8sCondition[]
 }
 
+export interface TemplateSourceConfig {
+  basic?: Record<string, never>
+  configMapRef?: { name: string; key?: string }
+  git?: { url: string; path: string; ref?: { branch?: string; tag?: string; commit?: string }; secretRef?: { name: string } }
+  none?: Record<string, never>
+}
+
 export interface MultiClusterMeshSpec {
   clusterSet: string
   controlPlane?: {
     namespace?: string
+    templateSource?: TemplateSourceConfig
+    version?: string
   }
   operator?: {
     namespace?: string

@@ -13,6 +13,7 @@ const friendlyReasons: Record<string, string> = {
   NamespaceConflict: 'Namespace Conflict',
   OperatorConfigConflict: 'Operator Config Conflict',
   ReconcileError: 'Reconcile Error',
+  TemplateSourceUnavailable: 'Template Source Unavailable',
 }
 
 export function deriveStatus(conditions?: K8sCondition[], conditionType?: string): { label: string; color: StatusColor } {
@@ -39,6 +40,13 @@ export function deriveStatus(conditions?: K8sCondition[], conditionType?: string
     }
     const reason = target.reason ?? `Not ${targetType}`
     return { label: friendlyReasons[reason] ?? reason, color: 'red' }
+  }
+
+  // Non-default condition type was requested but not present (e.g. ControlPlaneReady
+  // in None mode where the controller doesn't set it). Show N/A instead of
+  // inferring health from unrelated conditions.
+  if (conditionType && conditionType !== 'Ready') {
+    return { label: 'N/A', color: 'grey' }
   }
 
   const degraded = conditions.find((c) => c.status !== 'True')

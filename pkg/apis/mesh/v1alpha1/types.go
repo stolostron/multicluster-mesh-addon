@@ -28,6 +28,13 @@ func (m *MultiClusterMesh) GetTrustDomain() string {
 	return m.Name
 }
 
+// IsNoneMode returns true when the controller should skip mesh resource creation
+// and only handle foundational plumbing (operator, MSA, trust certs).
+func (m *MultiClusterMesh) IsNoneMode() bool {
+	return m.Spec.ControlPlane.TemplateSource != nil &&
+		m.Spec.ControlPlane.TemplateSource.None != nil
+}
+
 // GetControlPlaneNamespace returns the control plane namespace, defaulting to "istio-system".
 func (m *MultiClusterMesh) GetControlPlaneNamespace() string {
 	if m.Spec.ControlPlane.Namespace == "" {
@@ -89,14 +96,177 @@ type MultiClusterMeshSpec struct {
 	// Security defines the trust and discovery configuration
 	// +optional
 	Security SecurityConfig `json:"security,omitempty"`
+
+	// Gateway defines the east-west gateway configuration
+	// +optional
+	Gateway GatewayConfig `json:"gateway,omitempty"`
+
+	// Topology defines the mesh topology (MultiPrimary or PrimaryRemote)
+	// +optional
+	Topology TopologyConfig `json:"topology,omitempty"`
 }
 
-// ControlPlaneConfig defines where the mesh control plane will be installed
+// ControlPlaneConfig defines where and how the mesh control plane will be installed
 type ControlPlaneConfig struct {
 	// Namespace is the namespace where Istio will be installed on each cluster
 	// +optional
 	// +kubebuilder:default="istio-system"
 	Namespace string `json:"namespace,omitempty"`
+
+	// TemplateSource defines where the Istio CR template comes from.
+	// If omitted, a built-in basic template is used (suitable for demos).
+	// +optional
+	TemplateSource *TemplateSourceConfig `json:"templateSource,omitempty"`
+
+	// Version pins the Istio control plane version (e.g. "v1.28.8").
+	// If empty, the operator selects its default version.
+	// +optional
+	Version string `json:"version,omitempty"`
+}
+
+// TemplateSourceConfig defines the source of the Istio CR template.
+// Exactly one field must be set. The controller deep-merges its own
+// managed fields (meshID, network, trustDomain, etc.) on top of
+// whatever the source provides.
+// +kubebuilder:validation:XValidation:rule="(has(self.basic) ? 1 : 0) + (has(self.none) ? 1 : 0) + (has(self.configMapRef) ? 1 : 0) + (has(self.git) ? 1 : 0) == 1",message="exactly one of basic, none, configMapRef, or git must be set"
+type TemplateSourceConfig struct {
+	// Basic uses the controller's built-in Istio CR template with sensible
+	// defaults (DNS proxy metadata enabled). Suitable for demos and quick starts.
+	// This is also the behavior when templateSource is omitted entirely.
+	// +optional
+	Basic *BasicTemplateSource `json:"basic,omitempty"`
+
+	// ConfigMapRef references a ConfigMap containing the Istio CR template YAML.
+	// The ConfigMap must be in the same namespace as the MultiClusterMesh resource.
+	// +optional
+	ConfigMapRef *ConfigMapTemplateRef `json:"configMapRef,omitempty"`
+
+	// Git pulls the Istio CR template from a git repository.
+	// +optional
+	Git *GitTemplateSource `json:"git,omitempty"`
+
+	// None signals the controller to skip mesh resource creation
+	// (IstioCNI, Istio CR, gateway, remote secrets). Only foundational
+	// plumbing is reconciled: operator install, MSA, and trust certs.
+	// Use this when managing mesh resources externally (e.g. via ArgoCD).
+	// +optional
+	None *NoneTemplateSource `json:"none,omitempty"`
+}
+
+// BasicTemplateSource selects the controller's built-in Istio CR template.
+type BasicTemplateSource struct{}
+
+// NoneTemplateSource is a sentinel type indicating the controller should skip
+// mesh resource creation. The controller still handles operator install, MSA,
+// and trust certificate distribution.
+type NoneTemplateSource struct{}
+
+// ConfigMapTemplateRef references a ConfigMap containing Istio CR template YAML.
+type ConfigMapTemplateRef struct {
+	// Key is the ConfigMap data key containing the Istio CR YAML.
+	// +optional
+	// +kubebuilder:default="istio.yaml"
+	Key string `json:"key,omitempty"`
+
+	// Name is the ConfigMap name.
+	// +required
+	// +kubebuilder:validation:MinLength=1
+	Name string `json:"name"`
+}
+
+// GitTemplateSource pulls an Istio CR template from a git repository.
+type GitTemplateSource struct {
+	// Path is the file path within the repository to the Istio CR YAML.
+	// +required
+	// +kubebuilder:validation:MinLength=1
+	Path string `json:"path"`
+
+	// Ref specifies the git reference to resolve. Defaults to branch "main".
+	// +optional
+	Ref *GitRef `json:"ref,omitempty"`
+
+	// SecretRef references a Secret containing git credentials for private repos.
+	// For HTTPS: username + password (or token). For SSH: ssh-privatekey + known_hosts.
+	// +optional
+	SecretRef *SecretRef `json:"secretRef,omitempty"`
+
+	// URL is the git repository URL.
+	// +required
+	// +kubebuilder:validation:MinLength=1
+	URL string `json:"url"`
+}
+
+// GitRef specifies a git reference to resolve.
+type GitRef struct {
+	// Branch name to track.
+	// +optional
+	Branch string `json:"branch,omitempty"`
+
+	// Commit SHA to pin to.
+	// +optional
+	Commit string `json:"commit,omitempty"`
+
+	// Tag name to track.
+	// +optional
+	Tag string `json:"tag,omitempty"`
+}
+
+// SecretRef references a Secret by name.
+type SecretRef struct {
+	// Name of the Secret.
+	// +required
+	// +kubebuilder:validation:MinLength=1
+	Name string `json:"name"`
+}
+
+// GatewayServiceType defines the Kubernetes Service type for the east-west gateway
+type GatewayServiceType string
+
+const (
+	// GatewayServiceTypeLoadBalancer uses a cloud LoadBalancer for the east-west gateway.
+	// Requires a LoadBalancer controller (cloud provider, MetalLB, etc.) on the cluster.
+	GatewayServiceTypeLoadBalancer GatewayServiceType = "LoadBalancer"
+
+	// GatewayServiceTypeNodePort uses NodePort for the east-west gateway.
+	// Works on clusters without a LoadBalancer controller (CRC, Kind, bare-metal).
+	GatewayServiceTypeNodePort GatewayServiceType = "NodePort"
+)
+
+// GatewayConfig defines the east-west gateway configuration
+type GatewayConfig struct {
+	// ServiceType is the Kubernetes Service type for the east-west gateway.
+	// Use "NodePort" on clusters without a LoadBalancer controller (CRC, Kind, bare-metal).
+	// +optional
+	// +kubebuilder:default="LoadBalancer"
+	// +kubebuilder:validation:Enum=LoadBalancer;NodePort
+	ServiceType GatewayServiceType `json:"serviceType,omitempty"`
+}
+
+// TopologyType defines the mesh topology type
+type TopologyType string
+
+const (
+	// TopologyMultiPrimary is a multi-primary mesh where every cluster runs its own control plane
+	TopologyMultiPrimary TopologyType = "MultiPrimary"
+
+	// TopologyPrimaryRemote is a primary-remote mesh where one cluster runs the control plane
+	// and remote clusters connect to it
+	TopologyPrimaryRemote TopologyType = "PrimaryRemote"
+)
+
+// TopologyConfig defines the mesh topology
+// +kubebuilder:validation:XValidation:rule="self.type != 'MultiPrimary' || !has(self.primaryCluster) || size(self.primaryCluster) == 0",message="primaryCluster must be empty for MultiPrimary topology"
+type TopologyConfig struct {
+	// Type is the mesh topology
+	// +optional
+	// +kubebuilder:default="MultiPrimary"
+	// +kubebuilder:validation:Enum=MultiPrimary;PrimaryRemote
+	Type TopologyType `json:"type,omitempty"`
+
+	// PrimaryCluster is the name of the primary cluster for PrimaryRemote topology.
+	// If empty and type is PrimaryRemote, defaults to the first cluster alphabetically.
+	// +optional
+	PrimaryCluster string `json:"primaryCluster,omitempty"`
 }
 
 // OperatorConfig defines the service mesh operator installation settings.
@@ -191,6 +361,15 @@ const (
 	// ConditionReady indicates whether the mesh is fully operational
 	ConditionReady = "Ready"
 
+	// ConditionControlPlaneReady indicates whether the Istio control plane is ready on a cluster
+	ConditionControlPlaneReady = "ControlPlaneReady"
+
+	// ConditionDiscoveryReady indicates whether cross-cluster endpoint discovery is configured on a cluster
+	ConditionDiscoveryReady = "DiscoveryReady"
+
+	// ConditionGatewayReady indicates whether the east-west gateway is ready on a cluster
+	ConditionGatewayReady = "GatewayReady"
+
 	// ConditionOperatorInstalled indicates whether the operator is installed on a cluster
 	ConditionOperatorInstalled = "OperatorInstalled"
 
@@ -200,35 +379,70 @@ const (
 	// ReasonClustersNotReady indicates that not all clusters have confirmed operator installation
 	ReasonClustersNotReady = "ClustersNotReady"
 
+	// ReasonControlPlaneNotReady indicates the Istio control plane is not yet ready
+	ReasonControlPlaneNotReady = "ControlPlaneNotReady"
+
+	// ReasonControlPlaneReady indicates the Istio control plane is ready
+	ReasonControlPlaneReady = "ControlPlaneReady"
+
+	// ReasonDiscoveryNotReady indicates cross-cluster discovery is not yet configured
+	ReasonDiscoveryNotReady = "DiscoveryNotReady"
+
+	// ReasonDiscoveryReady indicates cross-cluster discovery is configured
+	ReasonDiscoveryReady = "DiscoveryReady"
+
+	// ReasonGatewayNotReady indicates the east-west gateway is not yet ready
+	ReasonGatewayNotReady = "GatewayNotReady"
+
+	// ReasonGatewayReady indicates the east-west gateway is ready
+	ReasonGatewayReady = "GatewayReady"
+
 	// ReasonInstallationPending indicates the operator installation has been requested
 	ReasonInstallationPending = "InstallationPending"
 
-	// ReasonOperatorInstalled indicates the operator CSV has been successfully installed
-	ReasonOperatorInstalled = "Installed"
+	// ReasonMissingProductClaim indicates the cluster is missing its product claim
+	ReasonMissingProductClaim = "MissingProductClaim"
 
-	// ReasonReconcileError indicates an error occurred during reconciliation
-	ReasonReconcileError = "ReconcileError"
+	// ReasonNamespaceConflict indicates a conflict with an older mesh's control plane namespace
+	ReasonNamespaceConflict = "NamespaceConflict"
 
 	// ReasonOperatorConfigConflict indicates a conflict with an older mesh's operator config
 	ReasonOperatorConfigConflict = "OperatorConfigConflict"
 
-	// ReasonNamespaceConflict indicates a conflict with an older mesh's control plane namespace
-	ReasonNamespaceConflict = "NamespaceConflict"
+	// ReasonOperatorInstalled indicates the operator CSV has been successfully installed
+	ReasonOperatorInstalled = "Installed"
+
+	// ReasonPhaseTimeout indicates a phase has been stuck for too long
+	ReasonPhaseTimeout = "PhaseTimeout"
+
+	// ReasonReconcileError indicates an error occurred during reconciliation
+	ReasonReconcileError = "ReconcileError"
+
+	// ReasonTemplateSourceUnavailable indicates the Istio CR template source
+	// could not be resolved (ConfigMap missing, git clone failed, invalid YAML, etc.)
+	ReasonTemplateSourceUnavailable = "TemplateSourceUnavailable"
 )
 
 // MultiClusterMeshStatus defines the observed state of MultiClusterMesh
 type MultiClusterMeshStatus struct {
+	// ClusterStatus tracks the status of each cluster in the mesh
+	// +listType=map
+	// +listMapKey=clusterName
+	// +optional
+	ClusterStatus []ClusterMeshStatus `json:"clusterStatus,omitempty"`
+
 	// Conditions represent the latest available observations of the mesh state
 	// +listType=map
 	// +listMapKey=type
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 
-	// ClusterStatus tracks the status of each cluster in the mesh
-	// +listType=map
-	// +listMapKey=clusterName
+	// PrimaryGatewayAddress is the LB address (IP or hostname) of the primary cluster's
+	// east-west gateway for PrimaryRemote topology. Empty for MultiPrimary.
+	// Populated by the controller for user observability; internal controller logic reads
+	// the address live from ManifestWork feedback.
 	// +optional
-	ClusterStatus []ClusterMeshStatus `json:"clusterStatus,omitempty"`
+	PrimaryGatewayAddress string `json:"primaryGatewayAddress,omitempty"`
 }
 
 // ClusterMeshStatus tracks the mesh status for a specific cluster

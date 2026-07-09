@@ -77,7 +77,11 @@ const MeshRow: FC<RowProps<FleetMeshItem>> = ({ obj, activeColumnIDs }) => {
       <TableData id="meshID" activeColumnIDs={activeColumnIDs}>
         {obj.meshID ? (
           <Link to={obj.detailLink}>{obj.meshID}</Link>
-        ) : '-'}
+        ) : (
+          isManaged
+            ? <Link to={obj.detailLink}><i>{t('Pending')}</i></Link>
+            : '-'
+        )}
       </TableData>
       <TableData id="type" activeColumnIDs={activeColumnIDs}>
         {isManaged ? t('Managed') : t('Discovered')}

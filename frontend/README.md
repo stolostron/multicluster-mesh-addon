@@ -35,8 +35,8 @@ Run `make help` to see all available targets.
 
 ## Documentation
 
-- [DEV-INSTALL.md](DEV-INSTALL.md) — End-to-end setup guide for CRC (ACM, cert-manager, backend controller, frontend plugin)
-- [DEMO-SETUP.md](DEMO-SETUP.md) — Demo environment setup guide
+- [DEV-INSTALL.md](DEV-INSTALL.md) — End-to-end dev install and demo setup guide for CRC
+- [DEMO-SETUP-MULTICLUSTER.md](DEMO-SETUP-MULTICLUSTER.md) — Multi-cluster demo setup (two OpenShift clusters)
 - [AGENTS.md](AGENTS.md) — AI/dev agent context for the frontend codebase
 - [docs/ROADMAP.md](docs/ROADMAP.md) — Current status and future plans
 - [docs/INITIAL-SPIKE.md](docs/INITIAL-SPIKE.md) — Original spike research and architecture notes

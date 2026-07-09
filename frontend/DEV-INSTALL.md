@@ -1,6 +1,22 @@
 # Dev Install Guide — End-to-End on CRC
 
-Complete instructions to go from zero to a working Fleet Service Mesh ConsolePlugin and backend controller on a local CRC OpenShift cluster.
+Complete instructions to go from zero to a working Fleet Service Mesh ConsolePlugin and backend controller on a local CRC OpenShift cluster. If you have a two-cluster ACM environment, see [DEMO-SETUP-MULTICLUSTER.md](DEMO-SETUP-MULTICLUSTER.md) instead.
+
+> **Quick start:** After ACM, the backend controller, and the frontend are deployed (steps 1-3), [`hack/setup-demo.sh install`](hack/setup-demo.sh) automates the rest: cert-manager, infrastructure, trust chain, MCM creation, and discovered CRs.
+
+## Resource Layout
+
+| MCM CR | MCM Namespace | Istio CR (auto-created) | CP Namespace | Mesh ID | Trust |
+|--------|---------------|-------------------------|--------------|---------|-------|
+| `secure-mcm` | `secure-mcm-ns` | `secure-mcm-ns-secure-mcm-cp` | `secure-ns` | `secure-mcm-ns-secure-mcm` | Yes |
+| `unsecure-mcm` | `unsecure-mcm-ns` | `unsecure-mcm-ns-unsecure-mcm-cp` | `unsecure-ns` | `unsecure-mcm-ns-unsecure-mcm` | No |
+| — | — | `discovered-standalone` | `istio-discovered` | `standalone-mesh` | — |
+
+The first two Istio CRs are created automatically by the controller when it
+reconciles their corresponding MCM CRs. The controller also creates IstioCNI,
+east-west gateways, control plane namespaces, and RBAC via ManifestWorks.
+The last row is a standalone "discovered" control plane with no MCM association,
+created manually.
 
 ## Prerequisites
 
@@ -10,12 +26,13 @@ Complete instructions to go from zero to a working Fleet Service Mesh ConsolePlu
 - `podman` installed
 - `jq` installed
 - `make` installed
+- `helm` installed
 - Node.js `^20.19.0 || >=22.12.0`
 - Go toolchain
 
 ## 1. Get an OpenShift cluster with ACM
 
-You need an OpenShift cluster with ACM (Advanced Cluster Management) installed. The image registry must be exposed. How you get this is up to you — any method that produces a working ACM hub cluster will work.
+You need an OpenShift cluster with ACM (Advanced Cluster Management) 2.16+ installed. The image registry must be exposed. How you get this is up to you — any method that produces a working ACM hub cluster will work.
 
 One option is the [install-acm.sh](https://github.com/kiali/kiali/blob/master/hack/install-acm.sh) script in the Kiali repo, which automates a full CRC/OpenShift + ACM setup. Its `init-openshift` command depends on other scripts in the same repo, so you need the [kiali server repo](https://github.com/kiali/kiali) cloned locally. All commands below are run from that repo's directory:
 
@@ -23,8 +40,9 @@ One option is the [install-acm.sh](https://github.com/kiali/kiali/blob/master/ha
 # Start CRC with 12 CPUs, 100GB disk, exposed image registry
 ./hack/install-acm.sh --crc-pull-secret-file <path-to-your-pull-secret-file> init-openshift
 
-# Install ACM (operator, MultiClusterHub, observability)
-./hack/install-acm.sh install-acm
+# Install ACM 2.16+ (operator, MultiClusterHub, observability)
+# ACM 2.16 is required for the v1beta1 addon API used by the backend Helm chart.
+./hack/install-acm.sh -c release-2.16 install-acm
 ```
 
 This takes 15-20 minutes. It installs the ACM operator, creates a MultiClusterHub, sets up MinIO for metrics storage, and enables observability. It also auto-registers `local-cluster` as a managed cluster (the hub acts as its own spoke).
@@ -39,19 +57,7 @@ oc get managedcluster local-cluster
 # Should show local-cluster as available
 ```
 
-## 2. Install cert-manager
-
-Required by the backend controller for trust distribution. The version
-and install method match what the addon's own `hack/dev-env.sh` uses for
-its Kind-based dev environment.
-
-```bash
-oc apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.20.2/cert-manager.yaml
-oc rollout status deployment/cert-manager -n cert-manager --timeout=120s
-oc rollout status deployment/cert-manager-webhook -n cert-manager --timeout=120s
-```
-
-## 3. Build and deploy the backend controller
+## 2. Build and deploy the backend controller
 
 The backend deploys via Helm. We build the image, push it to the OpenShift internal registry, then use `helm upgrade --install` to deploy.
 
@@ -78,6 +84,9 @@ oc create namespace ${BACKEND_NAMESPACE} --dry-run=client -o yaml | oc apply -f 
 make images IMG=${REGISTRY}/${BACKEND_NAMESPACE}/${BACKEND_IMAGE_NAME}:${BACKEND_IMAGE_TAG}
 podman push --tls-verify=false ${REGISTRY}/${BACKEND_NAMESPACE}/${BACKEND_IMAGE_NAME}:${BACKEND_IMAGE_TAG}
 
+# Update the CRD (Helm does not update CRDs on upgrade, only on first install)
+oc apply -f chart/crds/mesh.open-cluster-management.io_multiclustermeshes.yaml
+
 # Deploy the controller using Helm with the internal registry image
 helm upgrade --install ${BACKEND_IMAGE_NAME} chart/ \
   --create-namespace \
@@ -86,120 +95,15 @@ helm upgrade --install ${BACKEND_IMAGE_NAME} chart/ \
   --set image.tag=${BACKEND_IMAGE_TAG} \
   --wait --timeout 180s
 
-# Verify the controller is running
+# Restart the controller to ensure it picks up the new image
+# (required because the image tag "dev" doesn't change between rebuilds)
+oc rollout restart deployment/multicluster-mesh-controller \
+  -n ${BACKEND_NAMESPACE}
 oc rollout status deployment/multicluster-mesh-controller \
   -n ${BACKEND_NAMESPACE} --timeout=120s
 ```
 
-## 4. Create a test mesh
-
-Create a ManagedClusterSet, bind `local-cluster` to it, and create a
-MultiClusterMesh CR:
-
-```bash
-# Create a ManagedClusterSet
-oc apply -f - <<'EOF'
-apiVersion: cluster.open-cluster-management.io/v1beta2
-kind: ManagedClusterSet
-metadata:
-  name: mesh-cluster-set
-EOF
-
-# Bind local-cluster to the set
-oc label managedcluster local-cluster \
-  cluster.open-cluster-management.io/clusterset=mesh-cluster-set --overwrite
-
-# Create a namespace for mesh resources
-oc create namespace mesh-system
-
-# Create a MultiClusterMesh
-oc apply -f - <<'EOF'
-apiVersion: mesh.open-cluster-management.io/v1alpha1
-kind: MultiClusterMesh
-metadata:
-  name: my-mesh
-  namespace: mesh-system
-spec:
-  clusterSet: mesh-cluster-set
-EOF
-
-# Verify the controller reconciled it
-oc get multiclustermesh my-mesh -n mesh-system -o yaml
-```
-
-## 4a. (Optional) Enable trust distribution
-
-To test certificate and trust distribution, create a cert-manager Issuer and configure the mesh to use it. This step is optional -- the mesh works without it, but the Trust Status card in the UI will show "not configured" until an issuer is set.
-
-```bash
-cd <multicluster-mesh-addon-repo>
-
-# Create a cert-manager trust chain (ClusterIssuer -> root CA Certificate -> CA-backed Issuer)
-oc apply -n mesh-system -f samples/cert-manager-issuer.yaml
-
-# Configure the mesh to use it
-oc patch multiclustermesh my-mesh -n mesh-system --type=merge \
-  --patch='{"spec":{"security":{"trust":{"certManager":{"issuerRef":{"name":"mesh-root-ca"}}}}}}'
-
-# Verify the controller created a Certificate
-oc get certificates -n mesh-system
-```
-
-After this, the controller will create a `cacerts-local-cluster` Certificate in `mesh-system` and cert-manager will mint a TLS secret. The controller will then attempt to distribute it via a ManifestWork to `local-cluster`. The distribution will show as failed until the `istio-system` namespace exists on the target cluster (this namespace is normally created when an Istio control plane is configured). To unblock it for testing, create the namespace manually:
-
-```bash
-oc create namespace istio-system
-```
-
-Once the namespace exists, the ManifestWork will succeed on its next reconciliation cycle. Verify the full trust chain:
-
-```bash
-# Certificate minted by cert-manager on the hub
-oc get certificate cacerts-local-cluster -n mesh-system
-
-# ManifestWork delivering the secret to the spoke
-oc get manifestwork multicluster-mesh-cacerts -n local-cluster
-
-# The distributed cacerts secret in istio-system (this is what Istio uses for mTLS)
-oc get secret cacerts -n istio-system
-```
-
-## 4b. (Optional) Create additional test meshes
-
-To test the list page with multiple meshes in different states, create additional `MultiClusterMesh` CRs. If you use the same cluster set as `my-mesh`, they will show various conflict and status conditions if you induce conflicts in their config.
-
-```bash
-# A second mesh without trust. Trust is intentionally omitted because on a
-# single-node CRC, two trust-enabled meshes sharing the same cluster set will
-# fight over the same cacerts ManifestWork, causing status to oscillate.
-# To test conflicts, try changing controlPlane.namespace to "istio-system"
-# (same as my-mesh's default) to trigger a NamespaceConflict, or add
-# operator settings (e.g. spec.operator.channel: "preview") that differ from
-# my-mesh to trigger an OperatorConfigConflict. Both show a blocked-mesh
-# banner on the detail page and a red status on the list page.
-oc apply -f - <<'EOF'
-apiVersion: mesh.open-cluster-management.io/v1alpha1
-kind: MultiClusterMesh
-metadata:
-  name: staging-mesh
-  namespace: mesh-system
-spec:
-  clusterSet: mesh-cluster-set
-  controlPlane:
-    namespace: istio-staging
-EOF
-
-# Verify all meshes
-oc get multiclustermesh -n mesh-system
-```
-
-To clean up the extra meshes later:
-
-```bash
-oc delete multiclustermesh staging-mesh dev-mesh -n mesh-system
-```
-
-## 5. Build and deploy the frontend ConsolePlugin
+## 3. Build and deploy the frontend ConsolePlugin
 
 From the `frontend/` directory, build the container image and deploy:
 
@@ -210,120 +114,276 @@ make build deploy
 
 This builds a container image with the compiled plugin assets baked in (UBI9 nginx), pushes it to the OpenShift internal registry, deploys it, registers the ConsolePlugin, and restarts the console.
 
-## 6. Verify
+## 4. Install cert-manager
+
+Required by the backend controller for trust distribution.
+
+```bash
+oc apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.20.2/cert-manager.yaml
+oc rollout status deployment/cert-manager -n cert-manager --timeout=120s
+oc rollout status deployment/cert-manager-webhook -n cert-manager --timeout=120s
+```
+
+## 5. Set up infrastructure
+
+Create the ManagedClusterSet and MCM namespaces.
+
+```bash
+# Create a ManagedClusterSet and bind local-cluster to it
+oc apply -f - <<'EOF'
+apiVersion: cluster.open-cluster-management.io/v1beta2
+kind: ManagedClusterSet
+metadata:
+  name: demo-cluster-set
+EOF
+
+oc label managedcluster local-cluster \
+  cluster.open-cluster-management.io/clusterset=demo-cluster-set --overwrite
+
+# Create MCM namespaces
+oc create namespace secure-mcm-ns
+oc create namespace unsecure-mcm-ns
+```
+
+## 6. Set up the trust chain
+
+Deploy a cert-manager trust chain in the secure mesh's namespace. This
+establishes the root CA that the controller will use to mint per-cluster
+intermediate certificates for mTLS.
+
+```bash
+cd <multicluster-mesh-addon-repo>
+
+# Create a cert-manager trust chain (self-signed Issuer -> root CA Certificate -> CA-backed Issuer)
+oc apply -n secure-mcm-ns -f samples/cert-manager-issuer.yaml
+
+# Wait for the root CA to be ready
+oc wait certificate mesh-root-ca -n secure-mcm-ns --for=condition=Ready --timeout=60s
+```
+
+## 7. Create meshes
+
+Create both MultiClusterMesh CRs. The controller will automatically install the
+operator, IstioCNI, Istio CRs, east-west gateways, and trust certificates on
+all clusters in the set.
+
+```bash
+# secure-mcm: mesh with trust enabled, using the built-in basic template
+# - templateSource.basic: uses the controller's built-in Istio CR template
+#   (suitable for demos). To customize, use configMapRef, git, or none. See step 7a.
+# - topology.type: MultiPrimary (every cluster runs its own control plane;
+#   use PrimaryRemote if you want one primary and the rest as remotes)
+# - gateway.serviceType: NodePort (CRC has no LoadBalancer controller;
+#   use LoadBalancer on cloud platforms)
+oc apply -f - <<'EOF'
+apiVersion: mesh.open-cluster-management.io/v1alpha1
+kind: MultiClusterMesh
+metadata:
+  name: secure-mcm
+  namespace: secure-mcm-ns
+spec:
+  clusterSet: demo-cluster-set
+  controlPlane:
+    namespace: secure-ns
+    templateSource:
+      basic: {}
+  gateway:
+    serviceType: NodePort
+  topology:
+    type: MultiPrimary
+  security:
+    trust:
+      certManager:
+        issuerRef:
+          name: mesh-root-ca
+EOF
+
+# unsecure-mcm: mesh without trust, using the built-in basic template
+oc apply -f - <<'EOF'
+apiVersion: mesh.open-cluster-management.io/v1alpha1
+kind: MultiClusterMesh
+metadata:
+  name: unsecure-mcm
+  namespace: unsecure-mcm-ns
+spec:
+  clusterSet: demo-cluster-set
+  controlPlane:
+    namespace: unsecure-ns
+    templateSource:
+      basic: {}
+  gateway:
+    serviceType: NodePort
+  topology:
+    type: MultiPrimary
+EOF
+```
+
+Monitor the controller's progress through the reconciliation phases:
+
+```bash
+# Watch per-cluster conditions (OperatorInstalled → ControlPlaneReady → GatewayReady)
+oc get multiclustermesh secure-mcm -n secure-mcm-ns \
+  -o jsonpath='{.status.clusterStatus}' | jq .
+oc get multiclustermesh unsecure-mcm -n unsecure-mcm-ns \
+  -o jsonpath='{.status.clusterStatus}' | jq .
+
+# Check ManifestWorks created by the controller
+oc get manifestwork -n local-cluster | grep multicluster-mesh
+```
+
+## 7a. (Optional) Template source alternatives
+
+The meshes above use `templateSource.basic`, the controller's built-in Istio CR
+template. The controller supports three other template sources for customizing
+the Istio CR that gets deployed to managed clusters.
+
+**ConfigMap** — provide custom Istio CR YAML in a ConfigMap:
+
+```bash
+# Create a ConfigMap with a custom Istio CR template
+oc apply -n secure-mcm-ns -f - <<'EOF'
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: my-istio-template
+data:
+  istio.yaml: |
+    apiVersion: sailoperator.io/v1
+    kind: Istio
+    spec:
+      values:
+        pilot:
+          resources:
+            requests:
+              cpu: 500m
+              memory: 2Gi
+        meshConfig:
+          accessLogFile: /dev/stdout
+EOF
+
+# Then set templateSource.configMapRef in the MCM spec:
+oc patch multiclustermesh secure-mcm -n secure-mcm-ns --type merge -p '
+spec:
+  controlPlane:
+    templateSource:
+      configMapRef:
+        name: my-istio-template
+'
+```
+
+**Git** — pull the template from a git repository:
+
+```yaml
+spec:
+  controlPlane:
+    templateSource:
+      git:
+        url: https://github.com/myorg/mesh-configs.git
+        path: istio/production/istio.yaml
+        ref:
+          branch: main
+        # secretRef is optional — omit for public repos
+        # secretRef:
+        #   name: git-credentials
+```
+
+**None** — skip mesh resource creation entirely (for ArgoCD/Flux users who
+manage their own Istio CRs). The controller only installs the operator, creates
+ManagedServiceAccounts, and distributes trust certificates:
+
+```yaml
+spec:
+  controlPlane:
+    templateSource:
+      none: {}
+```
+
+In all cases, the controller deep-merges its required fields (meshID, network,
+trustDomain, topology) on top of whatever the template provides. See
+[docs/design.md](../docs/design.md) for details.
+
+## 8. (Optional) Create a standalone discovered Istio CR
+
+The Control Planes page discovers all `Istio` CRs across managed clusters via
+ACM Search — including ones not managed by any MultiClusterMesh. These appear
+as "discovered" control planes in the UI.
+
+```bash
+# The Sail operator must be installed first (the controller does this when reconciling the MCMs).
+oc get csv -n openshift-operators | grep servicemesh
+
+# Create a standalone Istio CR not associated with any MCM
+oc create namespace istio-discovered --dry-run=client -o yaml | oc apply -f -
+
+oc apply -f - <<'EOF'
+apiVersion: sailoperator.io/v1
+kind: Istio
+metadata:
+  name: discovered-standalone
+spec:
+  namespace: istio-discovered
+  values:
+    global:
+      meshID: standalone-mesh
+      multiCluster:
+        clusterName: local-cluster
+      network: network-standalone
+EOF
+
+# Verify all Istio CRs (2 managed + 1 discovered)
+oc get istios
+```
+
+The Control Planes page polls ACM Search every 30 seconds. After the search
+collector indexes the Istio CRs (typically within 1-2 minutes), they will
+appear in the table.
+
+To clean up:
+
+```bash
+oc delete istio discovered-standalone
+oc delete namespace istio-discovered --ignore-not-found
+```
+
+## 9. Verify
 
 1. Open the CRC console: `oc whoami --show-console`
 2. Log in as `kubeadmin`
 3. Click the perspective switcher (top-left dropdown)
 4. Select **Fleet Service Mesh**
 5. The **Overview** page should appear with donut charts for Meshes and Control Planes health
-6. Click **Meshes** in the left nav — the table should show `my-mesh` with its status
-7. Click **Control Planes** in the left nav — it shows Istio CRs discovered across managed clusters
+6. Click **Meshes** in the left nav — the table should show `secure-mcm` and `unsecure-mcm` with their statuses
+7. Click a mesh to see per-cluster conditions: Operator, Control Plane, Gateway, Discovery
+8. Click **Control Planes** in the left nav — it shows all Istio CRs (managed + discovered)
 
-## 6a. (Optional) Create Istio CRs for the Control Planes page
+## 10. (Optional) Deploy the mesh-hello test application
 
-The Control Planes page discovers sail-operator `Istio` CRs across managed clusters via ACM Search. If you already have OSSM installed on your clusters, those Istio CRs will appear automatically. If not, you can create test data manually.
-
-```bash
-# Install the OSSM 3.x operator (if not already installed)
-oc apply -f - <<'EOF'
-apiVersion: operators.coreos.com/v1alpha1
-kind: Subscription
-metadata:
-  name: servicemeshoperator3
-  namespace: openshift-operators
-spec:
-  channel: stable
-  installPlanApproval: Automatic
-  name: servicemeshoperator3
-  source: redhat-operators
-  sourceNamespace: openshift-marketplace
-EOF
-
-# Wait for OLM to install the operator
-# Poll until the subscription has a currentCSV, then wait for that CSV to succeed
-until oc get subscription.operators.coreos.com servicemeshoperator3 \
-  -n openshift-operators -o jsonpath='{.status.currentCSV}' 2>/dev/null | grep -q .; do
-  echo "Waiting for subscription to resolve..."
-  sleep 5
-done
-CSV=$(oc get subscription.operators.coreos.com servicemeshoperator3 \
-  -n openshift-operators -o jsonpath='{.status.currentCSV}')
-echo "Waiting for ${CSV} to succeed..."
-oc wait --for=jsonpath='{.status.phase}'=Succeeded \
-  csv/${CSV} -n openshift-operators --timeout=180s
-
-# Create an Istio CR with meshID set (multi-cluster scenario).
-# Use a namespace that is NOT managed by a MultiClusterMesh CR (e.g. NOT
-# istio-system if an MCM already targets that). Otherwise the Control Planes
-# page will show this CR as "Managed by" the MCM even though it was created
-# independently. In production this wouldn't happen, but in a single-cluster
-# test environment the namespaces can easily collide.
-oc apply -f - <<'EOF'
-apiVersion: sailoperator.io/v1
-kind: Istio
-metadata:
-  name: default
-spec:
-  namespace: istio-system
-  values:
-    global:
-      meshID: mesh-system-my-mesh
-      multiCluster:
-        clusterName: local-cluster
-      network: network1
-EOF
-
-# Verify the Istio CR was created
-oc get istios
-```
-
-The Control Planes page polls ACM Search every 30 seconds. After the search collector indexes the new Istio CR (typically within 1-2 minutes), it will appear in the Control Planes table.
-
-To clean up:
-
-```bash
-# Delete the Istio CR
-oc delete istio default
-
-# Remove the OSSM operator (CSV + subscription + CRDs)
-CSV=$(oc get subscription.operators.coreos.com servicemeshoperator3 \
-  -n openshift-operators -o jsonpath='{.status.currentCSV}')
-oc delete subscription.operators.coreos.com servicemeshoperator3 -n openshift-operators
-oc delete csv ${CSV} -n openshift-operators
-oc get crd -o name | grep -E 'sailoperator\.io|istio\.io' | xargs oc delete
-```
-
-## 6b. (Optional) Create managed Istio control planes
-
-If your MultiClusterMesh CR has been reconciled by the controller (operator installed,
-trust distributed), you can use [`hack/setup-mesh-cps.sh`](hack/setup-mesh-cps.sh)
-to create Istio control planes on all clusters in the mesh's cluster set. This
-automates Istio CR creation, trust certificate transformation, IstioCNI, east-west
-gateways, and cross-cluster endpoint discovery.
+Deploy a browser-accessible test app that shows cluster identity, cross-cluster
+connectivity, and mTLS status. The app consists of a frontend and backend service
+injected into the Istio mesh.
 
 ```bash
 cd <multicluster-mesh-addon-repo>/frontend
 
-# Create control planes for the mesh created in step 4
-hack/setup-mesh-cps.sh -m my-mesh -n mesh-system install
+# Deploy into the secure-mcm mesh (with trust — shows mTLS details)
+hack/deploy-mesh-hello.sh -m secure-mcm -n secure-mcm-ns install
 ```
 
-This creates an Istio control plane on each cluster in the mesh's cluster set with
-the correct mesh identity (meshID, trustDomain, clusterName, network). The Control
-Planes page will show these as "Managed by" the MCM once ACM Search indexes them
-(typically within 1-2 minutes).
+The script creates a `secure-mcm-testapp` namespace with Istio sidecar injection,
+deploys the frontend and backend, and prints a URL you can open in your browser
+(e.g. `http://mesh-hello-secure-mcm-secure-mcm-testapp.apps-crc.testing/` on CRC).
+The page auto-refreshes every 10 seconds showing the frontend's identity,
+the backend's cross-cluster response, and mTLS certificate details.
 
-To clean up:
+To remove:
 
 ```bash
-hack/setup-mesh-cps.sh -m my-mesh -n mesh-system uninstall
+hack/deploy-mesh-hello.sh -m secure-mcm -n secure-mcm-ns uninstall
 ```
 
-Run `hack/setup-mesh-cps.sh --help` for additional options (topology, Istio version,
-test application deployment).
+## Frontend Development
 
-## Local frontend development (fast iteration)
+### Fast iteration (local webpack)
 
 For day-to-day UI work, run the plugin locally with webpack and a local OpenShift Console bridge.
 
@@ -348,7 +408,7 @@ make start-console
 
 Open http://localhost:9000 and switch to the **Fleet Service Mesh** perspective. After editing source files, wait for webpack to rebuild and refresh the browser. The cluster plugin deploy is not required for this workflow — the local console loads the plugin from webpack.
 
-## Iterating on frontend changes (cluster deploy)
+### Cluster deploy (production-like)
 
 For production-like testing (nginx/TLS packaging, in-cluster ConsolePlugin), rebuild and redeploy to the cluster:
 
@@ -357,9 +417,9 @@ cd <multicluster-mesh-addon-repo>/frontend
 make build deploy
 ```
 
-## Iterating on backend changes
+## Backend Development
 
-After modifying backend Go code:
+After modifying backend Go code, rebuild the image, push it to the cluster registry, update the CRD if it changed, and restart the controller:
 
 ```bash
 cd <multicluster-mesh-addon-repo>
@@ -373,6 +433,9 @@ BACKEND_IMAGE_TAG=dev
 make images IMG=${REGISTRY}/${BACKEND_NAMESPACE}/${BACKEND_IMAGE_NAME}:${BACKEND_IMAGE_TAG}
 podman push --tls-verify=false \
   ${REGISTRY}/${BACKEND_NAMESPACE}/${BACKEND_IMAGE_NAME}:${BACKEND_IMAGE_TAG}
+
+# Update the CRD if types.go changed (Helm does not update CRDs on upgrade)
+oc apply -f chart/crds/mesh.open-cluster-management.io_multiclustermeshes.yaml
 
 oc rollout restart deployment/multicluster-mesh-controller \
   -n ${BACKEND_NAMESPACE}
@@ -388,13 +451,21 @@ cd <multicluster-mesh-addon-repo>
 # Remove the frontend plugin
 cd frontend && make teardown && cd ..
 
-# Remove test mesh resources
-oc delete multiclustermesh my-mesh -n mesh-system --ignore-not-found
-oc delete namespace mesh-system --ignore-not-found
+# Remove standalone discovered Istio CR
+oc delete istio discovered-standalone --ignore-not-found
+oc delete namespace istio-discovered --ignore-not-found
+
+# Remove MCM CRs (controller auto-cleans ManifestWorks, operator, IstioCNI, etc.)
+oc delete multiclustermesh secure-mcm -n secure-mcm-ns --ignore-not-found
+oc delete multiclustermesh unsecure-mcm -n unsecure-mcm-ns --ignore-not-found
+
+# Remove namespaces
+oc delete namespace secure-mcm-ns unsecure-mcm-ns --ignore-not-found
+
+# Remove cluster label and set
 oc label managedcluster local-cluster cluster.open-cluster-management.io/clusterset- 2>/dev/null; true
-oc delete managedclusterset mesh-cluster-set --ignore-not-found
+oc delete managedclusterset demo-cluster-set --ignore-not-found
 
 # Remove the backend controller
 make undeploy
 ```
-
