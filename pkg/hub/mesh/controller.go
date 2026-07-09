@@ -259,9 +259,8 @@ func (r *Reconciler) doReconcile(ctx context.Context, mesh *meshv1alpha1.MultiCl
 		}
 		klog.V(4).Infof("Applied operator ManifestWork %s/%s", work.Namespace, work.Name)
 
-		// Create ManagedServiceAccount resources for each cluster.
-		if err := r.ensureManagedServiceAccountCreated(ctx, mesh, &cluster); err != nil {
-			return fmt.Errorf("failed to create ManagedServiceAccounts: %w", err)
+		if err := r.ensureManagedServiceAccount(ctx, mesh, &cluster); err != nil {
+			return fmt.Errorf("failed to ensure ManagedServiceAccount for cluster %s: %w", cluster.Name, err)
 		}
 
 		if mesh.Spec.Security.Trust.CertManager.IssuerRef.Name != "" {

@@ -32,10 +32,6 @@ import (
 	msav1beta1 "open-cluster-management.io/managed-serviceaccount/apis/authentication/v1beta1"
 )
 
-const (
-	msaRootWord = "istio-reader"
-)
-
 var _ = Describe("MultiClusterMesh Controller", func() {
 	var (
 		testNs         string
@@ -664,7 +660,6 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 				expectNoCacertsManifestWork(clusterName)
 			})
 		})
-
 	})
 
 	Context("Endpoint discovery", func() {
@@ -698,7 +693,8 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 						Discovery: meshv1alpha1.DiscoveryConfig{
 							TokenValidity: &metav1.Duration{Duration: 15 * time.Minute},
 						},
-					}})
+					},
+				})
 
 				msa1 := expectManagedServiceAccount(testNs, meshName, cluster1)
 				Expect(msa1.Spec.Rotation.Validity).To(Equal(metav1.Duration{Duration: 15 * time.Minute}))
@@ -716,6 +712,25 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 				updateClusterSetLabel(cluster2, "")
 				util.ExpectResourceDeleted(ctx, k8sClient, &msav1beta1.ManagedServiceAccount{},
 					expectedManagedServiceAccountName(testNs, meshName), cluster2)
+			})
+		})
+
+		When("a MultiClusterMesh is updated with custom TokenValidity", func() {
+			It("should update ManagedServiceAccount Validity when the mesh spec changes", func() {
+				util.CreateManagedCluster(ctx, k8sClient, clusterName, testClusterSet)
+				util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet)
+
+				msa := expectManagedServiceAccount(testNs, meshName, clusterName)
+				Expect(msa.Spec.Rotation.Validity).To(Equal(metav1.Duration{Duration: 360 * time.Hour}))
+
+				updateMesh(meshName, testNs, func(mesh *meshv1alpha1.MultiClusterMesh) {
+					mesh.Spec.Security.Discovery.TokenValidity = &metav1.Duration{Duration: 15 * time.Minute}
+				})
+				Eventually(func(g Gomega) {
+					msa := &msav1beta1.ManagedServiceAccount{}
+					g.Expect(k8sClient.Get(ctx, key.Of(expectedManagedServiceAccountName(testNs, meshName), clusterName), msa)).To(Succeed())
+					g.Expect(msa.Spec.Rotation.Validity).To(Equal(metav1.Duration{Duration: 15 * time.Minute}))
+				}).Should(Succeed())
 			})
 		})
 
