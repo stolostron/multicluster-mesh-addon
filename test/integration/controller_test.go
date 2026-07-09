@@ -660,7 +660,6 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 				expectNoCacertsManifestWork(clusterName)
 			})
 		})
-
 	})
 
 	Context("Endpoint discovery", func() {
@@ -694,7 +693,8 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 						Discovery: meshv1alpha1.DiscoveryConfig{
 							TokenValidity: &metav1.Duration{Duration: 15 * time.Minute},
 						},
-					}})
+					},
+				})
 
 				msa1 := expectManagedServiceAccount(testNs, meshName, cluster1)
 				Expect(msa1.Spec.Rotation.Validity).To(Equal(metav1.Duration{Duration: 15 * time.Minute}))
@@ -727,8 +727,11 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 					mesh.Spec.Security.Discovery.TokenValidity = &metav1.Duration{Duration: 15 * time.Minute}
 				})
 				expectMeshNotReady(meshName, testNs)
-				msa = expectManagedServiceAccount(testNs, meshName, clusterName)
-				Expect(msa.Spec.Rotation.Validity).To(Equal(metav1.Duration{Duration: 15 * time.Minute}))
+				Eventually(func(g Gomega) {
+					msa := &msav1beta1.ManagedServiceAccount{}
+					g.Expect(k8sClient.Get(ctx, key.Of(expectedManagedServiceAccountName(testNs, meshName), clusterName), msa)).To(Succeed())
+					g.Expect(msa.Spec.Rotation.Validity).To(Equal(metav1.Duration{Duration: 15 * time.Minute}))
+				}).Should(Succeed())
 			})
 		})
 
