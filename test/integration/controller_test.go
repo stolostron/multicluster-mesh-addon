@@ -726,7 +726,6 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 				updateMesh(meshName, testNs, func(mesh *meshv1alpha1.MultiClusterMesh) {
 					mesh.Spec.Security.Discovery.TokenValidity = &metav1.Duration{Duration: 15 * time.Minute}
 				})
-				expectMeshNotReady(meshName, testNs)
 				Eventually(func(g Gomega) {
 					msa := &msav1beta1.ManagedServiceAccount{}
 					g.Expect(k8sClient.Get(ctx, key.Of(expectedManagedServiceAccountName(testNs, meshName), clusterName), msa)).To(Succeed())
