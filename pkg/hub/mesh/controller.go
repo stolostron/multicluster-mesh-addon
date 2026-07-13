@@ -46,8 +46,9 @@ const (
 	// When the operator targets this namespace, the controller skips creating Namespace and OperatorGroup.
 	BuiltinOperatorNamespace = "openshift-operators"
 
-	OperatorManifestWorkName = "multicluster-mesh-operator"
-	ManifestWorkNameCacerts  = "multicluster-mesh-cacerts"
+	OperatorManifestWorkName      = "multicluster-mesh-operator"
+	ManifestWorkNameCacerts       = "multicluster-mesh-cacerts"
+	ManifestWorkNameRemoteSecrets = "multicluster-mesh-remote-secrets"
 
 	FeedbackInstalledCSV = "installedCSV"
 
@@ -144,7 +145,7 @@ func RegisterController(mgr manager.Manager) error {
 //+kubebuilder:rbac:groups=work.open-cluster-management.io,resources=manifestworks,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=cert-manager.io,resources=certificates,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=authentication.open-cluster-management.io,resources=managedserviceaccounts,verbs=get;list;watch;create;update;delete
-//+kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
+//+kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;delete
 
 // Reconcile implements the reconcile loop for MultiClusterMesh resources
 func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
@@ -273,6 +274,10 @@ func (r *Reconciler) doReconcile(ctx context.Context, mesh *meshv1alpha1.MultiCl
 		}
 	}
 
+	if err := r.ensureRemoteSecretDistributed(ctx, mesh, clusters); err != nil {
+		return fmt.Errorf("failed to ensure remote secret distribution for mesh %s: %w", mesh.Name, err)
+	}
+
 	forceCleanupAll := mesh.Spec.Security.Trust.CertManager.IssuerRef.Name == ""
 	if err := r.cleanupCertificates(ctx, mesh, clusters, forceCleanupAll); err != nil {
 		return fmt.Errorf("failed to cleanup Certificates: %w", err)
@@ -282,9 +287,12 @@ func (r *Reconciler) doReconcile(ctx context.Context, mesh *meshv1alpha1.MultiCl
 		return fmt.Errorf("failed to cleanup ManifestWorks: %w", err)
 	}
 
-	// Cleanup ManagedServiceAccount when the cluster(s) are removed from the ClusterSet.
 	if err := r.cleanupManagedServiceAccounts(ctx, mesh, clusters); err != nil {
 		return fmt.Errorf("failed to cleanup ManagedServiceAccounts: %w", err)
+	}
+
+	if err := r.cleanupRemoteSecrets(ctx, mesh, clusters); err != nil {
+		return fmt.Errorf("failed to cleanup Istio remote secrets: %w", err)
 	}
 
 	return nil
@@ -363,6 +371,10 @@ func (r *Reconciler) handleDeletion(ctx context.Context, mesh *meshv1alpha1.Mult
 
 	if err := r.deleteAllManagedServiceAccounts(ctx, mesh); err != nil {
 		return fmt.Errorf("failed to cleanup ManagedServiceAccount resources: %w", err)
+	}
+
+	if err := r.deleteAllRemoteSecrets(ctx, mesh); err != nil {
+		return fmt.Errorf("failed to cleanup Istio remote access secrets: %w", err)
 	}
 
 	// Trigger reconciliation for other meshes targeting the same cluster set.
@@ -724,7 +736,6 @@ func (r *Reconciler) ensureCacertsManifestWork(ctx context.Context, mesh *meshv1
 	secretName := getCacertsName(cluster.Name)
 	secret := &corev1.Secret{}
 	err := r.Get(ctx, key.Of(secretName, mesh.Namespace), secret)
-
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			klog.V(4).Infof("Secret %s/%s not found yet, waiting for cert-manager to create it", mesh.Namespace, secretName)
