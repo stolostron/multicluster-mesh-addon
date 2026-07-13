@@ -18,7 +18,8 @@ spec:
     name: sailoperator
 
     # Namespace where the operator will be installed
-    namespace: sail-operator
+    # This namespace may be deleted when the mesh is removed
+    namespace: multicluster-mesh-operator
 
     # OLM subscription channel
     channel: stable
