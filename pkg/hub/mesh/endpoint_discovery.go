@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"maps"
+	"sort"
 
 	meshv1alpha1 "github.com/stolostron/multicluster-mesh-addon/pkg/apis/mesh/v1alpha1"
 	"github.com/stolostron/multicluster-mesh-addon/pkg/key"
@@ -122,18 +123,20 @@ func (r *Reconciler) ensureRemoteSecretDistributed(ctx context.Context, mesh *me
 		if err != nil {
 			if errors.IsNotFound(err) {
 				klog.V(4).Infof("ManagedServiceAccount secret %s/%s not found yet, waiting for its controller to create it", cluster.Name, msaSecretName)
-				return nil
 			}
+			msaSecret = nil
 		}
 
-		remoteSecret := buildMeshRemoteSecret(mesh, &cluster, msaSecret)
-		msaSecrets[remoteSecret.Name] = remoteSecret
+		if msaSecret != nil {
+			remoteSecret := buildMeshRemoteSecret(mesh, &cluster, msaSecret)
+			msaSecrets[remoteSecret.Name] = remoteSecret
+		}
 	}
 
 	for _, cluster := range clusters {
 		work, err := r.workApplier.Apply(ctx, r.buildRemoteSecretManifestWork(mesh, &cluster, msaSecrets))
 		if err != nil {
-			return fmt.Errorf("failed to apply remote secret ManifestWork %s/%s", work.Namespace, work.Name)
+			return fmt.Errorf("failed to apply remote secret ManifestWork %s/%s: %w", work.Namespace, work.Name, err)
 		}
 	}
 
@@ -167,11 +170,16 @@ func buildMeshRemoteSecret(mesh *meshv1alpha1.MultiClusterMesh, cluster *cluster
 
 // buildRemoteSecretManifestWork builds a ManifestWork using remote access secrets from other clusters.
 func (r *Reconciler) buildRemoteSecretManifestWork(mesh *meshv1alpha1.MultiClusterMesh, cluster *clusterv1.ManagedCluster, remoteSecrets map[string]*corev1.Secret) *workv1.ManifestWork {
-	manifests := []workv1.Manifest{}
+	names := make([]string, 0, len(remoteSecrets))
+	for name := range remoteSecrets {
+		names = append(names, name)
+	}
+	sort.Strings(names)
 
-	for _, secret := range remoteSecrets {
+	manifests := []workv1.Manifest{}
+	for _, name := range names {
 		manifests = append(manifests, workv1.Manifest{
-			RawExtension: runtime.RawExtension{Object: secret},
+			RawExtension: runtime.RawExtension{Object: remoteSecrets[name]},
 		})
 	}
 
