@@ -1,0 +1,25 @@
+# Grants the OCM work agent (klusterlet-work-sa) permission to manage Secrets.
+# This is required for distributing cacerts to spoke clusters via ManifestWork.
+# On OpenShift, klusterlet-work-sa gets cluster-admin during import. However, on
+# Kind clusters joined via clusteradm, only minimal permissions are granted.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: klusterlet-work-istio
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["create", "get", "list", "update", "patch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: klusterlet-work-istio
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: klusterlet-work-istio
+subjects:
+  - kind: ServiceAccount
+    name: klusterlet-work-sa
+    namespace: open-cluster-management-agent

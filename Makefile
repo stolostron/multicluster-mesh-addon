@@ -166,6 +166,22 @@ test-e2e: ## Run e2e tests against dev-env clusters (requires make dev-env)
 	CLUSTER2_KUBECONFIG=$(DEV_KUBE_DIR)/cluster2.config \
 	go run github.com/onsi/ginkgo/v2/ginkgo -v --fail-fast --tags=e2e ./test/e2e/...
 
+.PHONY: install-metallb
+install-metallb: ## Install MetalLB on spoke Kind clusters
+	$(DEV_ENV_SCRIPT) install-metallb
+
+.PHONY: install-gateway-api
+install-gateway-api: ## Install Gateway API CRDs on spoke Kind clusters
+	$(DEV_ENV_SCRIPT) install-gateway-api
+
+.PHONY: test-e2e-multicluster
+test-e2e-multicluster: install-metallb install-gateway-api ## Run multi-primary e2e tests (requires make dev-env)
+	HUB_KUBECONFIG=$(HUB_KUBECONFIG) \
+	CLUSTER1_KUBECONFIG=$(DEV_KUBE_DIR)/cluster1.config \
+	CLUSTER2_KUBECONFIG=$(DEV_KUBE_DIR)/cluster2.config \
+	go run github.com/onsi/ginkgo/v2/ginkgo -v --fail-fast --tags=e2e_multicluster --timeout=20m \
+		./test/e2e/...
+
 .PHONY: build
 build: $(BIN_DIR) ## Build addon binary
 	CGO_ENABLED=0 go build $(GO_BUILD_FLAGS) -buildvcs=false -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/multicluster-mesh-addon .
@@ -247,9 +263,13 @@ $(CLUSTERADM): | $(BIN_DIR)
 		rm -rf $$tmp_dir; \
 	fi
 
+METALLB_VERSION ?= v0.14.9
+GATEWAY_API_VERSION ?= v1.2.1
+
 DEV_ENV_SCRIPT := $(CURDIR)/hack/dev-env.sh
 
 export DEV_KUBE_DIR K8S_VERSION OLM_VERSION CERT_MANAGER_VERSION MSA_VERSION
+export METALLB_VERSION GATEWAY_API_VERSION
 export KIND CLUSTERADM HELM
 
 .PHONY: dev-env

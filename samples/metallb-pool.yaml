@@ -1,0 +1,17 @@
+apiVersion: metallb.io/v1beta1
+kind: IPAddressPool
+metadata:
+  name: e2e-pool
+  namespace: metallb-system
+spec:
+  addresses:
+  - __ADDRESS_RANGE__
+---
+apiVersion: metallb.io/v1beta1
+kind: L2Advertisement
+metadata:
+  name: e2e-l2
+  namespace: metallb-system
+spec:
+  ipAddressPools:
+  - e2e-pool
