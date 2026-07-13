@@ -9,3 +9,10 @@ image:
   pullPolicy: Always
 
 platform: openshift
+
+ui:
+  enabled: true
+  image:
+    repository: quay.io/sail-dev/ossm-acm-console-plugin
+    tag: latest
+    pullPolicy: Always
