@@ -180,7 +180,7 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 						if cs.ClusterName == clusterName {
 							c := findCondition(g, cs.Conditions, meshv1alpha1.ConditionOperatorInstalled)
 							g.Expect(c.LastTransitionTime).To(Equal(initialTime),
-								"LastTransitionTime changed from %v — determineStatus is not preserving existing conditions",
+								"LastTransitionTime changed from %v - determineStatus is not preserving existing conditions",
 								initialTime)
 							return
 						}
