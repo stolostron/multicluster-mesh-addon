@@ -134,9 +134,9 @@ func (r *Reconciler) ensureRemoteSecretDistributed(ctx context.Context, mesh *me
 	}
 
 	for _, cluster := range clusters {
-		work, err := r.workApplier.Apply(ctx, r.buildRemoteSecretManifestWork(mesh, &cluster, msaSecrets))
+		_, err := r.workApplier.Apply(ctx, r.buildRemoteSecretManifestWork(mesh, &cluster, msaSecrets))
 		if err != nil {
-			return fmt.Errorf("failed to apply remote secret ManifestWork %s/%s: %w", work.Namespace, work.Name, err)
+			return fmt.Errorf("failed to apply remote secret ManifestWork for cluster %s: %w", cluster.Name, err)
 		}
 	}
 

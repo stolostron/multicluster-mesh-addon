@@ -5,6 +5,7 @@ package integration
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
 	"time"
 
 	certmanagerv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
@@ -701,6 +702,19 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 				expectManagedServiceAccount(testNs, meshName, cluster2)
 			})
 
+			When("the ManagedServiceAccount secret is created", func() {
+				BeforeEach(func() {
+					util.CreateMsaSecret(ctx, k8sClient, clusterName, meshName, testNs)
+					util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet)
+					expectManagedServiceAccount(testNs, meshName, clusterName)
+				})
+
+				It("should create ManifestWork with remote access secrets", func() {
+					work := expectRemoteSecretsManifestWork(clusterName)
+					expectRemoteSecrets(work, testNs, meshName, []string{clusterName})
+				})
+			})
+
 			When("the ManagedServiceAccount exists", func() {
 				BeforeEach(func() {
 					util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet)
@@ -723,16 +737,40 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 						expectedManagedServiceAccountName(testNs, meshName), clusterName)
 				})
 
+				It("should cleanup ManifestWork and remote secrets when cluster is removed from ClusterSet", func() {
+					updateClusterSetLabel(clusterName, "")
+					util.ExpectResourceDeleted(ctx, k8sClient, &workv1.ManifestWork{},
+						meshcontroller.ManifestWorkNameRemoteSecrets, clusterName)
+					util.ExpectResourceDeleted(ctx, k8sClient, &corev1.Secret{},
+						expectedRemoteSecretName(testNs, meshName, clusterName), "istio-system")
+				})
+
 				It("should cleanup ManagedServiceAccount when cluster is deleted", func() {
 					util.DeleteResource(ctx, k8sClient, &clusterv1.ManagedCluster{}, clusterName, "")
 					util.ExpectResourceDeleted(ctx, k8sClient, &msav1beta1.ManagedServiceAccount{},
 						expectedManagedServiceAccountName(testNs, meshName), clusterName)
 				})
 
+				It("should cleanup ManifestWork and remote secrets when cluster is deleted", func() {
+					util.DeleteResource(ctx, k8sClient, &clusterv1.ManagedCluster{}, clusterName, "")
+					util.ExpectResourceDeleted(ctx, k8sClient, &workv1.ManifestWork{},
+						meshcontroller.ManifestWorkNameRemoteSecrets, clusterName)
+					util.ExpectResourceDeleted(ctx, k8sClient, &corev1.Secret{},
+						expectedRemoteSecretName(testNs, meshName, clusterName), "istio-system")
+				})
+
 				It("should cleanup ManagedServiceAccount when ClusterSet is deleted", func() {
 					util.DeleteResource(ctx, k8sClient, &clusterv1beta2.ManagedClusterSet{}, testClusterSet, "")
 					util.ExpectResourceDeleted(ctx, k8sClient, &msav1beta1.ManagedServiceAccount{},
 						expectedManagedServiceAccountName(testNs, meshName), clusterName)
+				})
+
+				It("should cleanup ManifestWork and remote secrets when ClusterSet is deleted", func() {
+					util.DeleteResource(ctx, k8sClient, &clusterv1beta2.ManagedClusterSet{}, testClusterSet, "")
+					util.ExpectResourceDeleted(ctx, k8sClient, &workv1.ManifestWork{},
+						meshcontroller.ManifestWorkNameRemoteSecrets, clusterName)
+					util.ExpectResourceDeleted(ctx, k8sClient, &corev1.Secret{},
+						expectedRemoteSecretName(testNs, meshName, clusterName), "istio-system")
 				})
 			})
 		})
@@ -868,6 +906,10 @@ func expectCacertsManifestWork(clusterNamespace string) *workv1.ManifestWork {
 	return expectManifestWork(meshcontroller.ManifestWorkNameCacerts, clusterNamespace)
 }
 
+func expectRemoteSecretsManifestWork(clusterNamespace string) *workv1.ManifestWork {
+	return expectManifestWork(meshcontroller.ManifestWorkNameRemoteSecrets, clusterNamespace)
+}
+
 func expectNoCertificate(namespace, meshName string) {
 	Consistently(func() []certmanagerv1.Certificate {
 		certList := &certmanagerv1.CertificateList{}
@@ -919,6 +961,41 @@ func expectCacertsSecret(work *workv1.ManifestWork) {
 	Expect(secret.Data).To(HaveKey("tls.crt"))
 	Expect(secret.Data).To(HaveKey("tls.key"))
 	Expect(secret.Data).To(HaveKey("ca.crt"))
+}
+
+func expectedRemoteSecretName(meshNamespace, meshName, clusterName string) string {
+	return fmt.Sprintf("%s-%s-%s-%s", meshNamespace, "istio-remote-secret", meshName, clusterName)
+}
+
+func expectRemoteSecrets(work *workv1.ManifestWork, meshNamespace, meshName string, clusterNames []string) {
+	Expect(work.Spec.Workload.Manifests).To(HaveLen(len(clusterNames)))
+	sort.Strings(clusterNames)
+
+	for i, clusterName := range clusterNames {
+		secret := &corev1.Secret{}
+		Expect(unmarshalManifest(work.Spec.Workload.Manifests[i], secret)).To(Succeed())
+		Expect(secret.Name).To(Equal(expectedRemoteSecretName(meshNamespace, meshName, clusterName)))
+		Expect(secret.Namespace).To(Equal("istio-system"))
+		Expect(secret.ObjectMeta.Labels).To(HaveKeyWithValue("istio/multiCluster", "true"))
+		Expect(secret.ObjectMeta.Annotations).To(HaveKeyWithValue("networking.istio.io/cluster", clusterName))
+		Expect(secret.Type).To(Equal(corev1.SecretTypeOpaque))
+		Expect(secret.Data).To(HaveKey("ca.crt"))
+		Expect(secret.Data).To(HaveKey("token"))
+	}
+}
+
+func getRemoteSecret(g Gomega, meshNamespace, meshName, clusterName string) *corev1.Secret {
+	secret := &corev1.Secret{}
+	g.Expect(k8sClient.Get(ctx, key.Of(expectedRemoteSecretName(meshNamespace, meshName, clusterName), "istio-system"), secret)).To(Succeed())
+	return secret
+}
+
+func expectRemoteSecret(meshNamespace, meshName, clusterName string) *corev1.Secret {
+	var secret *corev1.Secret
+	Eventually(func(g Gomega) {
+		secret = getRemoteSecret(g, meshNamespace, meshName, clusterName)
+	}).Should(Succeed())
+	return secret
 }
 
 func expectedManagedServiceAccountName(meshNamespace, meshName string) string {
