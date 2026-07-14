@@ -131,7 +131,7 @@ The resource name (`metadata.name`) is limited to 63 characters because it is us
 | `spec.clusterSet` | Yes | Name of the [ManagedClusterSet] defining cluster membership (immutable after creation) |
 | `spec.controlPlane.namespace` | No | Namespace where Istio is installed on each cluster (default: `istio-system`) |
 | `spec.operator.name` | No | OLM package name (default: `servicemeshoperator3`) |
-| `spec.operator.namespace` | No | Namespace where the operator is installed (default: `openshift-operators`) |
+| `spec.operator.namespace` | No | Namespace where the operator is installed (default: `multicluster-mesh-operator`) |
 | `spec.operator.channel` | No | OLM subscription channel (default: `stable`) |
 | `spec.operator.source` | No | CatalogSource name (default: `redhat-operators`) |
 | `spec.operator.sourceNamespace` | No | CatalogSource namespace (default: `openshift-marketplace`) |
@@ -190,7 +190,7 @@ The add-on follows a **Do No Harm** strategy: it never forcibly uninstalls or do
 
 1. **Pre-existing operator detection**: The controller creates a [ManagedClusterView] to check if a Sail/OSSM Subscription already exists on the managed cluster. This is necessary because ManifestWork claims ownership of any resource it applies, and deleting the ManifestWork would remove a pre-existing Subscription, potentially disrupting other components that depend on it (e.g., OpenShift Gateway API).
 2. **Adoption (operator already present)**: If a compatible Subscription is found, the add-on skips ManifestWork creation. If the configuration is incompatible, the add-on reports a conflict.
-3. **Installation (operator missing)**: If no Subscription is found, the controller creates a [ManifestWork] containing the OLM objects (Namespace, OperatorGroup, Subscription) using the operator configuration from `spec.operator`.
+3. **Installation (operator missing)**: If no Subscription is found, the controller creates a [ManifestWork] containing the OLM objects (Namespace, OperatorGroup, Subscription). The operator is installed in a dedicated namespace (`multicluster-mesh-operator` by default) so that removing the mesh cleanly removes all operator resources including the CSV.
 
 ### Collision Handling
 

@@ -3,6 +3,7 @@ package mesh
 import (
 	"context"
 	"fmt"
+	"maps"
 
 	meshv1alpha1 "github.com/stolostron/multicluster-mesh-addon/pkg/apis/mesh/v1alpha1"
 	"github.com/stolostron/multicluster-mesh-addon/pkg/key"
@@ -14,13 +15,12 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-// ensureManagedServiceAccountCreated creates ManagedServiceAccount resources using the mesh.Spec.Security.Discovery.TokenValidity value.
-func (r *Reconciler) ensureManagedServiceAccountCreated(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, cluster *clusterv1.ManagedCluster) error {
+// ensureManagedServiceAccount applies the desired ManagedServiceAccount state for a specific cluster using mesh's TokenValidity.
+func (r *Reconciler) ensureManagedServiceAccount(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, cluster *clusterv1.ManagedCluster) error {
 	msaName := fmt.Sprintf("%s-%s-%s", mesh.Namespace, "istio-reader", mesh.Name)
 	existing := &msav1beta1.ManagedServiceAccount{}
 	if err := r.Get(ctx, key.Of(msaName, cluster.Name), existing); err == nil {
-		klog.V(4).Infof("Cluster %s already has ManagedServiceAccount %s, skipping", cluster.Name, msaName)
-		return nil
+		return r.ensureManagedServiceAccountUpdated(ctx, mesh, existing)
 	} else if !errors.IsNotFound(err) {
 		return fmt.Errorf("failed to get ManagedServiceAccount %s/%s: %w", cluster.Name, msaName, err)
 	}
@@ -85,5 +85,24 @@ func (r *Reconciler) deleteAllManagedServiceAccounts(ctx context.Context, mesh *
 		}
 	}
 
+	return nil
+}
+
+func (r *Reconciler) ensureManagedServiceAccountUpdated(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, existing *msav1beta1.ManagedServiceAccount) error {
+	desiredLabels := meshOwnedLabels(mesh, existing.Namespace)
+	desiredValidity := *mesh.Spec.Security.Discovery.TokenValidity
+
+	if maps.Equal(existing.Labels, desiredLabels) && existing.Spec.Rotation.Validity == desiredValidity {
+		return nil
+	}
+
+	existing.Labels = desiredLabels
+	existing.Spec.Rotation.Validity = desiredValidity
+
+	if err := r.Update(ctx, existing); err != nil {
+		return fmt.Errorf("failed to update ManagedServiceAccount %s/%s: %w", existing.Namespace, existing.Name, err)
+	}
+
+	klog.V(4).Infof("Updated ManagedServiceAccount %s/%s", existing.Namespace, existing.Name)
 	return nil
 }

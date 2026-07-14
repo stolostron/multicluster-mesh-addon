@@ -42,10 +42,6 @@ import (
 )
 
 const (
-	// BuiltinOperatorNamespace is the namespace that already has a global OperatorGroup on OCP.
-	// When the operator targets this namespace, the controller skips creating Namespace and OperatorGroup.
-	BuiltinOperatorNamespace = "openshift-operators"
-
 	OperatorManifestWorkName = "multicluster-mesh-operator"
 	ManifestWorkNameCacerts  = "multicluster-mesh-cacerts"
 
@@ -259,9 +255,8 @@ func (r *Reconciler) doReconcile(ctx context.Context, mesh *meshv1alpha1.MultiCl
 		}
 		klog.V(4).Infof("Applied operator ManifestWork %s/%s", work.Namespace, work.Name)
 
-		// Create ManagedServiceAccount resources for each cluster.
-		if err := r.ensureManagedServiceAccountCreated(ctx, mesh, &cluster); err != nil {
-			return fmt.Errorf("failed to create ManagedServiceAccounts: %w", err)
+		if err := r.ensureManagedServiceAccount(ctx, mesh, &cluster); err != nil {
+			return fmt.Errorf("failed to ensure ManagedServiceAccount for cluster %s: %w", cluster.Name, err)
 		}
 
 		if mesh.Spec.Security.Trust.CertManager.IssuerRef.Name != "" {
@@ -587,10 +582,8 @@ func (r *Reconciler) getClustersFromSet(ctx context.Context, clusterSetName stri
 
 func (r *Reconciler) buildOperatorManifestWork(mesh *meshv1alpha1.MultiClusterMesh, cluster *clusterv1.ManagedCluster) *workv1.ManifestWork {
 	config := mesh.Spec.Operator
-	manifests := []workv1.Manifest{}
-
-	if config.Namespace != BuiltinOperatorNamespace {
-		manifests = append(manifests, workv1.Manifest{
+	manifests := []workv1.Manifest{
+		{
 			RawExtension: runtime.RawExtension{Object: &corev1.Namespace{
 				TypeMeta: metav1.TypeMeta{
 					APIVersion: "v1",
@@ -600,9 +593,8 @@ func (r *Reconciler) buildOperatorManifestWork(mesh *meshv1alpha1.MultiClusterMe
 					Name: config.Namespace,
 				},
 			}},
-		})
-
-		manifests = append(manifests, workv1.Manifest{
+		},
+		{
 			RawExtension: runtime.RawExtension{Object: &operatorsv1.OperatorGroup{
 				TypeMeta: metav1.TypeMeta{
 					APIVersion: "operators.coreos.com/v1",
@@ -616,29 +608,28 @@ func (r *Reconciler) buildOperatorManifestWork(mesh *meshv1alpha1.MultiClusterMe
 					// Empty spec = "AllNamespaces" scope
 				},
 			}},
-		})
+		},
+		{
+			RawExtension: runtime.RawExtension{Object: &operatorsv1alpha1.Subscription{
+				TypeMeta: metav1.TypeMeta{
+					APIVersion: "operators.coreos.com/v1alpha1",
+					Kind:       "Subscription",
+				},
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      config.Name,
+					Namespace: config.Namespace,
+				},
+				Spec: &operatorsv1alpha1.SubscriptionSpec{
+					Channel:                config.Channel,
+					InstallPlanApproval:    config.InstallPlanApproval,
+					Package:                config.Name,
+					CatalogSource:          config.Source,
+					CatalogSourceNamespace: config.SourceNamespace,
+					StartingCSV:            config.StartingCSV,
+				},
+			}},
+		},
 	}
-
-	manifests = append(manifests, workv1.Manifest{
-		RawExtension: runtime.RawExtension{Object: &operatorsv1alpha1.Subscription{
-			TypeMeta: metav1.TypeMeta{
-				APIVersion: "operators.coreos.com/v1alpha1",
-				Kind:       "Subscription",
-			},
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      config.Name,
-				Namespace: config.Namespace,
-			},
-			Spec: &operatorsv1alpha1.SubscriptionSpec{
-				Channel:                config.Channel,
-				InstallPlanApproval:    config.InstallPlanApproval,
-				Package:                config.Name,
-				CatalogSource:          config.Source,
-				CatalogSourceNamespace: config.SourceNamespace,
-				StartingCSV:            config.StartingCSV,
-			},
-		}},
-	})
 
 	return &workv1.ManifestWork{
 		ObjectMeta: metav1.ObjectMeta{
