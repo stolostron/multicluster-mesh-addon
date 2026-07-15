@@ -113,9 +113,11 @@ var _ = Describe("Multi-primary multi-network mesh", Ordered, Serial, func() {
 	})
 
 	It("addon plumbing is ready", func(ctx SpecContext) {
-		Step("Ensuring istio-system namespace exists on spoke clusters")
-		for _, spokeClient := range spokeClients {
-			util.EnsureNamespace(ctx, spokeClient, cpNamespace)
+		Step("Ensuring istio-system namespace exists on spoke clusters with network labels")
+		for cluster, spokeClient := range spokeClients {
+			util.CreateNamespaceWithLabels(ctx, spokeClient, cpNamespace, map[string]string{
+				"topology.istio.io/network": networks[cluster],
+			})
 		}
 
 		Step("Creating MultiClusterMesh CR")
@@ -183,8 +185,10 @@ var _ = Describe("Multi-primary multi-network mesh", Ordered, Serial, func() {
 
 	It("Istio control planes become ready on both clusters", func(ctx SpecContext) {
 		for cluster, spokeClient := range spokeClients {
-			Step("Creating istio-system namespace on %s", cluster)
-			util.EnsureNamespace(ctx, spokeClient, cpNamespace)
+			Step("Ensuring istio-system and istio-cni namespaces on %s", cluster)
+			util.CreateNamespaceWithLabels(ctx, spokeClient, cpNamespace, map[string]string{
+				"topology.istio.io/network": networks[cluster],
+			})
 			util.EnsureNamespace(ctx, spokeClient, "istio-cni")
 
 			Step("Applying IstioCNI CR on %s", cluster)
