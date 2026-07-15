@@ -105,6 +105,8 @@ func WaitForDeploymentReady(ctx context.Context, k8sClient client.Client, name, 
 	Eventually(func(g Gomega) {
 		deploy := &appsv1.Deployment{}
 		g.Expect(k8sClient.Get(ctx, key.Of(name, namespace), deploy)).To(Succeed())
+		g.Expect(deploy.Status.ObservedGeneration).To(Equal(deploy.Generation),
+			"deployment %s/%s status not yet observed for current generation", namespace, name)
 		var found bool
 		for _, c := range deploy.Status.Conditions {
 			if c.Type == appsv1.DeploymentAvailable {

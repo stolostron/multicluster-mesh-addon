@@ -70,9 +70,6 @@ var _ = Describe("Multi-primary multi-network mesh", Ordered, Serial, func() {
 			}))
 		}
 
-		//Step("Cleaning up remote secrets")
-		//util.CleanupRemoteSecrets(ctx, spokeClients, clusters, cpNamespace)
-
 		Step("Cleaning up Istio resources on spoke clusters")
 		for cluster, spokeClient := range spokeClients {
 			util.DeleteYAMLResources(ctx, spokeClient, filepath.Join(testdataDir, "eastwest-gateway.yaml"), map[string]string{

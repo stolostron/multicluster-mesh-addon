@@ -307,6 +307,9 @@ install_metallb() {
         log "Waiting for MetalLB controller to be ready on ${cluster}..."
         on "${cluster}" kubectl rollout status deployment/controller -n metallb-system --timeout=120s
 
+        log "Waiting for MetalLB speaker to be ready on ${cluster}..."
+        on "${cluster}" kubectl rollout status daemonset/speaker -n metallb-system --timeout=120s
+
         log "Configuring MetalLB IP pool ${range_start}-${range_end} on ${cluster}..."
         sed "s|__ADDRESS_RANGE__|${range_start}-${range_end}|" \
             "${SCRIPT_DIR}/samples/metallb-pool.yaml" \
