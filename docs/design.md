@@ -214,6 +214,15 @@ In both cases, the add-on will never forcibly uninstall, downgrade, or overwrite
 
 The add-on does not validate OpenShift version compatibility with the requested operator channel. It delegates this to OLM - if a cluster's OCP version is incompatible with the requested operator version, the OLM installation will stall, preventing the cluster from joining the mesh with an unsupported control plane.
 
+## Control Plane Namespace
+
+The controller creates the control plane namespace (default: `istio-system`) on each managed cluster via ManifestWork.
+The namespace is labeled with the cluster's network identity for istiod (see [Network Partitioning](#network-partitioning)).
+
+The namespace ManifestWork is owned by the mesh, not shared across meshes.
+Deleting the mesh deletes the namespace and everything in it on the spoke, including any Istio control plane resources the user deployed there.
+Users should be aware that removing a mesh will clean up the entire control plane namespace on each cluster.
+
 ## Trust Distribution
 
 Trust distribution requires [cert-manager] to be installed on the hub cluster. The user is responsible for setting up cert-manager and creating the `Issuer` or `ClusterIssuer` resource that acts as the Root CA.
@@ -251,6 +260,7 @@ For multi-primary mesh topologies, each control plane needs API access to its pe
 The user is responsible for:
 
 - Creating and managing Istio custom resources on each spoke cluster (directly or via GitOps)
+- Setting `values.global.network` in the Istio CR to match the cluster's network identity (cluster name by default, or the value of `topology.istio.io/network` on the ManagedCluster if set). See [Network Partitioning](#network-partitioning).
 - Enabling Istio CNI on OpenShift clusters
 - Configuring `discoverySelectors` in multi-tenant environments to prevent cross-mesh service visibility
 - Labeling application namespaces to match discovery selector configuration
