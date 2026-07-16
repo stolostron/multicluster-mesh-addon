@@ -2,7 +2,6 @@ package util
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	. "github.com/onsi/gomega"
@@ -43,7 +42,7 @@ func CreateNamespace(ctx context.Context, k8sClient client.Client, name string) 
 func CreateCacertsSecret(ctx context.Context, k8sClient client.Client, namespace, clusterName, meshName, meshNamespace string) {
 	secret := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      fmt.Sprintf("cacerts-%s", clusterName),
+			Name:      meshcontroller.CacertsSecretAndCertName(meshName, clusterName),
 			Namespace: namespace,
 			Labels: map[string]string{
 				meshcontroller.ManagedByLabel:     meshcontroller.ManagedByValue,

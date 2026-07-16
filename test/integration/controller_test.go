@@ -146,6 +146,50 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 				expectClusterOperatorConditionReason(meshName, testNs, cluster2Name, meshv1alpha1.ReasonOperatorInstalled)
 				expectMeshReady(meshName, testNs)
 			})
+
+			It("should preserve per-cluster condition LastTransitionTime when status is unchanged", func() {
+				expectClusterOperatorConditionReason(meshName, testNs, clusterName, meshv1alpha1.ReasonInstallationPending)
+
+				var initialTime metav1.Time
+				Eventually(func(g Gomega) {
+					mesh := &meshv1alpha1.MultiClusterMesh{}
+					g.Expect(k8sClient.Get(ctx, key.Of(meshName, testNs), mesh)).To(Succeed())
+					for _, cs := range mesh.Status.ClusterStatus {
+						if cs.ClusterName == clusterName {
+							c := findCondition(g, cs.Conditions, meshv1alpha1.ConditionOperatorInstalled)
+							initialTime = c.LastTransitionTime
+							g.Expect(initialTime.IsZero()).To(BeFalse())
+							return
+						}
+					}
+					g.Expect(false).To(BeTrue(), "cluster %s not found in status", clusterName)
+				}).Should(Succeed())
+
+				time.Sleep(2 * time.Second)
+
+				mesh := &meshv1alpha1.MultiClusterMesh{}
+				Expect(k8sClient.Get(ctx, key.Of(meshName, testNs), mesh)).To(Succeed())
+				if mesh.Annotations == nil {
+					mesh.Annotations = map[string]string{}
+				}
+				mesh.Annotations["trigger-reconcile"] = "true"
+				Expect(k8sClient.Update(ctx, mesh)).To(Succeed())
+
+				Consistently(func(g Gomega) {
+					mesh := &meshv1alpha1.MultiClusterMesh{}
+					g.Expect(k8sClient.Get(ctx, key.Of(meshName, testNs), mesh)).To(Succeed())
+					for _, cs := range mesh.Status.ClusterStatus {
+						if cs.ClusterName == clusterName {
+							c := findCondition(g, cs.Conditions, meshv1alpha1.ConditionOperatorInstalled)
+							g.Expect(c.LastTransitionTime).To(Equal(initialTime),
+								"LastTransitionTime changed from %v — determineStatus is not preserving existing conditions",
+								initialTime)
+							return
+						}
+					}
+					g.Expect(false).To(BeTrue(), "cluster %s not found in status", clusterName)
+				}, 3*time.Second, 500*time.Millisecond).Should(Succeed())
+			})
 		})
 
 		It("should use custom operator configuration when specified", func() {
@@ -572,23 +616,23 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 				// simulate creating the cacerts secret by cert-manager
 				util.CreateCacertsSecret(ctx, k8sClient, testNs, clusterName, meshName, testNs)
 
-				work := expectCacertsManifestWork(clusterName)
+				work := expectCacertsManifestWork(meshName, testNs, clusterName)
 				expectCacertsSecret(work)
 			})
 
 			It("should update ManifestWork when cacerts secret is updated", func() {
 				util.CreateCacertsSecret(ctx, k8sClient, testNs, clusterName, meshName, testNs)
-				expectCacertsManifestWork(clusterName)
+				expectCacertsManifestWork(meshName, testNs, clusterName)
 
 				secret := &corev1.Secret{}
-				Expect(k8sClient.Get(ctx, key.Of(fmt.Sprintf("cacerts-%s", clusterName), testNs), secret)).To(Succeed())
+				Expect(k8sClient.Get(ctx, key.Of(meshcontroller.CacertsSecretAndCertName(meshName, clusterName), testNs), secret)).To(Succeed())
 
 				secret.Data["tls.crt"] = []byte("updated-cert-data")
 				Expect(k8sClient.Update(ctx, secret)).To(Succeed())
 
 				Eventually(func() string {
 					work := &workv1.ManifestWork{}
-					if err := k8sClient.Get(ctx, key.Of(meshcontroller.ManifestWorkNameCacerts, clusterName), work); err != nil {
+					if err := k8sClient.Get(ctx, key.Of(meshcontroller.CacertsManifestWorkName(meshName, testNs), clusterName), work); err != nil {
 						return ""
 					}
 					manifestSecret := &corev1.Secret{}
@@ -623,8 +667,77 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 				util.CreateCacertsSecret(ctx, k8sClient, testNs, cluster1, meshName, testNs)
 				util.CreateCacertsSecret(ctx, k8sClient, testNs, cluster2, meshName, testNs)
 
-				expectCacertsManifestWork(cluster1)
-				expectCacertsManifestWork(cluster2)
+				expectCacertsManifestWork(meshName, testNs, cluster1)
+				expectCacertsManifestWork(meshName, testNs, cluster2)
+			})
+		})
+
+		When("two meshes in different namespaces target the same cluster", func() {
+			var mesh1, mesh1Ns, mesh2, mesh2Ns string
+
+			BeforeEach(func() {
+				util.CreateManagedCluster(ctx, k8sClient, clusterName, testClusterSet)
+
+				mesh1 = util.UniqueName("mesh-1")
+				mesh1Ns = util.UniqueName("mesh-1-ns")
+				mesh2 = util.UniqueName("mesh-2")
+				mesh2Ns = util.UniqueName("mesh-2-ns")
+				util.CreateNamespace(ctx, k8sClient, mesh1Ns)
+				util.CreateNamespace(ctx, k8sClient, mesh2Ns)
+
+				util.CreateMultiClusterMesh(ctx, k8sClient, mesh1, mesh1Ns, testClusterSet, meshv1alpha1.MultiClusterMeshSpec{
+					ControlPlane: meshv1alpha1.ControlPlaneConfig{Namespace: "istio-system-1"},
+					Security: meshv1alpha1.SecurityConfig{Trust: meshv1alpha1.TrustConfig{
+						CertManager: meshv1alpha1.CertManagerConfig{IssuerRef: meshv1alpha1.IssuerReference{Name: "mesh-issuer", Kind: "Issuer"}},
+					}},
+				})
+				util.CreateMultiClusterMesh(ctx, k8sClient, mesh2, mesh2Ns, testClusterSet, meshv1alpha1.MultiClusterMeshSpec{
+					ControlPlane: meshv1alpha1.ControlPlaneConfig{Namespace: "istio-system-2"},
+					Security: meshv1alpha1.SecurityConfig{Trust: meshv1alpha1.TrustConfig{
+						CertManager: meshv1alpha1.CertManagerConfig{IssuerRef: meshv1alpha1.IssuerReference{Name: "mesh-issuer", Kind: "Issuer"}},
+					}},
+				})
+
+				util.CreateCacertsSecret(ctx, k8sClient, mesh1Ns, clusterName, mesh1, mesh1Ns)
+				util.CreateCacertsSecret(ctx, k8sClient, mesh2Ns, clusterName, mesh2, mesh2Ns)
+			})
+
+			It("should create cacerts ManifestWork for each mesh", func() {
+				expectCacertsManifestWork(mesh1, mesh1Ns, clusterName)
+				expectCacertsManifestWork(mesh2, mesh2Ns, clusterName)
+			})
+
+			It("should delete only the removed mesh's cacerts ManifestWork while keeping the operator ManifestWork", func() {
+				expectCacertsManifestWork(mesh1, mesh1Ns, clusterName)
+				expectCacertsManifestWork(mesh2, mesh2Ns, clusterName)
+
+				util.DeleteResource(ctx, k8sClient, &meshv1alpha1.MultiClusterMesh{}, mesh1, mesh1Ns)
+
+				util.ExpectResourceDeleted(ctx, k8sClient, &workv1.ManifestWork{},
+					meshcontroller.CacertsManifestWorkName(mesh1, mesh1Ns), clusterName)
+
+				Consistently(func() error {
+					return k8sClient.Get(ctx, key.Of(meshcontroller.CacertsManifestWorkName(mesh2, mesh2Ns), clusterName), &workv1.ManifestWork{})
+				}).Should(Succeed())
+
+				Consistently(func() error {
+					return k8sClient.Get(ctx, key.Of(meshcontroller.OperatorManifestWorkName, clusterName), &workv1.ManifestWork{})
+				}).Should(Succeed())
+			})
+
+			It("should delete all ManifestWorks when the last mesh is deleted", func() {
+				expectCacertsManifestWork(mesh1, mesh1Ns, clusterName)
+				expectCacertsManifestWork(mesh2, mesh2Ns, clusterName)
+
+				util.DeleteResource(ctx, k8sClient, &meshv1alpha1.MultiClusterMesh{}, mesh1, mesh1Ns)
+				util.DeleteResource(ctx, k8sClient, &meshv1alpha1.MultiClusterMesh{}, mesh2, mesh2Ns)
+
+				util.ExpectResourceDeleted(ctx, k8sClient, &workv1.ManifestWork{},
+					meshcontroller.CacertsManifestWorkName(mesh1, mesh1Ns), clusterName)
+				util.ExpectResourceDeleted(ctx, k8sClient, &workv1.ManifestWork{},
+					meshcontroller.CacertsManifestWorkName(mesh2, mesh2Ns), clusterName)
+				util.ExpectResourceDeleted(ctx, k8sClient, &workv1.ManifestWork{},
+					meshcontroller.OperatorManifestWorkName, clusterName)
 			})
 		})
 
@@ -637,7 +750,7 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 				updateClusterSetLabel(clusterName, "")
 
 				util.ExpectResourceDeleted(ctx, k8sClient, &certmanagerv1.Certificate{},
-					fmt.Sprintf("cacerts-%s", clusterName), testNs)
+					meshcontroller.CacertsSecretAndCertName(meshName, clusterName), testNs)
 			})
 		})
 
@@ -652,7 +765,7 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 				})
 
 				util.ExpectResourceDeleted(ctx, k8sClient, &certmanagerv1.Certificate{},
-					fmt.Sprintf("cacerts-%s", clusterName), testNs)
+					meshcontroller.CacertsSecretAndCertName(meshName, clusterName), testNs)
 			})
 		})
 
@@ -664,7 +777,7 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 
 			It("should not create cacerts ManifestWork", func() {
 				expectMeshNotReady(meshName, testNs)
-				expectNoCacertsManifestWork(clusterName)
+				expectNoCacertsManifestWork(meshName, testNs, clusterName)
 			})
 		})
 	})
@@ -871,8 +984,8 @@ func expectOperatorManifestWork(clusterNamespace string) *workv1.ManifestWork {
 	return expectManifestWork(meshcontroller.OperatorManifestWorkName, clusterNamespace)
 }
 
-func expectCacertsManifestWork(clusterNamespace string) *workv1.ManifestWork {
-	return expectManifestWork(meshcontroller.ManifestWorkNameCacerts, clusterNamespace)
+func expectCacertsManifestWork(meshName, meshNamespace, clusterNamespace string) *workv1.ManifestWork {
+	return expectManifestWork(meshcontroller.CacertsManifestWorkName(meshName, meshNamespace), clusterNamespace)
 }
 
 func expectNoCertificate(namespace, meshName string) {
@@ -886,10 +999,10 @@ func expectNoCertificate(namespace, meshName string) {
 	}).Should(BeEmpty())
 }
 
-func expectNoCacertsManifestWork(clusterNamespace string) {
+func expectNoCacertsManifestWork(meshName, meshNamespace, clusterNamespace string) {
 	Consistently(func() bool {
 		work := &workv1.ManifestWork{}
-		err := k8sClient.Get(ctx, key.Of(meshcontroller.ManifestWorkNameCacerts, clusterNamespace), work)
+		err := k8sClient.Get(ctx, key.Of(meshcontroller.CacertsManifestWorkName(meshName, meshNamespace), clusterNamespace), work)
 		return errors.IsNotFound(err)
 	}).Should(BeTrue())
 }
@@ -909,7 +1022,7 @@ func expectCertificate(namespace, clusterName, meshName, issuerName, issuerKind 
 
 	cert := &certList.Items[0]
 	Expect(cert.Labels[meshcontroller.ManagedByLabel]).To(Equal(meshcontroller.ManagedByValue))
-	Expect(cert.Spec.SecretName).To(Equal(fmt.Sprintf("cacerts-%s", clusterName)))
+	Expect(cert.Spec.SecretName).To(Equal(meshcontroller.CacertsSecretAndCertName(meshName, clusterName)))
 	Expect(cert.Spec.IsCA).To(BeTrue())
 	Expect(cert.Spec.IssuerRef.Name).To(Equal(issuerName))
 	Expect(cert.Spec.IssuerRef.Kind).To(Equal(issuerKind))
