@@ -388,5 +388,5 @@ case "${ACTION}" in
     install-gateway-api)             install_gateway_api ;;
     clean)                           clean ;;
     *)
-        err "Unknown action: '${ACTION}'. Valid: check-host, create-cluster, install-olm, install-cert-manager, install-managed-serviceaccount, init-ocm, join-clusters, setup-mesh, install-metallb, install-gateway-api, clean"" ;;
+        err "Unknown action: '${ACTION}'. Valid: check-host, create-cluster, install-olm, install-cert-manager, install-managed-serviceaccount, init-ocm, join-clusters, setup-mesh, install-metallb, install-gateway-api, clean" ;;
 esac
