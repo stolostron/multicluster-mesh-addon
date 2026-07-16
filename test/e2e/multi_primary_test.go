@@ -223,6 +223,7 @@ var _ = Describe("Multi-primary multi-network mesh", Ordered, Serial, func() {
 				Expect(targetClient.Get(ctx, key.Of("istio-remote-secret-"+source, cpNamespace), secret)).
 					To(Succeed(), "remote secret for %s not found on %s", source, target)
 				Expect(secret.Labels).To(HaveKeyWithValue("istio/multiCluster", "true"))
+				Expect(secret.Annotations).To(HaveKeyWithValue("networking.istio.io/cluster", source))
 			}
 		}
 	}, SpecTimeout(2*time.Minute))
