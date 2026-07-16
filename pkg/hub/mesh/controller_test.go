@@ -147,9 +147,12 @@ func TestBuildManifestWorkReplicaSet(t *testing.T) {
 
 	r = &Reconciler{Client: client, Scheme: scheme}
 
-	_, err := r.getManifestWorkReplicaSet(context.Background(), "test-mwrs")
+	fetched, err := r.getManifestWorkReplicaSet(context.Background(), mwrs.Namespace, ManifestWorkReplicaSetName)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+	if fetched == nil {
+		t.Fatalf("expected ManifestWorkReplicaSet %s to be found", ManifestWorkReplicaSetName)
 	}
 }
 

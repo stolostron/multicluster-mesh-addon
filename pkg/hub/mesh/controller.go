@@ -561,9 +561,9 @@ func (r *Reconciler) getClustersFromSet(ctx context.Context, clusterSetName stri
 	return clusterList.Items, nil
 }
 
-func (r *Reconciler) getManifestWorkReplicaSet(ctx context.Context, mwrsName string) (*workv1alpha1.ManifestWorkReplicaSet, error) {
+func (r *Reconciler) getManifestWorkReplicaSet(ctx context.Context, mwrsNamespace, mwrsName string) (*workv1alpha1.ManifestWorkReplicaSet, error) {
 	mwrs := &workv1alpha1.ManifestWorkReplicaSet{}
-	if err := r.Get(ctx, key.Of(mwrsName), mwrs); err != nil {
+	if err := r.Get(ctx, key.Of(mwrsName, mwrsNamespace), mwrs); err != nil {
 		if apierrors.IsNotFound(err) {
 			klog.V(4).Infof("ManifestWorkReplicaSet %s not found", mwrsName)
 			return nil, nil
@@ -732,6 +732,7 @@ func (r *Reconciler) ensureCacertsManifestWork(ctx context.Context, mesh *meshv1
 	secretName := getCacertsName(cluster.Name)
 	secret := &corev1.Secret{}
 	err := r.Get(ctx, key.Of(secretName, mesh.Namespace), secret)
+
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			klog.V(4).Infof("Secret %s/%s not found yet, waiting for cert-manager to create it", mesh.Namespace, secretName)
