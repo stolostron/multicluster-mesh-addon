@@ -119,6 +119,17 @@ flowchart TD
 
 The MVP supports the [Multi-Primary Multi-Network] mesh topology. This aligns with OCM's model where each cluster runs its own control plane. Support for other topologies (e.g., Primary-Remote, External Control Plane) can be added with backwards-compatible API changes.
 
+### Network Partitioning
+
+In a multi-network mesh, each cluster's control plane namespace must be labeled with `topology.istio.io/network` so that istiod knows which network the cluster belongs to.
+The controller reads this label from the `ManagedCluster` object on the hub.
+If the label is not set, the controller falls back to using the cluster name as the network identifier.
+
+```bash
+kubectl label managedcluster cluster1 topology.istio.io/network=network-a
+kubectl label managedcluster cluster2 topology.istio.io/network=network-b
+```
+
 ## Custom Resource
 
 `MultiClusterMesh` is a namespaced resource. The namespace provides tenant isolation on the hub.

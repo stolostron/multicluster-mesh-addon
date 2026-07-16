@@ -786,6 +786,11 @@ func (r *Reconciler) ensureCacertsManifestWork(ctx context.Context, mesh *meshv1
 func (r *Reconciler) buildControlPlaneNamespaceManifestWork(mesh *meshv1alpha1.MultiClusterMesh, cluster *clusterv1.ManagedCluster) *workv1.ManifestWork {
 	cpNamespace := mesh.GetControlPlaneNamespace()
 
+	network := cluster.Name
+	if v, ok := cluster.Labels[IstioNetworkLabel]; ok && v != "" {
+		network = v
+	}
+
 	return buildMeshOwnedManifestWork(mesh, cluster.Name, ManifestWorkNameCPNSPrefix+cpNamespace, &corev1.Namespace{
 		TypeMeta: metav1.TypeMeta{
 			APIVersion: "v1",
@@ -794,7 +799,7 @@ func (r *Reconciler) buildControlPlaneNamespaceManifestWork(mesh *meshv1alpha1.M
 		ObjectMeta: metav1.ObjectMeta{
 			Name: cpNamespace,
 			Labels: map[string]string{
-				IstioNetworkLabel: cluster.Name,
+				IstioNetworkLabel: network,
 			},
 		},
 	})
