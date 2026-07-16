@@ -221,6 +221,8 @@ MSA_VERSION ?= 0.10.0
 
 DEV_KUBE_DIR := $(CURDIR)/.kube
 HUB_KUBECONFIG := $(DEV_KUBE_DIR)/hub.config
+SPOKE_CLUSTERS := cluster1 cluster2
+CLUSTERS := hub $(SPOKE_CLUSTERS)
 
 KIND := $(BIN_DIR)/kind
 CLUSTERADM := $(BIN_DIR)/clusteradm
@@ -252,35 +254,59 @@ DEV_ENV_SCRIPT := $(CURDIR)/hack/dev-env.sh
 export DEV_KUBE_DIR K8S_VERSION OLM_VERSION CERT_MANAGER_VERSION MSA_VERSION
 export KIND CLUSTERADM HELM
 
+# PARALLEL controls concurrent job count for dev-env/dev-clean (default: half of CPU cores).
+# Set PARALLEL=1 or PARALLEL=0 to run sequentially.
+PARALLEL ?= $(shell echo $$(( $$(getconf _NPROCESSORS_ONLN) / 2 )))
+ifeq ($(PARALLEL),0)
+override PARALLEL := 1
+endif
+
+log = @echo "==> $(1)"
+
 .PHONY: dev-env
-dev-env: create-clusters install-olm install-cert-manager init-ocm join-clusters install-managed-serviceaccount deploy-addon ## Provision full dev environment (Kind + OCM + addon)
+dev-env: ## Provision full dev environment (Kind + OCM + addon)
+	$(DEV_ENV_SCRIPT) check-host
+	$(MAKE) --no-print-directory -j$(PARALLEL) --output-sync=line install-olm install-cert-manager install-managed-serviceaccount deploy-addon
+	$(call log,Dev environment ready. Use KUBECONFIG=$(HUB_KUBECONFIG) to interact with the hub.)
 
 .PHONY: create-clusters
-create-clusters: $(KIND) ## Create 3 Kind clusters (hub, cluster1, cluster2)
-	$(DEV_ENV_SCRIPT) create-clusters
+create-clusters: $(addprefix create-,$(CLUSTERS)) ## Create 3 Kind clusters (hub, cluster1, cluster2)
+
+.PHONY: $(addprefix create-,$(CLUSTERS))
+$(addprefix create-,$(CLUSTERS)): create-%: $(KIND)
+	$(call log,Creating cluster: $*)
+	$(DEV_ENV_SCRIPT) create-cluster $*
 
 .PHONY: install-olm
-install-olm: ## Install OLM on managed clusters (cluster1, cluster2)
-	$(DEV_ENV_SCRIPT) install-olm
+install-olm: $(addprefix install-olm-,$(SPOKE_CLUSTERS)) ## Install OLM on managed clusters (cluster1, cluster2)
+
+.PHONY: $(addprefix install-olm-,$(SPOKE_CLUSTERS))
+$(addprefix install-olm-,$(SPOKE_CLUSTERS)): install-olm-%: create-%
+	$(call log,Installing OLM: $*)
+	$(DEV_ENV_SCRIPT) install-olm $*
 
 .PHONY: install-cert-manager
-install-cert-manager: ## Install cert-manager on the hub cluster
+install-cert-manager: create-hub ## Install cert-manager on the hub cluster
+	$(call log,Installing cert-manager: hub)
 	$(DEV_ENV_SCRIPT) install-cert-manager
 
 .PHONY: init-ocm
-init-ocm: $(CLUSTERADM) ## Initialize hub as OCM control plane
+init-ocm: $(CLUSTERADM) create-hub ## Initialize hub as OCM control plane
+	$(call log,Initializing OCM: hub)
 	$(DEV_ENV_SCRIPT) init-ocm
 
 .PHONY: join-clusters
-join-clusters: $(CLUSTERADM) ## Register managed clusters and create ManagedClusterSet
+join-clusters: $(CLUSTERADM) init-ocm $(addprefix create-,$(SPOKE_CLUSTERS)) ## Register managed clusters and create ManagedClusterSet
+	$(call log,Joining clusters to hub)
 	$(DEV_ENV_SCRIPT) join-clusters
 
 .PHONY: install-managed-serviceaccount
-install-managed-serviceaccount: $(HELM_BIN) ## Install managed-serviceaccount addon to the hub cluster
+install-managed-serviceaccount: $(HELM_BIN) join-clusters ## Install managed-serviceaccount addon to the hub cluster
+	$(call log,Installing managed-serviceaccount: hub)
 	$(DEV_ENV_SCRIPT) install-managed-serviceaccount
 
 .PHONY: deploy-addon
-deploy-addon: $(KIND) $(HELM_BIN) gen images ## Build and deploy addon to the hub Kind cluster
+deploy-addon: $(KIND) $(HELM_BIN) gen images join-clusters install-cert-manager ## Build and deploy addon to the hub Kind cluster
 	# We use image-archive instead of docker-image because the latter is Docker-specific
 	# and fails when images are built with Podman (separate image stores).
 	$(CONTAINER_ENGINE) save $(IMG) -o $(DEV_KUBE_DIR)/.addon-image.tar
@@ -297,7 +323,7 @@ deploy-addon: $(KIND) $(HELM_BIN) gen images ## Build and deploy addon to the hu
 		--wait --timeout 180s
 	kubectl --kubeconfig=$(HUB_KUBECONFIG) rollout status deployment/multicluster-mesh-controller \
 		-n $(ADDON_NAMESPACE) --timeout=180s
-	@echo "==> Addon controller deployed successfully. Use KUBECONFIG=$(HUB_KUBECONFIG) to interact with the hub."
+	$(call log,Addon controller deployed successfully. Use KUBECONFIG=$(HUB_KUBECONFIG) to interact with the hub.)
 
 .PHONY: setup-mesh
 setup-mesh: ## Create cert-manager trust chain, mesh-system namespace, and MultiClusterMesh CR
@@ -311,4 +337,10 @@ dev-clean-meshes: ## Delete all mesh resources, cert-manager trust chain, and me
 
 .PHONY: dev-clean
 dev-clean: ## Destroy dev clusters and remove .kube/ folder
-	$(DEV_ENV_SCRIPT) clean
+	$(MAKE) --no-print-directory -j$(PARALLEL) --output-sync=line $(addprefix delete-,$(CLUSTERS))
+	rm -rf $(DEV_KUBE_DIR)
+	$(call log,Dev environment cleaned)
+
+.PHONY: $(addprefix delete-,$(CLUSTERS))
+$(addprefix delete-,$(CLUSTERS)): delete-%: $(KIND)
+	$(KIND) delete cluster --name $*
