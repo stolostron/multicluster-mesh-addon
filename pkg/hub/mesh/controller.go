@@ -27,6 +27,7 @@ import (
 	clusterv1 "open-cluster-management.io/api/cluster/v1"
 	clusterv1beta2 "open-cluster-management.io/api/cluster/v1beta2"
 	workv1 "open-cluster-management.io/api/work/v1"
+	workv1alpha1 "open-cluster-management.io/api/work/v1alpha1"
 	"open-cluster-management.io/sdk-go/pkg/apis/work/v1/applier"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
@@ -42,8 +43,9 @@ import (
 )
 
 const (
-	OperatorManifestWorkName = "multicluster-mesh-operator"
-	ManifestWorkNameCacerts  = "multicluster-mesh-cacerts"
+	OperatorManifestWorkName   = "multicluster-mesh-operator"
+	ManifestWorkNameCacerts    = "multicluster-mesh-cacerts"
+	ManifestWorkReplicaSetName = "multicluster-mesh-mwrset"
 
 	FeedbackInstalledCSV = "installedCSV"
 
@@ -137,7 +139,9 @@ func RegisterController(mgr manager.Manager) error {
 //+kubebuilder:rbac:groups=mesh.open-cluster-management.io,resources=multiclustermeshes/finalizers,verbs=update
 //+kubebuilder:rbac:groups=cluster.open-cluster-management.io,resources=managedclusters,verbs=get;list;watch
 //+kubebuilder:rbac:groups=cluster.open-cluster-management.io,resources=managedclustersets,verbs=get;list;watch
+//+kubebuilder:rbac:groups=cluster.open-cluster-management.io,resources=placements,verbs=get;list;create;update;patch;delete
 //+kubebuilder:rbac:groups=work.open-cluster-management.io,resources=manifestworks,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=work.open-cluster-management.io,resources=manifestworkreplicasets,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=cert-manager.io,resources=certificates,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=authentication.open-cluster-management.io,resources=managedserviceaccounts,verbs=get;list;watch;create;update;delete
 //+kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
@@ -557,6 +561,18 @@ func (r *Reconciler) getClustersFromSet(ctx context.Context, clusterSetName stri
 	return clusterList.Items, nil
 }
 
+func (r *Reconciler) getManifestWorkReplicaSet(ctx context.Context, mwrsName string) (*workv1alpha1.ManifestWorkReplicaSet, error) {
+	mwrs := &workv1alpha1.ManifestWorkReplicaSet{}
+	if err := r.Get(ctx, key.Of(mwrsName), mwrs); err != nil {
+		if apierrors.IsNotFound(err) {
+			klog.V(4).Infof("ManifestWorkReplicaSet %s not found", mwrsName)
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to get ManifestWorkReplicaSet %s: %w", mwrsName, err)
+	}
+	return mwrs, nil
+}
+
 func (r *Reconciler) buildOperatorManifestWork(mesh *meshv1alpha1.MultiClusterMesh, cluster *clusterv1.ManagedCluster) *workv1.ManifestWork {
 	config := mesh.Spec.Operator
 	manifests := []workv1.Manifest{
@@ -716,7 +732,6 @@ func (r *Reconciler) ensureCacertsManifestWork(ctx context.Context, mesh *meshv1
 	secretName := getCacertsName(cluster.Name)
 	secret := &corev1.Secret{}
 	err := r.Get(ctx, key.Of(secretName, mesh.Namespace), secret)
-
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			klog.V(4).Infof("Secret %s/%s not found yet, waiting for cert-manager to create it", mesh.Namespace, secretName)
@@ -761,6 +776,28 @@ func (r *Reconciler) buildCacertsManifestWork(mesh *meshv1alpha1.MultiClusterMes
 					RawExtension: runtime.RawExtension{Object: cacertsSecret},
 				}},
 			},
+		},
+	}
+}
+
+// buildManifestWorkReplicaSet builds a ManifestWorkReplicaSet to create ManifestWork resources for clusters selected by a Placement.
+func (r *Reconciler) buildManifestWorkReplicaSet(mesh *meshv1alpha1.MultiClusterMesh, placementName string, workTemplate workv1.ManifestWorkSpec) *workv1alpha1.ManifestWorkReplicaSet {
+	config := mesh.Spec.Operator
+	return &workv1alpha1.ManifestWorkReplicaSet{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      ManifestWorkReplicaSetName,
+			Namespace: config.Namespace,
+			Labels: map[string]string{
+				ManagedByLabel:     ManagedByValue,
+				MeshNameLabel:      mesh.Name,
+				MeshNamespaceLabel: mesh.Namespace,
+			},
+		},
+		Spec: workv1alpha1.ManifestWorkReplicaSetSpec{
+			PlacementRefs: []workv1alpha1.LocalPlacementReference{
+				{Name: placementName},
+			},
+			ManifestWorkTemplate: workTemplate,
 		},
 	}
 }
