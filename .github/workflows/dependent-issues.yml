@@ -1,0 +1,24 @@
+---
+name: PR Dependencies
+
+on:
+  pull_request_target:
+    types:
+      - opened
+      - edited
+      - reopened
+      - synchronize
+
+permissions:
+  pull-requests: write
+
+jobs:
+  check:
+    name: Check Dependencies
+    if: github.repository_owner == 'stolostron'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: depends-on/depends-on-action@c7ac9a6932a7069e83aef80c202d9f60f91e43fd # v0.17.0
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          check-unmerged-pr: true
