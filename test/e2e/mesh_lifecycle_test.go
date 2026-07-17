@@ -129,6 +129,13 @@ var _ = Describe("MultiClusterMesh lifecycle", Ordered, func() {
 			Expect(meta.IsStatusConditionTrue(cs.Conditions, meshv1alpha1.ConditionOperatorInstalled)).To(BeTrue(),
 				"expected OperatorInstalled=True for %s", cluster)
 
+			Step("Verifying control plane namespace exists on %s", cluster)
+			ns := &corev1.Namespace{}
+			Eventually(func(g Gomega) {
+				g.Expect(spokeClient.Get(ctx, key.Of("istio-system"), ns)).To(Succeed())
+				g.Expect(ns.Labels[meshcontroller.IstioNetworkLabel]).To(Equal(cluster))
+			}).Should(Succeed())
+
 			Step("Verifying operator namespace exists on %s", cluster)
 			err := spokeClient.Get(ctx, key.Of(testOperatorNamespace), &corev1.Namespace{})
 			Expect(err).NotTo(HaveOccurred())
@@ -170,6 +177,11 @@ var _ = Describe("MultiClusterMesh lifecycle", Ordered, func() {
 		Step("Verifying ManifestWorks are removed from hub")
 		for _, cluster := range clusters {
 			util.ExpectResourceDeleted(ctx, hubClient, &workv1.ManifestWork{}, meshcontroller.OperatorManifestWorkName, cluster)
+		}
+
+		Step("Verifying control plane namespaces are removed from spoke clusters")
+		for _, spokeClient := range spokeClients {
+			util.ExpectResourceDeleted(ctx, spokeClient, &corev1.Namespace{}, "istio-system", "", 2*time.Minute)
 		}
 
 		Step("Verifying Subscriptions are removed from spoke clusters")
