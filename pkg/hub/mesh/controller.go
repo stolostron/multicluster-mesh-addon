@@ -42,8 +42,9 @@ import (
 )
 
 const (
-	OperatorManifestWorkName = "multicluster-mesh-operator"
-	ManifestWorkNameCacerts  = "multicluster-mesh-cacerts"
+	OperatorManifestWorkName   = "multicluster-mesh-operator"
+	ManifestWorkNameCacerts    = "multicluster-mesh-cacerts"
+	ManifestWorkNameCPNSPrefix = "multicluster-mesh-cp-ns-"
 
 	FeedbackInstalledCSV = "installedCSV"
 
@@ -57,7 +58,8 @@ const (
 	MeshNameLabel      = "mesh.open-cluster-management.io/mesh-name"
 	MeshNamespaceLabel = "mesh.open-cluster-management.io/mesh-namespace"
 
-	ClusterSetLabel = "cluster.open-cluster-management.io/clusterset"
+	ClusterSetLabel   = "cluster.open-cluster-management.io/clusterset"
+	IstioNetworkLabel = "topology.istio.io/network"
 
 	Day = 24 * time.Hour
 )
@@ -211,6 +213,14 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 // validate checks for conflicts that prevent reconciliation.
 // Sets a condition on the mesh and returns true if a conflict is found.
 func (r *Reconciler) validate(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh) (conflict bool, err error) {
+	// CEL cross-field rule on the spec struct exceeds the estimated cost budget,
+	// so this is validated here instead of via kubebuilder markers.
+	if mesh.GetControlPlaneNamespace() == mesh.Spec.Operator.Namespace {
+		mesh.SetReadyCondition(metav1.ConditionFalse, meshv1alpha1.ReasonNamespaceConflict,
+			"controlPlane.namespace %q must not equal operator.namespace", mesh.GetControlPlaneNamespace())
+		return true, nil
+	}
+
 	if err = r.forEachMeshInClusterSet(ctx, mesh.Spec.ClusterSet, func(other *meshv1alpha1.MultiClusterMesh) {
 		if other.UID == mesh.UID || conflict {
 			return
@@ -249,6 +259,12 @@ func (r *Reconciler) doReconcile(ctx context.Context, mesh *meshv1alpha1.MultiCl
 	for _, cluster := range clusters {
 		klog.V(4).Infof("Reconciling cluster %s", cluster.Name)
 
+		cpNsWork, err := r.workApplier.Apply(ctx, r.buildControlPlaneNamespaceManifestWork(mesh, &cluster))
+		if err != nil {
+			return fmt.Errorf("failed to apply control plane namespace ManifestWork on cluster %s: %w", cluster.Name, err)
+		}
+		klog.V(4).Infof("Applied control plane namespace ManifestWork %s/%s", cpNsWork.Namespace, cpNsWork.Name)
+
 		work, err := r.workApplier.Apply(ctx, r.buildOperatorManifestWork(mesh, &cluster))
 		if err != nil {
 			return fmt.Errorf("failed to apply operator ManifestWork on cluster %s: %w", cluster.Name, err)
@@ -272,6 +288,10 @@ func (r *Reconciler) doReconcile(ctx context.Context, mesh *meshv1alpha1.MultiCl
 	forceCleanupAll := mesh.Spec.Security.Trust.CertManager.IssuerRef.Name == ""
 	if err := r.cleanupCertificates(ctx, mesh, clusters, forceCleanupAll); err != nil {
 		return fmt.Errorf("failed to cleanup Certificates: %w", err)
+	}
+
+	if err := r.cleanupMeshOwnedManifestWorks(ctx, mesh, clusters); err != nil {
+		return fmt.Errorf("failed to cleanup mesh-owned ManifestWorks: %w", err)
 	}
 
 	if err := r.cleanupManifestWorks(ctx, mesh.Spec.ClusterSet); err != nil {
@@ -353,6 +373,11 @@ func (r *Reconciler) handleDeletion(ctx context.Context, mesh *meshv1alpha1.Mult
 	}
 
 	klog.Infof("Handling deletion for MultiClusterMesh %s/%s", mesh.Namespace, mesh.Name)
+
+	if err := r.cleanupMeshOwnedManifestWorks(ctx, mesh, nil); err != nil {
+		return fmt.Errorf("failed to cleanup mesh-owned ManifestWorks: %w", err)
+	}
+
 	if err := r.cleanupManifestWorks(ctx, mesh.Spec.ClusterSet); err != nil {
 		return fmt.Errorf("failed to cleanup ManifestWorks: %w", err)
 	}
@@ -423,6 +448,30 @@ func (r *Reconciler) cleanupCertificates(ctx context.Context, mesh *meshv1alpha1
 		klog.Infof("Deleting Certificate %s/%s (cluster %s no longer in ClusterSet %s)", cert.Namespace, cert.Name, clusterName, mesh.Spec.ClusterSet)
 		if err := client.IgnoreNotFound(r.Delete(ctx, &cert)); err != nil {
 			return fmt.Errorf("failed to delete Certificate %s/%s: %w", cert.Namespace, cert.Name, err)
+		}
+	}
+
+	return nil
+}
+
+func (r *Reconciler) cleanupMeshOwnedManifestWorks(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, clusters []clusterv1.ManagedCluster) error {
+	clusterNames := clusterNameSet(clusters)
+
+	workList := &workv1.ManifestWorkList{}
+	if err := r.List(ctx, workList,
+		client.MatchingLabels{MeshNameLabel: mesh.Name, MeshNamespaceLabel: mesh.Namespace},
+	); err != nil {
+		return fmt.Errorf("failed to list mesh-owned ManifestWorks: %w", err)
+	}
+
+	for _, work := range workList.Items {
+		if clusterNames[work.Namespace] {
+			continue
+		}
+
+		klog.Infof("Deleting mesh-owned ManifestWork %s/%s", work.Namespace, work.Name)
+		if err := r.workApplier.Delete(ctx, work.Namespace, work.Name); err != nil {
+			return fmt.Errorf("failed to delete ManifestWork %s/%s: %w", work.Namespace, work.Name, err)
 		}
 	}
 
@@ -734,6 +783,28 @@ func (r *Reconciler) ensureCacertsManifestWork(ctx context.Context, mesh *meshv1
 	return nil
 }
 
+func (r *Reconciler) buildControlPlaneNamespaceManifestWork(mesh *meshv1alpha1.MultiClusterMesh, cluster *clusterv1.ManagedCluster) *workv1.ManifestWork {
+	cpNamespace := mesh.GetControlPlaneNamespace()
+
+	network := cluster.Name
+	if v, ok := cluster.Labels[IstioNetworkLabel]; ok && v != "" {
+		network = v
+	}
+
+	return buildMeshOwnedManifestWork(mesh, cluster.Name, ManifestWorkNameCPNSPrefix+cpNamespace, &corev1.Namespace{
+		TypeMeta: metav1.TypeMeta{
+			APIVersion: "v1",
+			Kind:       "Namespace",
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name: cpNamespace,
+			Labels: map[string]string{
+				IstioNetworkLabel: network,
+			},
+		},
+	})
+}
+
 // buildCacertsManifestWork builds a ManifestWork for distributing the cacerts secret
 func (r *Reconciler) buildCacertsManifestWork(mesh *meshv1alpha1.MultiClusterMesh, clusterName string, secret *corev1.Secret) *workv1.ManifestWork {
 	cacertsSecret := &corev1.Secret{
@@ -749,16 +820,20 @@ func (r *Reconciler) buildCacertsManifestWork(mesh *meshv1alpha1.MultiClusterMes
 		Data: secret.Data,
 	}
 
+	return buildMeshOwnedManifestWork(mesh, clusterName, ManifestWorkNameCacerts, cacertsSecret)
+}
+
+func buildMeshOwnedManifestWork(mesh *meshv1alpha1.MultiClusterMesh, clusterName, name string, obj runtime.Object) *workv1.ManifestWork {
 	return &workv1.ManifestWork{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      ManifestWorkNameCacerts,
+			Name:      name,
 			Namespace: clusterName,
 			Labels:    meshOwnedLabels(mesh, clusterName),
 		},
 		Spec: workv1.ManifestWorkSpec{
 			Workload: workv1.ManifestsTemplate{
 				Manifests: []workv1.Manifest{{
-					RawExtension: runtime.RawExtension{Object: cacertsSecret},
+					RawExtension: runtime.RawExtension{Object: obj},
 				}},
 			},
 		},
