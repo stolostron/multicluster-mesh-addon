@@ -51,6 +51,8 @@ Depends-On: https://github.com/stolostron/multicluster-mesh-addon/pull/123
 
 You can list multiple dependencies, one `Depends-On:` line each. The **PR Dependencies / Check Dependencies** GitHub Action fails until every listed pull request is merged, which keeps Tide from merging the dependent PR early. Use `/hold` for other reasons to block merge (WIP, discussion); dependency gating is automatic when `Depends-On:` is present.
 
+The check re-runs when the dependent PR is updated (new commits, editing description etc). It does **not** refresh automatically when a listed dependency merges. After dependencies land, re-run **PR Dependencies / Check Dependencies** on the waiting PR (or push a commit / edit the description) so the check can turn green.
+
 ## Developer Certificate of Origin
 
 You must sign off your commits to certify that you have the right to submit the code under the project's license. This is done using the [Developer Certificate of Origin (DCO)](https://developercertificate.org/).
