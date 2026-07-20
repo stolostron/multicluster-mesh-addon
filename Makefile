@@ -343,4 +343,4 @@ dev-clean: ## Destroy dev clusters and remove .kube/ folder
 
 .PHONY: $(addprefix delete-,$(CLUSTERS))
 $(addprefix delete-,$(CLUSTERS)): delete-%: $(KIND)
-	$(KIND) delete cluster --name $*
+	$(KIND) delete cluster --name $* --kubeconfig $(DEV_KUBE_DIR)/$*.config
