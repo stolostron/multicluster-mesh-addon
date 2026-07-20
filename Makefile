@@ -337,10 +337,10 @@ dev-clean-meshes: ## Delete all mesh resources, cert-manager trust chain, and me
 
 .PHONY: dev-clean
 dev-clean: ## Destroy dev clusters and remove .kube/ folder
-	$(MAKE) --no-print-directory -j1 $(addprefix delete-,$(CLUSTERS))
+	$(MAKE) --no-print-directory -j$(PARALLEL) --output-sync=line $(addprefix delete-,$(CLUSTERS))
 	rm -rf $(DEV_KUBE_DIR)
 	$(call log,Dev environment cleaned)
 
 .PHONY: $(addprefix delete-,$(CLUSTERS))
 $(addprefix delete-,$(CLUSTERS)): delete-%: $(KIND)
-	$(KIND) delete cluster --name $*
+	$(KIND) delete cluster --name $* --kubeconfig $(DEV_KUBE_DIR)/$*.config
