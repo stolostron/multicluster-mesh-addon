@@ -8,7 +8,10 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	clusterv1 "open-cluster-management.io/api/cluster/v1"
+	clusterv1beta1 "open-cluster-management.io/api/cluster/v1beta1"
 	clusterv1beta2 "open-cluster-management.io/api/cluster/v1beta2"
+	workv1 "open-cluster-management.io/api/work/v1"
+	workv1alpha1 "open-cluster-management.io/api/work/v1alpha1"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	meshv1alpha1 "github.com/stolostron/multicluster-mesh-addon/pkg/apis/mesh/v1alpha1"
@@ -107,6 +110,49 @@ func TestIsOlderMesh(t *testing.T) {
 				t.Errorf("isOlderMesh() = %v, want %v", got, tc.expected)
 			}
 		})
+	}
+}
+
+func TestBuildManifestWorkReplicaSet(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = clusterv1.Install(scheme)
+	_ = clusterv1beta1.Install(scheme)
+	_ = clusterv1beta2.Install(scheme)
+	_ = workv1.Install(scheme)
+	_ = workv1alpha1.Install(scheme)
+
+	clusterSet := &clusterv1beta2.ManagedClusterSet{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-set"},
+	}
+
+	cluster := &clusterv1.ManagedCluster{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-cluster", Labels: map[string]string{ClusterSetLabel: "test-set"}},
+	}
+
+	placement := &clusterv1beta1.Placement{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-placement"},
+		Spec:       clusterv1beta1.PlacementSpec{ClusterSets: []string{clusterSet.Name}},
+	}
+
+	r := &Reconciler{}
+
+	mesh := meshWith("ns", "test-mesh", metav1.Now())
+	mw := r.buildOperatorManifestWork(mesh, cluster)
+	mwrs := r.buildManifestWorkReplicaSet(mesh, placement.Name, mw.Spec)
+
+	client := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(clusterSet, cluster, placement, mw, mwrs).
+		Build()
+
+	r = &Reconciler{Client: client, Scheme: scheme}
+
+	fetched, err := r.getManifestWorkReplicaSet(context.Background(), mwrs.Namespace, ManifestWorkReplicaSetName)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if fetched == nil {
+		t.Fatalf("expected ManifestWorkReplicaSet %s to be found", ManifestWorkReplicaSetName)
 	}
 }
 
