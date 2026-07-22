@@ -1,0 +1,20 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: curl
+  namespace: {{.Namespace}}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: curl
+  template:
+    metadata:
+      labels:
+        app: curl
+    spec:
+      containers:
+      - name: curl
+        image: curlimages/curl:latest
+        command: ["/bin/sleep", "infinity"]
+        imagePullPolicy: IfNotPresent

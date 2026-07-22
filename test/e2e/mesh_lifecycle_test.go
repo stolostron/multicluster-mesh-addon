@@ -28,15 +28,8 @@ import (
 const (
 	controllerNamespace = "multicluster-mesh-system"
 	controllerName      = "multicluster-mesh-controller"
-
-	testOperatorName      = "sailoperator"
-	testOperatorNamespace = "sail-operator"
-	testCatalogSource     = "operatorhubio-catalog"
-	testCatalogNamespace  = "olm"
-	testDefaultChannel    = "stable"
+	testDefaultChannel  = "stable"
 )
-
-var clusters = []string{"cluster1", "cluster2"}
 
 var _ = Describe("Addon registration", func() {
 	It("should have ClusterManagementAddOn registered", func(ctx SpecContext) {

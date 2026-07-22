@@ -159,6 +159,13 @@ install_olm() {
     log "Granting klusterlet-work-sa OLM permissions on ${cluster}"
     on "${cluster}" kubectl apply -f "${SCRIPT_DIR}/hack/kind/klusterlet-work-olm.yaml"
 
+    for cluster in "${CLUSTER1}" "${CLUSTER2}"; do
+        log "Granting klusterlet-work-sa OLM permissions on ${cluster}"
+        on "${cluster}" kubectl apply -f "${SCRIPT_DIR}/hack/kind/klusterlet-work-olm.yaml"
+        log "Granting klusterlet-work-sa Istio/Secret permissions on ${cluster}"
+        on "${cluster}" kubectl apply -f "${SCRIPT_DIR}/hack/kind/klusterlet-work-istio.yaml"
+    done
+
     log "OLM ${OLM_VERSION} installed on ${cluster}"
 }
 
@@ -271,6 +278,67 @@ install_managed_serviceaccount() {
     on "${HUB}" kubectl get managedclusteraddon -A
 }
 
+install_metallb() {
+    require_clusters "${CLUSTER1}" "${CLUSTER2}"
+    local metallb_version="${METALLB_VERSION:-v0.14.9}"
+
+    local kind_subnet
+    kind_subnet="$(docker network inspect kind -f '{{(index .IPAM.Config 0).Subnet}}' 2>/dev/null)" \
+        || err "Failed to determine Kind Docker network subnet. Is Docker running?"
+
+    local base_prefix
+    base_prefix="$(echo "${kind_subnet}" | cut -d'.' -f1-2)"
+
+    local idx=0
+    for cluster in "${CLUSTER1}" "${CLUSTER2}"; do
+        local range_start="${base_prefix}.255.$((idx * 10 + 1))"
+        local range_end="${base_prefix}.255.$((idx * 10 + 10))"
+        idx=$((idx + 1))
+
+        if on "${cluster}" kubectl get deployment controller -n metallb-system &>/dev/null; then
+            log "MetalLB already installed on ${cluster}, skipping"
+            continue
+        fi
+
+        log "Installing MetalLB ${metallb_version} on ${cluster}..."
+        on "${cluster}" kubectl apply -f \
+            "https://raw.githubusercontent.com/metallb/metallb/${metallb_version}/config/manifests/metallb-native.yaml"
+
+        log "Waiting for MetalLB controller to be ready on ${cluster}..."
+        on "${cluster}" kubectl rollout status deployment/controller -n metallb-system --timeout=120s
+
+        log "Waiting for MetalLB speaker to be ready on ${cluster}..."
+        on "${cluster}" kubectl rollout status daemonset/speaker -n metallb-system --timeout=120s
+
+        log "Configuring MetalLB IP pool ${range_start}-${range_end} on ${cluster}..."
+        sed "s|__ADDRESS_RANGE__|${range_start}-${range_end}|" \
+            "${SCRIPT_DIR}/samples/metallb-pool.yaml" \
+            | on "${cluster}" kubectl apply -f -
+        log "MetalLB configured on ${cluster}"
+    done
+}
+
+install_gateway_api() {
+    require_clusters "${CLUSTER1}" "${CLUSTER2}"
+    local gw_api_version="${GATEWAY_API_VERSION:-v1.2.1}"
+
+    for cluster in "${CLUSTER1}" "${CLUSTER2}"; do
+        if on "${cluster}" kubectl get crd gateways.gateway.networking.k8s.io &>/dev/null; then
+            log "Gateway API CRDs already installed on ${cluster}, skipping"
+            continue
+        fi
+
+        log "Installing Gateway API CRDs ${gw_api_version} on ${cluster}..."
+        on "${cluster}" kubectl apply --server-side -f \
+            "https://github.com/kubernetes-sigs/gateway-api/releases/download/${gw_api_version}/standard-install.yaml"
+
+        on "${cluster}" retry kubectl wait --for=condition=Established \
+            crd/gateways.gateway.networking.k8s.io --timeout=60s
+
+        log "Gateway API CRDs installed on ${cluster}"
+    done
+}
+
 setup_mesh() {
     require_clusters "${HUB}"
     if on "${HUB}" kubectl get namespace mesh-system &>/dev/null; then
@@ -316,6 +384,9 @@ case "${ACTION}" in
     init-ocm)                        init_ocm ;;
     join-clusters)                   join_clusters ;;
     setup-mesh)                      setup_mesh ;;
+    install-metallb)                 install_metallb ;;
+    install-gateway-api)             install_gateway_api ;;
+    clean)                           clean ;;
     *)
-        err "Unknown action: '${ACTION}'. Valid: check-host, create-cluster, install-olm, install-cert-manager, install-managed-serviceaccount, init-ocm, join-clusters, setup-mesh" ;;
+        err "Unknown action: '${ACTION}'. Valid: check-host, create-cluster, install-olm, install-cert-manager, install-managed-serviceaccount, init-ocm, join-clusters, setup-mesh, install-metallb, install-gateway-api, clean" ;;
 esac
