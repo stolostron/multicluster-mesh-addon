@@ -24,7 +24,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	meshv1alpha1 "github.com/stolostron/multicluster-mesh-addon/pkg/apis/mesh/v1alpha1"
-	meshcontroller "github.com/stolostron/multicluster-mesh-addon/pkg/hub/mesh"
 	"github.com/stolostron/multicluster-mesh-addon/test/util"
 )
 
@@ -70,7 +69,10 @@ var _ = BeforeSuite(func(ctx context.Context) {
 	}
 
 	Step("Checking for existing resources that can interfere with our testing")
-	checkNoExistingResources(ctx, hubClient)
+	meshList := &meshv1alpha1.MultiClusterMeshList{}
+	Expect(hubClient.List(ctx, meshList)).To(Succeed())
+	Expect(meshList.Items).To(BeEmpty(),
+		"existing MultiClusterMesh resources found; run 'make dev-clean-meshes' to clean up")
 })
 
 func env(key, def string) string {
@@ -98,18 +100,4 @@ func verifyConnection(ctx context.Context, c client.Client, name string) {
 	Expect(c.List(ctx, nsList)).To(Succeed(),
 		"failed to connect to %s cluster", name)
 	GinkgoWriter.Printf("Connected to %s cluster (%d namespaces)\n", name, len(nsList.Items))
-}
-
-func checkNoExistingResources(ctx context.Context, c client.Client) {
-	mwList := &workv1.ManifestWorkList{}
-	err := c.List(ctx, mwList, client.MatchingLabels{meshcontroller.ManagedByLabel: meshcontroller.ManagedByValue})
-	Expect(err).NotTo(HaveOccurred())
-	Expect(mwList.Items).To(BeEmpty(),
-		"existing ManifestWorks found; run 'make dev-clean-meshes' to clean up")
-
-	msaList := &msav1beta1.ManagedServiceAccountList{}
-	err = c.List(ctx, msaList, client.MatchingLabels{meshcontroller.ManagedByLabel: meshcontroller.ManagedByValue})
-	Expect(err).NotTo(HaveOccurred())
-	Expect(msaList.Items).To(BeEmpty(),
-		"existing ManagedServiceAccounts found; run 'make dev-clean-meshes' to clean up")
 }
