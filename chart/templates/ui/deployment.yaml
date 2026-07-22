@@ -1,0 +1,98 @@
+{{- if .Values.ui.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ossm-acm-plugin
+  namespace: {{ .Release.Namespace }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ossm-acm-plugin
+  template:
+    metadata:
+      labels:
+        app: ossm-acm-plugin
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: nginx
+          image: {{ .Values.ui.image.repository }}:{{ .Values.ui.image.tag }}
+          imagePullPolicy: {{ .Values.ui.image.pullPolicy }}
+          ports:
+            - containerPort: 9443
+          resources:
+            limits:
+              cpu: 200m
+              memory: 256Mi
+            requests:
+              cpu: 50m
+              memory: 64Mi
+          livenessProbe:
+            httpGet:
+              path: /plugin-manifest.json
+              port: 9443
+              scheme: HTTPS
+            initialDelaySeconds: 5
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /plugin-manifest.json
+              port: 9443
+              scheme: HTTPS
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          volumeMounts:
+            - name: serving-cert
+              mountPath: /var/serving-cert
+              readOnly: true
+            - name: nginx-config
+              mountPath: /etc/nginx/nginx.conf
+              subPath: nginx.conf
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+            - name: nginx-cache
+              mountPath: /var/cache/nginx
+            - name: nginx-run
+              mountPath: /var/run
+            - name: nginx-log
+              mountPath: /var/log/nginx
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities:
+              drop: ["ALL"]
+            seccompProfile:
+              type: RuntimeDefault
+      volumes:
+        - name: serving-cert
+          secret:
+            secretName: ossm-acm-plugin-tls
+        - name: nginx-config
+          configMap:
+            name: ossm-acm-plugin-nginx
+        - name: tmp
+          emptyDir: {}
+        - name: nginx-cache
+          emptyDir: {}
+        - name: nginx-run
+          emptyDir: {}
+        - name: nginx-log
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ossm-acm-plugin
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    service.beta.openshift.io/serving-cert-secret-name: ossm-acm-plugin-tls
+spec:
+  selector:
+    app: ossm-acm-plugin
+  ports:
+    - port: 9443
+      targetPort: 9443
+{{- end }}

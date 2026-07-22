@@ -1,0 +1,15 @@
+{{- if .Values.ui.enabled }}
+apiVersion: console.openshift.io/v1
+kind: ConsolePlugin
+metadata:
+  name: ossm-acm
+spec:
+  displayName: OpenShift Service Mesh — ACM Integration
+  backend:
+    type: Service
+    service:
+      name: ossm-acm-plugin
+      namespace: {{ .Release.Namespace }}
+      port: 9443
+      basePath: /
+{{- end }}
