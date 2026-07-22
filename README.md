@@ -36,6 +36,19 @@ For detailed architecture and design decisions, see [docs/design.md](docs/design
 
 ### Installation
 
+#### Using Helm
+
+For installation via Helm, see the [Helm Chart README](chart/README.md).
+
+Quick install:
+```bash
+helm repo add multicluster-mesh-addon https://stolostron.github.io/multicluster-mesh-addon
+helm repo update
+helm install multicluster-mesh-addon multicluster-mesh-addon/multicluster-mesh-addon \
+  --namespace multicluster-mesh-system \
+  --create-namespace
+```
+
 #### Development Deployment
 
 **Prerequisites:**
@@ -43,7 +56,7 @@ For detailed architecture and design decisions, see [docs/design.md](docs/design
 - ACM or OCM (Advanced Cluster Management or Open Cluster Management) installed on the cluster
 - `kubectl` CLI installed
 - `make` and Go toolchain installed
-- Push access to the container registry (default: `quay.io/sail-dev`, override with `REGISTRY_BASE`)
+- Push access to the container registry (default: `quay.io/sail-dev`, override with `HUB`)
 
 To build and deploy the controller to your cluster:
 
@@ -63,8 +76,10 @@ The `deploy` target will:
 3. Create the namespace and deploy all resources (CRDs, RBAC, Deployment)
 
 **Configuration:**
-- `REGISTRY_BASE`: Override the image registry (default: `quay.io/sail-dev`)
-- `IMG`: Full image reference (default: `${REGISTRY_BASE}/multicluster-mesh-addon:${GIT_VERSION}`)
+- `VERSION`: Version to release (default: `0.1.0`)
+- `HUB`: Image registry (default: `quay.io/sail-dev`)
+- `TAG`: Image tag (default: `${MINOR_VERSION}-latest`, e.g., `0.1-latest`)
+- `IMG`: Full image reference (default: `${HUB}/${IMAGE_BASE}:${TAG}`)
 - `ADDON_NAMESPACE`: Namespace where addon will be deployed (default: `multicluster-mesh-system`)
 - `PLATFORM`: Platform type (default: `openshift`, or `kind` for Kind clusters)
 

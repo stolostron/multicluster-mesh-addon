@@ -1,0 +1,4 @@
+owner: stolostron
+git-repo: multicluster-mesh-addon
+charts-dir: chart
+skip-existing: true
