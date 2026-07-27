@@ -3,7 +3,6 @@
 package e2e
 
 import (
-	"context"
 	"fmt"
 	"path/filepath"
 	"runtime"
@@ -16,8 +15,6 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	clusterv1 "open-cluster-management.io/api/cluster/v1"
-	workv1 "open-cluster-management.io/api/work/v1"
-	msav1beta1 "open-cluster-management.io/managed-serviceaccount/apis/authentication/v1beta1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	meshv1alpha1 "github.com/stolostron/multicluster-mesh-addon/pkg/apis/mesh/v1alpha1"
@@ -37,7 +34,7 @@ func init() {
 	samplesDir = filepath.Join(filepath.Dir(thisFile), "..", "..", "samples")
 }
 
-var _ = Describe("Multi-primary multi-network mesh", Ordered, Serial, func() {
+var _ = Describe("Multi-primary data plane", Ordered, Serial, func() {
 	const (
 		meshName    = "multi-primary-mesh"
 		clusterSet  = "mesh-cluster-set"
@@ -62,30 +59,7 @@ var _ = Describe("Multi-primary multi-network mesh", Ordered, Serial, func() {
 
 		Step("Setting up cert-manager trust chain in %s", meshNS)
 		hubClient.ApplyFile(ctx, filepath.Join(samplesDir, "cert-manager-issuer.yaml"), nil, meshNS)
-	})
 
-	AfterAll(func(ctx SpecContext) {
-		Step("Cleaning up spoke resources")
-		for _, spokeClient := range spokeClients {
-			_ = client.IgnoreNotFound(spokeClient.Delete(ctx, &corev1.Namespace{
-				ObjectMeta: metav1.ObjectMeta{Name: sampleNS},
-			}))
-			spokeClient.Cleanup(ctx)
-		}
-
-		Step("Deleting test mesh %s", meshName)
-		if mesh != nil {
-			_ = client.IgnoreNotFound(hubClient.Delete(ctx, mesh))
-		}
-
-		Step("Cleaning up hub resources")
-		hubClient.Cleanup(ctx)
-		_ = client.IgnoreNotFound(hubClient.Delete(ctx, &corev1.Namespace{
-			ObjectMeta: metav1.ObjectMeta{Name: meshNS},
-		}))
-	})
-
-	It("addon plumbing is ready", func(ctx SpecContext) {
 		Step("Labeling ManagedClusters with network identity")
 		for cluster := range spokeClients {
 			mc := &clusterv1.ManagedCluster{}
@@ -112,186 +86,174 @@ var _ = Describe("Multi-primary multi-network mesh", Ordered, Serial, func() {
 				},
 			})
 
-		Step("Waiting for controller to reconcile the mesh")
+		Step("Waiting for the mesh to become ready")
 		Eventually(func(g Gomega) {
 			g.Expect(hubClient.Get(ctx, key.For(mesh), mesh)).To(Succeed())
-			g.Expect(meta.FindStatusCondition(mesh.Status.Conditions, meshv1alpha1.ConditionReady)).NotTo(BeNil())
+			g.Expect(meta.IsStatusConditionTrue(mesh.Status.Conditions, meshv1alpha1.ConditionReady)).To(BeTrue())
 		}).Should(Succeed())
 
-		Step("Waiting for control plane namespace ManifestWorks to become Available")
-		for _, cluster := range clusters {
-			expectManifestWorkAvailable(ctx, meshcontroller.ManifestWorkNameCPNSPrefix+cpNamespace, cluster)
-		}
-
-		Step("Waiting for operator ManifestWorks to become Available")
-		for _, cluster := range clusters {
-			expectManifestWorkAvailable(ctx, meshcontroller.OperatorManifestWorkName, cluster)
-		}
-
-		Step("Waiting for cacerts ManifestWorks to become Available")
-		for _, cluster := range clusters {
-			expectManifestWorkAvailable(ctx, meshcontroller.ManifestWorkNameCacerts, cluster)
-		}
-
-		Step("Waiting for ManagedServiceAccount token secrets to exist on the hub")
-		for _, cluster := range clusters {
+		Step("Verifying control plane namespace exists with network labels")
+		for _, spokeClient := range spokeClients {
+			ns := &corev1.Namespace{}
 			Eventually(func(g Gomega) {
-				msaList := &msav1beta1.ManagedServiceAccountList{}
-				g.Expect(hubClient.List(ctx, msaList,
-					client.InNamespace(cluster),
-					client.MatchingLabels{
-						meshcontroller.MeshNameLabel:      mesh.Name,
-						meshcontroller.MeshNamespaceLabel: mesh.Namespace,
-					},
-				)).To(Succeed())
-				g.Expect(msaList.Items).To(HaveLen(1))
-				g.Expect(msaList.Items[0].Status.TokenSecretRef).NotTo(BeNil())
+				g.Expect(spokeClient.Get(ctx, key.Of(cpNamespace), ns)).To(Succeed())
+				g.Expect(ns.Labels).To(HaveKey("topology.istio.io/network"))
 			}).Should(Succeed())
 		}
-	}, SpecTimeout(5*time.Minute))
+	}, NodeTimeout(5*time.Minute))
 
-	It("Istio control planes become ready on both clusters", func(ctx SpecContext) {
-		for cluster, spokeClient := range spokeClients {
-			Step("Ensuring istio-cni namespace on %s", cluster)
-			util.CreateNamespace(ctx, spokeClient, "istio-cni")
-
-			Step("Applying IstioCNI CR on %s", cluster)
-			spokeClient.ApplyFile(ctx, filepath.Join(testdataDir, "istiocni-cr.yaml"), nil)
-
-			Step("Applying Istio CR on %s", cluster)
-			spokeClient.ApplyFile(ctx, filepath.Join(testdataDir, "istio-cr.yaml"), map[string]string{
-				"CRName":      "default",
-				"CPNamespace": cpNamespace,
-				"TrustDomain": trustDomain,
-				"MeshID":      meshID,
-				"ClusterName": cluster,
-				"Network":     networks[cluster],
-			})
+	AfterAll(func(ctx SpecContext) {
+		Step("Cleaning up spoke resources")
+		for _, spokeClient := range spokeClients {
+			_ = client.IgnoreNotFound(spokeClient.Delete(ctx, &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{Name: sampleNS},
+			}))
+			spokeClient.Cleanup(ctx)
 		}
 
-		for cluster, spokeClient := range spokeClients {
-			Step("Waiting for istiod to be ready on %s", cluster)
-			util.WaitForDeploymentReady(ctx, spokeClient, "istiod", cpNamespace, 5*time.Minute)
-			Success("istiod is ready on %s", cluster)
+		Step("Deleting test mesh %s", meshName)
+		if mesh != nil {
+			_ = client.IgnoreNotFound(hubClient.Delete(ctx, mesh))
 		}
-	}, SpecTimeout(7*time.Minute))
 
-	// REVISIT: Currently, the controller does not support secret distribution.
-	// See PIt specs in mesh_lifecycle_test.go for what the controller will eventually do.
-	It("remote secrets enable cross-cluster endpoint discovery", func(ctx SpecContext) {
-		Step("Verifying remote secrets exist on each spoke with istio/multiCluster label")
-		for source := range spokeClients {
-			for target, targetClient := range spokeClients {
-				if source == target {
-					continue
-				}
-				secret := &corev1.Secret{}
-				Expect(targetClient.Get(ctx, key.Of("istio-remote-secret-"+source, cpNamespace), secret)).
-					To(Succeed(), "remote secret for %s not found on %s", source, target)
-				Expect(secret.Labels).To(HaveKeyWithValue("istio/multiCluster", "true"))
-				Expect(secret.Annotations).To(HaveKeyWithValue("networking.istio.io/cluster", source))
+		Step("Cleaning up hub resources")
+		hubClient.Cleanup(ctx)
+		_ = client.IgnoreNotFound(hubClient.Delete(ctx, &corev1.Namespace{
+			ObjectMeta: metav1.ObjectMeta{Name: meshNS},
+		}))
+	})
+
+	When("Istio multi-cluster is deployed", func() {
+		BeforeAll(func(ctx SpecContext) {
+			for cluster, spokeClient := range spokeClients {
+				Step("Ensuring istio-cni namespace on %s", cluster)
+				util.CreateNamespace(ctx, spokeClient, "istio-cni")
+
+				Step("Applying IstioCNI CR on %s", cluster)
+				spokeClient.ApplyFile(ctx, filepath.Join(testdataDir, "istiocni-cr.yaml"), nil)
+
+				Step("Applying Istio CR on %s", cluster)
+				spokeClient.ApplyFile(ctx, filepath.Join(testdataDir, "istio-cr.yaml"), map[string]string{
+					"CRName":      "default",
+					"CPNamespace": cpNamespace,
+					"TrustDomain": trustDomain,
+					"MeshID":      meshID,
+					"ClusterName": cluster,
+					"Network":     networks[cluster],
+				})
 			}
-		}
-	}, SpecTimeout(2*time.Minute))
 
-	It("east-west gateways are functional", func(ctx SpecContext) {
-		for cluster, spokeClient := range spokeClients {
-			Step("Applying east-west Gateway API resource on %s", cluster)
-			spokeClient.ApplyFile(ctx, filepath.Join(testdataDir, "eastwest-gateway.yaml"), map[string]string{
-				"CPNamespace": cpNamespace,
-				"Network":     networks[cluster],
+			for cluster, spokeClient := range spokeClients {
+				Step("Waiting for istiod to be ready on %s", cluster)
+				util.WaitForDeploymentReady(ctx, spokeClient, "istiod", cpNamespace, 5*time.Minute)
+				Success("istiod is ready on %s", cluster)
+			}
+
+			for cluster, spokeClient := range spokeClients {
+				Step("Applying east-west Gateway API resource on %s", cluster)
+				spokeClient.ApplyFile(ctx, filepath.Join(testdataDir, "eastwest-gateway.yaml"), map[string]string{
+					"CPNamespace": cpNamespace,
+					"Network":     networks[cluster],
+				})
+			}
+
+			for cluster, spokeClient := range spokeClients {
+				Step("Waiting for east-west gateway deployment to be ready on %s", cluster)
+				util.WaitForDeploymentReady(ctx, spokeClient, "eastwestgateway-istio", cpNamespace, 3*time.Minute)
+
+				Step("Waiting for LoadBalancer IP on %s", cluster)
+				ip := util.WaitForLoadBalancerIP(ctx, spokeClient, "eastwestgateway-istio", cpNamespace, 3*time.Minute)
+				Success("East-west gateway on %s has IP: %s", cluster, ip)
+			}
+		}, NodeTimeout(10*time.Minute))
+
+		// REVISIT: Currently, the controller does not support secret distribution.
+		// See PIt specs in mesh_lifecycle_test.go for what the controller will eventually do.
+		It("should distribute remote secrets to spoke clusters", func(ctx SpecContext) {
+			for source := range spokeClients {
+				for target, targetClient := range spokeClients {
+					if source == target {
+						continue
+					}
+					secret := &corev1.Secret{}
+					Expect(targetClient.Get(ctx, key.Of("istio-remote-secret-"+source, cpNamespace), secret)).
+						To(Succeed(), "remote secret for %s not found on %s", source, target)
+					Expect(secret.Labels).To(HaveKeyWithValue("istio/multiCluster", "true"))
+					Expect(secret.Annotations).To(HaveKeyWithValue("networking.istio.io/cluster", source))
+				}
+			}
+		}, SpecTimeout(2*time.Minute))
+
+		It("should have cross-cluster data plane traffic working", func(ctx SpecContext) {
+			Step("Creating sample namespace with istio-injection on both clusters")
+			for _, spokeClient := range spokeClients {
+				util.CreateNamespace(ctx, spokeClient, sampleNS, map[string]string{
+					"istio-injection": "enabled",
+				})
+			}
+
+			Step("Deploying helloworld Service on both clusters")
+			for _, spokeClient := range spokeClients {
+				spokeClient.ApplyFile(ctx, filepath.Join(testdataDir, "helloworld-service.yaml"), map[string]string{
+					"Namespace": sampleNS,
+				})
+			}
+
+			Step("Deploying helloworld-v1 on cluster1")
+			spokeClients["cluster1"].ApplyFile(ctx, filepath.Join(testdataDir, "helloworld.yaml"), map[string]string{
+				"Namespace": sampleNS,
+				"Version":   "v1",
 			})
-		}
 
-		for cluster, spokeClient := range spokeClients {
-			Step("Waiting for east-west gateway deployment to be ready on %s", cluster)
-			util.WaitForDeploymentReady(ctx, spokeClient, "eastwestgateway-istio", cpNamespace, 3*time.Minute)
-
-			Step("Waiting for LoadBalancer IP on %s", cluster)
-			ip := util.WaitForLoadBalancerIP(ctx, spokeClient, "eastwestgateway-istio", cpNamespace, 3*time.Minute)
-			Success("East-west gateway on %s has IP: %s", cluster, ip)
-		}
-	}, SpecTimeout(5*time.Minute))
-
-	It("helloworld cross-cluster traffic is load-balanced", func(ctx SpecContext) {
-		Step("Creating sample namespace with istio-injection on both clusters")
-		for _, spokeClient := range spokeClients {
-			util.CreateNamespace(ctx, spokeClient, sampleNS, map[string]string{
-				"istio-injection": "enabled",
+			Step("Deploying helloworld-v2 on cluster2")
+			spokeClients["cluster2"].ApplyFile(ctx, filepath.Join(testdataDir, "helloworld.yaml"), map[string]string{
+				"Namespace": sampleNS,
+				"Version":   "v2",
 			})
-		}
 
-		Step("Deploying helloworld Service on both clusters")
-		for _, spokeClient := range spokeClients {
-			spokeClient.ApplyFile(ctx, filepath.Join(testdataDir, "helloworld-service.yaml"), map[string]string{
+			Step("Waiting for helloworld-v1 to be ready on cluster1")
+			util.WaitForDeploymentReady(ctx, spokeClients["cluster1"], "helloworld-v1", sampleNS, 2*time.Minute)
+
+			Step("Waiting for helloworld-v2 to be ready on cluster2")
+			util.WaitForDeploymentReady(ctx, spokeClients["cluster2"], "helloworld-v2", sampleNS, 2*time.Minute)
+
+			Step("Deploying curl pod on cluster1")
+			spokeClients["cluster1"].ApplyFile(ctx, filepath.Join(testdataDir, "curl.yaml"), map[string]string{
 				"Namespace": sampleNS,
 			})
-		}
 
-		Step("Deploying helloworld-v1 on cluster1")
-		spokeClients["cluster1"].ApplyFile(ctx, filepath.Join(testdataDir, "helloworld.yaml"), map[string]string{
-			"Namespace": sampleNS,
-			"Version":   "v1",
-		})
+			Step("Waiting for curl pod to be ready on cluster1")
+			curlPod := util.WaitForPodReady(ctx, spokeClients["cluster1"], sampleNS, map[string]string{"app": "curl"}, 2*time.Minute)
+			Success("Curl pod ready: %s", curlPod)
 
-		Step("Deploying helloworld-v2 on cluster2")
-		spokeClients["cluster2"].ApplyFile(ctx, filepath.Join(testdataDir, "helloworld.yaml"), map[string]string{
-			"Namespace": sampleNS,
-			"Version":   "v2",
-		})
-
-		Step("Waiting for helloworld-v1 to be ready on cluster1")
-		util.WaitForDeploymentReady(ctx, spokeClients["cluster1"], "helloworld-v1", sampleNS, 2*time.Minute)
-
-		Step("Waiting for helloworld-v2 to be ready on cluster2")
-		util.WaitForDeploymentReady(ctx, spokeClients["cluster2"], "helloworld-v2", sampleNS, 2*time.Minute)
-
-		Step("Deploying curl pod on cluster1")
-		spokeClients["cluster1"].ApplyFile(ctx, filepath.Join(testdataDir, "curl.yaml"), map[string]string{
-			"Namespace": sampleNS,
-		})
-
-		Step("Waiting for curl pod to be ready on cluster1")
-		curlPod := util.WaitForPodReady(ctx, spokeClients["cluster1"], sampleNS, map[string]string{"app": "curl"}, 2*time.Minute)
-		Success("Curl pod ready: %s", curlPod)
-
-		Step("Verifying cross-cluster traffic")
-		// sawV1/sawV2 are intentionally outside the Eventually closure so that we can evaluate if the test-code
-		// has seen response from both the helloworld applications.
-		var sawV1, sawV2 bool
-		Eventually(func(g Gomega) {
-			for i := 0; i < 20; i++ {
-				output, err := spokeClients["cluster1"].Exec(ctx,
-					sampleNS, curlPod, "curl",
-					[]string{"curl", "-s", fmt.Sprintf("helloworld.%s:5000/hello", sampleNS)})
-				if err != nil {
-					GinkgoWriter.Printf("curl attempt %d failed: %v\n", i+1, err)
-					continue
+			Step("Verifying cross-cluster traffic")
+			// sawV1/sawV2 are intentionally outside the Eventually closure so that we can evaluate if the test-code
+			// has seen response from both the helloworld applications.
+			var sawV1, sawV2 bool
+			Eventually(func(g Gomega) {
+				for i := 0; i < 20; i++ {
+					output, err := spokeClients["cluster1"].Exec(ctx,
+						sampleNS, curlPod, "curl",
+						[]string{"curl", "-s", fmt.Sprintf("helloworld.%s:5000/hello", sampleNS)})
+					if err != nil {
+						GinkgoWriter.Printf("curl attempt %d failed: %v\n", i+1, err)
+						continue
+					}
+					if strings.Contains(output, "v1") {
+						sawV1 = true
+					}
+					if strings.Contains(output, "v2") {
+						sawV2 = true
+					}
+					if sawV1 && sawV2 {
+						break
+					}
 				}
-				if strings.Contains(output, "v1") {
-					sawV1 = true
-				}
-				if strings.Contains(output, "v2") {
-					sawV2 = true
-				}
-				if sawV1 && sawV2 {
-					break
-				}
-			}
-			g.Expect(sawV1).To(BeTrue(), "never saw response from helloworld v1")
-			g.Expect(sawV2).To(BeTrue(), "never saw response from helloworld v2")
-		}).WithTimeout(3 * time.Minute).WithPolling(10 * time.Second).Should(Succeed())
+				g.Expect(sawV1).To(BeTrue(), "never saw response from helloworld v1")
+				g.Expect(sawV2).To(BeTrue(), "never saw response from helloworld v2")
+			}).WithTimeout(3 * time.Minute).WithPolling(10 * time.Second).Should(Succeed())
 
-		Success("Cross-cluster traffic verified: saw responses from both v1 and v2")
-	}, SpecTimeout(8*time.Minute))
+			Success("Cross-cluster traffic verified: saw responses from both v1 and v2")
+		}, SpecTimeout(8*time.Minute))
+	})
 })
-
-func expectManifestWorkAvailable(ctx context.Context, name, cluster string) {
-	Eventually(func(g Gomega) {
-		mw := &workv1.ManifestWork{}
-		g.Expect(hubClient.Get(ctx, key.Of(name, cluster), mw)).To(Succeed())
-		available := meta.FindStatusCondition(mw.Status.Conditions, string(workv1.WorkAvailable))
-		g.Expect(available).NotTo(BeNil())
-		g.Expect(available.Status).To(Equal(metav1.ConditionTrue))
-	}).WithTimeout(3 * time.Minute).Should(Succeed())
-}
