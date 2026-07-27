@@ -282,7 +282,7 @@ log = @echo "==> $(1)"
 .PHONY: dev-env
 dev-env: ## Provision full dev environment (Kind + OCM + addon)
 	$(DEV_ENV_SCRIPT) check-host
-	$(MAKE) --no-print-directory -j$(PARALLEL) --output-sync=line install-olm install-cert-manager install-managed-serviceaccount deploy-addon
+	$(MAKE) --no-print-directory -j$(PARALLEL) --output-sync=line install-olm install-cert-manager setup-test-issuer install-managed-serviceaccount deploy-addon
 	$(call log,Dev environment ready. Use KUBECONFIG=$(HUB_KUBECONFIG) to interact with the hub.)
 
 .PHONY: create-clusters
@@ -305,6 +305,11 @@ $(addprefix install-olm-,$(SPOKE_CLUSTERS)): install-olm-%: create-%
 install-cert-manager: create-hub ## Install cert-manager on the hub cluster
 	$(call log,Installing cert-manager: hub)
 	$(DEV_ENV_SCRIPT) install-cert-manager
+
+.PHONY: setup-test-issuer
+setup-test-issuer: install-cert-manager ## Create ClusterIssuer trust chain for e2e tests
+	$(call log,Setting up test ClusterIssuer: hub)
+	$(DEV_ENV_SCRIPT) setup-test-issuer
 
 .PHONY: init-ocm
 init-ocm: $(CLUSTERADM) create-hub ## Initialize hub as OCM control plane

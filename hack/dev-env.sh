@@ -4,7 +4,8 @@
 #
 # Usage: hack/dev-env.sh <action> [args...]
 # Actions: check-host, create-cluster <name>, install-olm <name>, install-cert-manager,
-#          install-managed-serviceaccount, init-ocm, join-clusters, setup-mesh
+#          install-managed-serviceaccount, init-ocm, join-clusters, setup-mesh,
+#          setup-test-issuer
 
 set -euo pipefail
 
@@ -178,6 +179,34 @@ install_cert_manager() {
     on "${HUB}" kubectl rollout status deployment/cert-manager-webhook -n cert-manager --timeout=120s
 
     log "cert-manager ${CERT_MANAGER_VERSION} installed on hub"
+}
+
+setup_test_issuer() {
+    if on "${HUB}" kubectl get clusterissuer mesh-test-root-ca &>/dev/null; then
+        log "Test ClusterIssuer already exists, skipping"
+        return
+    fi
+
+    log "Waiting for cert-manager-cainjector to be ready..."
+    on "${HUB}" kubectl rollout status deployment/cert-manager-cainjector \
+        -n cert-manager --timeout=120s
+
+    log "Creating test ClusterIssuer trust chain"
+    on "${HUB}" kubectl apply -f "${SCRIPT_DIR}/hack/kind/cert-manager-test-issuer.yaml"
+
+    log "Waiting for bootstrap ClusterIssuer to be ready..."
+    on "${HUB}" retry kubectl wait clusterissuer/mesh-test-selfsigned \
+        --for=condition=Ready --timeout=60s
+
+    log "Waiting for test root CA Certificate to be issued..."
+    on "${HUB}" retry kubectl wait certificate/mesh-test-root-ca \
+        -n cert-manager --for=condition=Ready --timeout=120s
+
+    log "Waiting for CA-backed ClusterIssuer to be ready..."
+    on "${HUB}" retry kubectl wait clusterissuer/mesh-test-root-ca \
+        --for=condition=Ready --timeout=60s
+
+    log "Test ClusterIssuer trust chain ready"
 }
 
 init_ocm() {
@@ -395,6 +424,7 @@ case "${ACTION}" in
     setup-mesh)                      setup_mesh ;;
     install-metallb)                 install_metallb "${2}" ;;
     install-gateway-api)             install_gateway_api "${2}" ;;
+    setup-test-issuer)               setup_test_issuer ;;
     *)
-        err "Unknown action: '${ACTION}'. Valid: check-host, create-cluster, install-olm, install-cert-manager, install-managed-serviceaccount, init-ocm, join-clusters, setup-mesh, install-metallb, install-gateway-api" ;;
+        err "Unknown action: '${ACTION}'. Valid: check-host, create-cluster, install-olm, install-cert-manager, install-managed-serviceaccount, init-ocm, join-clusters, setup-mesh, install-metallb, install-gateway-api, setup-test-issuer" ;;
 esac

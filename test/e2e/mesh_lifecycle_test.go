@@ -4,6 +4,8 @@ package e2e
 
 import (
 	"context"
+	"crypto/x509"
+	"encoding/pem"
 	"fmt"
 	"reflect"
 	"time"
@@ -32,6 +34,9 @@ const (
 	testDefaultChannel  = "stable"
 
 	msaSpokeNamespace = "open-cluster-management-agent-addon"
+
+	testIssuerName = "mesh-test-root-ca"
+	testIssuerKind = "ClusterIssuer"
 )
 
 type trackedResource struct {
@@ -102,7 +107,18 @@ var _ = Describe("MultiClusterMesh lifecycle", Ordered, func() {
 					Namespace:       testOperatorNamespace,
 					Source:          testCatalogSource,
 					SourceNamespace: testCatalogNamespace,
-				}})
+				},
+				Security: meshv1alpha1.SecurityConfig{
+					Trust: meshv1alpha1.TrustConfig{
+						CertManager: meshv1alpha1.CertManagerConfig{
+							IssuerRef: meshv1alpha1.IssuerReference{
+								Name: testIssuerName,
+								Kind: testIssuerKind,
+							},
+						},
+					},
+				},
+			})
 
 		Step("Waiting for mesh to become ready")
 		Eventually(func(g Gomega) {
@@ -159,6 +175,46 @@ var _ = Describe("MultiClusterMesh lifecycle", Ordered, func() {
 			Eventually(func(g Gomega) {
 				g.Expect(getSubscription(ctx, spokeClient)).To(HaveField("Spec.Channel", "candidate"))
 			}).Should(Succeed())
+		}
+	})
+
+	It("should distribute cacerts secrets to spoke clusters", func(ctx SpecContext) {
+		cpNamespace := mesh.GetControlPlaneNamespace()
+
+		Step("Fetching hub root CA certificate")
+		rootCASecret := &corev1.Secret{}
+		Expect(hubClient.Get(ctx, key.Of("mesh-test-root-ca-secret", "cert-manager"), rootCASecret)).To(Succeed())
+		hubRootCert := rootCASecret.Data["tls.crt"]
+		Expect(hubRootCert).NotTo(BeEmpty())
+
+		rootPool := x509.NewCertPool()
+		Expect(rootPool.AppendCertsFromPEM(hubRootCert)).To(BeTrue(), "failed to parse hub root CA")
+
+		for cluster, spokeClient := range spokeClients {
+			Step("Verifying cacerts secret on %s", cluster)
+			secret := &corev1.Secret{}
+			Eventually(func(g Gomega) {
+				g.Expect(spokeClient.Get(ctx, key.Of(meshcontroller.CacertsSecretName, cpNamespace), secret)).To(Succeed())
+				g.Expect(secret.Type).To(Equal(corev1.SecretTypeTLS))
+				g.Expect(secret.Data["tls.crt"]).NotTo(BeEmpty(), "tls.crt")
+				g.Expect(secret.Data["tls.key"]).NotTo(BeEmpty(), "tls.key")
+				g.Expect(secret.Data["ca.crt"]).To(Equal(hubRootCert), "ca.crt vs hub root CA")
+			}).WithTimeout(2 * time.Minute).Should(Succeed())
+			track(cluster, spokeClient, secret)
+
+			Step("Verifying certificate chain and subject on %s", cluster)
+			block, _ := pem.Decode(secret.Data["tls.crt"])
+			Expect(block).NotTo(BeNil(), "failed to decode tls.crt PEM")
+			cert, err := x509.ParseCertificate(block.Bytes)
+			Expect(err).NotTo(HaveOccurred())
+
+			Expect(cert.IsCA).To(BeTrue())
+			Expect(cert.Subject.CommonName).To(Equal("Istio CA"))
+			Expect(cert.Subject.Organization).To(ConsistOf(mesh.GetTrustDomain()))
+			Expect(cert.Subject.OrganizationalUnit).To(ConsistOf(cluster))
+
+			_, err = cert.Verify(x509.VerifyOptions{Roots: rootPool})
+			Expect(err).NotTo(HaveOccurred(), "intermediate CA not signed by hub root CA")
 		}
 	})
 
