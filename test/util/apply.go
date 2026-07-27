@@ -52,7 +52,7 @@ func loadAndApply(ctx context.Context, k8sClient client.Client, path string, var
 			obj.SetNamespace(defaultNS)
 		}
 		Expect(k8sClient.Patch(ctx, obj, client.Apply, client.FieldOwner("e2e-test"), client.ForceOwnership)). //nolint:staticcheck // client.Apply is the only way to SSA with unstructured objects
-															To(Succeed(), "failed to apply %s %s/%s", obj.GetKind(), obj.GetNamespace(), obj.GetName())
+			To(Succeed(), "failed to apply %s %s/%s", obj.GetKind(), obj.GetNamespace(), obj.GetName())
 	}
 }
 
@@ -121,19 +121,19 @@ func WaitForDeploymentReady(ctx context.Context, k8sClient client.Client, name, 
 }
 
 func WaitForLoadBalancerIP(ctx context.Context, k8sClient client.Client, name, namespace string, timeout time.Duration) string {
-	var ip string
+	var address string
 	Eventually(func(g Gomega) {
 		svc := &corev1.Service{}
 		g.Expect(k8sClient.Get(ctx, key.Of(name, namespace), svc)).To(Succeed())
 		g.Expect(svc.Status.LoadBalancer.Ingress).NotTo(BeEmpty(),
 			"service %s/%s has no LoadBalancer ingress", namespace, name)
-		ip = svc.Status.LoadBalancer.Ingress[0].IP
-		if ip == "" {
-			ip = svc.Status.LoadBalancer.Ingress[0].Hostname
+		address = svc.Status.LoadBalancer.Ingress[0].IP
+		if address == "" {
+			address = svc.Status.LoadBalancer.Ingress[0].Hostname
 		}
-		g.Expect(ip).NotTo(BeEmpty(), "service %s/%s has no IP or hostname", namespace, name)
+		g.Expect(address).NotTo(BeEmpty(), "service %s/%s has no IP or hostname", namespace, name)
 	}).WithTimeout(timeout).WithPolling(2 * time.Second).Should(Succeed())
-	return ip
+	return address
 }
 
 func WaitForPodReady(ctx context.Context, k8sClient client.Client, namespace string, labels map[string]string, timeout time.Duration) string {
@@ -199,7 +199,7 @@ func CreateNamespaceWithLabels(ctx context.Context, k8sClient client.Client, nam
 	nsObj.SetName(name)
 	nsObj.SetLabels(labels)
 	Expect(k8sClient.Patch(ctx, nsObj, client.Apply, client.FieldOwner("e2e-test"), client.ForceOwnership)). //nolint:staticcheck // client.Apply is the only way to SSA with unstructured objects
-															To(Succeed(), "failed to create/update namespace %s", name)
+		To(Succeed(), "failed to create/update namespace %s", name)
 }
 
 func EnsureNamespace(ctx context.Context, k8sClient client.Client, name string) {
