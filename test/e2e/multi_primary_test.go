@@ -112,7 +112,7 @@ var _ = Describe("Multi-primary multi-network mesh", Ordered, Serial, func() {
 	It("addon plumbing is ready", func(ctx SpecContext) {
 		Step("Ensuring istio-system namespace exists on spoke clusters with network labels")
 		for cluster, spokeClient := range spokeClients {
-			util.CreateNamespaceWithLabels(ctx, spokeClient, cpNamespace, map[string]string{
+			util.CreateNamespace(ctx, spokeClient, cpNamespace, map[string]string{
 				"topology.istio.io/network": networks[cluster],
 			})
 		}
@@ -183,10 +183,10 @@ var _ = Describe("Multi-primary multi-network mesh", Ordered, Serial, func() {
 	It("Istio control planes become ready on both clusters", func(ctx SpecContext) {
 		for cluster, spokeClient := range spokeClients {
 			Step("Ensuring istio-system and istio-cni namespaces on %s", cluster)
-			util.CreateNamespaceWithLabels(ctx, spokeClient, cpNamespace, map[string]string{
+			util.CreateNamespace(ctx, spokeClient, cpNamespace, map[string]string{
 				"topology.istio.io/network": networks[cluster],
 			})
-			util.EnsureNamespace(ctx, spokeClient, "istio-cni")
+			util.CreateNamespace(ctx, spokeClient, "istio-cni")
 
 			Step("Applying IstioCNI CR on %s", cluster)
 			util.LoadAndApplyYAML(ctx, spokeClient, filepath.Join(testdataDir, "istiocni-cr.yaml"), nil)
@@ -249,7 +249,7 @@ var _ = Describe("Multi-primary multi-network mesh", Ordered, Serial, func() {
 	It("helloworld cross-cluster traffic is load-balanced", func(ctx SpecContext) {
 		Step("Creating sample namespace with istio-injection on both clusters")
 		for _, spokeClient := range spokeClients {
-			util.CreateNamespaceWithLabels(ctx, spokeClient, sampleNS, map[string]string{
+			util.CreateNamespace(ctx, spokeClient, sampleNS, map[string]string{
 				"istio-injection": "enabled",
 			})
 		}

@@ -14,7 +14,6 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/yaml"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -190,23 +189,4 @@ func ExecInPod(ctx context.Context, restConfig *rest.Config, namespace, podName,
 	}
 
 	return stdout.String(), nil
-}
-
-func CreateNamespaceWithLabels(ctx context.Context, k8sClient client.Client, name string, labels map[string]string) {
-	nsObj := &unstructured.Unstructured{}
-	nsObj.SetGroupVersionKind(corev1.SchemeGroupVersion.WithKind("Namespace"))
-	nsObj.SetName(name)
-	nsObj.SetLabels(labels)
-	Expect(k8sClient.Patch(ctx, nsObj, client.Apply, client.FieldOwner("e2e-test"), client.ForceOwnership)). //nolint:staticcheck // client.Apply is the only way to SSA with unstructured objects
-															To(Succeed(), "failed to create/update namespace %s", name)
-}
-
-func EnsureNamespace(ctx context.Context, k8sClient client.Client, name string) {
-	ns := &corev1.Namespace{}
-	err := k8sClient.Get(ctx, types.NamespacedName{Name: name}, ns)
-	if err == nil {
-		return
-	}
-	Expect(client.IgnoreNotFound(err)).To(Succeed())
-	CreateNamespace(ctx, k8sClient, name)
 }
