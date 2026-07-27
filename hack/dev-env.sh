@@ -276,7 +276,7 @@ install_managed_serviceaccount() {
 
 install_metallb() {
     require_clusters "${CLUSTER1}" "${CLUSTER2}"
-    local metallb_version="${METALLB_VERSION:-v0.14.9}"
+    local metallb_version="${METALLB_VERSION}"
 
     local engine="${CONTAINER_ENGINE:-docker}"
     engine="$(basename "${engine}")"
@@ -327,7 +327,7 @@ install_metallb() {
 
 install_gateway_api() {
     require_clusters "${CLUSTER1}" "${CLUSTER2}"
-    local gw_api_version="${GATEWAY_API_VERSION:-v1.2.1}"
+    local gw_api_version="${GATEWAY_API_VERSION}"
 
     for cluster in "${CLUSTER1}" "${CLUSTER2}"; do
         if on "${cluster}" kubectl get crd gateways.gateway.networking.k8s.io &>/dev/null; then
