@@ -136,6 +136,9 @@ install_olm() {
     require_clusters "${cluster}"
     local olm_base_url="https://github.com/operator-framework/operator-lifecycle-manager/releases/download/${OLM_VERSION}"
 
+    log "Granting klusterlet-work-sa Istio/Secret permissions on ${cluster}"
+    on "${cluster}" kubectl apply -f "${SCRIPT_DIR}/hack/kind/klusterlet-work-istio.yaml"
+
     if on "${cluster}" kubectl get deployment olm-operator -n olm &>/dev/null; then
         log "OLM already installed on ${cluster}, skipping"
         return
@@ -158,13 +161,6 @@ install_olm() {
 
     log "Granting klusterlet-work-sa OLM permissions on ${cluster}"
     on "${cluster}" kubectl apply -f "${SCRIPT_DIR}/hack/kind/klusterlet-work-olm.yaml"
-
-    for cluster in "${CLUSTER1}" "${CLUSTER2}"; do
-        log "Granting klusterlet-work-sa OLM permissions on ${cluster}"
-        on "${cluster}" kubectl apply -f "${SCRIPT_DIR}/hack/kind/klusterlet-work-olm.yaml"
-        log "Granting klusterlet-work-sa Istio/Secret permissions on ${cluster}"
-        on "${cluster}" kubectl apply -f "${SCRIPT_DIR}/hack/kind/klusterlet-work-istio.yaml"
-    done
 
     log "OLM ${OLM_VERSION} installed on ${cluster}"
 }
