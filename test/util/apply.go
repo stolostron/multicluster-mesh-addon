@@ -142,18 +142,23 @@ func WaitForPodReady(ctx context.Context, k8sClient client.Client, namespace str
 		pods := &corev1.PodList{}
 		g.Expect(k8sClient.List(ctx, pods, client.InNamespace(namespace), client.MatchingLabels(labels))).To(Succeed())
 		g.Expect(pods.Items).NotTo(BeEmpty(), "no pods found with labels %v in %s", labels, namespace)
+		found := false
 		for i := range pods.Items {
 			pod := &pods.Items[i]
 			if pod.Status.Phase == corev1.PodRunning {
 				for _, c := range pod.Status.Conditions {
 					if c.Type == corev1.PodReady && c.Status == corev1.ConditionTrue {
 						podName = pod.Name
-						return
+						found = true
+						break
 					}
 				}
 			}
+			if found {
+				break
+			}
 		}
-		g.Expect(false).To(BeTrue(), "no ready pod found with labels %v in %s", labels, namespace)
+		g.Expect(found).To(BeTrue(), "no ready pod found with labels %v in %s", labels, namespace)
 	}).WithTimeout(timeout).WithPolling(2 * time.Second).Should(Succeed())
 	return podName
 }
