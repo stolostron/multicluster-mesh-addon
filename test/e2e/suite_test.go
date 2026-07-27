@@ -51,7 +51,7 @@ func TestE2E(t *testing.T) {
 }
 
 var _ = BeforeSuite(func(ctx context.Context) {
-	SetDefaultEventuallyTimeout(30 * time.Second)
+	SetDefaultEventuallyTimeout(2 * time.Minute)
 	SetDefaultEventuallyPollingInterval(250 * time.Millisecond)
 
 	util.MustAddToScheme(

@@ -89,7 +89,7 @@ var _ = Describe("MultiClusterMesh lifecycle", Ordered, func() {
 		Eventually(func(g Gomega) {
 			g.Expect(getMesh(ctx, mesh)).To(Succeed())
 			g.Expect(meta.IsStatusConditionTrue(mesh.Status.Conditions, meshv1alpha1.ConditionReady)).To(BeTrue())
-		}).WithTimeout(2 * time.Minute).Should(Succeed())
+		}).Should(Succeed())
 	})
 
 	AfterEach(func(ctx SpecContext) {
@@ -190,7 +190,7 @@ var _ = Describe("MultiClusterMesh lifecycle", Ordered, func() {
 				secret := &corev1.Secret{}
 				g.Expect(hubClient.Get(ctx, key.Of(msa.Status.TokenSecretRef.Name, cluster), secret)).To(Succeed(),
 					"token secret %s/%s should exist", cluster, msa.Status.TokenSecretRef.Name)
-			}).WithTimeout(2 * time.Minute).Should(Succeed())
+			}).Should(Succeed())
 		}
 	})
 

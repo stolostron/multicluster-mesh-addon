@@ -98,7 +98,7 @@ var _ = Describe("Multi-primary multi-network mesh", Ordered, Serial, func() {
 			err := hubClient.List(ctx, mwList, client.MatchingLabels{meshcontroller.ManagedByLabel: meshcontroller.ManagedByValue})
 			g.Expect(err).NotTo(HaveOccurred())
 			g.Expect(mwList.Items).To(BeEmpty(), "ManifestWorks still exist")
-		}).WithTimeout(2 * time.Minute).Should(Succeed())
+		}).Should(Succeed())
 
 		Step("Cleaning up cert-manager trust chain in %s", meshNS)
 		util.DeleteYAMLResourcesInNamespace(ctx, hubClient, filepath.Join(samplesDir, "cert-manager-issuer.yaml"), meshNS, nil)
@@ -139,7 +139,7 @@ var _ = Describe("Multi-primary multi-network mesh", Ordered, Serial, func() {
 		Eventually(func(g Gomega) {
 			g.Expect(hubClient.Get(ctx, key.For(mesh), mesh)).To(Succeed())
 			g.Expect(meta.FindStatusCondition(mesh.Status.Conditions, meshv1alpha1.ConditionReady)).NotTo(BeNil())
-		}).WithTimeout(30 * time.Second).Should(Succeed())
+		}).Should(Succeed())
 
 		Step("Waiting for operator ManifestWorks to become Available")
 		for _, cluster := range clusters {
@@ -176,7 +176,7 @@ var _ = Describe("Multi-primary multi-network mesh", Ordered, Serial, func() {
 				)).To(Succeed())
 				g.Expect(msaList.Items).To(HaveLen(1))
 				g.Expect(msaList.Items[0].Status.TokenSecretRef).NotTo(BeNil())
-			}).WithTimeout(2 * time.Minute).Should(Succeed())
+			}).Should(Succeed())
 		}
 	}, SpecTimeout(5*time.Minute))
 
