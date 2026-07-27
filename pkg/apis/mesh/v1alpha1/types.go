@@ -93,9 +93,12 @@ type MultiClusterMeshSpec struct {
 
 // ControlPlaneConfig defines where the mesh control plane will be installed
 type ControlPlaneConfig struct {
-	// Namespace is the namespace where Istio will be installed on each cluster
+	// Namespace is the namespace where Istio will be installed on each cluster.
+	// This namespace is created and deleted by the addon as part of the mesh lifecycle.
 	// +optional
 	// +kubebuilder:default="istio-system"
+	// +kubebuilder:validation:MaxLength=63
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="spec.controlPlane.namespace is immutable"
 	Namespace string `json:"namespace,omitempty"`
 }
 

@@ -102,6 +102,12 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 			})
 
 			It("should create ManifestWorks for each cluster", func() {
+				cpNsWork1, _ := expectControlPlaneNamespaceManifestWork(clusterName, "istio-system")
+				cpNsWork2, _ := expectControlPlaneNamespaceManifestWork(cluster2Name, "istio-system")
+
+				expectMeshOwnedLabels(cpNsWork1.Labels, meshName, testNs, clusterName)
+				expectMeshOwnedLabels(cpNsWork2.Labels, meshName, testNs, cluster2Name)
+
 				work1 := expectOperatorManifestWork(clusterName)
 				work2 := expectOperatorManifestWork(cluster2Name)
 
@@ -222,6 +228,47 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 			expectFinalizer(meshName, testNs)
 		})
 
+		Context("Control plane namespace", func() {
+			BeforeEach(func() {
+				util.CreateManagedCluster(ctx, k8sClient, clusterName, testClusterSet)
+			})
+
+			It("should use custom control plane namespace when specified", func() {
+				util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet, meshv1alpha1.MultiClusterMeshSpec{
+					ControlPlane: meshv1alpha1.ControlPlaneConfig{Namespace: "istio-system-2"},
+				})
+
+				expectControlPlaneNamespaceManifestWork(clusterName, "istio-system-2")
+			})
+
+			It("should default network label to cluster name", func() {
+				util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet)
+
+				_, ns := expectControlPlaneNamespaceManifestWork(clusterName, "istio-system")
+				Expect(ns.Labels[meshcontroller.IstioNetworkLabel]).To(Equal(clusterName))
+			})
+
+			It("should use network label from ManagedCluster when set", func() {
+				updateClusterLabel(clusterName, meshcontroller.IstioNetworkLabel, "network-east")
+				util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet)
+
+				_, ns := expectControlPlaneNamespaceManifestWork(clusterName, "istio-system")
+				Expect(ns.Labels[meshcontroller.IstioNetworkLabel]).To(Equal("network-east"))
+			})
+
+			It("should sync network label when ManagedCluster label is updated after mesh creation", func() {
+				util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet)
+				expectControlPlaneNamespaceManifestWork(clusterName, "istio-system")
+
+				updateClusterLabel(clusterName, meshcontroller.IstioNetworkLabel, "network-west")
+
+				Eventually(func() string {
+					_, ns := expectControlPlaneNamespaceManifestWork(clusterName, "istio-system")
+					return ns.Labels[meshcontroller.IstioNetworkLabel]
+				}).Should(Equal("network-west"))
+			})
+		})
+
 		When("referencing a set with a cluster", func() {
 			var work *workv1.ManifestWork
 
@@ -235,7 +282,7 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 				originalVersion := work.ResourceVersion
 
 				updateMesh(meshName, testNs, func(mesh *meshv1alpha1.MultiClusterMesh) {
-					mesh.Spec.ControlPlane.Namespace = "different-ns"
+					metav1.SetMetaDataLabel(&mesh.ObjectMeta, "trigger", "reconcile")
 				})
 
 				Consistently(func() string {
@@ -412,6 +459,17 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 			})
 		})
 
+		When("spec.controlPlane.namespace is changed on update", func() {
+			It("should reject the update", func() {
+				mesh := &meshv1alpha1.MultiClusterMesh{}
+				Expect(k8sClient.Get(ctx, types.NamespacedName{Name: meshName, Namespace: testNs}, mesh)).To(Succeed())
+				mesh.Spec.ControlPlane.Namespace = "different-ns"
+				err := k8sClient.Update(ctx, mesh)
+				Expect(err).To(HaveOccurred(), "expected validation error when updating the controlPlane namespace")
+				Expect(errors.IsInvalid(err)).To(BeTrue())
+			})
+		})
+
 		DescribeTable("should reject reserved operator namespace",
 			func(ns, expectedMessage string) {
 				expectInvalidCreateMeshFailure(meshName+"-ns", testNs,
@@ -426,6 +484,22 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 			Entry("kube-public", "kube-public", "kube-"),
 			Entry("default", "default", "'default'"),
 		)
+
+		It("should block mesh when control plane namespace equals operator namespace", func() {
+			conflictMesh := meshName + "-cpns"
+			util.CreateMultiClusterMesh(ctx, k8sClient, conflictMesh, testNs, testClusterSet, meshv1alpha1.MultiClusterMeshSpec{
+				ControlPlane: meshv1alpha1.ControlPlaneConfig{Namespace: "multicluster-mesh-operator"},
+			})
+			expectMeshConditionReason(conflictMesh, testNs, meshv1alpha1.ConditionReady, meshv1alpha1.ReasonNamespaceConflict)
+		})
+
+		It("should block mesh when operator namespace equals default control plane namespace", func() {
+			conflictMesh := meshName + "-opns"
+			util.CreateMultiClusterMesh(ctx, k8sClient, conflictMesh, testNs, testClusterSet, meshv1alpha1.MultiClusterMeshSpec{
+				Operator: meshv1alpha1.OperatorConfig{Namespace: "istio-system"},
+			})
+			expectMeshConditionReason(conflictMesh, testNs, meshv1alpha1.ConditionReady, meshv1alpha1.ReasonNamespaceConflict)
+		})
 
 		It("should allow two meshes with different control plane namespaces", func() {
 			util.CreateMultiClusterMesh(ctx, k8sClient, otherMesh, testNs, testClusterSet, meshv1alpha1.MultiClusterMeshSpec{
@@ -492,10 +566,15 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 			expectFinalizer(meshName, testNs)
 			expectOperatorManifestWork(clusterName)
 			expectOperatorManifestWork(cluster2)
+			expectControlPlaneNamespaceManifestWork(clusterName, "istio-system")
+			expectControlPlaneNamespaceManifestWork(cluster2, "istio-system")
 
+			cpNsMWName := meshcontroller.ManifestWorkNameCPNSPrefix + "istio-system"
 			util.DeleteResource(ctx, k8sClient, &meshv1alpha1.MultiClusterMesh{}, meshName, testNs)
 			util.ExpectResourceDeleted(ctx, k8sClient, &workv1.ManifestWork{}, meshcontroller.OperatorManifestWorkName, clusterName)
 			util.ExpectResourceDeleted(ctx, k8sClient, &workv1.ManifestWork{}, meshcontroller.OperatorManifestWorkName, cluster2)
+			util.ExpectResourceDeleted(ctx, k8sClient, &workv1.ManifestWork{}, cpNsMWName, clusterName)
+			util.ExpectResourceDeleted(ctx, k8sClient, &workv1.ManifestWork{}, cpNsMWName, cluster2)
 		})
 
 		It("should work when ClusterSet doesn't exist", func() {
@@ -572,8 +651,9 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 				// simulate creating the cacerts secret by cert-manager
 				util.CreateCacertsSecret(ctx, k8sClient, testNs, clusterName, meshName, testNs)
 
+				expectControlPlaneNamespaceManifestWork(clusterName, "istio-system")
 				work := expectCacertsManifestWork(clusterName)
-				expectCacertsSecret(work)
+				expectCacertsSecret(work, "istio-system")
 			})
 
 			It("should update ManifestWork when cacerts secret is updated", func() {
@@ -679,10 +759,7 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 				util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet)
 				msa := expectManagedServiceAccount(testNs, meshName, clusterName)
 
-				Expect(msa.Labels[meshcontroller.ManagedByLabel]).To(Equal(meshcontroller.ManagedByValue))
-				Expect(msa.Labels[meshcontroller.MeshNameLabel]).To(Equal(meshName))
-				Expect(msa.Labels[meshcontroller.MeshNamespaceLabel]).To(Equal(testNs))
-				Expect(msa.Labels[meshcontroller.ClusterNameLabel]).To(Equal(clusterName))
+				expectMeshOwnedLabels(msa.Labels, meshName, testNs, clusterName)
 				Expect(msa.Spec.Rotation.Validity).To(Equal(metav1.Duration{Duration: 360 * time.Hour}))
 			})
 
@@ -807,11 +884,15 @@ func expectFinalizer(name, namespace string) {
 	}).Should(ContainElement(meshcontroller.FinalizerName))
 }
 
-func updateClusterSetLabel(clusterName, newClusterSet string) {
+func updateClusterLabel(clusterName, labelKey, labelValue string) {
 	cluster := &clusterv1.ManagedCluster{}
 	Expect(k8sClient.Get(ctx, key.Of(clusterName), cluster)).To(Succeed())
-	cluster.Labels[meshcontroller.ClusterSetLabel] = newClusterSet
+	cluster.Labels[labelKey] = labelValue
 	Expect(k8sClient.Update(ctx, cluster)).To(Succeed())
+}
+
+func updateClusterSetLabel(clusterName, newClusterSet string) {
+	updateClusterLabel(clusterName, meshcontroller.ClusterSetLabel, newClusterSet)
 }
 
 // expectNoManifestWorks makes sure that no ManifestWorks are created, checking consistently
@@ -848,6 +929,13 @@ func updateMesh(meshName, namespace string, mutate func(*meshv1alpha1.MultiClust
 		return k8sClient.Update(ctx, mesh)
 	}).Should(Succeed())
 	return mesh
+}
+
+func expectMeshOwnedLabels(labels map[string]string, meshName, meshNamespace, clusterName string) {
+	Expect(labels[meshcontroller.ManagedByLabel]).To(Equal(meshcontroller.ManagedByValue))
+	Expect(labels[meshcontroller.MeshNameLabel]).To(Equal(meshName))
+	Expect(labels[meshcontroller.MeshNamespaceLabel]).To(Equal(meshNamespace))
+	Expect(labels[meshcontroller.ClusterNameLabel]).To(Equal(clusterName))
 }
 
 // expectAllManifestWorksDeleted makes sure ManifestWorks are deleted and none remain
@@ -916,16 +1004,24 @@ func expectCertificate(namespace, clusterName, meshName, issuerName, issuerKind 
 	return cert
 }
 
-func expectCacertsSecret(work *workv1.ManifestWork) {
+func expectCacertsSecret(work *workv1.ManifestWork, expectedNamespace string) {
 	Expect(work.Spec.Workload.Manifests).To(HaveLen(1))
 	secret := &corev1.Secret{}
 	Expect(unmarshalManifest(work.Spec.Workload.Manifests[0], secret)).To(Succeed())
 	Expect(secret.Name).To(Equal("cacerts"))
-	Expect(secret.Namespace).To(Equal("istio-system"))
+	Expect(secret.Namespace).To(Equal(expectedNamespace))
 	Expect(secret.Type).To(Equal(corev1.SecretTypeTLS))
 	Expect(secret.Data).To(HaveKey("tls.crt"))
 	Expect(secret.Data).To(HaveKey("tls.key"))
 	Expect(secret.Data).To(HaveKey("ca.crt"))
+}
+
+func expectControlPlaneNamespaceManifestWork(clusterName, cpNamespace string) (*workv1.ManifestWork, *corev1.Namespace) {
+	work := expectManifestWork(meshcontroller.ManifestWorkNameCPNSPrefix+cpNamespace, clusterName)
+	Expect(work.Spec.Workload.Manifests).To(HaveLen(1))
+	ns := expectNamespace(work, 0, cpNamespace)
+
+	return work, ns
 }
 
 func expectInvalidCreateMeshFailure(name, namespace string, spec meshv1alpha1.MultiClusterMeshSpec, messageSubstring string) {
@@ -970,10 +1066,11 @@ func unmarshalManifest(manifest workv1.Manifest, into interface{}) error {
 	return json.Unmarshal(manifest.Raw, into)
 }
 
-func expectNamespace(work *workv1.ManifestWork, index int, expectedName string) {
+func expectNamespace(work *workv1.ManifestWork, index int, expectedName string) *corev1.Namespace {
 	ns := &corev1.Namespace{}
 	Expect(unmarshalManifest(work.Spec.Workload.Manifests[index], ns)).To(Succeed())
 	Expect(ns.Name).To(Equal(expectedName))
+	return ns
 }
 
 func expectOperatorGroup(work *workv1.ManifestWork, index int, expectedName, expectedNamespace string) {
