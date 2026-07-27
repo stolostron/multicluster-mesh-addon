@@ -107,16 +107,10 @@ func WaitForDeploymentReady(ctx context.Context, k8sClient client.Client, name, 
 		g.Expect(k8sClient.Get(ctx, key.Of(name, namespace), deploy)).To(Succeed())
 		g.Expect(deploy.Status.ObservedGeneration).To(Equal(deploy.Generation),
 			"deployment %s/%s status not yet observed for current generation", namespace, name)
-		var found bool
-		for _, c := range deploy.Status.Conditions {
-			if c.Type == appsv1.DeploymentAvailable {
-				g.Expect(c.Status).To(Equal(corev1.ConditionTrue),
-					"deployment %s/%s is not Available: %s", namespace, name, c.Message)
-				found = true
-				break
-			}
-		}
-		g.Expect(found).To(BeTrue(), "deployment %s/%s has no Available condition", namespace, name)
+		g.Expect(deploy.Status.Conditions).To(ContainElement(And(
+			HaveField("Type", appsv1.DeploymentAvailable),
+			HaveField("Status", corev1.ConditionTrue),
+		)), "deployment %s/%s is not Available", namespace, name)
 	}).WithTimeout(timeout).WithPolling(2 * time.Second).Should(Succeed())
 }
 
