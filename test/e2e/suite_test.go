@@ -15,7 +15,6 @@ import (
 	operatorsv1alpha1 "github.com/operator-framework/api/pkg/operators/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/kubernetes/scheme"
-	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	addonv1beta1 "open-cluster-management.io/api/addon/v1beta1"
 	clusterv1 "open-cluster-management.io/api/cluster/v1"
@@ -39,10 +38,8 @@ const (
 var (
 	clusters = []string{"cluster1", "cluster2"}
 
-	hubClient    client.Client
-	spokeClients map[string]client.Client
-	// spokeConfigs holds the raw REST configs needed for pod exec, which client.Client does not support.
-	spokeConfigs map[string]*rest.Config
+	hubClient    *util.E2EClient
+	spokeClients map[string]*util.E2EClient
 )
 
 func TestE2E(t *testing.T) {
@@ -69,16 +66,13 @@ var _ = BeforeSuite(func(ctx context.Context) {
 	cluster1Kubeconfig := env("CLUSTER1_KUBECONFIG", ".kube/cluster1.config")
 	cluster2Kubeconfig := env("CLUSTER2_KUBECONFIG", ".kube/cluster2.config")
 
-	hubClient = clientFrom(hubKubeconfig)
-	spokeClients = make(map[string]client.Client)
-	spokeConfigs = make(map[string]*rest.Config)
+	hubClient = util.NewE2EClient(clientFrom(hubKubeconfig), hubKubeconfig)
+	spokeClients = make(map[string]*util.E2EClient)
 	for name, kc := range map[string]string{
 		"cluster1": cluster1Kubeconfig,
 		"cluster2": cluster2Kubeconfig,
 	} {
-		cfg, c := clientAndConfigFrom(kc)
-		spokeClients[name] = c
-		spokeConfigs[name] = cfg
+		spokeClients[name] = util.NewE2EClient(clientFrom(kc), kc)
 	}
 
 	Step("Verifying cluster connectivity")
@@ -99,17 +93,12 @@ func env(key, def string) string {
 }
 
 func clientFrom(kubeconfig string) client.Client {
-	_, c := clientAndConfigFrom(kubeconfig)
-	return c
-}
-
-func clientAndConfigFrom(kubeconfig string) (*rest.Config, client.Client) {
 	cfg, err := clientcmd.BuildConfigFromFlags("", kubeconfig)
 	Expect(err).NotTo(HaveOccurred(), "failed to load kubeconfig from %s", kubeconfig)
 
 	c, err := client.New(cfg, client.Options{Scheme: scheme.Scheme})
 	Expect(err).NotTo(HaveOccurred(), "failed to create client from %s", kubeconfig)
-	return cfg, c
+	return c
 }
 
 func Step(format string, args ...any) {

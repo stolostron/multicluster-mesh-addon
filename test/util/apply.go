@@ -3,88 +3,17 @@ package util
 import (
 	"bytes"
 	"context"
-	"fmt"
-	"io"
 	"os"
-	"strings"
 	"text/template"
 	"time"
 
 	. "github.com/onsi/gomega"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/util/yaml"
-	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/rest"
-	"k8s.io/client-go/tools/remotecommand"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/stolostron/multicluster-mesh-addon/pkg/key"
 )
-
-func LoadAndApplyYAML(ctx context.Context, k8sClient client.Client, path string, vars map[string]string) {
-	loadAndApply(ctx, k8sClient, path, vars, "")
-}
-
-// LoadAndApplyYAMLInNamespace works like LoadAndApplyYAML but sets the given namespace
-// on any resource that doesn't already have one (like kubectl apply -n).
-func LoadAndApplyYAMLInNamespace(ctx context.Context, k8sClient client.Client, path, namespace string, vars map[string]string) {
-	loadAndApply(ctx, k8sClient, path, vars, namespace)
-}
-
-func loadAndApply(ctx context.Context, k8sClient client.Client, path string, vars map[string]string, defaultNS string) {
-	rendered := renderYAML(path, vars)
-	decoder := yaml.NewYAMLOrJSONDecoder(bytes.NewReader(rendered), 4096)
-	for {
-		obj := &unstructured.Unstructured{}
-		if err := decoder.Decode(obj); err != nil {
-			if err == io.EOF {
-				break
-			}
-			Expect(err).NotTo(HaveOccurred(), "failed to decode YAML document from %s", path)
-		}
-		if obj.Object == nil {
-			continue
-		}
-		if defaultNS != "" && obj.GetNamespace() == "" {
-			obj.SetNamespace(defaultNS)
-		}
-		Expect(k8sClient.Patch(ctx, obj, client.Apply, client.FieldOwner("e2e-test"), client.ForceOwnership)). //nolint:staticcheck // client.Apply is the only way to SSA with unstructured objects
-															To(Succeed(), "failed to apply %s %s/%s", obj.GetKind(), obj.GetNamespace(), obj.GetName())
-	}
-}
-
-func DeleteYAMLResources(ctx context.Context, k8sClient client.Client, path string, vars map[string]string) {
-	deleteResources(ctx, k8sClient, path, vars, "")
-}
-
-// DeleteYAMLResourcesInNamespace works like DeleteYAMLResources but sets the given
-// namespace on any resource that doesn't already have one.
-func DeleteYAMLResourcesInNamespace(ctx context.Context, k8sClient client.Client, path, namespace string, vars map[string]string) {
-	deleteResources(ctx, k8sClient, path, vars, namespace)
-}
-
-func deleteResources(ctx context.Context, k8sClient client.Client, path string, vars map[string]string, defaultNS string) {
-	rendered := renderYAML(path, vars)
-	decoder := yaml.NewYAMLOrJSONDecoder(bytes.NewReader(rendered), 4096)
-	for {
-		obj := &unstructured.Unstructured{}
-		if err := decoder.Decode(obj); err != nil {
-			if err == io.EOF {
-				break
-			}
-			Expect(err).NotTo(HaveOccurred(), "failed to decode YAML document from %s", path)
-		}
-		if obj.Object == nil {
-			continue
-		}
-		if defaultNS != "" && obj.GetNamespace() == "" {
-			obj.SetNamespace(defaultNS)
-		}
-		_ = client.IgnoreNotFound(k8sClient.Delete(ctx, obj))
-	}
-}
 
 func renderYAML(path string, vars map[string]string) []byte {
 	data, err := os.ReadFile(path)
@@ -154,39 +83,4 @@ func WaitForPodReady(ctx context.Context, k8sClient client.Client, namespace str
 		g.Expect(found).To(BeTrue(), "no ready pod found with labels %v in %s", labels, namespace)
 	}).WithTimeout(timeout).WithPolling(2 * time.Second).Should(Succeed())
 	return podName
-}
-
-func ExecInPod(ctx context.Context, restConfig *rest.Config, namespace, podName, container string, command []string) (string, error) {
-	clientset, err := kubernetes.NewForConfig(restConfig)
-	if err != nil {
-		return "", fmt.Errorf("failed to create clientset: %w", err)
-	}
-
-	req := clientset.CoreV1().RESTClient().Post().
-		Resource("pods").
-		Name(podName).
-		Namespace(namespace).
-		SubResource("exec").
-		Param("container", container).
-		Param("stdout", "true").
-		Param("stderr", "true")
-	for _, c := range command {
-		req = req.Param("command", c)
-	}
-
-	exec, err := remotecommand.NewSPDYExecutor(restConfig, "POST", req.URL())
-	if err != nil {
-		return "", fmt.Errorf("failed to create SPDY executor: %w", err)
-	}
-
-	var stdout, stderr bytes.Buffer
-	err = exec.StreamWithContext(ctx, remotecommand.StreamOptions{
-		Stdout: &stdout,
-		Stderr: &stderr,
-	})
-	if err != nil {
-		return "", fmt.Errorf("exec failed (stderr: %s): %w", strings.TrimSpace(stderr.String()), err)
-	}
-
-	return stdout.String(), nil
 }

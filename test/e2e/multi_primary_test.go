@@ -3,6 +3,7 @@
 package e2e
 
 import (
+	"context"
 	"fmt"
 	"path/filepath"
 	"runtime"
@@ -60,7 +61,7 @@ var _ = Describe("Multi-primary multi-network mesh", Ordered, Serial, func() {
 		util.CreateNamespace(ctx, hubClient, meshNS)
 
 		Step("Setting up cert-manager trust chain in %s", meshNS)
-		util.LoadAndApplyYAMLInNamespace(ctx, hubClient, filepath.Join(samplesDir, "cert-manager-issuer.yaml"), meshNS, nil)
+		hubClient.ApplyFile(ctx, filepath.Join(samplesDir, "cert-manager-issuer.yaml"), nil, meshNS)
 	})
 
 	AfterAll(func(ctx SpecContext) {
@@ -73,11 +74,11 @@ var _ = Describe("Multi-primary multi-network mesh", Ordered, Serial, func() {
 
 		Step("Cleaning up Istio resources on spoke clusters")
 		for cluster, spokeClient := range spokeClients {
-			util.DeleteYAMLResources(ctx, spokeClient, filepath.Join(testdataDir, "eastwest-gateway.yaml"), map[string]string{
+			spokeClient.DeleteFile(ctx, filepath.Join(testdataDir, "eastwest-gateway.yaml"), map[string]string{
 				"CPNamespace": cpNamespace,
 				"Network":     networks[cluster],
 			})
-			util.DeleteYAMLResources(ctx, spokeClient, filepath.Join(testdataDir, "istio-cr.yaml"), map[string]string{
+			spokeClient.DeleteFile(ctx, filepath.Join(testdataDir, "istio-cr.yaml"), map[string]string{
 				"CRName":      "default",
 				"CPNamespace": cpNamespace,
 				"TrustDomain": trustDomain,
@@ -85,7 +86,7 @@ var _ = Describe("Multi-primary multi-network mesh", Ordered, Serial, func() {
 				"ClusterName": cluster,
 				"Network":     networks[cluster],
 			})
-			util.DeleteYAMLResources(ctx, spokeClient, filepath.Join(testdataDir, "istiocni-cr.yaml"), nil)
+			spokeClient.DeleteFile(ctx, filepath.Join(testdataDir, "istiocni-cr.yaml"), nil)
 		}
 
 		Step("Deleting test mesh %s", meshName)
@@ -102,7 +103,7 @@ var _ = Describe("Multi-primary multi-network mesh", Ordered, Serial, func() {
 		}).Should(Succeed())
 
 		Step("Cleaning up cert-manager trust chain in %s", meshNS)
-		util.DeleteYAMLResourcesInNamespace(ctx, hubClient, filepath.Join(samplesDir, "cert-manager-issuer.yaml"), meshNS, nil)
+		hubClient.DeleteFile(ctx, filepath.Join(samplesDir, "cert-manager-issuer.yaml"), nil, meshNS)
 
 		Step("Deleting test namespace %s", meshNS)
 		_ = client.IgnoreNotFound(hubClient.Delete(ctx, &corev1.Namespace{
@@ -181,10 +182,10 @@ var _ = Describe("Multi-primary multi-network mesh", Ordered, Serial, func() {
 			util.CreateNamespace(ctx, spokeClient, "istio-cni")
 
 			Step("Applying IstioCNI CR on %s", cluster)
-			util.LoadAndApplyYAML(ctx, spokeClient, filepath.Join(testdataDir, "istiocni-cr.yaml"), nil)
+			spokeClient.ApplyFile(ctx, filepath.Join(testdataDir, "istiocni-cr.yaml"), nil)
 
 			Step("Applying Istio CR on %s", cluster)
-			util.LoadAndApplyYAML(ctx, spokeClient, filepath.Join(testdataDir, "istio-cr.yaml"), map[string]string{
+			spokeClient.ApplyFile(ctx, filepath.Join(testdataDir, "istio-cr.yaml"), map[string]string{
 				"CRName":      "default",
 				"CPNamespace": cpNamespace,
 				"TrustDomain": trustDomain,
@@ -222,7 +223,7 @@ var _ = Describe("Multi-primary multi-network mesh", Ordered, Serial, func() {
 	It("east-west gateways are functional", func(ctx SpecContext) {
 		for cluster, spokeClient := range spokeClients {
 			Step("Applying east-west Gateway API resource on %s", cluster)
-			util.LoadAndApplyYAML(ctx, spokeClient, filepath.Join(testdataDir, "eastwest-gateway.yaml"), map[string]string{
+			spokeClient.ApplyFile(ctx, filepath.Join(testdataDir, "eastwest-gateway.yaml"), map[string]string{
 				"CPNamespace": cpNamespace,
 				"Network":     networks[cluster],
 			})
@@ -248,19 +249,19 @@ var _ = Describe("Multi-primary multi-network mesh", Ordered, Serial, func() {
 
 		Step("Deploying helloworld Service on both clusters")
 		for _, spokeClient := range spokeClients {
-			util.LoadAndApplyYAML(ctx, spokeClient, filepath.Join(testdataDir, "helloworld-service.yaml"), map[string]string{
+			spokeClient.ApplyFile(ctx, filepath.Join(testdataDir, "helloworld-service.yaml"), map[string]string{
 				"Namespace": sampleNS,
 			})
 		}
 
 		Step("Deploying helloworld-v1 on cluster1")
-		util.LoadAndApplyYAML(ctx, spokeClients["cluster1"], filepath.Join(testdataDir, "helloworld.yaml"), map[string]string{
+		spokeClients["cluster1"].ApplyFile(ctx, filepath.Join(testdataDir, "helloworld.yaml"), map[string]string{
 			"Namespace": sampleNS,
 			"Version":   "v1",
 		})
 
 		Step("Deploying helloworld-v2 on cluster2")
-		util.LoadAndApplyYAML(ctx, spokeClients["cluster2"], filepath.Join(testdataDir, "helloworld.yaml"), map[string]string{
+		spokeClients["cluster2"].ApplyFile(ctx, filepath.Join(testdataDir, "helloworld.yaml"), map[string]string{
 			"Namespace": sampleNS,
 			"Version":   "v2",
 		})
@@ -272,7 +273,7 @@ var _ = Describe("Multi-primary multi-network mesh", Ordered, Serial, func() {
 		util.WaitForDeploymentReady(ctx, spokeClients["cluster2"], "helloworld-v2", sampleNS, 2*time.Minute)
 
 		Step("Deploying curl pod on cluster1")
-		util.LoadAndApplyYAML(ctx, spokeClients["cluster1"], filepath.Join(testdataDir, "curl.yaml"), map[string]string{
+		spokeClients["cluster1"].ApplyFile(ctx, filepath.Join(testdataDir, "curl.yaml"), map[string]string{
 			"Namespace": sampleNS,
 		})
 
@@ -286,7 +287,7 @@ var _ = Describe("Multi-primary multi-network mesh", Ordered, Serial, func() {
 		var sawV1, sawV2 bool
 		Eventually(func(g Gomega) {
 			for i := 0; i < 20; i++ {
-				output, err := util.ExecInPod(ctx, spokeConfigs["cluster1"],
+				output, err := spokeClients["cluster1"].Exec(ctx,
 					sampleNS, curlPod, "curl",
 					[]string{"curl", "-s", fmt.Sprintf("helloworld.%s:5000/hello", sampleNS)})
 				if err != nil {
