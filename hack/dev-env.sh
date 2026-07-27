@@ -319,7 +319,7 @@ install_metallb() {
 
         log "Configuring MetalLB IP pool ${range_start}-${range_end} on ${cluster}..."
         sed "s|__ADDRESS_RANGE__|${range_start}-${range_end}|" \
-            "${SCRIPT_DIR}/samples/metallb-pool.yaml" \
+            "${SCRIPT_DIR}/hack/kind/metallb-pool.yaml" \
             | on "${cluster}" kubectl apply -f -
         log "MetalLB configured on ${cluster}"
     done
