@@ -213,12 +213,11 @@ var _ = Describe("Multi-primary multi-network mesh", Ordered, Serial, func() {
 	// See PIt specs in mesh_lifecycle_test.go for what the controller will eventually do.
 	It("remote secrets enable cross-cluster endpoint discovery", func(ctx SpecContext) {
 		Step("Verifying remote secrets exist on each spoke with istio/multiCluster label")
-		for _, source := range clusters {
-			for _, target := range clusters {
+		for source := range spokeClients {
+			for target, targetClient := range spokeClients {
 				if source == target {
 					continue
 				}
-				targetClient := spokeClients[target]
 				secret := &corev1.Secret{}
 				Expect(targetClient.Get(ctx, key.Of("istio-remote-secret-"+source, cpNamespace), secret)).
 					To(Succeed(), "remote secret for %s not found on %s", source, target)
