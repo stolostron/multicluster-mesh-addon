@@ -272,8 +272,14 @@ install_managed_serviceaccount() {
 }
 
 install_metallb() {
-    require_clusters "${CLUSTER1}" "${CLUSTER2}"
+    local cluster="${1}"
+    require_clusters "${cluster}"
     local metallb_version="${METALLB_VERSION}"
+
+    if on "${cluster}" kubectl get deployment controller -n metallb-system &>/dev/null; then
+        log "MetalLB already installed on ${cluster}, skipping"
+        return
+    fi
 
     local engine="${CONTAINER_ENGINE:-docker}"
     engine="$(basename "${engine}")"
@@ -293,54 +299,50 @@ install_metallb() {
     local base_prefix
     base_prefix="$(echo "${kind_subnet}" | cut -d'.' -f1-2)"
 
-    local idx=0
-    for cluster in "${CLUSTER1}" "${CLUSTER2}"; do
-        local range_start="${base_prefix}.255.$((idx * 10 + 1))"
-        local range_end="${base_prefix}.255.$((idx * 10 + 10))"
-        idx=$((idx + 1))
+    local idx
+    case "${cluster}" in
+        "${CLUSTER1}") idx=0 ;;
+        "${CLUSTER2}") idx=1 ;;
+        *) err "Unknown cluster for MetalLB IP assignment: ${cluster}" ;;
+    esac
+    local range_start="${base_prefix}.255.$((idx * 10 + 1))"
+    local range_end="${base_prefix}.255.$((idx * 10 + 10))"
 
-        if on "${cluster}" kubectl get deployment controller -n metallb-system &>/dev/null; then
-            log "MetalLB already installed on ${cluster}, skipping"
-            continue
-        fi
+    log "Installing MetalLB ${metallb_version} on ${cluster}..."
+    on "${cluster}" kubectl apply -f \
+        "https://raw.githubusercontent.com/metallb/metallb/${metallb_version}/config/manifests/metallb-native.yaml"
 
-        log "Installing MetalLB ${metallb_version} on ${cluster}..."
-        on "${cluster}" kubectl apply -f \
-            "https://raw.githubusercontent.com/metallb/metallb/${metallb_version}/config/manifests/metallb-native.yaml"
+    log "Waiting for MetalLB controller to be ready on ${cluster}..."
+    on "${cluster}" kubectl rollout status deployment/controller -n metallb-system --timeout=120s
 
-        log "Waiting for MetalLB controller to be ready on ${cluster}..."
-        on "${cluster}" kubectl rollout status deployment/controller -n metallb-system --timeout=120s
+    log "Waiting for MetalLB speaker to be ready on ${cluster}..."
+    on "${cluster}" kubectl rollout status daemonset/speaker -n metallb-system --timeout=120s
 
-        log "Waiting for MetalLB speaker to be ready on ${cluster}..."
-        on "${cluster}" kubectl rollout status daemonset/speaker -n metallb-system --timeout=120s
-
-        log "Configuring MetalLB IP pool ${range_start}-${range_end} on ${cluster}..."
-        sed "s|__ADDRESS_RANGE__|${range_start}-${range_end}|" \
-            "${SCRIPT_DIR}/hack/kind/metallb-pool.yaml" \
-            | on "${cluster}" kubectl apply -f -
-        log "MetalLB configured on ${cluster}"
-    done
+    log "Configuring MetalLB IP pool ${range_start}-${range_end} on ${cluster}..."
+    sed "s|__ADDRESS_RANGE__|${range_start}-${range_end}|" \
+        "${SCRIPT_DIR}/hack/kind/metallb-pool.yaml" \
+        | on "${cluster}" kubectl apply -f -
+    log "MetalLB configured on ${cluster}"
 }
 
 install_gateway_api() {
-    require_clusters "${CLUSTER1}" "${CLUSTER2}"
+    local cluster="${1}"
+    require_clusters "${cluster}"
     local gw_api_version="${GATEWAY_API_VERSION}"
 
-    for cluster in "${CLUSTER1}" "${CLUSTER2}"; do
-        if on "${cluster}" kubectl get crd gateways.gateway.networking.k8s.io &>/dev/null; then
-            log "Gateway API CRDs already installed on ${cluster}, skipping"
-            continue
-        fi
+    if on "${cluster}" kubectl get crd gateways.gateway.networking.k8s.io &>/dev/null; then
+        log "Gateway API CRDs already installed on ${cluster}, skipping"
+        return
+    fi
 
-        log "Installing Gateway API CRDs ${gw_api_version} on ${cluster}..."
-        on "${cluster}" kubectl apply --server-side -f \
-            "https://github.com/kubernetes-sigs/gateway-api/releases/download/${gw_api_version}/standard-install.yaml"
+    log "Installing Gateway API CRDs ${gw_api_version} on ${cluster}..."
+    on "${cluster}" kubectl apply --server-side -f \
+        "https://github.com/kubernetes-sigs/gateway-api/releases/download/${gw_api_version}/standard-install.yaml"
 
-        on "${cluster}" retry kubectl wait --for=condition=Established \
-            crd/gateways.gateway.networking.k8s.io --timeout=60s
+    on "${cluster}" retry kubectl wait --for=condition=Established \
+        crd/gateways.gateway.networking.k8s.io --timeout=60s
 
-        log "Gateway API CRDs installed on ${cluster}"
-    done
+    log "Gateway API CRDs installed on ${cluster}"
 }
 
 setup_mesh() {
@@ -388,8 +390,8 @@ case "${ACTION}" in
     init-ocm)                        init_ocm ;;
     join-clusters)                   join_clusters ;;
     setup-mesh)                      setup_mesh ;;
-    install-metallb)                 install_metallb ;;
-    install-gateway-api)             install_gateway_api ;;
+    install-metallb)                 install_metallb "${2}" ;;
+    install-gateway-api)             install_gateway_api "${2}" ;;
     *)
         err "Unknown action: '${ACTION}'. Valid: check-host, create-cluster, install-olm, install-cert-manager, install-managed-serviceaccount, init-ocm, join-clusters, setup-mesh, install-metallb, install-gateway-api" ;;
 esac

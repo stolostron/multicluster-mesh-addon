@@ -167,15 +167,27 @@ test-e2e: ## Run e2e tests against dev-env clusters (requires make dev-env)
 	go run github.com/onsi/ginkgo/v2/ginkgo -v --fail-fast --tags=e2e ./test/e2e/...
 
 .PHONY: install-metallb
-install-metallb: ## Install MetalLB on spoke Kind clusters
-	$(DEV_ENV_SCRIPT) install-metallb
+install-metallb: $(addprefix install-metallb-,$(SPOKE_CLUSTERS)) ## Install MetalLB on spoke Kind clusters
+
+.PHONY: $(addprefix install-metallb-,$(SPOKE_CLUSTERS))
+$(addprefix install-metallb-,$(SPOKE_CLUSTERS)): install-metallb-%:
+	$(call log,Installing MetalLB: $*)
+	$(DEV_ENV_SCRIPT) install-metallb $*
 
 .PHONY: install-gateway-api
-install-gateway-api: ## Install Gateway API CRDs on spoke Kind clusters
-	$(DEV_ENV_SCRIPT) install-gateway-api
+install-gateway-api: $(addprefix install-gateway-api-,$(SPOKE_CLUSTERS)) ## Install Gateway API CRDs on spoke Kind clusters
+
+.PHONY: $(addprefix install-gateway-api-,$(SPOKE_CLUSTERS))
+$(addprefix install-gateway-api-,$(SPOKE_CLUSTERS)): install-gateway-api-%:
+	$(call log,Installing Gateway API: $*)
+	$(DEV_ENV_SCRIPT) install-gateway-api $*
+
+.PHONY: test-e2e-multicluster-prereqs
+test-e2e-multicluster-prereqs:
+	$(MAKE) --no-print-directory -j$(PARALLEL) --output-sync=line install-metallb install-gateway-api
 
 .PHONY: test-e2e-multicluster
-test-e2e-multicluster: install-metallb install-gateway-api ## Run multi-primary e2e tests (requires make dev-env)
+test-e2e-multicluster: test-e2e-multicluster-prereqs ## Run multi-primary e2e tests (requires make dev-env)
 	HUB_KUBECONFIG=$(HUB_KUBECONFIG) \
 	CLUSTER1_KUBECONFIG=$(DEV_KUBE_DIR)/cluster1.config \
 	CLUSTER2_KUBECONFIG=$(DEV_KUBE_DIR)/cluster2.config \
