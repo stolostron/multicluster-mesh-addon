@@ -14,6 +14,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	clusterv1 "open-cluster-management.io/api/cluster/v1"
 	workv1 "open-cluster-management.io/api/work/v1"
 	msav1beta1 "open-cluster-management.io/managed-serviceaccount/apis/authentication/v1beta1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -110,11 +111,12 @@ var _ = Describe("Multi-primary multi-network mesh", Ordered, Serial, func() {
 	})
 
 	It("addon plumbing is ready", func(ctx SpecContext) {
-		Step("Ensuring istio-system namespace exists on spoke clusters with network labels")
-		for cluster, spokeClient := range spokeClients {
-			util.CreateNamespace(ctx, spokeClient, cpNamespace, map[string]string{
-				"topology.istio.io/network": networks[cluster],
-			})
+		Step("Labeling ManagedClusters with network identity")
+		for cluster := range spokeClients {
+			mc := &clusterv1.ManagedCluster{}
+			Expect(hubClient.Get(ctx, key.Of(cluster), mc)).To(Succeed())
+			metav1.SetMetaDataLabel(&mc.ObjectMeta, meshcontroller.IstioNetworkLabel, networks[cluster])
+			Expect(hubClient.Update(ctx, mc)).To(Succeed())
 		}
 
 		Step("Creating MultiClusterMesh CR")
@@ -141,26 +143,19 @@ var _ = Describe("Multi-primary multi-network mesh", Ordered, Serial, func() {
 			g.Expect(meta.FindStatusCondition(mesh.Status.Conditions, meshv1alpha1.ConditionReady)).NotTo(BeNil())
 		}).Should(Succeed())
 
+		Step("Waiting for control plane namespace ManifestWorks to become Available")
+		for _, cluster := range clusters {
+			expectManifestWorkAvailable(ctx, meshcontroller.ManifestWorkNameCPNSPrefix+cpNamespace, cluster)
+		}
+
 		Step("Waiting for operator ManifestWorks to become Available")
 		for _, cluster := range clusters {
-			Eventually(func(g Gomega) {
-				mw := &workv1.ManifestWork{}
-				g.Expect(hubClient.Get(ctx, key.Of(meshcontroller.OperatorManifestWorkName, cluster), mw)).To(Succeed())
-				available := meta.FindStatusCondition(mw.Status.Conditions, string(workv1.WorkAvailable))
-				g.Expect(available).NotTo(BeNil())
-				g.Expect(available.Status).To(Equal(metav1.ConditionTrue))
-			}).WithTimeout(3 * time.Minute).Should(Succeed())
+			expectManifestWorkAvailable(ctx, meshcontroller.OperatorManifestWorkName, cluster)
 		}
 
 		Step("Waiting for cacerts ManifestWorks to become Available")
 		for _, cluster := range clusters {
-			Eventually(func(g Gomega) {
-				mw := &workv1.ManifestWork{}
-				g.Expect(hubClient.Get(ctx, key.Of(meshcontroller.ManifestWorkNameCacerts, cluster), mw)).To(Succeed())
-				available := meta.FindStatusCondition(mw.Status.Conditions, string(workv1.WorkAvailable))
-				g.Expect(available).NotTo(BeNil())
-				g.Expect(available.Status).To(Equal(metav1.ConditionTrue))
-			}).WithTimeout(3 * time.Minute).Should(Succeed())
+			expectManifestWorkAvailable(ctx, meshcontroller.ManifestWorkNameCacerts, cluster)
 		}
 
 		Step("Waiting for ManagedServiceAccount token secrets to exist on the hub")
@@ -182,10 +177,7 @@ var _ = Describe("Multi-primary multi-network mesh", Ordered, Serial, func() {
 
 	It("Istio control planes become ready on both clusters", func(ctx SpecContext) {
 		for cluster, spokeClient := range spokeClients {
-			Step("Ensuring istio-system and istio-cni namespaces on %s", cluster)
-			util.CreateNamespace(ctx, spokeClient, cpNamespace, map[string]string{
-				"topology.istio.io/network": networks[cluster],
-			})
+			Step("Ensuring istio-cni namespace on %s", cluster)
 			util.CreateNamespace(ctx, spokeClient, "istio-cni")
 
 			Step("Applying IstioCNI CR on %s", cluster)
@@ -318,3 +310,13 @@ var _ = Describe("Multi-primary multi-network mesh", Ordered, Serial, func() {
 		Success("Cross-cluster traffic verified: saw responses from both v1 and v2")
 	}, SpecTimeout(8*time.Minute))
 })
+
+func expectManifestWorkAvailable(ctx context.Context, name, cluster string) {
+	Eventually(func(g Gomega) {
+		mw := &workv1.ManifestWork{}
+		g.Expect(hubClient.Get(ctx, key.Of(name, cluster), mw)).To(Succeed())
+		available := meta.FindStatusCondition(mw.Status.Conditions, string(workv1.WorkAvailable))
+		g.Expect(available).NotTo(BeNil())
+		g.Expect(available.Status).To(Equal(metav1.ConditionTrue))
+	}).WithTimeout(3 * time.Minute).Should(Succeed())
+}
