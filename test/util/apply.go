@@ -52,7 +52,7 @@ func loadAndApply(ctx context.Context, k8sClient client.Client, path string, var
 			obj.SetNamespace(defaultNS)
 		}
 		Expect(k8sClient.Patch(ctx, obj, client.Apply, client.FieldOwner("e2e-test"), client.ForceOwnership)). //nolint:staticcheck // client.Apply is the only way to SSA with unstructured objects
-			To(Succeed(), "failed to apply %s %s/%s", obj.GetKind(), obj.GetNamespace(), obj.GetName())
+															To(Succeed(), "failed to apply %s %s/%s", obj.GetKind(), obj.GetNamespace(), obj.GetName())
 	}
 }
 
@@ -199,7 +199,7 @@ func CreateNamespaceWithLabels(ctx context.Context, k8sClient client.Client, nam
 	nsObj.SetName(name)
 	nsObj.SetLabels(labels)
 	Expect(k8sClient.Patch(ctx, nsObj, client.Apply, client.FieldOwner("e2e-test"), client.ForceOwnership)). //nolint:staticcheck // client.Apply is the only way to SSA with unstructured objects
-		To(Succeed(), "failed to create/update namespace %s", name)
+															To(Succeed(), "failed to create/update namespace %s", name)
 }
 
 func EnsureNamespace(ctx context.Context, k8sClient client.Client, name string) {

@@ -15,6 +15,6 @@ spec:
     spec:
       containers:
       - name: curl
-        image: curlimages/curl:latest
+        image: curlimages/curl:8.13.0
         command: ["/bin/sleep", "infinity"]
         imagePullPolicy: IfNotPresent
