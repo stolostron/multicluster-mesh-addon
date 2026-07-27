@@ -65,28 +65,12 @@ var _ = Describe("Multi-primary multi-network mesh", Ordered, Serial, func() {
 	})
 
 	AfterAll(func(ctx SpecContext) {
-		Step("Cleaning up sample namespace on spoke clusters")
+		Step("Cleaning up spoke resources")
 		for _, spokeClient := range spokeClients {
 			_ = client.IgnoreNotFound(spokeClient.Delete(ctx, &corev1.Namespace{
 				ObjectMeta: metav1.ObjectMeta{Name: sampleNS},
 			}))
-		}
-
-		Step("Cleaning up Istio resources on spoke clusters")
-		for cluster, spokeClient := range spokeClients {
-			spokeClient.DeleteFile(ctx, filepath.Join(testdataDir, "eastwest-gateway.yaml"), map[string]string{
-				"CPNamespace": cpNamespace,
-				"Network":     networks[cluster],
-			})
-			spokeClient.DeleteFile(ctx, filepath.Join(testdataDir, "istio-cr.yaml"), map[string]string{
-				"CRName":      "default",
-				"CPNamespace": cpNamespace,
-				"TrustDomain": trustDomain,
-				"MeshID":      meshID,
-				"ClusterName": cluster,
-				"Network":     networks[cluster],
-			})
-			spokeClient.DeleteFile(ctx, filepath.Join(testdataDir, "istiocni-cr.yaml"), nil)
+			spokeClient.Cleanup(ctx)
 		}
 
 		Step("Deleting test mesh %s", meshName)
@@ -94,18 +78,8 @@ var _ = Describe("Multi-primary multi-network mesh", Ordered, Serial, func() {
 			_ = client.IgnoreNotFound(hubClient.Delete(ctx, mesh))
 		}
 
-		Step("Waiting for addon resources to be cleaned up")
-		Eventually(func(g Gomega) {
-			mwList := &workv1.ManifestWorkList{}
-			err := hubClient.List(ctx, mwList, client.MatchingLabels{meshcontroller.ManagedByLabel: meshcontroller.ManagedByValue})
-			g.Expect(err).NotTo(HaveOccurred())
-			g.Expect(mwList.Items).To(BeEmpty(), "ManifestWorks still exist")
-		}).Should(Succeed())
-
-		Step("Cleaning up cert-manager trust chain in %s", meshNS)
-		hubClient.DeleteFile(ctx, filepath.Join(samplesDir, "cert-manager-issuer.yaml"), nil, meshNS)
-
-		Step("Deleting test namespace %s", meshNS)
+		Step("Cleaning up hub resources")
+		hubClient.Cleanup(ctx)
 		_ = client.IgnoreNotFound(hubClient.Delete(ctx, &corev1.Namespace{
 			ObjectMeta: metav1.ObjectMeta{Name: meshNS},
 		}))

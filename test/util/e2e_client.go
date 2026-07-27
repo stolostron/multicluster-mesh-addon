@@ -13,24 +13,39 @@ import (
 
 // E2EClient wraps client.Client with a kubeconfig path, providing kubectl-based
 // operations (like pod exec, apply, delete) alongside the standard controller-runtime client.
+// ApplyFile calls are automatically recorded so Cleanup can reverse-delete them.
 type E2EClient struct {
 	client.Client
 	Kubeconfig string
+	applied    []appliedFile
+}
+
+type appliedFile struct {
+	path      string
+	vars      map[string]string
+	namespace string
 }
 
 func NewE2EClient(c client.Client, kubeconfig string) *E2EClient {
 	return &E2EClient{Client: c, Kubeconfig: kubeconfig}
 }
 
+// ApplyFile renders a YAML template and applies it via kubectl. // The call is recorded so that Cleanup can reverse-delete all applied files.
 func (c *E2EClient) ApplyFile(ctx context.Context, path string, vars map[string]string, namespace ...string) {
+	ns := ""
+	if len(namespace) > 0 {
+		ns = namespace[0]
+	}
 	args := []string{"apply", "--kubeconfig", c.Kubeconfig}
-	if len(namespace) > 0 && namespace[0] != "" {
-		args = append(args, "-n", namespace[0])
+	if ns != "" {
+		args = append(args, "-n", ns)
 	}
 	args = append(args, "-f", "-")
 	c.runKubectl(ctx, path, vars, args)
+	c.applied = append(c.applied, appliedFile{path: path, vars: vars, namespace: ns})
 }
 
+// DeleteFile renders a YAML template and deletes matching resources via kubectl.
 func (c *E2EClient) DeleteFile(ctx context.Context, path string, vars map[string]string, namespace ...string) {
 	args := []string{"delete", "--kubeconfig", c.Kubeconfig, "--ignore-not-found"}
 	if len(namespace) > 0 && namespace[0] != "" {
@@ -38,6 +53,15 @@ func (c *E2EClient) DeleteFile(ctx context.Context, path string, vars map[string
 	}
 	args = append(args, "-f", "-")
 	c.runKubectl(ctx, path, vars, args)
+}
+
+// Cleanup reverse-deletes all files that were applied via ApplyFile.
+func (c *E2EClient) Cleanup(ctx context.Context) {
+	for i := len(c.applied) - 1; i >= 0; i-- {
+		f := c.applied[i]
+		c.DeleteFile(ctx, f.path, f.vars, f.namespace)
+	}
+	c.applied = nil
 }
 
 func (c *E2EClient) runKubectl(ctx context.Context, path string, vars map[string]string, args []string) {
