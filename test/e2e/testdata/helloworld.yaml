@@ -1,26 +1,26 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: helloworld-v1
+  name: helloworld-{{.Version}}
   namespace: {{.Namespace}}
   labels:
     app: helloworld
-    version: v1
+    version: "{{.Version}}"
 spec:
   replicas: 1
   selector:
     matchLabels:
       app: helloworld
-      version: v1
+      version: "{{.Version}}"
   template:
     metadata:
       labels:
         app: helloworld
-        version: v1
+        version: "{{.Version}}"
     spec:
       containers:
       - name: helloworld
-        image: quay.io/sail-dev/examples-helloworld-v1
+        image: quay.io/sail-dev/examples-helloworld-{{.Version}}:1.0
         resources:
           requests:
             cpu: "100m"

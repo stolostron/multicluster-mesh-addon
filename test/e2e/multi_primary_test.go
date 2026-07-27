@@ -263,13 +263,15 @@ var _ = Describe("Multi-primary multi-network mesh", Ordered, Serial, func() {
 		}
 
 		Step("Deploying helloworld-v1 on cluster1")
-		util.LoadAndApplyYAML(ctx, spokeClients["cluster1"], filepath.Join(testdataDir, "helloworld-v1.yaml"), map[string]string{
+		util.LoadAndApplyYAML(ctx, spokeClients["cluster1"], filepath.Join(testdataDir, "helloworld.yaml"), map[string]string{
 			"Namespace": sampleNS,
+			"Version":   "v1",
 		})
 
 		Step("Deploying helloworld-v2 on cluster2")
-		util.LoadAndApplyYAML(ctx, spokeClients["cluster2"], filepath.Join(testdataDir, "helloworld-v2.yaml"), map[string]string{
+		util.LoadAndApplyYAML(ctx, spokeClients["cluster2"], filepath.Join(testdataDir, "helloworld.yaml"), map[string]string{
 			"Namespace": sampleNS,
+			"Version":   "v2",
 		})
 
 		Step("Waiting for helloworld-v1 to be ready on cluster1")
