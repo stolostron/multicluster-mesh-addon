@@ -278,9 +278,20 @@ install_metallb() {
     require_clusters "${CLUSTER1}" "${CLUSTER2}"
     local metallb_version="${METALLB_VERSION:-v0.14.9}"
 
+    local engine="${CONTAINER_ENGINE:-docker}"
+    engine="$(basename "${engine}")"
+
     local kind_subnet
-    kind_subnet="$(docker network inspect kind -f '{{(index .IPAM.Config 0).Subnet}}' 2>/dev/null)" \
-        || err "Failed to determine Kind Docker network subnet. Is Docker running?"
+    case "${engine}" in
+        podman)
+            kind_subnet="$(podman network inspect kind -f '{{(index .Subnets 0).Subnet}}')" \
+                || err "Failed to inspect Kind network with Podman" ;;
+        docker)
+            kind_subnet="$(docker network inspect kind -f '{{(index .IPAM.Config 0).Subnet}}')" \
+                || err "Failed to inspect Kind network with Docker" ;;
+        *)
+            err "Unsupported container engine: ${engine}" ;;
+    esac
 
     local base_prefix
     base_prefix="$(echo "${kind_subnet}" | cut -d'.' -f1-2)"
@@ -382,7 +393,6 @@ case "${ACTION}" in
     setup-mesh)                      setup_mesh ;;
     install-metallb)                 install_metallb ;;
     install-gateway-api)             install_gateway_api ;;
-    clean)                           clean ;;
     *)
-        err "Unknown action: '${ACTION}'. Valid: check-host, create-cluster, install-olm, install-cert-manager, install-managed-serviceaccount, init-ocm, join-clusters, setup-mesh, install-metallb, install-gateway-api, clean" ;;
+        err "Unknown action: '${ACTION}'. Valid: check-host, create-cluster, install-olm, install-cert-manager, install-managed-serviceaccount, init-ocm, join-clusters, setup-mesh, install-metallb, install-gateway-api" ;;
 esac
