@@ -116,6 +116,10 @@ func Step(format string, args ...any) {
 	By(fmt.Sprintf(format, args...))
 }
 
+func Success(format string, args ...any) {
+	GinkgoWriter.Println("* " + fmt.Sprintf(format, args...))
+}
+
 func verifyConnection(ctx context.Context, c client.Client, name string) {
 	nsList := &corev1.NamespaceList{}
 	Expect(c.List(ctx, nsList)).To(Succeed(),

@@ -205,7 +205,7 @@ var _ = Describe("Multi-primary multi-network mesh", Ordered, Serial, func() {
 		for cluster, spokeClient := range spokeClients {
 			Step("Waiting for istiod to be ready on %s", cluster)
 			util.WaitForDeploymentReady(ctx, spokeClient, "istiod", cpNamespace, 5*time.Minute)
-			GinkgoWriter.Printf("istiod is ready on %s\n", cluster)
+			Success("istiod is ready on %s", cluster)
 		}
 	}, SpecTimeout(7*time.Minute))
 
@@ -243,7 +243,7 @@ var _ = Describe("Multi-primary multi-network mesh", Ordered, Serial, func() {
 
 			Step("Waiting for LoadBalancer IP on %s", cluster)
 			ip := util.WaitForLoadBalancerIP(ctx, spokeClient, "eastwestgateway-istio", cpNamespace, 3*time.Minute)
-			GinkgoWriter.Printf("East-west gateway on %s has IP: %s\n", cluster, ip)
+			Success("East-west gateway on %s has IP: %s", cluster, ip)
 		}
 	}, SpecTimeout(5*time.Minute))
 
@@ -285,7 +285,7 @@ var _ = Describe("Multi-primary multi-network mesh", Ordered, Serial, func() {
 
 		Step("Waiting for curl pod to be ready on cluster1")
 		curlPod := util.WaitForPodReady(ctx, spokeClients["cluster1"], sampleNS, map[string]string{"app": "curl"}, 2*time.Minute)
-		GinkgoWriter.Printf("Curl pod ready: %s\n", curlPod)
+		Success("Curl pod ready: %s", curlPod)
 
 		Step("Verifying cross-cluster traffic")
 		// sawV1/sawV2 are intentionally outside the Eventually closure so that we can evaluate if the test-code
@@ -314,6 +314,6 @@ var _ = Describe("Multi-primary multi-network mesh", Ordered, Serial, func() {
 			g.Expect(sawV2).To(BeTrue(), "never saw response from helloworld v2")
 		}).WithTimeout(3 * time.Minute).WithPolling(10 * time.Second).Should(Succeed())
 
-		GinkgoWriter.Println("Cross-cluster traffic verified: saw responses from both v1 and v2")
+		Success("Cross-cluster traffic verified: saw responses from both v1 and v2")
 	}, SpecTimeout(8*time.Minute))
 })
