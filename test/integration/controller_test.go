@@ -795,7 +795,7 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 
 			It("should create Placement for the ManagedClusterSet", func() {
 				util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet)
-				placement := expectPlacement(testNs, testClusterSet)
+				placement := expectPlacement(meshName, testNs)
 				expectClusterSetOwnedLabels(placement.Labels, testNs, testClusterSet)
 				Expect(placement.Spec.ClusterSets).To(ContainElement(testClusterSet))
 			})
@@ -853,12 +853,12 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 
 			It("should not create ManagedClusterSetBindings", func() {
 				expectMeshNotReady(meshName, testNs)
-				expectNoManagedClusterSetBindings()
+				expectNoManagedClusterSetBinding()
 			})
 
 			It("should not create Placements", func() {
 				expectMeshNotReady(meshName, testNs)
-				expectNoPlacements()
+				expectNoPlacement(otherClusterSet)
 			})
 
 			It("should reconcile when the ClusterSet is created", func() {
@@ -866,7 +866,7 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 				util.CreateManagedCluster(ctx, k8sClient, clusterName, otherClusterSet)
 				util.CreateManagedClusterSet(ctx, k8sClient, otherClusterSet)
 				expectManagedClusterSetBinding(testNs, otherClusterSet)
-				expectPlacement(testNs, otherClusterSet)
+				expectPlacement(meshName, testNs)
 			})
 		})
 
@@ -1117,7 +1117,7 @@ func expectNoManagedServiceAccount(meshNamespace, meshName, clusterName string) 
 	}).Should(BeTrue())
 }
 
-func expectNoManagedClusterSetBindings() {
+func expectNoManagedClusterSetBinding() {
 	Consistently(func() []clusterv1beta2.ManagedClusterSetBinding {
 		bindingList := &clusterv1beta2.ManagedClusterSetBindingList{}
 		Expect(k8sClient.List(ctx, bindingList)).To(Succeed())
@@ -1125,10 +1125,13 @@ func expectNoManagedClusterSetBindings() {
 	}).Should(BeEmpty())
 }
 
-func expectNoPlacements() {
+func expectNoPlacement(clusterSet string) {
 	Consistently(func() []clusterv1beta1.Placement {
 		placementList := &clusterv1beta1.PlacementList{}
-		Expect(k8sClient.List(ctx, placementList)).To(Succeed())
+		Expect(k8sClient.List(ctx, placementList, client.MatchingLabels{
+			meshcontroller.ManagedByLabel:  meshcontroller.ManagedByValue,
+			meshcontroller.ClusterSetLabel: clusterSet,
+		})).To(Succeed())
 		return placementList.Items
 	}).Should(BeEmpty())
 }
@@ -1163,10 +1166,10 @@ func expectManagedClusterSetBinding(meshNamespace, clusterSet string) *clusterv1
 	return binding
 }
 
-func expectPlacement(meshNamespace, clusterSet string) *clusterv1beta1.Placement {
+func expectPlacement(meshName, meshNamespace string) *clusterv1beta1.Placement {
 	placement := &clusterv1beta1.Placement{}
 	Eventually(func() error {
-		return k8sClient.Get(ctx, key.Of(clusterSet, meshNamespace), placement)
+		return k8sClient.Get(ctx, key.Of(meshName, meshNamespace), placement)
 	}).Should(Succeed())
 	return placement
 }

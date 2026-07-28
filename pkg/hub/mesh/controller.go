@@ -45,7 +45,6 @@ import (
 const (
 	OperatorManifestWorkName   = "multicluster-mesh-operator"
 	ManifestWorkNameCacerts    = "multicluster-mesh-cacerts"
-	ManifestWorkReplicaSetName = "multicluster-mesh-mwrset"
 	ManifestWorkNameCPNSPrefix = "multicluster-mesh-cp-ns-"
 
 	FeedbackInstalledCSV = "installedCSV"
@@ -142,6 +141,7 @@ func RegisterController(mgr manager.Manager) error {
 //+kubebuilder:rbac:groups=cluster.open-cluster-management.io,resources=managedclusters,verbs=get;list;watch
 //+kubebuilder:rbac:groups=cluster.open-cluster-management.io,resources=managedclustersets,verbs=get;list;watch
 //+kubebuilder:rbac:groups=cluster.open-cluster-management.io,resources=managedclustersetbindings,verbs=get;list;create;delete
+//+kubebuilder:rbac:groups=cluster.open-cluster-management.io,resources=managedclustersets/bind,verbs=create
 //+kubebuilder:rbac:groups=cluster.open-cluster-management.io,resources=placements,verbs=get;list;create;delete
 //+kubebuilder:rbac:groups=work.open-cluster-management.io,resources=manifestworks,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=cert-manager.io,resources=certificates,verbs=get;list;watch;create;update;patch;delete
@@ -323,10 +323,6 @@ func (r *Reconciler) doReconcile(ctx context.Context, mesh *meshv1alpha1.MultiCl
 		return fmt.Errorf("failed to cleanup ManagedClusterSetBinding: %w", err)
 	}
 
-	if err := r.cleanupPlacement(ctx, mesh.Spec.ClusterSet); err != nil {
-		return fmt.Errorf("failed to cleanup Placement: %w", err)
-	}
-
 	return nil
 }
 
@@ -412,10 +408,6 @@ func (r *Reconciler) handleDeletion(ctx context.Context, mesh *meshv1alpha1.Mult
 
 	if err := r.cleanupManagedClusterSetBinding(ctx, mesh.Spec.ClusterSet); err != nil {
 		return fmt.Errorf("failed to cleanup ManagedClusterSetBinding: %w", err)
-	}
-
-	if err := r.cleanupPlacement(ctx, mesh.Spec.ClusterSet); err != nil {
-		return fmt.Errorf("failed to cleanup Placement: %w", err)
 	}
 
 	// Trigger reconciliation for other meshes targeting the same cluster set.
@@ -902,16 +894,13 @@ func meshOwnedLabels(mesh *meshv1alpha1.MultiClusterMesh, clusterName string) ma
 
 // ensureManagedClusterSetBinding creates a ManagedClusterSetBinding. It binds the mesh's ClusterSet in the mesh namespace
 func (r *Reconciler) ensureManagedClusterSetBinding(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh) error {
-	bindingList := &clusterv1beta2.ManagedClusterSetBindingList{}
-	if err := r.List(ctx, bindingList, client.MatchingLabels{
-		ManagedByLabel: ManagedByValue, MeshNamespaceLabel: mesh.Namespace, ClusterSetLabel: mesh.Spec.ClusterSet,
-	}); err != nil {
-		return fmt.Errorf("failed to list ManagedClusterSetBinding in namespace %s: %w", mesh.Namespace, err)
-	}
-
-	if len(bindingList.Items) > 0 {
-		klog.V(4).Infof("ManagedClusterSetBinding for ClusterSet %s exists", mesh.Spec.ClusterSet)
+	clusterSetBinding := &clusterv1beta2.ManagedClusterSetBinding{}
+	err := r.Get(ctx, key.Of(mesh.Spec.ClusterSet, mesh.Namespace), clusterSetBinding)
+	if err == nil {
 		return nil
+	}
+	if !apierrors.IsNotFound(err) {
+		return fmt.Errorf("failed to get ManagedClusterSetBinding: %w", err)
 	}
 
 	if err := r.Get(ctx, key.Of(mesh.Spec.ClusterSet), &clusterv1beta2.ManagedClusterSet{}); err != nil {
@@ -919,10 +908,10 @@ func (r *Reconciler) ensureManagedClusterSetBinding(ctx context.Context, mesh *m
 			klog.V(4).Infof("ManagedClusterSet %s not found", mesh.Spec.ClusterSet)
 			return nil
 		}
-		return fmt.Errorf("failed to list ManagedClusterSet: %w", err)
+		return fmt.Errorf("failed to get ManagedClusterSet: %w", err)
 	}
 
-	clusterSetBinding := &clusterv1beta2.ManagedClusterSetBinding{
+	clusterSetBinding = &clusterv1beta2.ManagedClusterSetBinding{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      mesh.Spec.ClusterSet,
 			Namespace: mesh.Namespace,
@@ -968,32 +957,21 @@ func (r *Reconciler) cleanupManagedClusterSetBinding(ctx context.Context, cluste
 
 // ensurePlacement creates a Placement referencing the mesh's ClusterSet
 func (r *Reconciler) ensurePlacement(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh) error {
-	placementList := &clusterv1beta1.PlacementList{}
-	if err := r.List(ctx, placementList, client.MatchingLabels{
-		ManagedByLabel: ManagedByValue, MeshNamespaceLabel: mesh.Namespace, ClusterSetLabel: mesh.Spec.ClusterSet,
-	}); err != nil {
-		return fmt.Errorf("failed to list Placement in namespace %s: %w", mesh.Namespace, err)
-	}
-
-	if len(placementList.Items) > 0 {
-		klog.V(4).Infof("Placement for ClusterSet %s exists", mesh.Spec.ClusterSet)
-		return nil
-	}
-
 	if err := r.Get(ctx, key.Of(mesh.Spec.ClusterSet), &clusterv1beta2.ManagedClusterSet{}); err != nil {
 		if apierrors.IsNotFound(err) {
 			klog.V(4).Infof("ManagedClusterSet %s not found", mesh.Spec.ClusterSet)
 			return nil
 		}
-		return fmt.Errorf("failed to list ManagedClusterSet: %w", err)
+		return fmt.Errorf("failed to get ManagedClusterSet: %w", err)
 	}
 
 	placement := &clusterv1beta1.Placement{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      mesh.Spec.ClusterSet,
+			Name:      mesh.Name,
 			Namespace: mesh.Namespace,
 			Labels: map[string]string{
 				ManagedByLabel:     ManagedByValue,
+				MeshNameLabel:      mesh.Name,
 				MeshNamespaceLabel: mesh.Namespace,
 				ClusterSetLabel:    mesh.Spec.ClusterSet,
 			},
@@ -1002,32 +980,18 @@ func (r *Reconciler) ensurePlacement(ctx context.Context, mesh *meshv1alpha1.Mul
 			ClusterSets: []string{mesh.Spec.ClusterSet},
 		},
 	}
-	return r.Create(ctx, placement)
-}
 
-// cleanupPlacement deletes Placement that no mesh in the given ClusterSet needs anymore
-func (r *Reconciler) cleanupPlacement(ctx context.Context, clusterSet string) error {
-	hasActiveMesh := false
-	if err := r.forEachMeshInClusterSet(ctx, clusterSet, func(_ *meshv1alpha1.MultiClusterMesh) {
-		hasActiveMesh = true
-	}); err != nil {
-		return err
+	if err := controllerutil.SetControllerReference(mesh, placement, r.Scheme); err != nil {
+		return fmt.Errorf("failed to set owner reference for placement %s:%w", placement.Name, err)
 	}
 
-	if hasActiveMesh {
+	_, err := controllerutil.CreateOrUpdate(ctx, r.Client, placement, func() error {
+		placement.Labels[ClusterSetLabel] = mesh.Spec.ClusterSet
+		placement.Spec.ClusterSets = []string{mesh.Spec.ClusterSet}
 		return nil
-	}
-
-	placementList := &clusterv1beta1.PlacementList{}
-	if err := r.List(ctx, placementList, client.MatchingLabels{ManagedByLabel: ManagedByValue, ClusterSetLabel: clusterSet}); err != nil {
-		return fmt.Errorf("failed to list Placement: %w", err)
-	}
-
-	for _, placement := range placementList.Items {
-		klog.Infof("Deleting Placement %s/%s (no mesh targets this clusterSet)", placement.Namespace, placement.Name)
-		if err := client.IgnoreNotFound(r.Delete(ctx, &placement)); err != nil {
-			return fmt.Errorf("failed to delete placement %s/%s: %w", placement.Namespace, placement.Name, err)
-		}
+	})
+	if err != nil {
+		return fmt.Errorf("failed to ensure placement %s: %w", placement.Name, err)
 	}
 	return nil
 }
