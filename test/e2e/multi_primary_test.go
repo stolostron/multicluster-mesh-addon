@@ -212,10 +212,10 @@ var _ = Describe("Multi-primary data plane", Ordered, Serial, func() {
 			})
 
 			Step("Waiting for helloworld-v1 to be ready on cluster1")
-			util.WaitForDeploymentReady(ctx, spokeClients["cluster1"], "helloworld-v1", sampleNS, 2*time.Minute)
+			util.WaitForDeploymentReady(ctx, spokeClients["cluster1"], "helloworld-v1", sampleNS)
 
 			Step("Waiting for helloworld-v2 to be ready on cluster2")
-			util.WaitForDeploymentReady(ctx, spokeClients["cluster2"], "helloworld-v2", sampleNS, 2*time.Minute)
+			util.WaitForDeploymentReady(ctx, spokeClients["cluster2"], "helloworld-v2", sampleNS)
 
 			Step("Deploying curl pod on cluster1")
 			spokeClients["cluster1"].ApplyFile(ctx, filepath.Join(testdataDir, "curl.yaml"), map[string]string{
@@ -223,7 +223,7 @@ var _ = Describe("Multi-primary data plane", Ordered, Serial, func() {
 			})
 
 			Step("Waiting for curl pod to be ready on cluster1")
-			curlPod := util.WaitForPodReady(ctx, spokeClients["cluster1"], sampleNS, map[string]string{"app": "curl"}, 2*time.Minute)
+			curlPod := util.WaitForPodReady(ctx, spokeClients["cluster1"], sampleNS, map[string]string{"app": "curl"})
 			Success("Curl pod ready: %s", curlPod)
 
 			Step("Verifying cross-cluster traffic")
