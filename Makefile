@@ -139,6 +139,8 @@ update-test-crds: deps ## Update test CRDs from OCM API, managed-serviceaccount 
 	cp -fv $$OCM_API_PATH/cluster/v1beta1/*.crd.yaml $(TEST_CRD_DIR)/ocm/ 2>/dev/null || true; \
 	cp -fv $$OCM_API_PATH/cluster/v1beta2/*.crd.yaml $(TEST_CRD_DIR)/ocm/ 2>/dev/null || true; \
 	cp -fv $$OCM_API_PATH/work/v1/*.crd.yaml $(TEST_CRD_DIR)/ocm/ 2>/dev/null || true; \
+	cp -fv $$OCM_API_PATH/work/v1alpha1/*.crd.yaml $(TEST_CRD_DIR)/ocm/ 2>/dev/null || true; \
+	cp -fv $$OCM_API_PATH/operator/v1/*.io_clustermanagers.crd.yaml $(TEST_CRD_DIR)/ocm/ 2>/dev/null || true; \
 	echo "Test CRDs updated successfully in $(TEST_CRD_DIR)/ocm/"
 	@echo "Updating test CRDs from open-cluster-management.io/managed-serviceaccount..."
 	@set -e; \

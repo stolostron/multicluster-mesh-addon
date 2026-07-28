@@ -8,6 +8,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	clusterv1 "open-cluster-management.io/api/cluster/v1"
 	clusterv1beta2 "open-cluster-management.io/api/cluster/v1beta2"
+	ocmoperatorv1 "open-cluster-management.io/api/operator/v1"
 	workv1 "open-cluster-management.io/api/work/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -62,4 +63,11 @@ func SetManifestWorkFeedback(ctx context.Context, k8sClient client.Client, workN
 		}},
 	}
 	Expect(k8sClient.Status().Update(ctx, work)).To(Succeed())
+}
+
+// CreateClusterManager creates a ClusterManager (required for enabling ManifestWorkReplicaSet)
+// simulating what the OCM/ACM operator does on a hub cluster.
+func CreateClusterManager(ctx context.Context, k8sClient client.Client) {
+	Expect(k8sClient.Create(ctx, &ocmoperatorv1.ClusterManager{
+		ObjectMeta: metav1.ObjectMeta{Name: "cluster-manager"}})).To(Succeed())
 }

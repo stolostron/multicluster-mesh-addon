@@ -101,6 +101,17 @@ rules:
 - apiGroups:
   - work.open-cluster-management.io
   resources:
+  - manifestworkreplicasets
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+- apiGroups:
+  - work.open-cluster-management.io
+  resources:
   - manifestworks
   verbs:
   - create
