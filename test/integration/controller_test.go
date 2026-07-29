@@ -852,7 +852,7 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 
 			It("should not create ManagedClusterSetBindings", func() {
 				expectMeshNotReady(meshName, testNs)
-				expectNoManagedClusterSetBinding(otherClusterSet)
+				expectNoManagedClusterSetBinding()
 			})
 
 			It("should not create Placements", func() {
@@ -1116,10 +1116,11 @@ func expectNoManagedServiceAccount(meshNamespace, meshName, clusterName string) 
 	}).Should(BeTrue())
 }
 
-func expectNoManagedClusterSetBinding(clusterSet string) {
+func expectNoManagedClusterSetBinding() {
 	Consistently(func() []clusterv1beta2.ManagedClusterSetBinding {
 		bindingList := &clusterv1beta2.ManagedClusterSetBindingList{}
-		Expect(k8sClient.List(ctx, bindingList, client.MatchingLabels{"metadata.name": clusterSet})).To(Succeed())
+		Expect(k8sClient.List(ctx, bindingList, client.MatchingLabels{
+			meshcontroller.ManagedByLabel: meshcontroller.ManagedByValue})).To(Succeed())
 		return bindingList.Items
 	}).Should(BeEmpty())
 }
@@ -1139,8 +1140,7 @@ func expectManagedClusterSetBindingDeleted(clusterSet string) {
 	Eventually(func() []clusterv1beta2.ManagedClusterSetBinding {
 		bindingList := &clusterv1beta2.ManagedClusterSetBindingList{}
 		Expect(k8sClient.List(ctx, bindingList, client.MatchingLabels{
-			meshcontroller.ManagedByLabel:  meshcontroller.ManagedByValue,
-			meshcontroller.ClusterSetLabel: clusterSet,
+			meshcontroller.ManagedByLabel: meshcontroller.ManagedByValue,
 		})).To(Succeed())
 		return bindingList.Items
 	}).Should(BeEmpty())
