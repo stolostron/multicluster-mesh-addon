@@ -890,33 +890,37 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 		})
 
 		When("two meshes target the same cluster", func() {
-			var otherNs, otherMesh string
+			var otherMesh string
 
 			BeforeEach(func() {
 				util.CreateManagedCluster(ctx, k8sClient, clusterName, testClusterSet)
 				util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet)
 				expectMeshNotReady(meshName, testNs)
 
-				otherNs = util.UniqueName("other-ns")
 				otherMesh = util.UniqueName("other-mesh")
-				util.CreateNamespace(ctx, k8sClient, otherNs)
-				util.CreateMultiClusterMesh(ctx, k8sClient, otherMesh, otherNs, testClusterSet, meshv1alpha1.MultiClusterMeshSpec{
+				util.CreateMultiClusterMesh(ctx, k8sClient, otherMesh, testNs, testClusterSet, meshv1alpha1.MultiClusterMeshSpec{
 					ControlPlane: meshv1alpha1.ControlPlaneConfig{Namespace: "istio-system-2"},
 				})
-				expectMeshNotReady(otherMesh, otherNs)
+				expectMeshNotReady(otherMesh, testNs)
 			})
 
 			It("should delete only the removed mesh's ManagedServiceAccount when one mesh is deleted", func() {
 				expectManagedServiceAccount(testNs, meshName, clusterName)
-				expectManagedServiceAccount(otherNs, otherMesh, clusterName)
+				expectManagedServiceAccount(testNs, otherMesh, clusterName)
 
 				util.DeleteResource(ctx, k8sClient, &meshv1alpha1.MultiClusterMesh{}, meshName, testNs)
 				util.ExpectResourceDeleted(ctx, k8sClient, &msav1beta1.ManagedServiceAccount{},
 					expectedManagedServiceAccountName(testNs, meshName), clusterName)
 
 				Consistently(func(g Gomega) {
-					getManagedServiceAccount(g, otherNs, otherMesh, clusterName)
+					getManagedServiceAccount(g, testNs, otherMesh, clusterName)
 				}).Should(Succeed())
+			})
+
+			It("should keep the ManagedClusterSetBinding when only one mesh is deleted", func() {
+				expectManagedClusterSetBinding(testNs, testClusterSet)
+				util.DeleteResource(ctx, k8sClient, &meshv1alpha1.MultiClusterMesh{}, meshName, testNs)
+				expectManagedClusterSetBinding(testNs, testClusterSet)
 			})
 		})
 	})
