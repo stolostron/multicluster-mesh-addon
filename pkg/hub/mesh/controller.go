@@ -313,7 +313,7 @@ func (r *Reconciler) doReconcile(ctx context.Context, mesh *meshv1alpha1.MultiCl
 
 	clusterSetExists, err := r.clusterSetExists(ctx, mesh.Spec.ClusterSet)
 	if err != nil {
-		klog.V(4).Infof("ManagedClusterSet %s not found: %s", mesh.Spec.ClusterSet, err)
+		return fmt.Errorf("failed to check ManagedClusterSet %s: %w", mesh.Spec.ClusterSet, err)
 	}
 
 	if clusterSetExists {
@@ -901,7 +901,7 @@ func meshOwnedLabels(mesh *meshv1alpha1.MultiClusterMesh, clusterName string) ma
 func (r *Reconciler) clusterSetExists(ctx context.Context, clusterSet string) (bool, error) {
 	if err := r.Get(ctx, key.Of(clusterSet), &clusterv1beta2.ManagedClusterSet{}); err != nil {
 		if apierrors.IsNotFound(err) {
-			return false, fmt.Errorf("ManagedClusterSet %s not found", clusterSet)
+			return false, nil
 		}
 		return false, fmt.Errorf("failed to get ManagedClusterSet: %w", err)
 	}
