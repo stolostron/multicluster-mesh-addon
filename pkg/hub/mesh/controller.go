@@ -27,7 +27,6 @@ import (
 	clusterv1 "open-cluster-management.io/api/cluster/v1"
 	clusterv1beta1 "open-cluster-management.io/api/cluster/v1beta1"
 	clusterv1beta2 "open-cluster-management.io/api/cluster/v1beta2"
-	ocmoperatorv1 "open-cluster-management.io/api/operator/v1"
 	workv1 "open-cluster-management.io/api/work/v1"
 	"open-cluster-management.io/sdk-go/pkg/apis/work/v1/applier"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -46,7 +45,6 @@ import (
 const (
 	OperatorManifestWorkName   = "multicluster-mesh-operator"
 	ManifestWorkNameCacerts    = "multicluster-mesh-cacerts"
-	ManifestWorkReplicaSetName = "multicluster-mesh-mwrset"
 	ManifestWorkNameCPNSPrefix = "multicluster-mesh-cp-ns-"
 
 	FeedbackInstalledCSV = "installedCSV"
@@ -137,28 +135,6 @@ func RegisterController(mgr manager.Manager) error {
 		Complete(reconciler)
 }
 
-// EnableFeatureManifestWorkReplicaSet configures the cluster-manager object on the hub cluster and enables its ManifestWorkReplicaSet feature
-func EnableFeatureManifestWorkReplicaSet(ctx context.Context, client client.Client) error {
-	cmList := &ocmoperatorv1.ClusterManagerList{}
-	if err := client.List(ctx, cmList); err != nil {
-		return fmt.Errorf("failed to list ClusterManager: %w", err)
-	}
-
-	if len(cmList.Items) == 0 {
-		return fmt.Errorf("ClusterManager Object not found")
-	}
-
-	for _, cm := range cmList.Items {
-		cm.Spec.WorkConfiguration.FeatureGates = append(cm.Spec.WorkConfiguration.FeatureGates,
-			ocmoperatorv1.FeatureGate{Feature: "ManifestWorkReplicaSet", Mode: "Enable"})
-
-		if err := client.Update(ctx, &cm); err != nil {
-			return fmt.Errorf("failed to update the ClusterManager %s: %w", cm.Name, err)
-		}
-	}
-	return nil
-}
-
 //+kubebuilder:rbac:groups=mesh.open-cluster-management.io,resources=multiclustermeshes,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=mesh.open-cluster-management.io,resources=multiclustermeshes/status,verbs=get;update;patch
 //+kubebuilder:rbac:groups=mesh.open-cluster-management.io,resources=multiclustermeshes/finalizers,verbs=update
@@ -168,7 +144,6 @@ func EnableFeatureManifestWorkReplicaSet(ctx context.Context, client client.Clie
 //+kubebuilder:rbac:groups=cluster.open-cluster-management.io,resources=managedclustersets/bind,verbs=create
 //+kubebuilder:rbac:groups=cluster.open-cluster-management.io,resources=placements,verbs=get;list;create;update;patch;delete
 //+kubebuilder:rbac:groups=work.open-cluster-management.io,resources=manifestworks,verbs=get;list;watch;create;update;patch;delete
-//+kubebuilder:rbac:groups=work.open-cluster-management.io,resources=manifestworkreplicasets,verbs=get;list;create;update;patch;delete
 //+kubebuilder:rbac:groups=cert-manager.io,resources=certificates,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=authentication.open-cluster-management.io,resources=managedserviceaccounts,verbs=get;list;watch;create;update;delete
 //+kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch

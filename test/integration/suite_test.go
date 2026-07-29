@@ -18,7 +18,6 @@ import (
 	clusterv1 "open-cluster-management.io/api/cluster/v1"
 	clusterv1beta1 "open-cluster-management.io/api/cluster/v1beta1"
 	clusterv1beta2 "open-cluster-management.io/api/cluster/v1beta2"
-	ocmoperatorv1 "open-cluster-management.io/api/operator/v1"
 	workv1 "open-cluster-management.io/api/work/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -71,7 +70,6 @@ var _ = BeforeSuite(func() {
 		clusterv1beta1.Install,
 		clusterv1beta2.Install,
 		workv1.Install,
-		ocmoperatorv1.Install,
 		operatorsv1.AddToScheme,
 		operatorsv1alpha1.AddToScheme,
 		certmanagerv1.AddToScheme,
@@ -85,8 +83,6 @@ var _ = BeforeSuite(func() {
 	ctrl.SetLogger(logr.Discard())
 
 	ctx, cancel = context.WithCancel(context.Background())
-
-	util.CreateClusterManager(ctx, k8sClient)
 
 	mgr, err := ctrl.NewManager(cfg, ctrl.Options{
 		Scheme: scheme.Scheme,

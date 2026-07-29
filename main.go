@@ -22,7 +22,6 @@ import (
 	clusterv1 "open-cluster-management.io/api/cluster/v1"
 	clusterv1beta1 "open-cluster-management.io/api/cluster/v1beta1"
 	clusterv1beta2 "open-cluster-management.io/api/cluster/v1beta2"
-	ocmoperatorv1 "open-cluster-management.io/api/operator/v1"
 	workv1 "open-cluster-management.io/api/work/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
@@ -47,7 +46,6 @@ func init() {
 	utilruntime.Must(clusterv1beta1.Install(runtimeScheme))
 	utilruntime.Must(clusterv1beta2.Install(runtimeScheme))
 	utilruntime.Must(workv1.Install(runtimeScheme))
-	utilruntime.Must(ocmoperatorv1.Install(runtimeScheme))
 	utilruntime.Must(operatorsv1.AddToScheme(runtimeScheme))
 	utilruntime.Must(operatorsv1alpha1.AddToScheme(runtimeScheme))
 	utilruntime.Must(certmanagerv1.AddToScheme(runtimeScheme))
@@ -169,12 +167,6 @@ func runController(ctx context.Context, controllerContext *controllercmd.Control
 	klog.Info("Starting manager...")
 	if err := mgr.Start(ctx); err != nil {
 		klog.Errorf("Problem running manager: %v", err)
-		return err
-	}
-
-	// Enable ManifestWorkReplicaSet feature
-	if err := meshcontroller.EnableFeatureManifestWorkReplicaSet(context.Background(), mgr.GetClient()); err != nil {
-		klog.Errorf("failed to enable ManifestWorkReplicaSet feature for hub ClusterManager: %v", err)
 		return err
 	}
 
