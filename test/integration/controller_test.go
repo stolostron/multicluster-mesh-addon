@@ -795,7 +795,9 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 			It("should create Placement for the ManagedClusterSet", func() {
 				util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet)
 				placement := expectPlacement(meshName, testNs)
-				expectClusterSetOwnedLabels(placement.Labels, testNs, testClusterSet)
+				Expect(placement.Labels[meshcontroller.ManagedByLabel]).To(Equal(meshcontroller.ManagedByValue))
+				Expect(placement.Labels[meshcontroller.MeshNameLabel]).To(Equal(meshName))
+				Expect(placement.Labels[meshcontroller.MeshNamespaceLabel]).To(Equal(testNs))
 				Expect(placement.Spec.ClusterSets).To(ContainElement(testClusterSet))
 			})
 
@@ -993,12 +995,6 @@ func expectMeshOwnedLabels(labels map[string]string, meshName, meshNamespace, cl
 	Expect(labels[meshcontroller.MeshNameLabel]).To(Equal(meshName))
 	Expect(labels[meshcontroller.MeshNamespaceLabel]).To(Equal(meshNamespace))
 	Expect(labels[meshcontroller.ClusterNameLabel]).To(Equal(clusterName))
-}
-
-func expectClusterSetOwnedLabels(labels map[string]string, meshNamespace, clusterSet string) {
-	Expect(labels[meshcontroller.ManagedByLabel]).To(Equal(meshcontroller.ManagedByValue))
-	Expect(labels[meshcontroller.MeshNamespaceLabel]).To(Equal(meshNamespace))
-	Expect(labels[meshcontroller.ClusterSetLabel]).To(Equal(clusterSet))
 }
 
 // expectAllManifestWorksDeleted makes sure ManifestWorks are deleted and none remain
