@@ -42,9 +42,11 @@ import (
 )
 
 const (
-	OperatorManifestWorkName   = "multicluster-mesh-operator"
-	ManifestWorkNameCacerts    = "multicluster-mesh-cacerts"
-	ManifestWorkNameCPNSPrefix = "multicluster-mesh-cp-ns-"
+	OperatorManifestWorkName      = "multicluster-mesh-operator"
+	ManifestWorkNameCacerts       = "multicluster-mesh-cacerts"
+	ManifestWorkReplicaSetName    = "multicluster-mesh-mwrset"
+	ManifestWorkNameRemoteSecrets = "multicluster-mesh-remote-secrets"
+	ManifestWorkNameCPNSPrefix    = "multicluster-mesh-cp-ns-"
 
 	FeedbackInstalledCSV = "installedCSV"
 
@@ -140,6 +142,7 @@ func RegisterController(mgr manager.Manager) error {
 //+kubebuilder:rbac:groups=cluster.open-cluster-management.io,resources=managedclusters,verbs=get;list;watch
 //+kubebuilder:rbac:groups=cluster.open-cluster-management.io,resources=managedclustersets,verbs=get;list;watch
 //+kubebuilder:rbac:groups=work.open-cluster-management.io,resources=manifestworks,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=work.open-cluster-management.io,resources=manifestworkreplicasets,verbs=get;list;create;update;delete
 //+kubebuilder:rbac:groups=cert-manager.io,resources=certificates,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=authentication.open-cluster-management.io,resources=managedserviceaccounts,verbs=get;list;watch;create;update;delete
 //+kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;delete
@@ -283,6 +286,10 @@ func (r *Reconciler) doReconcile(ctx context.Context, mesh *meshv1alpha1.MultiCl
 				return fmt.Errorf("failed to ensure cacerts ManifestWork for cluster %s: %w", cluster.Name, err)
 			}
 		}
+	}
+
+	if err := r.ensureRemoteSecretDistributed(ctx, mesh, clusters); err != nil {
+		return fmt.Errorf("failed to ensure remote secret distribution for mesh %s: %w", mesh.Name, err)
 	}
 
 	if mesh.Spec.Security.Trust.CertManager.IssuerRef.Name == "" {
@@ -795,6 +802,7 @@ func (r *Reconciler) ensureCacertsManifestWork(ctx context.Context, mesh *meshv1
 	secretName := getCacertsName(cluster.Name)
 	secret := &corev1.Secret{}
 	err := r.Get(ctx, key.Of(secretName, mesh.Namespace), secret)
+
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			klog.V(4).Infof("Secret %s/%s not found yet, waiting for cert-manager to create it", mesh.Namespace, secretName)

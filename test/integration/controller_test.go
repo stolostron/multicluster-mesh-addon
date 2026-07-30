@@ -5,6 +5,7 @@ package integration
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
 	"time"
 
 	certmanagerv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
@@ -1074,6 +1075,41 @@ func expectInvalidCreateMeshFailure(name, namespace string, spec meshv1alpha1.Mu
 	Expect(err).To(HaveOccurred())
 	Expect(errors.IsInvalid(err)).To(BeTrue())
 	Expect(err.Error()).To(ContainSubstring(messageSubstring))
+}
+
+func expectedRemoteSecretName(meshNamespace, meshName, clusterName string) string {
+	return fmt.Sprintf("%s-%s-%s-%s", meshNamespace, "istio-remote-secret", meshName, clusterName)
+}
+
+func expectRemoteSecrets(work *workv1.ManifestWork, meshNamespace, meshName string, clusterNames []string) {
+	Expect(work.Spec.Workload.Manifests).To(HaveLen(len(clusterNames)))
+	sort.Strings(clusterNames)
+
+	for i, clusterName := range clusterNames {
+		secret := &corev1.Secret{}
+		Expect(unmarshalManifest(work.Spec.Workload.Manifests[i], secret)).To(Succeed())
+		Expect(secret.Name).To(Equal(expectedRemoteSecretName(meshNamespace, meshName, clusterName)))
+		Expect(secret.Namespace).To(Equal("istio-system"))
+		Expect(secret.ObjectMeta.Labels).To(HaveKeyWithValue("istio/multiCluster", "true"))
+		Expect(secret.ObjectMeta.Annotations).To(HaveKeyWithValue("networking.istio.io/cluster", clusterName))
+		Expect(secret.Type).To(Equal(corev1.SecretTypeOpaque))
+		Expect(secret.Data).To(HaveKey("ca.crt"))
+		Expect(secret.Data).To(HaveKey("token"))
+	}
+}
+
+func getRemoteSecret(g Gomega, meshNamespace, meshName, clusterName string) *corev1.Secret {
+	secret := &corev1.Secret{}
+	g.Expect(k8sClient.Get(ctx, key.Of(expectedRemoteSecretName(meshNamespace, meshName, clusterName), "istio-system"), secret)).To(Succeed())
+	return secret
+}
+
+func expectRemoteSecret(meshNamespace, meshName, clusterName string) *corev1.Secret {
+	var secret *corev1.Secret
+	Eventually(func(g Gomega) {
+		secret = getRemoteSecret(g, meshNamespace, meshName, clusterName)
+	}).Should(Succeed())
+	return secret
 }
 
 func expectedManagedServiceAccountName(meshNamespace, meshName string) string {

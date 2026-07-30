@@ -10,13 +10,17 @@ import (
 	"github.com/stolostron/multicluster-mesh-addon/pkg/key"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/klog/v2"
 	clusterv1 "open-cluster-management.io/api/cluster/v1"
+	clusterv1beta1 "open-cluster-management.io/api/cluster/v1beta1"
 	workv1 "open-cluster-management.io/api/work/v1"
+	workv1alpha1 "open-cluster-management.io/api/work/v1alpha1"
 	msav1beta1 "open-cluster-management.io/managed-serviceaccount/apis/authentication/v1beta1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
 
 // ensureManagedServiceAccount applies the desired ManagedServiceAccount state for a specific cluster using mesh's TokenValidity.
@@ -108,6 +112,51 @@ func (r *Reconciler) ensureManagedServiceAccountUpdated(ctx context.Context, mes
 	}
 
 	klog.V(4).Infof("Updated ManagedServiceAccount %s/%s", existing.Namespace, existing.Name)
+	return nil
+}
+
+// ensureManifestWorkReplicaSet creates a ManifestWorkReplicaSet to distribute ManifestWork resources for clusters selected by a Placement
+func (r *Reconciler) ensureManifestWorkReplicaSet(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh) error {
+
+	// TODO: implement buildRemoteSecrets and buildManifestWorkSpec
+	workTemplate := workv1.ManifestWorkSpec{}
+
+	placement := &clusterv1beta1.Placement{}
+	if err := r.Get(ctx, key.Of(mesh.Name, mesh.Namespace), placement); err != nil {
+		if apierrors.IsNotFound(err) {
+			klog.V(4).Infof("Placement %s/%s not found", mesh.Namespace, mesh.Name)
+			return nil
+		}
+		return fmt.Errorf("failed to get Placement: %w", err)
+	}
+
+	mwrc := &workv1alpha1.ManifestWorkReplicaSet{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      ManifestWorkReplicaSetName,
+			Namespace: mesh.Namespace,
+			Labels: map[string]string{
+				ManagedByLabel:     ManagedByValue,
+				MeshNameLabel:      mesh.Name,
+				MeshNamespaceLabel: mesh.Namespace,
+			},
+		},
+		Spec: workv1alpha1.ManifestWorkReplicaSetSpec{
+			PlacementRefs: []workv1alpha1.LocalPlacementReference{
+				{Name: placement.Name},
+			},
+			ManifestWorkTemplate: workTemplate,
+		},
+	}
+
+	_, err := controllerutil.CreateOrUpdate(ctx, r.Client, mwrc, func() error {
+		mwrc.Spec.PlacementRefs = []workv1alpha1.LocalPlacementReference{{Name: placement.Name}}
+		mwrc.Spec.ManifestWorkTemplate = workTemplate
+		return nil
+	})
+
+	if err != nil {
+		return fmt.Errorf("failed to ensure ManifestWorkReplicaSet %s/%s: %w", mesh.Namespace, mwrc.Name, err)
+	}
 	return nil
 }
 
