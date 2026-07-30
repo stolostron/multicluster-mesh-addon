@@ -802,8 +802,8 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 			It("should cleanup ManagedClusterSetBinding and Placement when the ClusterSet is deleted", func() {
 				util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet)
 				util.DeleteResource(ctx, k8sClient, &clusterv1beta2.ManagedClusterSet{}, testClusterSet, "")
-				expectManagedClusterSetBindingDeleted(testClusterSet)
-				expectPlacementDeleted(testClusterSet)
+				expectManagedClusterSetBindingDeleted(testNs)
+				expectPlacementDeleted(testNs)
 			})
 
 			When("the ManagedServiceAccount exists", func() {
@@ -852,12 +852,12 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 
 			It("should not create ManagedClusterSetBindings", func() {
 				expectMeshNotReady(meshName, testNs)
-				expectNoManagedClusterSetBinding()
+				expectNoManagedClusterSetBinding(testNs)
 			})
 
 			It("should not create Placements", func() {
 				expectMeshNotReady(meshName, testNs)
-				expectNoPlacement(otherClusterSet)
+				expectNoPlacement(testNs)
 			})
 
 			It("should reconcile when the ClusterSet is created", func() {
@@ -918,9 +918,14 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 			})
 
 			It("should keep the ManagedClusterSetBinding when only one mesh is deleted", func() {
-				expectManagedClusterSetBinding(testNs, testClusterSet)
+				binding := expectManagedClusterSetBinding(testNs, testClusterSet)
+				rv := binding.ResourceVersion
 				util.DeleteResource(ctx, k8sClient, &meshv1alpha1.MultiClusterMesh{}, meshName, testNs)
-				expectManagedClusterSetBinding(testNs, testClusterSet)
+				Consistently(func(g Gomega) {
+					b := &clusterv1beta2.ManagedClusterSetBinding{}
+					g.Expect(k8sClient.Get(ctx, key.Of(testClusterSet, testNs), b)).To(Succeed())
+					g.Expect(b.ResourceVersion).To(Equal(rv))
+				}).Should(Succeed())
 			})
 		})
 	})
@@ -1120,43 +1125,34 @@ func expectNoManagedServiceAccount(meshNamespace, meshName, clusterName string) 
 	}).Should(BeTrue())
 }
 
-func expectNoManagedClusterSetBinding() {
+func expectNoManagedClusterSetBinding(namespace string) {
 	Consistently(func() []clusterv1beta2.ManagedClusterSetBinding {
 		bindingList := &clusterv1beta2.ManagedClusterSetBindingList{}
-		Expect(k8sClient.List(ctx, bindingList, client.MatchingLabels{
-			meshcontroller.ManagedByLabel: meshcontroller.ManagedByValue})).To(Succeed())
+		Expect(k8sClient.List(ctx, bindingList, client.InNamespace(namespace))).To(Succeed())
 		return bindingList.Items
 	}).Should(BeEmpty())
 }
 
-func expectNoPlacement(clusterSet string) {
+func expectNoPlacement(namespace string) {
 	Consistently(func() []clusterv1beta1.Placement {
 		placementList := &clusterv1beta1.PlacementList{}
-		Expect(k8sClient.List(ctx, placementList, client.MatchingLabels{
-			meshcontroller.ManagedByLabel:  meshcontroller.ManagedByValue,
-			meshcontroller.ClusterSetLabel: clusterSet,
-		})).To(Succeed())
+		Expect(k8sClient.List(ctx, placementList, client.InNamespace(namespace))).To(Succeed())
 		return placementList.Items
 	}).Should(BeEmpty())
 }
 
-func expectManagedClusterSetBindingDeleted(clusterSet string) {
+func expectManagedClusterSetBindingDeleted(namespace string) {
 	Eventually(func() []clusterv1beta2.ManagedClusterSetBinding {
 		bindingList := &clusterv1beta2.ManagedClusterSetBindingList{}
-		Expect(k8sClient.List(ctx, bindingList, client.MatchingLabels{
-			meshcontroller.ManagedByLabel: meshcontroller.ManagedByValue,
-		})).To(Succeed())
+		Expect(k8sClient.List(ctx, bindingList, client.InNamespace(namespace))).To(Succeed())
 		return bindingList.Items
 	}).Should(BeEmpty())
 }
 
-func expectPlacementDeleted(clusterSet string) {
+func expectPlacementDeleted(namespace string) {
 	Eventually(func() []clusterv1beta1.Placement {
 		placementList := &clusterv1beta1.PlacementList{}
-		Expect(k8sClient.List(ctx, placementList, client.MatchingLabels{
-			meshcontroller.ManagedByLabel:  meshcontroller.ManagedByValue,
-			meshcontroller.ClusterSetLabel: clusterSet,
-		})).To(Succeed())
+		Expect(k8sClient.List(ctx, placementList, client.InNamespace(namespace))).To(Succeed())
 		return placementList.Items
 	}).Should(BeEmpty())
 }
