@@ -801,13 +801,6 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 				Expect(placement.Spec.ClusterSets).To(ContainElement(testClusterSet))
 			})
 
-			It("should cleanup ManagedClusterSetBinding and Placement when the ClusterSet is deleted", func() {
-				util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet)
-				util.DeleteResource(ctx, k8sClient, &clusterv1beta2.ManagedClusterSet{}, testClusterSet, "")
-				expectManagedClusterSetBindingDeleted(testNs)
-				expectPlacementDeleted(testNs)
-			})
-
 			When("the ManagedServiceAccount exists", func() {
 				BeforeEach(func() {
 					util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet)
@@ -1142,14 +1135,6 @@ func expectManagedClusterSetBindingDeleted(namespace string) {
 		bindingList := &clusterv1beta2.ManagedClusterSetBindingList{}
 		Expect(k8sClient.List(ctx, bindingList, client.InNamespace(namespace))).To(Succeed())
 		return bindingList.Items
-	}).Should(BeEmpty())
-}
-
-func expectPlacementDeleted(namespace string) {
-	Eventually(func() []clusterv1beta1.Placement {
-		placementList := &clusterv1beta1.PlacementList{}
-		Expect(k8sClient.List(ctx, placementList, client.InNamespace(namespace))).To(Succeed())
-		return placementList.Items
 	}).Should(BeEmpty())
 }
 

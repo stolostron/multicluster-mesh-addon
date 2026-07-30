@@ -323,10 +323,6 @@ func (r *Reconciler) doReconcile(ctx context.Context, mesh *meshv1alpha1.MultiCl
 		if err := r.ensurePlacement(ctx, mesh); err != nil {
 			return fmt.Errorf("failed to ensure Placement for mesh %s binding %s: %w", mesh.Name, mesh.Spec.ClusterSet, err)
 		}
-	} else {
-		if err := r.cleanupManagedClusterSetBinding(ctx, mesh); err != nil {
-			return fmt.Errorf("failed to cleanup ManagedClusterSetBinding: %w", err)
-		}
 	}
 
 	return nil
