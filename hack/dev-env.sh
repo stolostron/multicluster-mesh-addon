@@ -2,8 +2,9 @@
 # Provisions and manages a local 3-cluster Kind/OCM development environment.
 # This file is invoked by Makefile targets with an action argument.
 #
-# Usage: hack/dev-env.sh <action>
-# Actions: create-clusters, install-olm, install-cert-manager, install-managed-serviceaccount, init-ocm, join-clusters, setup-mesh, clean
+# Usage: hack/dev-env.sh <action> [args...]
+# Actions: check-host, create-cluster <name>, install-olm <name>, install-cert-manager,
+#          install-managed-serviceaccount, init-ocm, join-clusters, setup-mesh
 
 set -euo pipefail
 
@@ -98,73 +99,67 @@ require_clusters() {
     done
 }
 
-create_clusters() {
+check_host() {
     check_inotify_limits
     check_kernel_keyring_limits
-    mkdir -p "${DEV_KUBE_DIR}"
 
-    local existing_clusters
-    existing_clusters="$(${KIND} get clusters 2>/dev/null || true)"
+    local existing
+    existing="$(${KIND} get clusters 2>/dev/null || true)"
     local found=()
     for cluster in "${HUB}" "${CLUSTER1}" "${CLUSTER2}"; do
-        if echo "${existing_clusters}" | grep -qx "${cluster}"; then
+        if echo "${existing}" | grep -qx "${cluster}"; then
             found+=("${cluster}")
         fi
     done
-
     if [[ ${#found[@]} -gt 0 ]]; then
         err "Kind clusters already exist: ${found[*]}. Run 'make dev-clean' to tear them down first."
     fi
+}
 
-    local kind_node_image="kindest/node:${K8S_VERSION}"
+create_cluster() {
+    local cluster="${1}"
+    mkdir -p "${DEV_KUBE_DIR}"
 
-    for cluster in "${HUB}" "${CLUSTER1}" "${CLUSTER2}"; do
-        log "Creating Kind cluster: ${cluster}"
-        on "${cluster}" "${KIND}" create cluster \
-            --name "${cluster}" \
-            --image "${kind_node_image}" \
-            --wait 120s
+    log "Creating Kind cluster: ${cluster}"
+    on "${cluster}" "${KIND}" create cluster \
+        --name "${cluster}" \
+        --image "kindest/node:${K8S_VERSION}" \
+        --wait 120s
 
-        log "Waiting for cluster ${cluster} API to be ready..."
-        on "${cluster}" kubectl wait --for=condition=Ready nodes --all --timeout=120s
-    done
-
-    log "All clusters created successfully"
-    ${KIND} get clusters
+    log "Waiting for cluster ${cluster} API to be ready..."
+    on "${cluster}" kubectl wait --for=condition=Ready nodes --all --timeout=120s
+    log "Cluster ${cluster} ready"
 }
 
 install_olm() {
-    require_clusters "${CLUSTER1}" "${CLUSTER2}"
+    local cluster="${1}"
+    require_clusters "${cluster}"
     local olm_base_url="https://github.com/operator-framework/operator-lifecycle-manager/releases/download/${OLM_VERSION}"
 
-    for cluster in "${CLUSTER1}" "${CLUSTER2}"; do
-        if on "${cluster}" kubectl get deployment olm-operator -n olm &>/dev/null; then
-            log "OLM already installed on ${cluster}, skipping"
-            continue
-        fi
+    if on "${cluster}" kubectl get deployment olm-operator -n olm &>/dev/null; then
+        log "OLM already installed on ${cluster}, skipping"
+        return
+    fi
 
-        log "Installing OLM ${OLM_VERSION} on ${cluster}..."
+    log "Installing OLM ${OLM_VERSION} on ${cluster}..."
 
-        on "${cluster}" kubectl apply --server-side -f "${olm_base_url}/crds.yaml"
-        on "${cluster}" retry kubectl wait --for=condition=Established \
-            crd/catalogsources.operators.coreos.com \
-            crd/subscriptions.operators.coreos.com \
-            --timeout=60s
+    on "${cluster}" kubectl apply --server-side -f "${olm_base_url}/crds.yaml"
+    on "${cluster}" retry kubectl wait --for=condition=Established \
+        crd/catalogsources.operators.coreos.com \
+        crd/subscriptions.operators.coreos.com \
+        --timeout=60s
 
-        log "Applying OLM components on ${cluster}..."
-        on "${cluster}" kubectl apply -f "${olm_base_url}/olm.yaml"
+    log "Applying OLM components on ${cluster}..."
+    on "${cluster}" kubectl apply -f "${olm_base_url}/olm.yaml"
 
-        log "Waiting for OLM components to be ready on ${cluster}..."
-        on "${cluster}" kubectl rollout status deployment/olm-operator -n olm --timeout=180s
-        on "${cluster}" kubectl rollout status deployment/catalog-operator -n olm --timeout=180s
+    log "Waiting for OLM components to be ready on ${cluster}..."
+    on "${cluster}" kubectl rollout status deployment/olm-operator -n olm --timeout=180s
+    on "${cluster}" kubectl rollout status deployment/catalog-operator -n olm --timeout=180s
 
-        log "OLM ${OLM_VERSION} installed on ${cluster}"
-    done
+    log "Granting klusterlet-work-sa OLM permissions on ${cluster}"
+    on "${cluster}" kubectl apply -f "${SCRIPT_DIR}/hack/kind/klusterlet-work-olm.yaml"
 
-    for cluster in "${CLUSTER1}" "${CLUSTER2}"; do
-        log "Granting klusterlet-work-sa OLM permissions on ${cluster}"
-        on "${cluster}" kubectl apply -f "${SCRIPT_DIR}/hack/kind/klusterlet-work-olm.yaml"
-    done
+    log "OLM ${OLM_VERSION} installed on ${cluster}"
 }
 
 install_cert_manager() {
@@ -311,31 +306,16 @@ setup_mesh() {
     log "Monitor progress: $(on "${HUB}" echo kubectl get multiclustermesh -n mesh-system)"
 }
 
-clean() {
-    log "Deleting Kind clusters..."
-    for cluster in "${HUB}" "${CLUSTER1}" "${CLUSTER2}"; do
-        if ${KIND} get clusters 2>/dev/null | grep -qx "${cluster}"; then
-            log "Deleting cluster: ${cluster}"
-            ${KIND} delete cluster --name "${cluster}" || true
-        fi
-    done
-
-    log "Removing dev environment state..."
-    rm -rf "${DEV_KUBE_DIR}"
-
-    log "Clean complete"
-}
-
 ACTION="${1:-}"
 case "${ACTION}" in
-    create-clusters)                 create_clusters ;;
-    install-olm)                     install_olm ;;
+    check-host)                      check_host ;;
+    create-cluster)                  create_cluster "${2}" ;;
+    install-olm)                     install_olm "${2}" ;;
     install-cert-manager)            install_cert_manager ;;
     install-managed-serviceaccount)  install_managed_serviceaccount ;;
     init-ocm)                        init_ocm ;;
     join-clusters)                   join_clusters ;;
     setup-mesh)                      setup_mesh ;;
-    clean)                           clean ;;
     *)
-        err "Unknown action: '${ACTION}'. Valid: create-clusters, install-olm, install-cert-manager, install-managed-serviceaccount, init-ocm, join-clusters, setup-mesh, clean" ;;
+        err "Unknown action: '${ACTION}'. Valid: check-host, create-cluster, install-olm, install-cert-manager, install-managed-serviceaccount, init-ocm, join-clusters, setup-mesh" ;;
 esac

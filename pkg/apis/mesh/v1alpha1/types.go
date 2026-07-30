@@ -93,9 +93,12 @@ type MultiClusterMeshSpec struct {
 
 // ControlPlaneConfig defines where the mesh control plane will be installed
 type ControlPlaneConfig struct {
-	// Namespace is the namespace where Istio will be installed on each cluster
+	// Namespace is the namespace where Istio will be installed on each cluster.
+	// This namespace is created and deleted by the addon as part of the mesh lifecycle.
 	// +optional
 	// +kubebuilder:default="istio-system"
+	// +kubebuilder:validation:MaxLength=63
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="spec.controlPlane.namespace is immutable"
 	Namespace string `json:"namespace,omitempty"`
 }
 
@@ -107,9 +110,14 @@ type OperatorConfig struct {
 	// +kubebuilder:default="servicemeshoperator3"
 	Name string `json:"name,omitempty"`
 
-	// Namespace is the namespace where the operator will be installed
+	// Namespace is the namespace where the operator will be installed.
+	// This namespace may be deleted when the mesh is removed, so avoid
+	// using a namespace that contains other resources.
 	// +optional
-	// +kubebuilder:default="openshift-operators"
+	// +kubebuilder:default="multicluster-mesh-operator"
+	// +kubebuilder:validation:XValidation:rule="!self.startsWith('openshift-')",message="namespace must not use the reserved 'openshift-' prefix"
+	// +kubebuilder:validation:XValidation:rule="!self.startsWith('kube-')",message="namespace must not use the reserved 'kube-' prefix"
+	// +kubebuilder:validation:XValidation:rule="self != 'default'",message="namespace must not be 'default'"
 	Namespace string `json:"namespace,omitempty"`
 
 	// Channel is the OLM subscription channel (e.g., "stable", "1.23")
