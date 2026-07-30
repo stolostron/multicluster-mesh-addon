@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"maps"
-	"sort"
 
 	meshv1alpha1 "github.com/stolostron/multicluster-mesh-addon/pkg/apis/mesh/v1alpha1"
 	"github.com/stolostron/multicluster-mesh-addon/pkg/key"
@@ -117,85 +116,45 @@ func (r *Reconciler) ensureManagedServiceAccountUpdated(ctx context.Context, mes
 
 // ensureManifestWorkReplicaSet creates a ManifestWorkReplicaSet to distribute ManifestWork resources for clusters selected by a Placement
 func (r *Reconciler) ensureManifestWorkReplicaSet(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh) error {
-
-	// TODO: implement buildRemoteSecrets and buildManifestWorkSpec
-	workTemplate := workv1.ManifestWorkSpec{}
-
 	placement := &clusterv1beta1.Placement{}
 	if err := r.Get(ctx, key.Of(mesh.Name, mesh.Namespace), placement); err != nil {
 		if apierrors.IsNotFound(err) {
-			klog.V(4).Infof("Placement %s/%s not found", mesh.Namespace, mesh.Name)
-			return nil
+			return fmt.Errorf("Placement %s/%s not found: %w", mesh.Namespace, mesh.Name, err)
 		}
 		return fmt.Errorf("failed to get Placement: %w", err)
 	}
 
-	mwrc := &workv1alpha1.ManifestWorkReplicaSet{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      ManifestWorkReplicaSetName,
-			Namespace: mesh.Namespace,
-			Labels: map[string]string{
-				ManagedByLabel:     ManagedByValue,
-				MeshNameLabel:      mesh.Name,
-				MeshNamespaceLabel: mesh.Namespace,
-			},
-		},
-		Spec: workv1alpha1.ManifestWorkReplicaSetSpec{
-			PlacementRefs: []workv1alpha1.LocalPlacementReference{
-				{Name: placement.Name},
-			},
-			ManifestWorkTemplate: workTemplate,
-		},
+	workTemplate, err := r.buildManifestWorkSpec(ctx, mesh)
+	if err != nil {
+		return fmt.Errorf("failed to build ManifestWorkSpec Template: %w", err)
 	}
 
-	_, err := controllerutil.CreateOrUpdate(ctx, r.Client, mwrc, func() error {
-		mwrc.Spec.PlacementRefs = []workv1alpha1.LocalPlacementReference{{Name: placement.Name}}
-		mwrc.Spec.ManifestWorkTemplate = workTemplate
-		return nil
+	mwrs := &workv1alpha1.ManifestWorkReplicaSet{
+		ObjectMeta: metav1.ObjectMeta{Name: ManifestWorkReplicaSetName, Namespace: mesh.Namespace},
+	}
+
+	_, err = controllerutil.CreateOrUpdate(ctx, r.Client, mwrs, func() error {
+		if mwrs.Labels == nil {
+			mwrs.Labels = make(map[string]string)
+		}
+		mwrs.Labels[ManagedByLabel] = ManagedByValue
+		mwrs.Labels[MeshNameLabel] = mesh.Name
+		mwrs.Labels[MeshNamespaceLabel] = mesh.Namespace
+		mwrs.Spec.PlacementRefs = []workv1alpha1.LocalPlacementReference{{Name: placement.Name}}
+		mwrs.Spec.ManifestWorkTemplate = *workTemplate
+		return controllerutil.SetControllerReference(mesh, mwrs, r.Scheme)
 	})
 
 	if err != nil {
-		return fmt.Errorf("failed to ensure ManifestWorkReplicaSet %s/%s: %w", mesh.Namespace, mwrc.Name, err)
+		return fmt.Errorf("failed to ensure ManifestWorkReplicaSet %s/%s: %w", mesh.Namespace, mwrs.Name, err)
 	}
-	return nil
-}
-
-// The ManagedServiceAccount controller generates an access secret with the name of the ManagedServiceAccount.
-// ensureRemoteSecretDistributed creates a ManifestWork to distribute the access secrets.
-func (r *Reconciler) ensureRemoteSecretDistributed(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, clusters []clusterv1.ManagedCluster) error {
-	msaSecretName := fmt.Sprintf("%s-%s-%s", mesh.Namespace, "istio-reader", mesh.Name)
-	msaSecrets := make(map[string]*corev1.Secret) // secret name to secret
-
-	for _, cluster := range clusters {
-		msaSecret := &corev1.Secret{}
-		err := r.Get(ctx, key.Of(msaSecretName, cluster.Name), msaSecret)
-		if err != nil {
-			if errors.IsNotFound(err) {
-				klog.V(4).Infof("ManagedServiceAccount secret %s/%s not found yet, waiting for its controller to create it", cluster.Name, msaSecretName)
-			}
-			msaSecret = nil
-		}
-
-		if msaSecret != nil {
-			remoteSecret := buildMeshRemoteSecret(mesh, &cluster, msaSecret)
-			msaSecrets[remoteSecret.Name] = remoteSecret
-		}
-	}
-
-	for _, cluster := range clusters {
-		_, err := r.workApplier.Apply(ctx, r.buildRemoteSecretManifestWork(mesh, &cluster, msaSecrets))
-		if err != nil {
-			return fmt.Errorf("failed to apply remote secret ManifestWork for cluster %s: %w", cluster.Name, err)
-		}
-	}
-
 	return nil
 }
 
 // buildMeshRemoteSecret builds a remote API server access secret.
-// The secret includes required label and annotation for Istio remote endpoint discovery and data from the ManageServiceAccount secret.
+// The secret includes required label and annotation for Istio remote endpoint discovery and data from a ManageServiceAccount secret.
 func buildMeshRemoteSecret(mesh *meshv1alpha1.MultiClusterMesh, cluster *clusterv1.ManagedCluster, msaSecret *corev1.Secret) *corev1.Secret {
-	istioRemoteSecretName := fmt.Sprintf("%s-%s-%s-%s", mesh.Namespace, "istio-remote-secret", mesh.Name, cluster.Name)
+	istioRemoteSecretName := fmt.Sprintf("%s-%s-%s-%s", mesh.Namespace, mesh.Name, "istio-remote-secret", cluster.Name)
 	istioRemoteSecretLabels := meshOwnedLabels(mesh, cluster.Name)
 	istioRemoteSecretLabels["istio/multiCluster"] = "true"
 
@@ -217,33 +176,31 @@ func buildMeshRemoteSecret(mesh *meshv1alpha1.MultiClusterMesh, cluster *cluster
 	}
 }
 
-// buildRemoteSecretManifestWork builds a ManifestWork using remote access secrets from other clusters.
-func (r *Reconciler) buildRemoteSecretManifestWork(mesh *meshv1alpha1.MultiClusterMesh, cluster *clusterv1.ManagedCluster, remoteSecrets map[string]*corev1.Secret) *workv1.ManifestWork {
-	names := make([]string, 0, len(remoteSecrets))
-	for name := range remoteSecrets {
-		names = append(names, name)
+func (r *Reconciler) buildManifestWorkSpec(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh) (*workv1.ManifestWorkSpec, error) {
+	msaName := fmt.Sprintf("%s-%s-%s", mesh.Namespace, "istio-reader", mesh.Name)
+	clusters, err := r.getClustersFromSet(ctx, mesh.Spec.ClusterSet)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get clusters from set %s: %w", mesh.Spec.ClusterSet, err)
 	}
-	sort.Strings(names)
 
 	manifests := []workv1.Manifest{}
-	for _, name := range names {
+	for _, cluster := range clusters {
+		msaSecret := &corev1.Secret{}
+		if err := r.Get(ctx, key.Of(msaName, cluster.Name), msaSecret); err != nil {
+			if apierrors.IsNotFound(err) {
+				return nil, fmt.Errorf("MSA Secret %s/%s not found: %w", cluster.Name, msaName, err)
+			}
+			return nil, fmt.Errorf("failed to get MSA Secret: %w", err)
+		}
+
+		remoteSecret := buildMeshRemoteSecret(mesh, &cluster, msaSecret)
+
 		manifests = append(manifests, workv1.Manifest{
-			RawExtension: runtime.RawExtension{Object: remoteSecrets[name]},
+			RawExtension: runtime.RawExtension{Object: remoteSecret},
 		})
 	}
 
-	return &workv1.ManifestWork{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      ManifestWorkNameRemoteSecrets,
-			Namespace: cluster.Name,
-			Labels:    meshOwnedLabels(mesh, cluster.Name),
-		},
-		Spec: workv1.ManifestWorkSpec{
-			Workload: workv1.ManifestsTemplate{
-				Manifests: manifests,
-			},
-		},
-	}
+	return &workv1.ManifestWorkSpec{Workload: workv1.ManifestsTemplate{Manifests: manifests}}, nil
 }
 
 // cleanupRemoteSecrets deletes Istio remote access secrets when the cluster(s) are removed from the given mesh's ClusterSet.

@@ -45,7 +45,6 @@ const (
 	OperatorManifestWorkName      = "multicluster-mesh-operator"
 	ManifestWorkNameCacerts       = "multicluster-mesh-cacerts"
 	ManifestWorkReplicaSetName    = "multicluster-mesh-mwrset"
-	ManifestWorkNameRemoteSecrets = "multicluster-mesh-remote-secrets"
 	ManifestWorkNameCPNSPrefix    = "multicluster-mesh-cp-ns-"
 
 	FeedbackInstalledCSV = "installedCSV"
@@ -288,10 +287,6 @@ func (r *Reconciler) doReconcile(ctx context.Context, mesh *meshv1alpha1.MultiCl
 		}
 	}
 
-	if err := r.ensureRemoteSecretDistributed(ctx, mesh, clusters); err != nil {
-		return fmt.Errorf("failed to ensure remote secret distribution for mesh %s: %w", mesh.Name, err)
-	}
-
 	if mesh.Spec.Security.Trust.CertManager.IssuerRef.Name == "" {
 		if err := r.deleteAllCertificates(ctx, mesh); err != nil {
 			return fmt.Errorf("failed to cleanup Certificates: %w", err)
@@ -312,6 +307,10 @@ func (r *Reconciler) doReconcile(ctx context.Context, mesh *meshv1alpha1.MultiCl
 
 	if err := r.cleanupManagedServiceAccounts(ctx, mesh, clusters); err != nil {
 		return fmt.Errorf("failed to cleanup ManagedServiceAccounts: %w", err)
+	}
+
+	if err := r.ensureManifestWorkReplicaSet(ctx, mesh); err != nil {
+		return fmt.Errorf("failed to ensure ManifestWorkReplicaSet for mesh %s: %w", mesh.Name, err)
 	}
 
 	if err := r.cleanupRemoteSecrets(ctx, mesh, clusters); err != nil {
