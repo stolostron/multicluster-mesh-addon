@@ -8,7 +8,6 @@ import (
 	meshv1alpha1 "github.com/stolostron/multicluster-mesh-addon/pkg/apis/mesh/v1alpha1"
 	"github.com/stolostron/multicluster-mesh-addon/pkg/key"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -28,7 +27,7 @@ func (r *Reconciler) ensureManagedServiceAccount(ctx context.Context, mesh *mesh
 	existing := &msav1beta1.ManagedServiceAccount{}
 	if err := r.Get(ctx, key.Of(msaName, cluster.Name), existing); err == nil {
 		return r.ensureManagedServiceAccountUpdated(ctx, mesh, existing)
-	} else if !errors.IsNotFound(err) {
+	} else if !apierrors.IsNotFound(err) {
 		return fmt.Errorf("failed to get ManagedServiceAccount %s/%s: %w", cluster.Name, msaName, err)
 	}
 
@@ -193,8 +192,8 @@ func (r *Reconciler) buildManifestWorkSpec(ctx context.Context, mesh *meshv1alph
 	}
 
 	manifests := []workv1.Manifest{}
-	msaSecret := &corev1.Secret{}
 	for _, cluster := range clusters {
+		msaSecret := &corev1.Secret{}
 		if err := r.Get(ctx, key.Of(msaName, cluster.Name), msaSecret); err != nil {
 			if apierrors.IsNotFound(err) {
 				klog.V(4).Infof("ManagedServiceAccount Secret %s/%s not found yet, waiting for ManagedServiceAccount to create it", cluster.Name, msaName)
@@ -202,13 +201,10 @@ func (r *Reconciler) buildManifestWorkSpec(ctx context.Context, mesh *meshv1alph
 			}
 			return nil, fmt.Errorf("failed to get ManagedServiceAccount Secret %s/%s: %w", cluster.Name, msaName, err)
 		}
-
-		if msaSecret != nil {
-			remoteSecret := buildMeshRemoteSecret(mesh, &cluster, msaSecret)
-			manifests = append(manifests, workv1.Manifest{
-				RawExtension: runtime.RawExtension{Object: remoteSecret},
-			})
-		}
+		remoteSecret := buildMeshRemoteSecret(mesh, &cluster, msaSecret)
+		manifests = append(manifests, workv1.Manifest{
+			RawExtension: runtime.RawExtension{Object: remoteSecret},
+		})
 	}
 
 	return &workv1.ManifestWorkSpec{Workload: workv1.ManifestsTemplate{Manifests: manifests}}, nil
