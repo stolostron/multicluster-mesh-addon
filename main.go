@@ -22,6 +22,7 @@ import (
 	clusterv1 "open-cluster-management.io/api/cluster/v1"
 	clusterv1beta2 "open-cluster-management.io/api/cluster/v1beta2"
 	workv1 "open-cluster-management.io/api/work/v1"
+	workv1alpha1 "open-cluster-management.io/api/work/v1alpha1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
@@ -44,6 +45,7 @@ func init() {
 	utilruntime.Must(clusterv1.Install(runtimeScheme))
 	utilruntime.Must(clusterv1beta2.Install(runtimeScheme))
 	utilruntime.Must(workv1.Install(runtimeScheme))
+	utilruntime.Must(workv1alpha1.Install(runtimeScheme))
 	utilruntime.Must(operatorsv1.AddToScheme(runtimeScheme))
 	utilruntime.Must(operatorsv1alpha1.AddToScheme(runtimeScheme))
 	utilruntime.Must(certmanagerv1.AddToScheme(runtimeScheme))

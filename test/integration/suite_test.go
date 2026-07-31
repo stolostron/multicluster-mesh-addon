@@ -18,6 +18,7 @@ import (
 	clusterv1 "open-cluster-management.io/api/cluster/v1"
 	clusterv1beta2 "open-cluster-management.io/api/cluster/v1beta2"
 	workv1 "open-cluster-management.io/api/work/v1"
+	workv1alpha1 "open-cluster-management.io/api/work/v1alpha1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
@@ -68,6 +69,7 @@ var _ = BeforeSuite(func() {
 		clusterv1.Install,
 		clusterv1beta2.Install,
 		workv1.Install,
+		workv1alpha1.Install,
 		operatorsv1.AddToScheme,
 		operatorsv1alpha1.AddToScheme,
 		certmanagerv1.AddToScheme,

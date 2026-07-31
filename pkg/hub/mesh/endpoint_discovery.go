@@ -116,12 +116,18 @@ func (r *Reconciler) ensureManagedServiceAccountUpdated(ctx context.Context, mes
 
 // ensureManifestWorkReplicaSet creates a ManifestWorkReplicaSet to distribute remote access secrets for clusters selected by a Placement
 func (r *Reconciler) ensureManifestWorkReplicaSet(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh) error {
-	placement := &clusterv1beta1.Placement{}
+	mwrsetName := fmt.Sprintf("%s-%s-%s", mesh.Namespace, ManifestWorkReplicaSetName, mesh.Name)
+
+	// TODO: update placement part after PR 221 is merged. This is a placeholder placement
+	placement := &clusterv1beta1.Placement{
+		ObjectMeta: metav1.ObjectMeta{Name: mesh.Name, Namespace: mesh.Namespace},
+	}
+	// TODO: update return error after PR 221 is merged.
 	if err := r.Get(ctx, key.Of(mesh.Name, mesh.Namespace), placement); err != nil {
 		if apierrors.IsNotFound(err) {
-			return fmt.Errorf("Placement %s/%s not found: %w", mesh.Namespace, mesh.Name, err)
+			klog.V(4).Infof("Placement %s/%s not found: %s", mesh.Namespace, mesh.Name, err)
 		}
-		return fmt.Errorf("failed to get Placement: %w", err)
+		klog.V(4).Infof("failed to get Placement: %s", err)
 	}
 
 	workTemplate, err := r.buildManifestWorkSpec(ctx, mesh)
@@ -129,25 +135,27 @@ func (r *Reconciler) ensureManifestWorkReplicaSet(ctx context.Context, mesh *mes
 		return fmt.Errorf("failed to build ManifestWorkSpec Template: %w", err)
 	}
 
-	mwrs := &workv1alpha1.ManifestWorkReplicaSet{
-		ObjectMeta: metav1.ObjectMeta{Name: ManifestWorkReplicaSetName, Namespace: mesh.Namespace},
+	mwrset := &workv1alpha1.ManifestWorkReplicaSet{
+		ObjectMeta: metav1.ObjectMeta{Name: mwrsetName, Namespace: mesh.Namespace},
 	}
 
-	_, err = controllerutil.CreateOrUpdate(ctx, r.Client, mwrs, func() error {
-		if mwrs.Labels == nil {
-			mwrs.Labels = make(map[string]string)
+	_, err = controllerutil.CreateOrUpdate(ctx, r.Client, mwrset, func() error {
+		if mwrset.Labels == nil {
+			mwrset.Labels = make(map[string]string)
 		}
-		mwrs.Labels[ManagedByLabel] = ManagedByValue
-		mwrs.Labels[MeshNameLabel] = mesh.Name
-		mwrs.Labels[MeshNamespaceLabel] = mesh.Namespace
-		mwrs.Spec.PlacementRefs = []workv1alpha1.LocalPlacementReference{{Name: placement.Name}}
-		mwrs.Spec.ManifestWorkTemplate = *workTemplate
-		return controllerutil.SetControllerReference(mesh, mwrs, r.Scheme)
+		mwrset.Labels[ManagedByLabel] = ManagedByValue
+		mwrset.Labels[MeshNameLabel] = mesh.Name
+		mwrset.Labels[MeshNamespaceLabel] = mesh.Namespace
+		mwrset.Spec.PlacementRefs = []workv1alpha1.LocalPlacementReference{{Name: placement.Name}}
+		mwrset.Spec.ManifestWorkTemplate = *workTemplate
+		return controllerutil.SetControllerReference(mesh, mwrset, r.Scheme)
 	})
 
 	if err != nil {
-		return fmt.Errorf("failed to ensure ManifestWorkReplicaSet %s/%s: %w", mesh.Namespace, mwrs.Name, err)
+		return fmt.Errorf("failed to ensure ManifestWorkReplicaSet %s/%s: %w", mesh.Namespace, mwrset.Name, err)
 	}
+
+	klog.Infof("Successfully created a ManifestWorkReplicaSet %s/%s", mesh.Namespace, mwrsetName)
 	return nil
 }
 
@@ -185,21 +193,22 @@ func (r *Reconciler) buildManifestWorkSpec(ctx context.Context, mesh *meshv1alph
 	}
 
 	manifests := []workv1.Manifest{}
+	msaSecret := &corev1.Secret{}
 	for _, cluster := range clusters {
-		msaSecret := &corev1.Secret{}
 		if err := r.Get(ctx, key.Of(msaName, cluster.Name), msaSecret); err != nil {
 			if apierrors.IsNotFound(err) {
 				klog.V(4).Infof("ManagedServiceAccount Secret %s/%s not found yet, waiting for ManagedServiceAccount to create it", cluster.Name, msaName)
-				return nil, nil
+				continue
 			}
-			return nil, fmt.Errorf("failed to get ManagedServiceAccount Secret: %w", err)
+			return nil, fmt.Errorf("failed to get ManagedServiceAccount Secret %s/%s: %w", cluster.Name, msaName, err)
 		}
 
-		remoteSecret := buildMeshRemoteSecret(mesh, &cluster, msaSecret)
-
-		manifests = append(manifests, workv1.Manifest{
-			RawExtension: runtime.RawExtension{Object: remoteSecret},
-		})
+		if msaSecret != nil {
+			remoteSecret := buildMeshRemoteSecret(mesh, &cluster, msaSecret)
+			manifests = append(manifests, workv1.Manifest{
+				RawExtension: runtime.RawExtension{Object: remoteSecret},
+			})
+		}
 	}
 
 	return &workv1.ManifestWorkSpec{Workload: workv1.ManifestsTemplate{Manifests: manifests}}, nil
