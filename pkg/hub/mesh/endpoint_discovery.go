@@ -114,7 +114,7 @@ func (r *Reconciler) ensureManagedServiceAccountUpdated(ctx context.Context, mes
 	return nil
 }
 
-// ensureManifestWorkReplicaSet creates a ManifestWorkReplicaSet to distribute ManifestWork resources for clusters selected by a Placement
+// ensureManifestWorkReplicaSet creates a ManifestWorkReplicaSet to distribute remote access secrets for clusters selected by a Placement
 func (r *Reconciler) ensureManifestWorkReplicaSet(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh) error {
 	placement := &clusterv1beta1.Placement{}
 	if err := r.Get(ctx, key.Of(mesh.Name, mesh.Namespace), placement); err != nil {
@@ -170,6 +170,7 @@ func buildMeshRemoteSecret(mesh *meshv1alpha1.MultiClusterMesh, cluster *cluster
 			Annotations: map[string]string{
 				"networking.istio.io/cluster": cluster.Name,
 			},
+			OwnerReferences: msaSecret.OwnerReferences,
 		},
 		Type: corev1.SecretTypeOpaque,
 		Data: msaSecret.Data,
@@ -188,9 +189,10 @@ func (r *Reconciler) buildManifestWorkSpec(ctx context.Context, mesh *meshv1alph
 		msaSecret := &corev1.Secret{}
 		if err := r.Get(ctx, key.Of(msaName, cluster.Name), msaSecret); err != nil {
 			if apierrors.IsNotFound(err) {
-				return nil, fmt.Errorf("MSA Secret %s/%s not found: %w", cluster.Name, msaName, err)
+				klog.V(4).Infof("ManagedServiceAccount Secret %s/%s not found yet, waiting for ManagedServiceAccount to create it", cluster.Name, msaName)
+				return nil, nil
 			}
-			return nil, fmt.Errorf("failed to get MSA Secret: %w", err)
+			return nil, fmt.Errorf("failed to get ManagedServiceAccount Secret: %w", err)
 		}
 
 		remoteSecret := buildMeshRemoteSecret(mesh, &cluster, msaSecret)
@@ -203,36 +205,12 @@ func (r *Reconciler) buildManifestWorkSpec(ctx context.Context, mesh *meshv1alph
 	return &workv1.ManifestWorkSpec{Workload: workv1.ManifestsTemplate{Manifests: manifests}}, nil
 }
 
-// cleanupRemoteSecrets deletes Istio remote access secrets when the cluster(s) are removed from the given mesh's ClusterSet.
-func (r *Reconciler) cleanupRemoteSecrets(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, clusters []clusterv1.ManagedCluster) error {
-	clusterNames := clusterNameSet(clusters)
-	secretList := &corev1.SecretList{}
-	if err := r.List(ctx, secretList, client.InNamespace(mesh.Namespace), client.MatchingLabels{
-		"networking.istio.io/cluster": "true", MeshNameLabel: mesh.Name, MeshNamespaceLabel: mesh.Namespace,
-	}); err != nil {
-		return fmt.Errorf("failed to list Istio remote secrets managed by mesh %s: %w", mesh.Name, err)
-	}
-
-	for _, secret := range secretList.Items {
-		clusterName := secret.Labels[ClusterNameLabel]
-		if clusterNames[clusterName] {
-			continue
-		}
-
-		klog.Infof("Deleting Istio remote secret %s/%s (cluster %s no longer in ClusterSet %s)", secret.Namespace, secret.Name, clusterName, mesh.Spec.ClusterSet)
-		if err := client.IgnoreNotFound(r.Delete(ctx, &secret)); err != nil {
-			return fmt.Errorf("failed to delete Istio remote secret %s/%s: %w", secret.Namespace, secret.Name, err)
-		}
-	}
-
-	return nil
-}
-
 // deleteAllRemoteSecrets deletes all Istio remote access secrets managed by a mesh.
 func (r *Reconciler) deleteAllRemoteSecrets(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh) error {
 	secretList := &corev1.SecretList{}
 	if err := r.List(ctx, secretList, client.MatchingLabels{
 		"networking.istio.io/cluster": "true",
+		ManagedByLabel:                ManagedByValue,
 		MeshNameLabel:                 mesh.Name,
 		MeshNamespaceLabel:            mesh.Namespace,
 	}); err != nil {
