@@ -2,7 +2,6 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: helloworld-{{.Version}}
-  namespace: {{.Namespace}}
   labels:
     app: helloworld
     version: "{{.Version}}"

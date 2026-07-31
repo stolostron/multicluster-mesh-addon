@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
+	"text/template"
 
 	. "github.com/onsi/gomega"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -71,6 +73,20 @@ func (c *E2EClient) runKubectl(ctx context.Context, path string, vars map[string
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	Expect(cmd.Run()).To(Succeed(), "kubectl %s failed for %s: %s", args[0], path, strings.TrimSpace(stderr.String()))
+}
+
+func renderYAML(path string, vars map[string]string) []byte {
+	data, err := os.ReadFile(path)
+	Expect(err).NotTo(HaveOccurred(), "failed to read YAML file %s", path)
+
+	if len(vars) == 0 {
+		return data
+	}
+	tmpl, err := template.New("manifest").Parse(string(data))
+	Expect(err).NotTo(HaveOccurred(), "failed to parse template %s", path)
+	var buf bytes.Buffer
+	Expect(tmpl.Execute(&buf, vars)).To(Succeed(), "failed to execute template %s", path)
+	return buf.Bytes()
 }
 
 func (c *E2EClient) Exec(ctx context.Context, namespace, podName, container string, command []string) (string, error) {

@@ -3,6 +3,7 @@
 package e2e
 
 import (
+	"context"
 	"fmt"
 	"path/filepath"
 	"runtime"
@@ -11,6 +12,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -39,8 +41,6 @@ var _ = Describe("Multi-primary data plane", Ordered, Serial, func() {
 		meshName    = "multi-primary-mesh"
 		clusterSet  = "mesh-cluster-set"
 		cpNamespace = "istio-system"
-		meshID      = "multi-primary-mesh"
-		trustDomain = "cluster.local"
 		sampleNS    = "sample"
 	)
 
@@ -95,10 +95,8 @@ var _ = Describe("Multi-primary data plane", Ordered, Serial, func() {
 		Step("Verifying control plane namespace exists with network labels")
 		for _, spokeClient := range spokeClients {
 			ns := &corev1.Namespace{}
-			Eventually(func(g Gomega) {
-				g.Expect(spokeClient.Get(ctx, key.Of(cpNamespace), ns)).To(Succeed())
-				g.Expect(ns.Labels).To(HaveKey("topology.istio.io/network"))
-			}).Should(Succeed())
+			Expect(spokeClient.Get(ctx, key.Of(cpNamespace), ns)).To(Succeed())
+			Expect(ns.Labels).To(HaveKey("topology.istio.io/network"))
 		}
 	}, NodeTimeout(5*time.Minute))
 
@@ -134,10 +132,7 @@ var _ = Describe("Multi-primary data plane", Ordered, Serial, func() {
 
 				Step("Applying Istio CR on %s", cluster)
 				spokeClient.ApplyFile(ctx, filepath.Join(testdataDir, "istio-cr.yaml"), map[string]string{
-					"CRName":      "default",
 					"CPNamespace": cpNamespace,
-					"TrustDomain": trustDomain,
-					"MeshID":      meshID,
 					"ClusterName": cluster,
 					"Network":     networks[cluster],
 				})
@@ -145,7 +140,7 @@ var _ = Describe("Multi-primary data plane", Ordered, Serial, func() {
 
 			for cluster, spokeClient := range spokeClients {
 				Step("Waiting for istiod to be ready on %s", cluster)
-				util.WaitForDeploymentReady(ctx, spokeClient, "istiod", cpNamespace, 5*time.Minute)
+				waitForDeploymentReady(ctx, spokeClient, "istiod", cpNamespace, 5*time.Minute)
 				Success("istiod is ready on %s", cluster)
 			}
 
@@ -159,10 +154,10 @@ var _ = Describe("Multi-primary data plane", Ordered, Serial, func() {
 
 			for cluster, spokeClient := range spokeClients {
 				Step("Waiting for east-west gateway deployment to be ready on %s", cluster)
-				util.WaitForDeploymentReady(ctx, spokeClient, "eastwestgateway-istio", cpNamespace, 3*time.Minute)
+				waitForDeploymentReady(ctx, spokeClient, "eastwestgateway-istio", cpNamespace, 3*time.Minute)
 
 				Step("Waiting for LoadBalancer IP on %s", cluster)
-				ip := util.WaitForLoadBalancerIP(ctx, spokeClient, "eastwestgateway-istio", cpNamespace, 3*time.Minute)
+				ip := waitForLoadBalancerIP(ctx, spokeClient, "eastwestgateway-istio", cpNamespace, 3*time.Minute)
 				Success("East-west gateway on %s has IP: %s", cluster, ip)
 			}
 		}, NodeTimeout(10*time.Minute))
@@ -194,66 +189,82 @@ var _ = Describe("Multi-primary data plane", Ordered, Serial, func() {
 
 			Step("Deploying helloworld Service on both clusters")
 			for _, spokeClient := range spokeClients {
-				spokeClient.ApplyFile(ctx, filepath.Join(testdataDir, "helloworld-service.yaml"), map[string]string{
-					"Namespace": sampleNS,
-				})
+				spokeClient.ApplyFile(ctx, filepath.Join(testdataDir, "helloworld-service.yaml"), nil, sampleNS)
 			}
 
 			Step("Deploying helloworld-v1 on cluster1")
-			spokeClients["cluster1"].ApplyFile(ctx, filepath.Join(testdataDir, "helloworld.yaml"), map[string]string{
-				"Namespace": sampleNS,
-				"Version":   "v1",
-			})
+			spokeClients["cluster1"].ApplyFile(ctx, filepath.Join(testdataDir, "helloworld.yaml"),
+				map[string]string{"Version": "v1"}, sampleNS)
 
 			Step("Deploying helloworld-v2 on cluster2")
-			spokeClients["cluster2"].ApplyFile(ctx, filepath.Join(testdataDir, "helloworld.yaml"), map[string]string{
-				"Namespace": sampleNS,
-				"Version":   "v2",
-			})
+			spokeClients["cluster2"].ApplyFile(ctx, filepath.Join(testdataDir, "helloworld.yaml"),
+				map[string]string{"Version": "v2"}, sampleNS)
+
+			Step("Deploying curl on cluster1")
+			spokeClients["cluster1"].ApplyFile(ctx, filepath.Join(testdataDir, "curl.yaml"), nil, sampleNS)
 
 			Step("Waiting for helloworld-v1 to be ready on cluster1")
-			util.WaitForDeploymentReady(ctx, spokeClients["cluster1"], "helloworld-v1", sampleNS)
+			waitForDeploymentReady(ctx, spokeClients["cluster1"], "helloworld-v1", sampleNS)
 
 			Step("Waiting for helloworld-v2 to be ready on cluster2")
-			util.WaitForDeploymentReady(ctx, spokeClients["cluster2"], "helloworld-v2", sampleNS)
+			waitForDeploymentReady(ctx, spokeClients["cluster2"], "helloworld-v2", sampleNS)
 
-			Step("Deploying curl pod on cluster1")
-			spokeClients["cluster1"].ApplyFile(ctx, filepath.Join(testdataDir, "curl.yaml"), map[string]string{
-				"Namespace": sampleNS,
-			})
-
-			Step("Waiting for curl pod to be ready on cluster1")
-			curlPod := util.WaitForPodReady(ctx, spokeClients["cluster1"], sampleNS, map[string]string{"app": "curl"})
-			Success("Curl pod ready: %s", curlPod)
+			Step("Waiting for curl to be ready on cluster1")
+			waitForDeploymentReady(ctx, spokeClients["cluster1"], "curl", sampleNS)
 
 			Step("Verifying cross-cluster traffic")
-			// sawV1/sawV2 are intentionally outside the Eventually closure so that we can evaluate if the test-code
-			// has seen response from both the helloworld applications.
 			var sawV1, sawV2 bool
 			Eventually(func(g Gomega) {
-				for i := 0; i < 20; i++ {
-					output, err := spokeClients["cluster1"].Exec(ctx,
-						sampleNS, curlPod, "curl",
-						[]string{"curl", "-s", fmt.Sprintf("helloworld.%s:5000/hello", sampleNS)})
-					if err != nil {
-						GinkgoWriter.Printf("curl attempt %d failed: %v\n", i+1, err)
-						continue
-					}
-					if strings.Contains(output, "v1") {
-						sawV1 = true
-					}
-					if strings.Contains(output, "v2") {
-						sawV2 = true
-					}
-					if sawV1 && sawV2 {
-						break
-					}
+				output, err := spokeClients["cluster1"].Exec(ctx,
+					sampleNS, "deployment/curl", "curl",
+					[]string{"curl", "-sS", "--fail", fmt.Sprintf("helloworld.%s:5000/hello", sampleNS)})
+				if err != nil {
+					return
 				}
+				sawV1 = sawV1 || strings.Contains(output, "v1")
+				sawV2 = sawV2 || strings.Contains(output, "v2")
 				g.Expect(sawV1).To(BeTrue(), "never saw response from helloworld v1")
 				g.Expect(sawV2).To(BeTrue(), "never saw response from helloworld v2")
-			}).WithTimeout(3 * time.Minute).WithPolling(10 * time.Second).Should(Succeed())
+			}).WithTimeout(3 * time.Minute).WithPolling(1 * time.Second).Should(Succeed())
 
 			Success("Cross-cluster traffic verified: saw responses from both v1 and v2")
 		}, SpecTimeout(8*time.Minute))
 	})
 })
+
+func waitForDeploymentReady(ctx context.Context, k8sClient client.Client, name, namespace string, timeout ...time.Duration) {
+	e := Eventually(func(g Gomega) {
+		deploy := &appsv1.Deployment{}
+		g.Expect(k8sClient.Get(ctx, key.Of(name, namespace), deploy)).To(Succeed())
+		g.Expect(deploy.Status.ObservedGeneration).To(Equal(deploy.Generation),
+			"deployment %s/%s status not yet observed for current generation", namespace, name)
+		g.Expect(deploy.Status.Conditions).To(ContainElement(And(
+			HaveField("Type", appsv1.DeploymentAvailable),
+			HaveField("Status", corev1.ConditionTrue),
+		)), "deployment %s/%s is not Available", namespace, name)
+	}).WithPolling(2 * time.Second)
+	if len(timeout) > 0 {
+		e = e.WithTimeout(timeout[0])
+	}
+	e.Should(Succeed())
+}
+
+func waitForLoadBalancerIP(ctx context.Context, k8sClient client.Client, name, namespace string, timeout ...time.Duration) string {
+	var address string
+	e := Eventually(func(g Gomega) {
+		svc := &corev1.Service{}
+		g.Expect(k8sClient.Get(ctx, key.Of(name, namespace), svc)).To(Succeed())
+		g.Expect(svc.Status.LoadBalancer.Ingress).NotTo(BeEmpty(),
+			"service %s/%s has no LoadBalancer ingress", namespace, name)
+		address = svc.Status.LoadBalancer.Ingress[0].IP
+		if address == "" {
+			address = svc.Status.LoadBalancer.Ingress[0].Hostname
+		}
+		g.Expect(address).NotTo(BeEmpty(), "service %s/%s has no IP or hostname", namespace, name)
+	}).WithPolling(2 * time.Second)
+	if len(timeout) > 0 {
+		e = e.WithTimeout(timeout[0])
+	}
+	e.Should(Succeed())
+	return address
+}

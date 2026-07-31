@@ -1,18 +1,18 @@
 apiVersion: sailoperator.io/v1
 kind: Istio
 metadata:
-  name: {{.CRName}}
+  name: default
 spec:
   namespace: {{.CPNamespace}}
   values:
     meshConfig:
-      trustDomain: {{.TrustDomain}}
+      trustDomain: cluster.local
       defaultConfig:
         proxyMetadata:
           ISTIO_META_DNS_CAPTURE: "true"
           ISTIO_META_DNS_AUTO_ALLOCATE: "true"
     global:
-      meshID: {{.MeshID}}
+      meshID: multi-primary-mesh
       multiCluster:
         clusterName: {{.ClusterName}}
       network: {{.Network}}
