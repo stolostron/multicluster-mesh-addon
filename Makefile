@@ -136,6 +136,7 @@ update-test-crds: deps ## Update test CRDs from OCM API, managed-serviceaccount 
 	mkdir -p $(TEST_CRD_DIR)/ocm; \
 	echo "Copying CRDs from $$OCM_API_PATH..."; \
 	cp -fv $$OCM_API_PATH/cluster/v1/*.crd.yaml $(TEST_CRD_DIR)/ocm/ 2>/dev/null || true; \
+	cp -fv $$OCM_API_PATH/cluster/v1beta1/*.crd.yaml $(TEST_CRD_DIR)/ocm/ 2>/dev/null || true; \
 	cp -fv $$OCM_API_PATH/cluster/v1beta2/*.crd.yaml $(TEST_CRD_DIR)/ocm/ 2>/dev/null || true; \
 	cp -fv $$OCM_API_PATH/work/v1/*.crd.yaml $(TEST_CRD_DIR)/ocm/ 2>/dev/null || true; \
 	cp -fv $$OCM_API_PATH/work/v1alpha1/*.crd.yaml $(TEST_CRD_DIR)/ocm/ 2>/dev/null || true; \

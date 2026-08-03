@@ -117,16 +117,12 @@ func (r *Reconciler) ensureManagedServiceAccountUpdated(ctx context.Context, mes
 func (r *Reconciler) ensureManifestWorkReplicaSet(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh) error {
 	mwrsetName := fmt.Sprintf("%s-%s-%s", mesh.Namespace, ManifestWorkReplicaSetName, mesh.Name)
 
-	// TODO: update placement part after PR 221 is merged. This is a placeholder placement
-	placement := &clusterv1beta1.Placement{
-		ObjectMeta: metav1.ObjectMeta{Name: mesh.Name, Namespace: mesh.Namespace},
-	}
-	// TODO: update return error after PR 221 is merged.
+	placement := &clusterv1beta1.Placement{ObjectMeta: metav1.ObjectMeta{Name: mesh.Name, Namespace: mesh.Namespace}}
 	if err := r.Get(ctx, key.Of(mesh.Name, mesh.Namespace), placement); err != nil {
 		if apierrors.IsNotFound(err) {
-			klog.V(4).Infof("Placement %s/%s not found: %s", mesh.Namespace, mesh.Name, err)
+			return fmt.Errorf("Placement %s/%s not found: %w", mesh.Namespace, mesh.Name, err)
 		}
-		klog.V(4).Infof("failed to get Placement: %s", err)
+		return fmt.Errorf("failed to get Placement: %w", err)
 	}
 
 	workTemplate, err := r.buildManifestWorkSpec(ctx, mesh)

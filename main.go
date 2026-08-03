@@ -20,6 +20,7 @@ import (
 	"k8s.io/klog/v2"
 	"k8s.io/utils/clock"
 	clusterv1 "open-cluster-management.io/api/cluster/v1"
+	clusterv1beta1 "open-cluster-management.io/api/cluster/v1beta1"
 	clusterv1beta2 "open-cluster-management.io/api/cluster/v1beta2"
 	workv1 "open-cluster-management.io/api/work/v1"
 	workv1alpha1 "open-cluster-management.io/api/work/v1alpha1"
@@ -43,6 +44,7 @@ func init() {
 	utilruntime.Must(scheme.AddToScheme(runtimeScheme))
 	utilruntime.Must(meshv1alpha1.Install(runtimeScheme))
 	utilruntime.Must(clusterv1.Install(runtimeScheme))
+	utilruntime.Must(clusterv1beta1.Install(runtimeScheme))
 	utilruntime.Must(clusterv1beta2.Install(runtimeScheme))
 	utilruntime.Must(workv1.Install(runtimeScheme))
 	utilruntime.Must(workv1alpha1.Install(runtimeScheme))

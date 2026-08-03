@@ -23,6 +23,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/stolostron/multicluster-mesh-addon/pkg/key"
+	clusterv1beta1 "open-cluster-management.io/api/cluster/v1beta1"
 	clusterv1beta2 "open-cluster-management.io/api/cluster/v1beta2"
 	workv1 "open-cluster-management.io/api/work/v1"
 	workv1alpha1 "open-cluster-management.io/api/work/v1alpha1"
@@ -786,6 +787,23 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 				expectManagedServiceAccount(testNs, meshName, cluster2)
 			})
 
+			It("should create ManagedClusterSetBinding for the ManagedClusterSet", func() {
+				util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet)
+				clusterSetBinding := expectManagedClusterSetBinding(testNs, testClusterSet)
+				Expect(clusterSetBinding.Spec.ClusterSet).To(Equal(testClusterSet))
+			})
+
+			It("should create Placement for the ManagedClusterSet", func() {
+				util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet)
+				placement := expectPlacement(meshName, testNs)
+				Expect(placement.OwnerReferences).To(HaveLen(1))
+				Expect(placement.OwnerReferences[0].Name).To(Equal(meshName))
+				Expect(placement.Labels[meshcontroller.ManagedByLabel]).To(Equal(meshcontroller.ManagedByValue))
+				Expect(placement.Labels[meshcontroller.MeshNameLabel]).To(Equal(meshName))
+				Expect(placement.Labels[meshcontroller.MeshNamespaceLabel]).To(Equal(testNs))
+				Expect(placement.Spec.ClusterSets).To(ContainElement(testClusterSet))
+			})
+
 			It("should create ManifestWorkReplicaSet after ManagedServiceAccount Secret is created", func() {
 				util.CreateMsaSecret(ctx, k8sClient, clusterName, meshName, testNs)
 				util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet)
@@ -828,6 +846,33 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 			})
 		})
 
+		When("referencing a non-existing ClusterSet", func() {
+			var otherClusterSet string
+
+			BeforeEach(func() {
+				otherClusterSet = util.UniqueName("late-set")
+				util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, otherClusterSet)
+			})
+
+			It("should not create ManagedClusterSetBindings", func() {
+				expectMeshNotReady(meshName, testNs)
+				expectNoManagedClusterSetBinding(testNs)
+			})
+
+			It("should not create Placements", func() {
+				expectMeshNotReady(meshName, testNs)
+				expectNoPlacement(testNs)
+			})
+
+			It("should reconcile when the ClusterSet is created", func() {
+				expectMeshNotReady(meshName, testNs)
+				util.CreateManagedCluster(ctx, k8sClient, clusterName, otherClusterSet)
+				util.CreateManagedClusterSet(ctx, k8sClient, otherClusterSet)
+				expectManagedClusterSetBinding(testNs, otherClusterSet)
+				expectPlacement(meshName, testNs)
+			})
+		})
+
 		When("referencing an empty ClusterSet", func() {
 			BeforeEach(func() {
 				util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet)
@@ -849,33 +894,49 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 		})
 
 		When("two meshes target the same cluster", func() {
-			var otherNs, otherMesh string
+			var otherMesh string
 
 			BeforeEach(func() {
 				util.CreateManagedCluster(ctx, k8sClient, clusterName, testClusterSet)
 				util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet)
 				expectMeshNotReady(meshName, testNs)
 
-				otherNs = util.UniqueName("other-ns")
 				otherMesh = util.UniqueName("other-mesh")
-				util.CreateNamespace(ctx, k8sClient, otherNs)
-				util.CreateMultiClusterMesh(ctx, k8sClient, otherMesh, otherNs, testClusterSet, meshv1alpha1.MultiClusterMeshSpec{
+				util.CreateMultiClusterMesh(ctx, k8sClient, otherMesh, testNs, testClusterSet, meshv1alpha1.MultiClusterMeshSpec{
 					ControlPlane: meshv1alpha1.ControlPlaneConfig{Namespace: "istio-system-2"},
 				})
-				expectMeshNotReady(otherMesh, otherNs)
+				expectMeshNotReady(otherMesh, testNs)
 			})
 
 			It("should delete only the removed mesh's ManagedServiceAccount when one mesh is deleted", func() {
 				expectManagedServiceAccount(testNs, meshName, clusterName)
-				expectManagedServiceAccount(otherNs, otherMesh, clusterName)
+				expectManagedServiceAccount(testNs, otherMesh, clusterName)
 
 				util.DeleteResource(ctx, k8sClient, &meshv1alpha1.MultiClusterMesh{}, meshName, testNs)
 				util.ExpectResourceDeleted(ctx, k8sClient, &msav1beta1.ManagedServiceAccount{},
 					expectedManagedServiceAccountName(testNs, meshName), clusterName)
 
 				Consistently(func(g Gomega) {
-					getManagedServiceAccount(g, otherNs, otherMesh, clusterName)
+					getManagedServiceAccount(g, testNs, otherMesh, clusterName)
 				}).Should(Succeed())
+			})
+
+			It("should keep the ManagedClusterSetBinding when only one mesh is deleted", func() {
+				binding := expectManagedClusterSetBinding(testNs, testClusterSet)
+				rv := binding.ResourceVersion
+				util.DeleteResource(ctx, k8sClient, &meshv1alpha1.MultiClusterMesh{}, meshName, testNs)
+				Consistently(func(g Gomega) {
+					b := &clusterv1beta2.ManagedClusterSetBinding{}
+					g.Expect(k8sClient.Get(ctx, key.Of(testClusterSet, testNs), b)).To(Succeed())
+					g.Expect(b.ResourceVersion).To(Equal(rv))
+				}).Should(Succeed())
+			})
+
+			It("should delete the ManagedClusterSetBinding when all meshes are deleted", func() {
+				expectManagedClusterSetBinding(testNs, testClusterSet)
+				util.DeleteResource(ctx, k8sClient, &meshv1alpha1.MultiClusterMesh{}, meshName, testNs)
+				util.DeleteResource(ctx, k8sClient, &meshv1alpha1.MultiClusterMesh{}, otherMesh, testNs)
+				expectManagedClusterSetBindingDeleted(testNs)
 			})
 		})
 	})
@@ -1067,6 +1128,46 @@ func expectNoManagedServiceAccount(meshNamespace, meshName, clusterName string) 
 		err := k8sClient.Get(ctx, key.Of(expectedManagedServiceAccountName(meshNamespace, meshName), clusterName), msa)
 		return errors.IsNotFound(err)
 	}).Should(BeTrue())
+}
+
+func expectNoManagedClusterSetBinding(namespace string) {
+	Consistently(func() []clusterv1beta2.ManagedClusterSetBinding {
+		bindingList := &clusterv1beta2.ManagedClusterSetBindingList{}
+		Expect(k8sClient.List(ctx, bindingList, client.InNamespace(namespace))).To(Succeed())
+		return bindingList.Items
+	}).Should(BeEmpty())
+}
+
+func expectNoPlacement(namespace string) {
+	Consistently(func() []clusterv1beta1.Placement {
+		placementList := &clusterv1beta1.PlacementList{}
+		Expect(k8sClient.List(ctx, placementList, client.InNamespace(namespace))).To(Succeed())
+		return placementList.Items
+	}).Should(BeEmpty())
+}
+
+func expectManagedClusterSetBindingDeleted(namespace string) {
+	Eventually(func() []clusterv1beta2.ManagedClusterSetBinding {
+		bindingList := &clusterv1beta2.ManagedClusterSetBindingList{}
+		Expect(k8sClient.List(ctx, bindingList, client.InNamespace(namespace))).To(Succeed())
+		return bindingList.Items
+	}).Should(BeEmpty())
+}
+
+func expectManagedClusterSetBinding(meshNamespace, clusterSet string) *clusterv1beta2.ManagedClusterSetBinding {
+	binding := &clusterv1beta2.ManagedClusterSetBinding{}
+	Eventually(func() error {
+		return k8sClient.Get(ctx, key.Of(clusterSet, meshNamespace), binding)
+	}).Should(Succeed())
+	return binding
+}
+
+func expectPlacement(meshName, meshNamespace string) *clusterv1beta1.Placement {
+	placement := &clusterv1beta1.Placement{}
+	Eventually(func() error {
+		return k8sClient.Get(ctx, key.Of(meshName, meshNamespace), placement)
+	}).Should(Succeed())
+	return placement
 }
 
 func expectedManifestWorkReplicaSetName(meshNamespace, meshName string) string {
