@@ -119,10 +119,7 @@ func (r *Reconciler) ensureManifestWorkReplicaSet(ctx context.Context, mesh *mes
 
 	placement := &clusterv1beta1.Placement{ObjectMeta: metav1.ObjectMeta{Name: mesh.Name, Namespace: mesh.Namespace}}
 	if err := r.Get(ctx, key.Of(mesh.Name, mesh.Namespace), placement); err != nil {
-		if apierrors.IsNotFound(err) {
-			return fmt.Errorf("Placement %s/%s not found: %w", mesh.Namespace, mesh.Name, err)
-		}
-		return fmt.Errorf("failed to get Placement: %w", err)
+		return fmt.Errorf("failed to get Placement %s/%s: %w", mesh.Namespace, mesh.Name, err)
 	}
 
 	workTemplate, err := r.buildManifestWorkSpec(ctx, mesh)
