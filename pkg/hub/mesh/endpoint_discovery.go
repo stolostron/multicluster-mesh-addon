@@ -214,7 +214,7 @@ func (r *Reconciler) deleteAllRemoteSecrets(ctx context.Context, mesh *meshv1alp
 	}
 
 	for _, secret := range secretList.Items {
-		klog.Infof("Deleting Istio remote secret %s/%s", secret.Namespace, secret.Name)
+		klog.V(4).Infof("Deleting Istio remote secret %s/%s", secret.Namespace, secret.Name)
 		if err := client.IgnoreNotFound(r.Delete(ctx, &secret)); err != nil {
 			return fmt.Errorf("failed to delete Istio remote secret %s/%s: %w", secret.Namespace, secret.Name, err)
 		}
