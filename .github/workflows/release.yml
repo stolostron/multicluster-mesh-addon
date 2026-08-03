@@ -8,11 +8,6 @@ on:
         required: true
         type: string
         default: 'main'
-      prerelease:
-        description: 'Create as pre-release'
-        required: false
-        type: boolean
-        default: false
 
 permissions:
   contents: write  # Required to push tags, create releases, and commit to gh-pages branch
@@ -81,7 +76,6 @@ jobs:
         uses: softprops/action-gh-release@da05d552573ad5d49f27b8ba0c6c92e8c6011a94 # v2.2.1
         with:
           tag_name: v${{ steps.version.outputs.version }}
-          prerelease: ${{ inputs.prerelease }}
           generate_release_notes: true
           body: |
             ## Installation

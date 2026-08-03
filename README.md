@@ -76,7 +76,7 @@ The `deploy` target will:
 3. Create the namespace and deploy all resources (CRDs, RBAC, Deployment)
 
 **Configuration:**
-- `VERSION`: Version to release (default: `0.1.0`)
+- `VERSION`: Build/chart version string (default: see `Makefile`)
 - `HUB`: Image registry (default: `quay.io/sail-dev`)
 - `TAG`: Image tag (default: `${MINOR_VERSION}-latest`, e.g., `0.1-latest`)
 - `IMG`: Full image reference (default: `${HUB}/${IMAGE_BASE}:${TAG}`)

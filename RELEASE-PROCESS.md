@@ -55,7 +55,6 @@ Branch naming convention: `release-X.Y` (e.g., `release-0.1`, `release-0.2`)
 3. Click **Run workflow**
 4. Configure the workflow:
    - **Branch to release from**: Select the release branch (e.g., `release-0.2`)
-   - **Create as pre-release**: Check if this is a pre-release (alpha/beta/rc)
 5. Click **Run workflow**
 
 The workflow will:
