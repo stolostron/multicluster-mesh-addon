@@ -200,8 +200,10 @@ var _ = Describe("Multi-primary data plane", Ordered, Serial, func() {
 			spokeClients["cluster2"].ApplyFile(ctx, filepath.Join(testdataDir, "helloworld.yaml"),
 				map[string]string{"Version": "v2"}, sampleNS)
 
-			Step("Deploying curl on cluster1")
-			spokeClients["cluster1"].ApplyFile(ctx, filepath.Join(testdataDir, "curl.yaml"), nil, sampleNS)
+			Step("Deploying curl on both clusters")
+			for _, spokeClient := range spokeClients {
+				spokeClient.ApplyFile(ctx, filepath.Join(testdataDir, "curl.yaml"), nil, sampleNS)
+			}
 
 			Step("Waiting for helloworld-v1 to be ready on cluster1")
 			waitForDeploymentReady(ctx, spokeClients["cluster1"], "helloworld-v1", sampleNS)
@@ -209,25 +211,27 @@ var _ = Describe("Multi-primary data plane", Ordered, Serial, func() {
 			Step("Waiting for helloworld-v2 to be ready on cluster2")
 			waitForDeploymentReady(ctx, spokeClients["cluster2"], "helloworld-v2", sampleNS)
 
-			Step("Waiting for curl to be ready on cluster1")
-			waitForDeploymentReady(ctx, spokeClients["cluster1"], "curl", sampleNS)
+			Step("Waiting for curl to be ready on both clusters")
+			for _, spokeClient := range spokeClients {
+				waitForDeploymentReady(ctx, spokeClient, "curl", sampleNS)
+			}
 
-			Step("Verifying cross-cluster traffic")
-			var sawV1, sawV2 bool
-			Eventually(func(g Gomega) {
-				output, err := spokeClients["cluster1"].Exec(ctx,
-					sampleNS, "deployment/curl", "curl",
-					[]string{"curl", "-sS", "--fail", fmt.Sprintf("helloworld.%s:5000/hello", sampleNS)})
-				if err != nil {
-					return
-				}
-				sawV1 = sawV1 || strings.Contains(output, "v1")
-				sawV2 = sawV2 || strings.Contains(output, "v2")
-				g.Expect(sawV1).To(BeTrue(), "never saw response from helloworld v1")
-				g.Expect(sawV2).To(BeTrue(), "never saw response from helloworld v2")
-			}).WithTimeout(3 * time.Minute).WithPolling(1 * time.Second).Should(Succeed())
-
-			Success("Cross-cluster traffic verified: saw responses from both v1 and v2")
+			Step("Verifying cross-cluster traffic from each cluster")
+			for cluster, spokeClient := range spokeClients {
+				var sawV1, sawV2 bool
+				Eventually(func(g Gomega) {
+					output, err := spokeClient.Exec(ctx,
+						sampleNS, "deployment/curl", "curl",
+						[]string{"curl", "-sS", "--fail", fmt.Sprintf("helloworld.%s:5000/hello", sampleNS)})
+					if err == nil {
+						sawV1 = sawV1 || strings.Contains(output, "v1")
+						sawV2 = sawV2 || strings.Contains(output, "v2")
+					}
+					g.Expect(sawV1).To(BeTrue(), "never saw v1 from %s", cluster)
+					g.Expect(sawV2).To(BeTrue(), "never saw v2 from %s", cluster)
+				}).WithTimeout(3 * time.Minute).WithPolling(1 * time.Second).Should(Succeed())
+				Success("Cross-cluster traffic verified from %s", cluster)
+			}
 		}, SpecTimeout(8*time.Minute))
 	})
 })
