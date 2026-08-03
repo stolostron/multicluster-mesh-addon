@@ -16,6 +16,7 @@ import (
 	operatorsv1alpha1 "github.com/operator-framework/api/pkg/operators/v1alpha1"
 	"k8s.io/client-go/kubernetes/scheme"
 	clusterv1 "open-cluster-management.io/api/cluster/v1"
+	clusterv1beta1 "open-cluster-management.io/api/cluster/v1beta1"
 	clusterv1beta2 "open-cluster-management.io/api/cluster/v1beta2"
 	workv1 "open-cluster-management.io/api/work/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -66,6 +67,7 @@ var _ = BeforeSuite(func() {
 	util.MustAddToScheme(
 		meshv1alpha1.Install,
 		clusterv1.Install,
+		clusterv1beta1.Install,
 		clusterv1beta2.Install,
 		workv1.Install,
 		operatorsv1.AddToScheme,
