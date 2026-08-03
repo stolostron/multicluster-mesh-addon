@@ -101,6 +101,14 @@ var _ = Describe("Multi-primary data plane", Ordered, Serial, func() {
 	}, NodeTimeout(5*time.Minute))
 
 	AfterAll(func(ctx SpecContext) {
+		// TODO(endpoint-discovery): Remove once the controller distributes remote secrets.
+		Step("Cleaning up remote secrets")
+		spokeClientMap := make(map[string]client.Client, len(spokeClients))
+		for name, sc := range spokeClients {
+			spokeClientMap[name] = sc
+		}
+		util.CleanupRemoteSecrets(ctx, spokeClientMap, clusters, cpNamespace)
+
 		Step("Cleaning up spoke resources")
 		for _, spokeClient := range spokeClients {
 			_ = client.IgnoreNotFound(spokeClient.Delete(ctx, &corev1.Namespace{
@@ -144,6 +152,14 @@ var _ = Describe("Multi-primary data plane", Ordered, Serial, func() {
 				Success("istiod is ready on %s", cluster)
 			}
 
+			// TODO(endpoint-discovery): Remove once the controller distributes remote secrets.
+			Step("Creating remote secrets for cross-cluster discovery")
+			spokeClientMap := make(map[string]client.Client, len(spokeClients))
+			for name, sc := range spokeClients {
+				spokeClientMap[name] = sc
+			}
+			util.CreateAndDistributeRemoteSecrets(ctx, hubClient, spokeClientMap, clusters, cpNamespace)
+
 			for cluster, spokeClient := range spokeClients {
 				Step("Applying east-west Gateway API resource on %s", cluster)
 				spokeClient.ApplyFile(ctx, filepath.Join(testdataDir, "eastwest-gateway.yaml"), map[string]string{
@@ -177,7 +193,7 @@ var _ = Describe("Multi-primary data plane", Ordered, Serial, func() {
 					Expect(secret.Annotations).To(HaveKeyWithValue("networking.istio.io/cluster", source))
 				}
 			}
-		}, SpecTimeout(2*time.Minute))
+		})
 
 		It("should have cross-cluster data plane traffic working", func(ctx SpecContext) {
 			Step("Creating sample namespace with istio-injection on both clusters")

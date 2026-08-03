@@ -281,23 +281,26 @@ install_metallb() {
         return
     fi
 
-    local engine="${CONTAINER_ENGINE:-docker}"
-    engine="$(basename "${engine}")"
+    # Kind auto-detects its container provider (docker or podman), which may
+    # differ from CONTAINER_ENGINE. Detect the actual provider by checking
+    # which runtime owns the Kind node containers.
+    local kind_provider="docker"
+    if podman inspect "${cluster}-control-plane" &>/dev/null; then
+        kind_provider="podman"
+    fi
 
     local kind_subnet
-    case "${engine}" in
+    case "${kind_provider}" in
         podman)
             kind_subnet="$(podman network inspect kind -f '{{(index .Subnets 0).Subnet}}')" \
                 || err "Failed to inspect Kind network with Podman" ;;
         docker)
             kind_subnet="$(docker network inspect kind -f '{{(index .IPAM.Config 0).Subnet}}')" \
                 || err "Failed to inspect Kind network with Docker" ;;
-        *)
-            err "Unsupported container engine: ${engine}" ;;
     esac
 
     local base_prefix
-    base_prefix="$(echo "${kind_subnet}" | cut -d'.' -f1-2)"
+    base_prefix="$(echo "${kind_subnet}" | cut -d'/' -f1 | cut -d'.' -f1-3)"
 
     local idx
     case "${cluster}" in
@@ -305,8 +308,8 @@ install_metallb() {
         "${CLUSTER2}") idx=1 ;;
         *) err "Unknown cluster for MetalLB IP assignment: ${cluster}" ;;
     esac
-    local range_start="${base_prefix}.255.$((idx * 10 + 1))"
-    local range_end="${base_prefix}.255.$((idx * 10 + 10))"
+    local range_start="${base_prefix}.$((200 + idx * 10 + 1))"
+    local range_end="${base_prefix}.$((200 + idx * 10 + 10))"
 
     log "Installing MetalLB ${metallb_version} on ${cluster}..."
     on "${cluster}" kubectl apply -f \

@@ -166,22 +166,6 @@ test-e2e: ## Run e2e tests against dev-env clusters (requires make dev-env)
 	CLUSTER2_KUBECONFIG=$(DEV_KUBE_DIR)/cluster2.config \
 	go run github.com/onsi/ginkgo/v2/ginkgo -v --fail-fast --tags=e2e ./test/e2e/...
 
-.PHONY: install-metallb
-install-metallb: $(addprefix install-metallb-,$(SPOKE_CLUSTERS)) ## Install MetalLB on spoke Kind clusters
-
-.PHONY: $(addprefix install-metallb-,$(SPOKE_CLUSTERS))
-$(addprefix install-metallb-,$(SPOKE_CLUSTERS)): install-metallb-%:
-	$(call log,Installing MetalLB: $*)
-	$(DEV_ENV_SCRIPT) install-metallb $*
-
-.PHONY: install-gateway-api
-install-gateway-api: $(addprefix install-gateway-api-,$(SPOKE_CLUSTERS)) ## Install Gateway API CRDs on spoke Kind clusters
-
-.PHONY: $(addprefix install-gateway-api-,$(SPOKE_CLUSTERS))
-$(addprefix install-gateway-api-,$(SPOKE_CLUSTERS)): install-gateway-api-%:
-	$(call log,Installing Gateway API: $*)
-	$(DEV_ENV_SCRIPT) install-gateway-api $*
-
 .PHONY: test-e2e-multicluster-prereqs
 test-e2e-multicluster-prereqs:
 	$(MAKE) --no-print-directory -j$(PARALLEL) --output-sync=line install-metallb install-gateway-api
@@ -335,6 +319,22 @@ join-clusters: $(CLUSTERADM) init-ocm $(addprefix create-,$(SPOKE_CLUSTERS)) ## 
 install-managed-serviceaccount: $(HELM_BIN) join-clusters ## Install managed-serviceaccount addon to the hub cluster
 	$(call log,Installing managed-serviceaccount: hub)
 	$(DEV_ENV_SCRIPT) install-managed-serviceaccount
+
+.PHONY: install-metallb
+install-metallb: $(addprefix install-metallb-,$(SPOKE_CLUSTERS)) ## Install MetalLB on spoke Kind clusters
+
+.PHONY: $(addprefix install-metallb-,$(SPOKE_CLUSTERS))
+$(addprefix install-metallb-,$(SPOKE_CLUSTERS)): install-metallb-%:
+	$(call log,Installing MetalLB: $*)
+	$(DEV_ENV_SCRIPT) install-metallb $*
+
+.PHONY: install-gateway-api
+install-gateway-api: $(addprefix install-gateway-api-,$(SPOKE_CLUSTERS)) ## Install Gateway API CRDs on spoke Kind clusters
+
+.PHONY: $(addprefix install-gateway-api-,$(SPOKE_CLUSTERS))
+$(addprefix install-gateway-api-,$(SPOKE_CLUSTERS)): install-gateway-api-%:
+	$(call log,Installing Gateway API: $*)
+	$(DEV_ENV_SCRIPT) install-gateway-api $*
 
 .PHONY: deploy-addon
 deploy-addon: $(KIND) $(HELM_BIN) gen images join-clusters install-cert-manager ## Build and deploy addon to the hub Kind cluster
