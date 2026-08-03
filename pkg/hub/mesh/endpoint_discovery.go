@@ -204,11 +204,11 @@ func (r *Reconciler) buildManifestWorkSpec(ctx context.Context, mesh *meshv1alph
 // deleteAllRemoteSecrets deletes all Istio remote access secrets managed by a mesh.
 func (r *Reconciler) deleteAllRemoteSecrets(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh) error {
 	secretList := &corev1.SecretList{}
-	if err := r.List(ctx, secretList, client.MatchingLabels{
-		"networking.istio.io/cluster": "true",
-		ManagedByLabel:                ManagedByValue,
-		MeshNameLabel:                 mesh.Name,
-		MeshNamespaceLabel:            mesh.Namespace,
+	if err := r.List(ctx, secretList, client.InNamespace(mesh.Spec.ControlPlane.Namespace), client.MatchingLabels{
+		"istio/multiCluster": "true",
+		ManagedByLabel:       ManagedByValue,
+		MeshNameLabel:        mesh.Name,
+		MeshNamespaceLabel:   mesh.Namespace,
 	}); err != nil {
 		return fmt.Errorf("failed to list Istio remote secret managed by mesh %s: %w", mesh.Name, err)
 	}

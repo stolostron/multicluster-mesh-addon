@@ -804,17 +804,6 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 				Expect(placement.Spec.ClusterSets).To(ContainElement(testClusterSet))
 			})
 
-			It("should create ManifestWorkReplicaSet after ManagedServiceAccount Secret is created", func() {
-				util.CreateMsaSecret(ctx, k8sClient, clusterName, meshName, testNs)
-				util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet)
-				mwrset := expectManifestWorkReplicaSet(testNs, meshName)
-				Expect(mwrset.OwnerReferences).To(HaveLen(1))
-				Expect(mwrset.OwnerReferences[0].Name).To(Equal(meshName))
-				Expect(mwrset.Labels[meshcontroller.ManagedByLabel]).To(Equal(meshcontroller.ManagedByValue))
-				Expect(mwrset.Labels[meshcontroller.MeshNameLabel]).To(Equal(meshName))
-				Expect(mwrset.Labels[meshcontroller.MeshNamespaceLabel]).To(Equal(testNs))
-			})
-
 			When("the ManagedServiceAccount exists", func() {
 				BeforeEach(func() {
 					util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet)
@@ -851,6 +840,46 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 			})
 		})
 
+		When("two clusters have ManagedServiceAccount secrets", func() {
+			var cluster2Name string
+
+			BeforeEach(func() {
+				cluster2Name = util.UniqueName("cluster")
+
+				util.CreateManagedCluster(ctx, k8sClient, clusterName, testClusterSet)
+				util.CreateManagedCluster(ctx, k8sClient, cluster2Name, testClusterSet)
+				util.CreateMsaSecret(ctx, k8sClient, clusterName, meshName, testNs)
+				util.CreateMsaSecret(ctx, k8sClient, cluster2Name, meshName, testNs)
+				util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet, meshv1alpha1.MultiClusterMeshSpec{
+					ControlPlane: meshv1alpha1.ControlPlaneConfig{Namespace: "istio-system"},
+				})
+			})
+
+			It("should create ManifestWorkReplicaSet with two Manifests", func() {
+				placement := expectPlacement(meshName, testNs)
+				mwrset := expectManifestWorkReplicaSet(testNs, meshName)
+				Expect(mwrset.OwnerReferences).To(HaveLen(1))
+				Expect(mwrset.OwnerReferences[0].Name).To(Equal(meshName))
+				Expect(mwrset.Labels[meshcontroller.ManagedByLabel]).To(Equal(meshcontroller.ManagedByValue))
+				Expect(mwrset.Labels[meshcontroller.MeshNameLabel]).To(Equal(meshName))
+				Expect(mwrset.Labels[meshcontroller.MeshNamespaceLabel]).To(Equal(testNs))
+				Expect(mwrset.Spec.PlacementRefs[0].Name).To(Equal(placement.Name))
+				Expect(mwrset.Spec.ManifestWorkTemplate.Workload.Manifests).To(HaveLen(2))
+			})
+
+			It("should cleanup remote access secrets when mesh is deleted", func() {
+				util.CreateNamespace(ctx, k8sClient, "istio-system")
+				util.CreateIstioRemoteSecret(ctx, k8sClient, clusterName, meshName, testNs, "istio-system")
+				util.CreateIstioRemoteSecret(ctx, k8sClient, cluster2Name, meshName, testNs, "istio-system")
+				util.DeleteResource(ctx, k8sClient, &meshv1alpha1.MultiClusterMesh{}, meshName, testNs)
+
+				util.ExpectResourceDeleted(ctx, k8sClient, &corev1.Secret{},
+					expectedIstioRemoteSecretName(testNs, meshName, clusterName), "istio-system")
+				util.ExpectResourceDeleted(ctx, k8sClient, &corev1.Secret{},
+					expectedIstioRemoteSecretName(testNs, meshName, cluster2Name), "istio-system")
+			})
+		})
+
 		When("referencing a non-existing ClusterSet", func() {
 			var otherClusterSet string
 
@@ -869,12 +898,19 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 				expectNoPlacement(testNs)
 			})
 
+			It("should not create a ManifestWorkReplicaSet", func() {
+				expectMeshNotReady(meshName, testNs)
+				expectNoManifestWorkReplicaSet(testNs)
+			})
+
 			It("should reconcile when the ClusterSet is created", func() {
 				expectMeshNotReady(meshName, testNs)
 				util.CreateManagedCluster(ctx, k8sClient, clusterName, otherClusterSet)
+				util.CreateMsaSecret(ctx, k8sClient, clusterName, meshName, testNs)
 				util.CreateManagedClusterSet(ctx, k8sClient, otherClusterSet)
 				expectManagedClusterSetBinding(testNs, otherClusterSet)
 				expectPlacement(meshName, testNs)
+				expectManifestWorkReplicaSet(testNs, meshName)
 			})
 		})
 
@@ -1112,6 +1148,10 @@ func expectedManagedServiceAccountName(meshNamespace, meshName string) string {
 	return fmt.Sprintf("%s-istio-reader-%s", meshNamespace, meshName)
 }
 
+func expectedIstioRemoteSecretName(meshNamespace, meshName, clusterName string) string {
+	return fmt.Sprintf("%s-%s-%s-%s", meshNamespace, meshName, "istio-remote-secret", clusterName)
+}
+
 func getManagedServiceAccount(g Gomega, meshNamespace, meshName, clusterName string) *msav1beta1.ManagedServiceAccount {
 	msa := &msav1beta1.ManagedServiceAccount{}
 	g.Expect(k8sClient.Get(ctx, key.Of(expectedManagedServiceAccountName(meshNamespace, meshName), clusterName), msa)).To(Succeed())
@@ -1148,6 +1188,14 @@ func expectNoPlacement(namespace string) {
 		placementList := &clusterv1beta1.PlacementList{}
 		Expect(k8sClient.List(ctx, placementList, client.InNamespace(namespace))).To(Succeed())
 		return placementList.Items
+	}).Should(BeEmpty())
+}
+
+func expectNoManifestWorkReplicaSet(namespace string) {
+	Consistently(func() []workv1alpha1.ManifestWorkReplicaSet {
+		mwrsetList := &workv1alpha1.ManifestWorkReplicaSetList{}
+		Expect(k8sClient.List(ctx, mwrsetList, client.InNamespace(namespace))).To(Succeed())
+		return mwrsetList.Items
 	}).Should(BeEmpty())
 }
 

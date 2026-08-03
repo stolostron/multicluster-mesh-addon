@@ -81,6 +81,32 @@ func CreateMsaSecret(ctx context.Context, k8sClient client.Client, clusterName, 
 	Expect(k8sClient.Create(ctx, secret)).To(Succeed())
 }
 
+// CreateIstioRemoteSecret creates a secret that simulates what ManifestWorkReplicaSet controller would distribute.
+func CreateIstioRemoteSecret(ctx context.Context, k8sClient client.Client, clusterName, meshName, meshNamespace, cpNamespace string) {
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      fmt.Sprintf("%s-%s-%s-%s", meshNamespace, meshName, "istio-remote-secret", clusterName),
+			Namespace: cpNamespace,
+			Labels: map[string]string{
+				"istio/multiCluster":              "true",
+				meshcontroller.ManagedByLabel:     meshcontroller.ManagedByValue,
+				meshcontroller.MeshNameLabel:      meshName,
+				meshcontroller.MeshNamespaceLabel: meshNamespace,
+				meshcontroller.ClusterNameLabel:   clusterName,
+			},
+			Annotations: map[string]string{
+				"networking.istio.io/cluster": clusterName,
+			},
+		},
+		Type: corev1.SecretTypeOpaque,
+		Data: map[string][]byte{
+			"ca.crt": []byte("test-ca-data"),
+			"token":  []byte("test-token-data"),
+		},
+	}
+	Expect(k8sClient.Create(ctx, secret)).To(Succeed())
+}
+
 // DeleteResource deletes a Kubernetes resource and waits for it to be fully removed.
 func DeleteResource(ctx context.Context, k8sClient client.Client, obj client.Object, name, namespace string) {
 	Expect(k8sClient.Get(ctx, key.Of(name, namespace), obj)).To(Succeed())
