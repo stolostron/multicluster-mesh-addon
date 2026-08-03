@@ -55,6 +55,7 @@ rules:
   - delete
   - get
   - list
+  - watch
 - apiGroups:
   - cluster.open-cluster-management.io
   resources:
@@ -67,10 +68,10 @@ rules:
   - placements
   verbs:
   - create
-  - delete
   - get
   - list
   - update
+  - watch
 - apiGroups:
   - mesh.open-cluster-management.io
   resources:

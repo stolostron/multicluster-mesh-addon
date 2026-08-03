@@ -140,9 +140,9 @@ func RegisterController(mgr manager.Manager) error {
 //+kubebuilder:rbac:groups=mesh.open-cluster-management.io,resources=multiclustermeshes/finalizers,verbs=update
 //+kubebuilder:rbac:groups=cluster.open-cluster-management.io,resources=managedclusters,verbs=get;list;watch
 //+kubebuilder:rbac:groups=cluster.open-cluster-management.io,resources=managedclustersets,verbs=get;list;watch
-//+kubebuilder:rbac:groups=cluster.open-cluster-management.io,resources=managedclustersetbindings,verbs=get;list;create;delete
+//+kubebuilder:rbac:groups=cluster.open-cluster-management.io,resources=managedclustersetbindings,verbs=get;list;watch;create;delete
 //+kubebuilder:rbac:groups=cluster.open-cluster-management.io,resources=managedclustersets/bind,verbs=create
-//+kubebuilder:rbac:groups=cluster.open-cluster-management.io,resources=placements,verbs=get;list;create;update;delete
+//+kubebuilder:rbac:groups=cluster.open-cluster-management.io,resources=placements,verbs=get;list;watch;create;update
 //+kubebuilder:rbac:groups=work.open-cluster-management.io,resources=manifestworks,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=cert-manager.io,resources=certificates,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=authentication.open-cluster-management.io,resources=managedserviceaccounts,verbs=get;list;watch;create;update;delete
@@ -321,7 +321,7 @@ func (r *Reconciler) doReconcile(ctx context.Context, mesh *meshv1alpha1.MultiCl
 			return fmt.Errorf("failed to ensure ManagedClusterSetBinding for mesh %s binding %s: %w", mesh.Name, mesh.Spec.ClusterSet, err)
 		}
 		if err := r.ensurePlacement(ctx, mesh); err != nil {
-			return fmt.Errorf("failed to ensure Placement for mesh %s binding %s: %w", mesh.Name, mesh.Spec.ClusterSet, err)
+			return fmt.Errorf("failed to ensure Placement for mesh %s/%s: %w", mesh.Namespace, mesh.Name, err)
 		}
 	}
 
@@ -930,7 +930,7 @@ func (r *Reconciler) ensureManagedClusterSetBinding(ctx context.Context, mesh *m
 	return r.Create(ctx, clusterSetBinding)
 }
 
-// cleanupManagedClusterSetBinding deletes ManagedClusterSetBinding when the given ClusterSet is deleted or no mesh targets it
+// cleanupManagedClusterSetBinding deletes ManagedClusterSetBinding when no other mesh in the namespace targets the same ClusterSet
 func (r *Reconciler) cleanupManagedClusterSetBinding(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh) error {
 	meshList := &meshv1alpha1.MultiClusterMeshList{}
 	if err := r.List(ctx, meshList, client.InNamespace(mesh.Namespace), client.MatchingFields{"spec.clusterSet": mesh.Spec.ClusterSet}); err != nil {

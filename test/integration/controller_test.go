@@ -795,6 +795,8 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 			It("should create Placement for the ManagedClusterSet", func() {
 				util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet)
 				placement := expectPlacement(meshName, testNs)
+				Expect(placement.OwnerReferences).To(HaveLen(1))
+				Expect(placement.OwnerReferences[0].Name).To(Equal(meshName))
 				Expect(placement.Labels[meshcontroller.ManagedByLabel]).To(Equal(meshcontroller.ManagedByValue))
 				Expect(placement.Labels[meshcontroller.MeshNameLabel]).To(Equal(meshName))
 				Expect(placement.Labels[meshcontroller.MeshNamespaceLabel]).To(Equal(testNs))
@@ -921,6 +923,13 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 					g.Expect(k8sClient.Get(ctx, key.Of(testClusterSet, testNs), b)).To(Succeed())
 					g.Expect(b.ResourceVersion).To(Equal(rv))
 				}).Should(Succeed())
+			})
+
+			It("should delete the ManagedClusterSetBinding when all meshes are deleted", func() {
+				expectManagedClusterSetBinding(testNs, testClusterSet)
+				util.DeleteResource(ctx, k8sClient, &meshv1alpha1.MultiClusterMesh{}, meshName, testNs)
+				util.DeleteResource(ctx, k8sClient, &meshv1alpha1.MultiClusterMesh{}, otherMesh, testNs)
+				expectManagedClusterSetBindingDeleted(testNs)
 			})
 		})
 	})
