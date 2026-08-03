@@ -105,7 +105,6 @@ rules:
   - manifestworkreplicasets
   verbs:
   - create
-  - delete
   - get
   - list
   - update

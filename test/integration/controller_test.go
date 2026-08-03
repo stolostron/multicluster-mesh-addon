@@ -807,7 +807,12 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 			It("should create ManifestWorkReplicaSet after ManagedServiceAccount Secret is created", func() {
 				util.CreateMsaSecret(ctx, k8sClient, clusterName, meshName, testNs)
 				util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet)
-				expectManifestWorkReplicaSet(testNs, meshName)
+				mwrset := expectManifestWorkReplicaSet(testNs, meshName)
+				Expect(mwrset.OwnerReferences).To(HaveLen(1))
+				Expect(mwrset.OwnerReferences[0].Name).To(Equal(meshName))
+				Expect(mwrset.Labels[meshcontroller.ManagedByLabel]).To(Equal(meshcontroller.ManagedByValue))
+				Expect(mwrset.Labels[meshcontroller.MeshNameLabel]).To(Equal(meshName))
+				Expect(mwrset.Labels[meshcontroller.MeshNamespaceLabel]).To(Equal(testNs))
 			})
 
 			When("the ManagedServiceAccount exists", func() {
@@ -1170,14 +1175,10 @@ func expectPlacement(meshName, meshNamespace string) *clusterv1beta1.Placement {
 	return placement
 }
 
-func expectedManifestWorkReplicaSetName(meshNamespace, meshName string) string {
-	return fmt.Sprintf("%s-%s-%s", meshNamespace, meshcontroller.ManifestWorkReplicaSetName, meshName)
-}
-
 func expectManifestWorkReplicaSet(meshNamespace, meshName string) *workv1alpha1.ManifestWorkReplicaSet {
 	mwrset := &workv1alpha1.ManifestWorkReplicaSet{}
 	Eventually(func() error {
-		return k8sClient.Get(ctx, key.Of(expectedManifestWorkReplicaSetName(meshNamespace, meshName), meshNamespace), mwrset)
+		return k8sClient.Get(ctx, key.Of(meshName, meshNamespace), mwrset)
 	}).Should(Succeed())
 	return mwrset
 }

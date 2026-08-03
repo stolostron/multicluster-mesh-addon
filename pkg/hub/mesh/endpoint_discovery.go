@@ -115,9 +115,7 @@ func (r *Reconciler) ensureManagedServiceAccountUpdated(ctx context.Context, mes
 
 // ensureManifestWorkReplicaSet creates a ManifestWorkReplicaSet to distribute remote access secrets for clusters selected by a Placement
 func (r *Reconciler) ensureManifestWorkReplicaSet(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh) error {
-	mwrsetName := fmt.Sprintf("%s-%s-%s", mesh.Namespace, ManifestWorkReplicaSetName, mesh.Name)
-
-	placement := &clusterv1beta1.Placement{ObjectMeta: metav1.ObjectMeta{Name: mesh.Name, Namespace: mesh.Namespace}}
+	placement := &clusterv1beta1.Placement{}
 	if err := r.Get(ctx, key.Of(mesh.Name, mesh.Namespace), placement); err != nil {
 		return fmt.Errorf("failed to get Placement %s/%s: %w", mesh.Namespace, mesh.Name, err)
 	}
@@ -128,7 +126,7 @@ func (r *Reconciler) ensureManifestWorkReplicaSet(ctx context.Context, mesh *mes
 	}
 
 	mwrset := &workv1alpha1.ManifestWorkReplicaSet{
-		ObjectMeta: metav1.ObjectMeta{Name: mwrsetName, Namespace: mesh.Namespace},
+		ObjectMeta: metav1.ObjectMeta{Name: mesh.Name, Namespace: mesh.Namespace},
 	}
 
 	_, err = controllerutil.CreateOrUpdate(ctx, r.Client, mwrset, func() error {
@@ -144,10 +142,10 @@ func (r *Reconciler) ensureManifestWorkReplicaSet(ctx context.Context, mesh *mes
 	})
 
 	if err != nil {
-		return fmt.Errorf("failed to ensure ManifestWorkReplicaSet %s/%s: %w", mesh.Namespace, mwrset.Name, err)
+		return fmt.Errorf("failed to ensure ManifestWorkReplicaSet %s/%s: %w", mesh.Namespace, mesh.Name, err)
 	}
 
-	klog.Infof("Successfully created a ManifestWorkReplicaSet %s/%s", mesh.Namespace, mwrsetName)
+	klog.Infof("Successfully created a ManifestWorkReplicaSet %s/%s", mesh.Namespace, mesh.Name)
 	return nil
 }
 
