@@ -3,6 +3,7 @@
 ## Table of Contents
 
 - [Overview](#overview)
+- [Approach Comparison](#approach-comparison)
 - [Architecture](#architecture)
 - [Scope](#scope)
 - [Supported Topologies](#supported-topologies)
@@ -23,6 +24,96 @@ The OCM Service Mesh Add-on automates multi-cluster Istio service mesh setup via
 3. **Endpoint Discovery** - Exchanging discovery credentials via [ManagedServiceAccount]
 
 Without this add-on, multi-cluster mesh setup is a manual process involving certificate management, O(N^2) secret exchanges, and per-cluster operator configuration.
+
+## Approach Comparison
+
+Multi-cluster Istio mesh can be set up in several ways, from fully manual to policy-driven to addon-managed.
+Each approach trades off flexibility against operational complexity, error-proneness, and safety at scale.
+The table below compares three approaches across operational concerns:
+
+- **Manual**: the user provisions all resources directly using `kubectl`, `istioctl`, and scripting or GitOps tooling (e.g., ArgoCD `ApplicationSets`).
+Maximum flexibility, maximum burden.
+GitOps can automate distribution and drift detection for the resources you define, but it cannot compute derived resources (peer graphs, per-cluster certificates) or validate domain-specific constraints.
+- **OCM Policies**: the user authors [governance policies][Policy Framework] with hub templates to automate resource distribution across clusters.
+The policy framework handles targeting and compliance, but the user is responsible for authoring, maintaining, and debugging the policy stack.
+- **Addon Controller**: the user creates a single `MultiClusterMesh` CR.
+The addon controller orchestrates the full mesh lifecycle (operator, certificates, discovery, and Istio control plane rollout) with domain-aware validation, conflict detection, and lifecycle management.
+
+> **Note on phased scope:** The comparison below reflects the addon's full intended scope, including centralized `Istio` CR management (see [Phased Approach](#phased-approach)).
+>
+> In Phase 1 (MVP), the addon manages plumbing only (operator, trust, discovery).
+> `Istio` CR rollout (control plane, `IstioCNI`, gateways) remains the user's responsibility and can be handled via any of the approaches above (manual, GitOps, or OCM policies).
+>
+> The addon's advantages in Phase 1 apply to plumbing concerns.
+> For `Istio` CR management concerns, the Phase 1 user experience is closer to the manual or policy columns.
+
+### Setup and Day-1 Operations
+
+| Concern | Manual | OCM Policies | Addon Controller |
+|---------|--------|--------------|------------------|
+| **Initial setup** | **Very high complexity.** 4 per-cluster operations (namespace, control plane, gateway, expose services) + N×(N−1) remote secret exchanges. At 10 clusters: ~130 operations. | **Medium complexity.** Author ~8 policies, set up supporting resources (`ManagedClusterSetBinding`, `Placements`, `PolicySets`, `PlacementBindings`, RBAC for `managedclustersets/bind`). One-time effort, but requires hub template syntax, policy semantics, and Istio architecture knowledge. | **Low complexity.** One CR covers the full mesh lifecycle: operator, trust, discovery, and Istio control plane rollout. |
+| **Adding clusters** | **High complexity.** Repeat per-cluster steps. Adding one cluster to an N-cluster mesh requires 2×(N−1) remote secret operations plus operator, certs, and namespace setup. | **Low complexity.** Add a label. The new cluster is automatically provisioned. | **Low complexity.** Add the cluster to the `ClusterSet`. The new cluster is automatically provisioned. |
+| **Removing clusters** | **High complexity.** Revoke remote secrets from all N−1 peers, clean up certs, optionally remove operator. Easy to miss a peer. | **Low complexity.** Remove a label. Resources are cleaned up automatically, though depending on how policies are authored, some may be left behind (e.g., namespaces, CRDs). | **Low complexity.** Automatic cleanup and prompt access revocation across all peers. |
+| **Setup reliability** | **Low.** Fragile: a single wrong label, typo, or outdated guide step means debugging across N clusters with no clear error. Istio failures are often silent. GitOps helps with drift but doesn't catch Istio-specific misconfigurations. | **Medium.** Compliance reporting tells you something is wrong, but doesn't diagnose Istio-specific misconfigurations (wrong network label, cert chain mismatch). Template authoring errors can be hard to debug. | **High.** Validates inputs and catches Istio-specific misconfigurations (wrong network label, missing CNI, version skew, `discoverySelectors` overlap) in addition to plumbing errors. Reports domain-specific errors. Reduces the surface area for mistakes to the CRD spec. |
+
+### Trust and Credential Management
+
+| Concern | Manual | OCM Policies | Addon Controller |
+|---------|--------|--------------|------------------|
+| **Certificate distribution** | **High complexity.** Generate root CA, keep root key secure, generate per-cluster intermediates, distribute manually. No built-in Istio tooling for this. | **Medium complexity.** Policies can distribute CA material. Per-cluster intermediate CAs require cert-manager + additional hub-side `Certificate` management. Without cert-manager, user provides CA material manually. | **Low complexity.** Per-cluster intermediate CAs via cert-manager. Root key never leaves hub. Automatic propagation. |
+| **Zero-downtime trust rotation** | **Difficult.** Requires a multi-step overlapping trust bundle approach across all clusters. Istio does not provide a turnkey procedure. Skipping steps or mistiming breaks cross-cluster mTLS. | **Possible but manual.** Policies can distribute the trust bundles, but the admin must manually coordinate the steps (distribute combined bundle, verify all clusters received it, then switch signing). A simpler approach (just replace the cert) works but risks downtime if clusters pick up the new cert at different times. | **Controller-orchestrated.** The controller can coordinate the multi-step rotation across clusters (distribute combined bundle, verify propagation, switch signing). The operation itself still depends on Istio's trust renewal timing, but the coordination is the kind of sequenced, cluster-aware work that a controller handles naturally and is hard to express in declarative policies. |
+| **N-to-N discovery** | **Very high complexity, grows quadratically.** `istioctl create-remote-secret` works one cluster pair at a time with no batch mode. N×(N−1) manual invocations for a full mesh. | **Medium complexity.** A single policy can generate remote secrets for all cluster pairs automatically. Non-trivial to author and maintain. | **Low complexity.** Automatic peer discovery and credential exchange. |
+| **Discovery credential rotation** | **High effort, risk of outage.** Regenerate tokens, rebuild kubeconfigs, redistribute all remote secrets manually. If the admin misses the rotation window, tokens expire and clusters lose cross-cluster discovery until manually fixed. | **Automatic, minimal risk.** `ManagedServiceAccount` handles token rotation. Policies pick up the new token and update remote secrets well before the old token expires. | **Automatic, minimal risk.** `ManagedServiceAccount` handles token rotation. Controller picks up the new token and updates remote secrets. Functionally similar to the policy path. |
+
+### Safety and Correctness
+
+| Concern | Manual | OCM Policies | Addon Controller |
+|---------|--------|--------------|------------------|
+| **Conflict detection** | **High risk.** Conflicts discovered at runtime. No warning before damage (e.g., two `Subscriptions` fighting, OCP Gateway API operator collision on 4.19-4.21). | **Medium risk.** Compliance shows NonCompliant but no domain-aware diagnosis. No cross-policy conflict detection: competing policies result in last-write-wins. `OperatorPolicy` silently overwrites pre-existing `Subscription` fields. | **Low risk.** Do-no-harm strategy: detects pre-existing operators before touching them, compares configs, detects cross-mesh conflicts. Reports specific error reasons. |
+| **Guardrails** | **None.** User can create invalid configurations with no warning. | **Generic.** Compliance reports resource drift, but doesn't understand Istio semantics. Won't warn about version skew, `discoverySelectors` overlap, or `IstioCNI` conflicts between meshes. | **Domain-aware.** Validates operator compatibility, namespace uniqueness, `ClusterSet` exclusivity, `discoverySelectors` isolation, and control plane version alignment. Guides without babysitting. |
+| **Configuration integrity** | **None.** Any mesh resource can be modified or deleted with no automatic correction. Credentials (certs, tokens) spread across N clusters with no centralized tracking. | **Partial.** Policies auto-remediate drift on resources they manage. Modifying the policy itself (the source of truth) is not guarded by any higher-level mechanism. | **Self-healing.** Controller auto-corrects rogue changes to all managed resources. The `MultiClusterMesh` CRD is the single source of truth, with validations (immutable `spec.clusterSet`, field constraints) guarding against invalid changes. |
+
+### Scaling and Multi-Tenancy
+
+| Concern | Manual | OCM Policies | Addon Controller |
+|---------|--------|--------------|------------------|
+| **Operational complexity at scale** | **Untenable.** Istio docs say "managing configuration across multiple clusters at scale is challenging." Manageable for a handful of clusters, impractical beyond that. | **Manageable for single mesh.** User effort stays constant per mesh regardless of cluster count. Multi-mesh multiplies the policy surface area the user maintains and debugs. | **Constant.** One CR per mesh regardless of cluster count or mesh count. |
+| **Multi-mesh / multi-tenancy** | **Very high complexity.** Every concern multiplied by mesh count. User must manually ensure isolation (namespaces, `discoverySelectors`, `IstioCNI` singleton). | **High complexity.** Requires duplicating policies per mesh or complex parameterization. No cross-mesh validation. Cluster-scoped singletons (`IstioCNI`, operator) become conflict points with no framework-level resolution. | **Reduced complexity.** Namespace-scoped CRs provide tenant isolation on the hub. `ClusterSet` boundaries and hub-side ownership rules reduce overlap risks. The addon detects cross-mesh conflicts for operator, namespaces, `discoverySelectors`, and control plane resources. |
+
+### Flexibility and Day-2 Operations
+
+| Concern | Manual | OCM Policies | Addon Controller |
+|---------|--------|--------------|------------------|
+| **Flexibility / customization** | **Maximum.** Most flexible, most headache. | **Medium-high.** Per-cluster customization is limited to what the hub template supports. Non-uniform topologies (e.g., primary-remote where one cluster is fundamentally different) require complex conditional branching in templates. Each new use case means more template logic to maintain. | **Constrained for plumbing, flexible for configuration.** Operator and trust config is parameterized within supported boundaries. `Istio` CR management provides sensible defaults with per-cluster overrides. |
+| **Istio CR management** | **Full control, full responsibility.** | **Full control with automation.** Can distribute `Istio`, `IstioCNI`, and gateways with per-cluster templating. | **Centralized management** with domain-aware defaults, validation, and per-cluster overrides. See the phased scope note above for current coverage. |
+| **Drift detection and compliance** | **Limited.** GitOps tooling can detect drift for resources it manages, but has no awareness of Istio-specific correctness. Without GitOps, none. | **Strong.** First-class compliance reporting with per-resource violation details. Configurable remediation (inform vs enforce). | **Domain-aware.** Reports specific error reasons for all managed resources. Compliance reporting is planned as the addon matures. |
+
+### User Experience
+
+| Concern | Manual | OCM Policies | Addon Controller |
+|---------|--------|--------------|------------------|
+| **Learning curve** | **Low entry, high ongoing.** Familiar tools (`kubectl`, `openssl`, `istioctl`). But the ongoing knowledge burden is high: Istio multi-cluster architecture, cert management, discovery lifecycle. | **High entry, transferable.** Must learn the OCM policy framework (hub templates, compliance types, evaluation intervals, `PolicySets`, `PlacementBindings`) in addition to Istio. The policy knowledge is transferable to other governance use cases, but learning it solely for mesh deployment is a high upfront cost. | **Low.** User interacts with a single CRD. Internal complexity is abstracted. |
+| **Debugging / troubleshooting** | **High effort.** User debugs across N clusters independently with no centralized view. | **Medium effort.** Compliance reporting aggregates state and identifies non-compliant clusters. If deeper debugging is needed, the user traces through the policy stack. | **Low effort.** Per-cluster status conditions on a single CR with specific error reasons. If the user needs to dig deeper into the distribution mechanism, the complexity is similar to manual policies. |
+| **Prerequisites** | **Minimal.** `kubectl`, `openssl`/`cfssl`, `istioctl`. Tools most users already have. | **OCM policy framework** + `ManagedServiceAccount` addon. cert-manager optional (needed for automated per-cluster CA generation, otherwise user provides CA material manually). | **cert-manager** + `ManagedServiceAccount` addon + the addon itself. |
+
+### Summary
+
+The comparison above describes each approach at its full intended scope (see the phased scope note above for current coverage).
+
+For **production and semi-production environments**, the addon controller is the recommended approach.
+It handles the hardest parts of multi-cluster mesh management (trust distribution, N-to-N discovery, conflict detection, credential rotation) while keeping the user's interaction surface to a single CR.
+The domain-aware validation and do-no-harm strategy prevent classes of errors that the other approaches can't detect.
+
+**OCM policies** are a production-capable approach for **single-mesh deployments** when the team has policy framework expertise and accepts the tradeoffs.
+The compliance reporting and drift detection are genuine strengths, and policies can manage the full Istio stack including control plane CRs.
+However, the lack of cross-policy conflict detection, the difficulty of orchestrating multi-phase operations (such as zero-downtime CA rotation), and the complexity of multi-mesh management are significant limitations that users should evaluate for their use case.
+Policies can also complement the addon for `Istio` CR distribution while the addon handles plumbing (see the phased scope note above).
+
+**Manual setup** (with or without GitOps) offers the most granularity and is appropriate for **learning, experimentation, or environments where the addon cannot run** (no OCM, no cert-manager).
+GitOps tooling helps with distribution and drift detection for defined resources, but cannot compute derived resources (peer graphs, per-cluster certificates) or validate Istio-specific constraints.
+Beyond a few clusters, the quadratic growth in discovery operations and the fragility of the setup process make it the most operationally demanding option.
+
+[Policy Framework]: https://open-cluster-management.io/docs/getting-started/integration/policy-controllers/
 
 ## Architecture
 
@@ -105,7 +196,10 @@ flowchart TD
 - Exchanges discovery tokens between peer clusters
 - Handles lifecycle events (cluster add/remove, mesh creation/deletion)
 
-### What the add-on does not do (Configuration)
+### What the add-on does not do (Configuration) — Phase 1
+
+The following are out of scope for Phase 1.
+Some of these are planned for future phases (see [Phased Approach](#phased-approach) and [Approach Comparison](#approach-comparison)).
 
 - Does not create or manage Istio custom resources (the user or GitOps owns this)
 - Does not patch existing Istio CRs on spoke clusters (this would conflict with ArgoCD/GitOps reconciliation)
