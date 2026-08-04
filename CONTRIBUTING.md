@@ -43,7 +43,7 @@ Contact the org [owners](https://github.com/orgs/stolostron/people?query=role%3A
 
 ### Dependent Pull Requests
 
-If a pull request depends on another open pull request in this repository, declare the dependency in the PR description using a full PR URL:
+If a pull request depends on another open pull request in this repository, declare the dependency in the PR description with a full PR URL (short forms like `#123` are not supported):
 
 ```text
 Depends-On: https://github.com/stolostron/multicluster-mesh-addon/pull/123
@@ -51,7 +51,7 @@ Depends-On: https://github.com/stolostron/multicluster-mesh-addon/pull/123
 
 You can list multiple dependencies, one `Depends-On:` line each. The **PR Dependencies / Check Dependencies** GitHub Action fails until every listed pull request is merged, which keeps Tide from merging the dependent PR early. Use `/hold` for other reasons to block merge (WIP, discussion); dependency gating is automatic when `Depends-On:` is present.
 
-The check re-runs when the dependent PR is updated (new commits, editing description etc). It does **not** refresh automatically when a listed dependency merges. After dependencies land, re-run **PR Dependencies / Check Dependencies** on the waiting PR (or push a commit / edit the description) so the check can turn green.
+The check does not refresh automatically when a listed dependency merges. After the parent PR lands (this repo squash-merges), merge or rebase `main` into the dependent PR. That picks up the parent's changes and re-runs the dependency check.
 
 ## Developer Certificate of Origin
 
