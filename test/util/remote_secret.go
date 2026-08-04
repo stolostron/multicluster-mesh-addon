@@ -36,7 +36,7 @@ const (
 //  1. Creates a SA token secret for istio-reader-service-account
 //  2. Reads the API server URL from the ManagedCluster on the hub
 //  3. Builds a kubeconfig-style secret and applies it on each peer cluster
-func CreateAndDistributeRemoteSecrets(ctx context.Context, hubClient client.Client, spokeClients map[string]client.Client, clusterNames []string, cpNamespace string) {
+func CreateAndDistributeRemoteSecrets(ctx context.Context, hubClient client.Client, spokeClients map[string]*E2EClient, clusterNames []string, cpNamespace string) {
 	type clusterInfo struct {
 		apiServerURL string
 		caData       []byte
@@ -142,35 +142,4 @@ users:
 		clusterName, clusterName, clusterName,
 		clusterName,
 		clusterName, token)
-}
-
-// REVISIT: Delete when multicluster-mesh-addon controller handles remote secret
-// construction and distribution.
-//
-// CleanupRemoteSecrets deletes the temporary remote secrets and SA token secrets
-// created by CreateAndDistributeRemoteSecrets.
-func CleanupRemoteSecrets(ctx context.Context, spokeClients map[string]client.Client, clusterNames []string, cpNamespace string) {
-	for _, source := range clusterNames {
-		for _, target := range clusterNames {
-			if source == target {
-				continue
-			}
-			targetClient := spokeClients[target]
-			_ = client.IgnoreNotFound(targetClient.Delete(ctx, &corev1.Secret{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      remoteSecretPrefix + source,
-					Namespace: cpNamespace,
-				},
-			}))
-		}
-	}
-	for _, cluster := range clusterNames {
-		spokeClient := spokeClients[cluster]
-		_ = client.IgnoreNotFound(spokeClient.Delete(ctx, &corev1.Secret{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      saTokenSecretPrefix + cluster,
-				Namespace: cpNamespace,
-			},
-		}))
-	}
 }

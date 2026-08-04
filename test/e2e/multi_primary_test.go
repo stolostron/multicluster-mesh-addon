@@ -101,14 +101,6 @@ var _ = Describe("Multi-primary data plane", Ordered, Serial, func() {
 	}, NodeTimeout(5*time.Minute))
 
 	AfterAll(func(ctx SpecContext) {
-		// TODO(endpoint-discovery): Remove once the controller distributes remote secrets.
-		Step("Cleaning up remote secrets")
-		spokeClientMap := make(map[string]client.Client, len(spokeClients))
-		for name, sc := range spokeClients {
-			spokeClientMap[name] = sc
-		}
-		util.CleanupRemoteSecrets(ctx, spokeClientMap, clusters, cpNamespace)
-
 		Step("Cleaning up spoke resources")
 		for _, spokeClient := range spokeClients {
 			_ = client.IgnoreNotFound(spokeClient.Delete(ctx, &corev1.Namespace{
@@ -154,11 +146,7 @@ var _ = Describe("Multi-primary data plane", Ordered, Serial, func() {
 
 			// TODO(endpoint-discovery): Remove once the controller distributes remote secrets.
 			Step("Creating remote secrets for cross-cluster discovery")
-			spokeClientMap := make(map[string]client.Client, len(spokeClients))
-			for name, sc := range spokeClients {
-				spokeClientMap[name] = sc
-			}
-			util.CreateAndDistributeRemoteSecrets(ctx, hubClient, spokeClientMap, clusters, cpNamespace)
+			util.CreateAndDistributeRemoteSecrets(ctx, hubClient, spokeClients, clusters, cpNamespace)
 
 			for cluster, spokeClient := range spokeClients {
 				Step("Applying east-west Gateway API resource on %s", cluster)
