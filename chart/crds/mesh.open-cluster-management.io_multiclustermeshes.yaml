@@ -54,9 +54,14 @@ spec:
                 properties:
                   namespace:
                     default: istio-system
-                    description: Namespace is the namespace where Istio will be installed
-                      on each cluster
+                    description: |-
+                      Namespace is the namespace where Istio will be installed on each cluster.
+                      This namespace is created and deleted by the addon as part of the mesh lifecycle.
+                    maxLength: 63
                     type: string
+                    x-kubernetes-validations:
+                    - message: spec.controlPlane.namespace is immutable
+                      rule: self == oldSelf
                 type: object
               operator:
                 description: Operator defines the service mesh operator installation
