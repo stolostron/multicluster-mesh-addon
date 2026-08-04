@@ -41,6 +41,18 @@ Contact the org [owners](https://github.com/orgs/stolostron/people?query=role%3A
 - Avoid force-pushing during review if possible. Use merge commits to resolve conflicts.
 - Use the `/hold` and `/unhold` comments to control when a PR is eligible for merge. Contributors may use `/hold` to prevent a PR from merging while additional review or discussion is in progress. This is particularly useful for complex changes that require multiple approvals. If a PR is not on hold, it becomes eligible for merge after receiving a single approving review from a maintainer.
 
+### Dependent Pull Requests
+
+If a pull request depends on another open pull request in this repository, declare the dependency in the PR description with a full PR URL (short forms like `#123` are not supported):
+
+```text
+Depends-On: https://github.com/stolostron/multicluster-mesh-addon/pull/123
+```
+
+You can list multiple dependencies, one `Depends-On:` line each. The **PR Dependencies / Check Dependencies** GitHub Action fails until every listed pull request is merged, which keeps Tide from merging the dependent PR early. Use `/hold` for other reasons to block merge (WIP, discussion); dependency gating is automatic when `Depends-On:` is present.
+
+The check does not refresh automatically when a listed dependency merges. After the parent PR lands (this repo squash-merges), merge or rebase `main` into the dependent PR. That picks up the parent's changes and re-runs the dependency check.
+
 ## Developer Certificate of Origin
 
 You must sign off your commits to certify that you have the right to submit the code under the project's license. This is done using the [Developer Certificate of Origin (DCO)](https://developercertificate.org/).
