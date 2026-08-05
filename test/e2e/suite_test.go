@@ -1,4 +1,4 @@
-//go:build e2e
+//go:build e2e || e2e_multicluster
 
 package e2e
 
@@ -24,13 +24,21 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	meshv1alpha1 "github.com/stolostron/multicluster-mesh-addon/pkg/apis/mesh/v1alpha1"
-	meshcontroller "github.com/stolostron/multicluster-mesh-addon/pkg/hub/mesh"
 	"github.com/stolostron/multicluster-mesh-addon/test/util"
 )
 
+const (
+	testOperatorName      = "sailoperator"
+	testOperatorNamespace = "sail-operator"
+	testCatalogSource     = "operatorhubio-catalog"
+	testCatalogNamespace  = "olm"
+)
+
 var (
-	hubClient    client.Client
-	spokeClients map[string]client.Client
+	clusters = []string{"cluster1", "cluster2"}
+
+	hubClient    *util.E2EClient
+	spokeClients map[string]*util.E2EClient
 )
 
 func TestE2E(t *testing.T) {
@@ -39,7 +47,7 @@ func TestE2E(t *testing.T) {
 }
 
 var _ = BeforeSuite(func(ctx context.Context) {
-	SetDefaultEventuallyTimeout(30 * time.Second)
+	SetDefaultEventuallyTimeout(2 * time.Minute)
 	SetDefaultEventuallyPollingInterval(250 * time.Millisecond)
 
 	util.MustAddToScheme(
@@ -57,10 +65,13 @@ var _ = BeforeSuite(func(ctx context.Context) {
 	cluster1Kubeconfig := env("CLUSTER1_KUBECONFIG", ".kube/cluster1.config")
 	cluster2Kubeconfig := env("CLUSTER2_KUBECONFIG", ".kube/cluster2.config")
 
-	hubClient = clientFrom(hubKubeconfig)
-	spokeClients = map[string]client.Client{
-		"cluster1": clientFrom(cluster1Kubeconfig),
-		"cluster2": clientFrom(cluster2Kubeconfig),
+	hubClient = util.NewE2EClient(clientFrom(hubKubeconfig), hubKubeconfig)
+	spokeClients = make(map[string]*util.E2EClient)
+	for name, kc := range map[string]string{
+		"cluster1": cluster1Kubeconfig,
+		"cluster2": cluster2Kubeconfig,
+	} {
+		spokeClients[name] = util.NewE2EClient(clientFrom(kc), kc)
 	}
 
 	Step("Verifying cluster connectivity")
@@ -70,7 +81,10 @@ var _ = BeforeSuite(func(ctx context.Context) {
 	}
 
 	Step("Checking for existing resources that can interfere with our testing")
-	checkNoExistingResources(ctx, hubClient)
+	meshList := &meshv1alpha1.MultiClusterMeshList{}
+	Expect(hubClient.List(ctx, meshList)).To(Succeed())
+	Expect(meshList.Items).To(BeEmpty(),
+		"existing MultiClusterMesh resources found; run 'make dev-clean-meshes' to clean up")
 })
 
 func env(key, def string) string {
@@ -93,23 +107,13 @@ func Step(format string, args ...any) {
 	By(fmt.Sprintf(format, args...))
 }
 
+func Success(format string, args ...any) {
+	GinkgoWriter.Println("* " + fmt.Sprintf(format, args...))
+}
+
 func verifyConnection(ctx context.Context, c client.Client, name string) {
 	nsList := &corev1.NamespaceList{}
 	Expect(c.List(ctx, nsList)).To(Succeed(),
 		"failed to connect to %s cluster", name)
 	GinkgoWriter.Printf("Connected to %s cluster (%d namespaces)\n", name, len(nsList.Items))
-}
-
-func checkNoExistingResources(ctx context.Context, c client.Client) {
-	mwList := &workv1.ManifestWorkList{}
-	err := c.List(ctx, mwList, client.MatchingLabels{meshcontroller.ManagedByLabel: meshcontroller.ManagedByValue})
-	Expect(err).NotTo(HaveOccurred())
-	Expect(mwList.Items).To(BeEmpty(),
-		"existing ManifestWorks found; run 'make dev-clean-meshes' to clean up")
-
-	msaList := &msav1beta1.ManagedServiceAccountList{}
-	err = c.List(ctx, msaList, client.MatchingLabels{meshcontroller.ManagedByLabel: meshcontroller.ManagedByValue})
-	Expect(err).NotTo(HaveOccurred())
-	Expect(msaList.Items).To(BeEmpty(),
-		"existing ManagedServiceAccounts found; run 'make dev-clean-meshes' to clean up")
 }

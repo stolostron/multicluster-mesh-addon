@@ -271,6 +271,83 @@ install_managed_serviceaccount() {
     on "${HUB}" kubectl get managedclusteraddon -A
 }
 
+install_metallb() {
+    local cluster="${1}"
+    require_clusters "${cluster}"
+    local metallb_version="${METALLB_VERSION}"
+
+    if on "${cluster}" kubectl get deployment controller -n metallb-system &>/dev/null; then
+        log "MetalLB already installed on ${cluster}, skipping"
+        return
+    fi
+
+    # Kind auto-detects its container provider (docker or podman), which may
+    # differ from CONTAINER_ENGINE. Detect the actual provider by checking
+    # which runtime owns the Kind node containers.
+    local kind_provider="docker"
+    if podman inspect "${cluster}-control-plane" &>/dev/null; then
+        kind_provider="podman"
+    fi
+
+    local kind_subnet
+    case "${kind_provider}" in
+        podman)
+            kind_subnet="$(podman network inspect kind -f '{{(index .Subnets 0).Subnet}}')" \
+                || err "Failed to inspect Kind network with Podman" ;;
+        docker)
+            kind_subnet="$(docker network inspect kind -f '{{(index .IPAM.Config 0).Subnet}}')" \
+                || err "Failed to inspect Kind network with Docker" ;;
+    esac
+
+    local base_prefix
+    base_prefix="$(echo "${kind_subnet}" | cut -d'/' -f1 | cut -d'.' -f1-3)"
+
+    local idx
+    case "${cluster}" in
+        "${CLUSTER1}") idx=0 ;;
+        "${CLUSTER2}") idx=1 ;;
+        *) err "Unknown cluster for MetalLB IP assignment: ${cluster}" ;;
+    esac
+    local range_start="${base_prefix}.$((200 + idx * 10 + 1))"
+    local range_end="${base_prefix}.$((200 + idx * 10 + 10))"
+
+    log "Installing MetalLB ${metallb_version} on ${cluster}..."
+    on "${cluster}" kubectl apply -f \
+        "https://raw.githubusercontent.com/metallb/metallb/${metallb_version}/config/manifests/metallb-native.yaml"
+
+    log "Waiting for MetalLB controller to be ready on ${cluster}..."
+    on "${cluster}" kubectl rollout status deployment/controller -n metallb-system --timeout=120s
+
+    log "Waiting for MetalLB speaker to be ready on ${cluster}..."
+    on "${cluster}" kubectl rollout status daemonset/speaker -n metallb-system --timeout=120s
+
+    log "Configuring MetalLB IP pool ${range_start}-${range_end} on ${cluster}..."
+    sed "s|__ADDRESS_RANGE__|${range_start}-${range_end}|" \
+        "${SCRIPT_DIR}/hack/kind/metallb-pool.yaml" \
+        | on "${cluster}" kubectl apply -f -
+    log "MetalLB configured on ${cluster}"
+}
+
+install_gateway_api() {
+    local cluster="${1}"
+    require_clusters "${cluster}"
+    local gw_api_version="${GATEWAY_API_VERSION}"
+
+    if on "${cluster}" kubectl get crd gateways.gateway.networking.k8s.io &>/dev/null; then
+        log "Gateway API CRDs already installed on ${cluster}, skipping"
+        return
+    fi
+
+    log "Installing Gateway API CRDs ${gw_api_version} on ${cluster}..."
+    on "${cluster}" kubectl apply --server-side -f \
+        "https://github.com/kubernetes-sigs/gateway-api/releases/download/${gw_api_version}/standard-install.yaml"
+
+    on "${cluster}" retry kubectl wait --for=condition=Established \
+        crd/gateways.gateway.networking.k8s.io --timeout=60s
+
+    log "Gateway API CRDs installed on ${cluster}"
+}
+
 setup_mesh() {
     require_clusters "${HUB}"
     if on "${HUB}" kubectl get namespace mesh-system &>/dev/null; then
@@ -316,6 +393,8 @@ case "${ACTION}" in
     init-ocm)                        init_ocm ;;
     join-clusters)                   join_clusters ;;
     setup-mesh)                      setup_mesh ;;
+    install-metallb)                 install_metallb "${2}" ;;
+    install-gateway-api)             install_gateway_api "${2}" ;;
     *)
-        err "Unknown action: '${ACTION}'. Valid: check-host, create-cluster, install-olm, install-cert-manager, install-managed-serviceaccount, init-ocm, join-clusters, setup-mesh" ;;
+        err "Unknown action: '${ACTION}'. Valid: check-host, create-cluster, install-olm, install-cert-manager, install-managed-serviceaccount, init-ocm, join-clusters, setup-mesh, install-metallb, install-gateway-api" ;;
 esac

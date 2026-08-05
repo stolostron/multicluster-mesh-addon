@@ -168,6 +168,18 @@ test-e2e: ## Run e2e tests against dev-env clusters (requires make dev-env)
 	CLUSTER2_KUBECONFIG=$(DEV_KUBE_DIR)/cluster2.config \
 	go run github.com/onsi/ginkgo/v2/ginkgo -v --fail-fast --tags=e2e ./test/e2e/...
 
+.PHONY: test-e2e-multicluster-prereqs
+test-e2e-multicluster-prereqs:
+	$(MAKE) --no-print-directory -j$(PARALLEL) --output-sync=line install-metallb install-gateway-api
+
+.PHONY: test-e2e-multicluster
+test-e2e-multicluster: test-e2e-multicluster-prereqs ## Run multi-primary e2e tests (requires make dev-env)
+	HUB_KUBECONFIG=$(HUB_KUBECONFIG) \
+	CLUSTER1_KUBECONFIG=$(DEV_KUBE_DIR)/cluster1.config \
+	CLUSTER2_KUBECONFIG=$(DEV_KUBE_DIR)/cluster2.config \
+	go run github.com/onsi/ginkgo/v2/ginkgo -v --fail-fast --tags=e2e_multicluster --timeout=20m \
+		./test/e2e/...
+
 .PHONY: build
 build: $(BIN_DIR) ## Build addon binary
 	CGO_ENABLED=0 go build $(GO_BUILD_FLAGS) -buildvcs=false -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/multicluster-mesh-addon .
@@ -220,6 +232,8 @@ K8S_VERSION ?= v1.35.0
 OLM_VERSION ?= v0.43.0
 CERT_MANAGER_VERSION ?= v1.20.2
 MSA_VERSION ?= 0.10.0
+METALLB_VERSION ?= v0.14.9
+GATEWAY_API_VERSION ?= v1.2.1
 
 DEV_KUBE_DIR := $(CURDIR)/.kube
 HUB_KUBECONFIG := $(DEV_KUBE_DIR)/hub.config
@@ -254,7 +268,8 @@ $(CLUSTERADM): | $(BIN_DIR)
 DEV_ENV_SCRIPT := $(CURDIR)/hack/dev-env.sh
 
 export DEV_KUBE_DIR K8S_VERSION OLM_VERSION CERT_MANAGER_VERSION MSA_VERSION
-export KIND CLUSTERADM HELM
+export METALLB_VERSION GATEWAY_API_VERSION
+export KIND CLUSTERADM HELM CONTAINER_ENGINE
 
 # PARALLEL controls concurrent job count for dev-env/dev-clean (default: half of CPU cores).
 # Set PARALLEL=1 or PARALLEL=0 to run sequentially.
@@ -306,6 +321,22 @@ join-clusters: $(CLUSTERADM) init-ocm $(addprefix create-,$(SPOKE_CLUSTERS)) ## 
 install-managed-serviceaccount: $(HELM_BIN) join-clusters ## Install managed-serviceaccount addon to the hub cluster
 	$(call log,Installing managed-serviceaccount: hub)
 	$(DEV_ENV_SCRIPT) install-managed-serviceaccount
+
+.PHONY: install-metallb
+install-metallb: $(addprefix install-metallb-,$(SPOKE_CLUSTERS)) ## Install MetalLB on spoke Kind clusters
+
+.PHONY: $(addprefix install-metallb-,$(SPOKE_CLUSTERS))
+$(addprefix install-metallb-,$(SPOKE_CLUSTERS)): install-metallb-%:
+	$(call log,Installing MetalLB: $*)
+	$(DEV_ENV_SCRIPT) install-metallb $*
+
+.PHONY: install-gateway-api
+install-gateway-api: $(addprefix install-gateway-api-,$(SPOKE_CLUSTERS)) ## Install Gateway API CRDs on spoke Kind clusters
+
+.PHONY: $(addprefix install-gateway-api-,$(SPOKE_CLUSTERS))
+$(addprefix install-gateway-api-,$(SPOKE_CLUSTERS)): install-gateway-api-%:
+	$(call log,Installing Gateway API: $*)
+	$(DEV_ENV_SCRIPT) install-gateway-api $*
 
 .PHONY: deploy-addon
 deploy-addon: $(KIND) $(HELM_BIN) gen images join-clusters install-cert-manager ## Build and deploy addon to the hub Kind cluster

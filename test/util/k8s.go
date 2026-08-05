@@ -30,13 +30,16 @@ func UniqueName(prefix string) string {
 	return prefix + "-" + rand.String(6)
 }
 
-// CreateNamespace creates a namespace.
-func CreateNamespace(ctx context.Context, k8sClient client.Client, name string) {
-	Expect(k8sClient.Create(ctx, &corev1.Namespace{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: name,
-		},
-	})).To(Succeed())
+// CreateNamespace creates a namespace with optional labels. If the namespace
+// already exists, the call is a no-op.
+func CreateNamespace(ctx context.Context, k8sClient client.Client, name string, labels ...map[string]string) {
+	ns := &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{Name: name},
+	}
+	if len(labels) > 0 && labels[0] != nil {
+		ns.Labels = labels[0]
+	}
+	Expect(client.IgnoreAlreadyExists(k8sClient.Create(ctx, ns))).To(Succeed())
 }
 
 // CreateCacertsSecret creates a TLS secret that simulates what cert-manager would create.
