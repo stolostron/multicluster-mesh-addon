@@ -1,4 +1,4 @@
-//go:build e2e
+//go:build e2e || e2e_multicluster
 
 package e2e
 
@@ -27,9 +27,18 @@ import (
 	"github.com/stolostron/multicluster-mesh-addon/test/util"
 )
 
+const (
+	testOperatorName      = "sailoperator"
+	testOperatorNamespace = "sail-operator"
+	testCatalogSource     = "operatorhubio-catalog"
+	testCatalogNamespace  = "olm"
+)
+
 var (
-	hubClient    client.Client
-	spokeClients map[string]client.Client
+	clusters = []string{"cluster1", "cluster2"}
+
+	hubClient    *util.E2EClient
+	spokeClients map[string]*util.E2EClient
 )
 
 func TestE2E(t *testing.T) {
@@ -38,7 +47,7 @@ func TestE2E(t *testing.T) {
 }
 
 var _ = BeforeSuite(func(ctx context.Context) {
-	SetDefaultEventuallyTimeout(30 * time.Second)
+	SetDefaultEventuallyTimeout(2 * time.Minute)
 	SetDefaultEventuallyPollingInterval(250 * time.Millisecond)
 
 	util.MustAddToScheme(
@@ -56,10 +65,13 @@ var _ = BeforeSuite(func(ctx context.Context) {
 	cluster1Kubeconfig := env("CLUSTER1_KUBECONFIG", ".kube/cluster1.config")
 	cluster2Kubeconfig := env("CLUSTER2_KUBECONFIG", ".kube/cluster2.config")
 
-	hubClient = clientFrom(hubKubeconfig)
-	spokeClients = map[string]client.Client{
-		"cluster1": clientFrom(cluster1Kubeconfig),
-		"cluster2": clientFrom(cluster2Kubeconfig),
+	hubClient = util.NewE2EClient(clientFrom(hubKubeconfig), hubKubeconfig)
+	spokeClients = make(map[string]*util.E2EClient)
+	for name, kc := range map[string]string{
+		"cluster1": cluster1Kubeconfig,
+		"cluster2": cluster2Kubeconfig,
+	} {
+		spokeClients[name] = util.NewE2EClient(clientFrom(kc), kc)
 	}
 
 	Step("Verifying cluster connectivity")
@@ -93,6 +105,10 @@ func clientFrom(kubeconfig string) client.Client {
 
 func Step(format string, args ...any) {
 	By(fmt.Sprintf(format, args...))
+}
+
+func Success(format string, args ...any) {
+	GinkgoWriter.Println("* " + fmt.Sprintf(format, args...))
 }
 
 func verifyConnection(ctx context.Context, c client.Client, name string) {

@@ -29,17 +29,10 @@ import (
 const (
 	controllerNamespace = "multicluster-mesh-system"
 	controllerName      = "multicluster-mesh-controller"
-
-	testOperatorName      = "sailoperator"
-	testOperatorNamespace = "sail-operator"
-	testCatalogSource     = "operatorhubio-catalog"
-	testCatalogNamespace  = "olm"
-	testDefaultChannel    = "stable"
+	testDefaultChannel  = "stable"
 
 	msaSpokeNamespace = "open-cluster-management-agent-addon"
 )
-
-var clusters = []string{"cluster1", "cluster2"}
 
 type trackedResource struct {
 	cluster string
@@ -115,7 +108,7 @@ var _ = Describe("MultiClusterMesh lifecycle", Ordered, func() {
 		Eventually(func(g Gomega) {
 			g.Expect(getMesh(ctx, mesh)).To(Succeed())
 			g.Expect(meta.IsStatusConditionTrue(mesh.Status.Conditions, meshv1alpha1.ConditionReady)).To(BeTrue())
-		}).WithTimeout(2 * time.Minute).Should(Succeed())
+		}).Should(Succeed())
 	})
 
 	It("should deploy operator resources to spoke clusters", func(ctx SpecContext) {
@@ -190,7 +183,7 @@ var _ = Describe("MultiClusterMesh lifecycle", Ordered, func() {
 				g.Expect(hubClient.Get(ctx, key.Of(msa.Status.TokenSecretRef.Name, cluster), secret)).To(Succeed(),
 					"token secret %s/%s should exist on hub", cluster, msa.Status.TokenSecretRef.Name)
 				track(cluster, hubClient, secret)
-			}).WithTimeout(2 * time.Minute).Should(Succeed())
+			}).Should(Succeed())
 		}
 	})
 

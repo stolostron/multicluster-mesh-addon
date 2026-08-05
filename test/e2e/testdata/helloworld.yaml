@@ -1,0 +1,28 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: helloworld-{{.Version}}
+  labels:
+    app: helloworld
+    version: "{{.Version}}"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: helloworld
+      version: "{{.Version}}"
+  template:
+    metadata:
+      labels:
+        app: helloworld
+        version: "{{.Version}}"
+    spec:
+      containers:
+      - name: helloworld
+        image: quay.io/sail-dev/examples-helloworld-{{.Version}}:1.0
+        resources:
+          requests:
+            cpu: "100m"
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 5000
