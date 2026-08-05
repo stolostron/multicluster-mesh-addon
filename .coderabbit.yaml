@@ -16,6 +16,9 @@ reviews:
         - Skip repetition — if a pattern repeats, mention it once at a summary level only.
         - Do not post comments on code style, formatting, or non-critical improvements.
         - Before flagging a deviation from best practices, check if the PR follows an existing pattern in the codebase. If the same approach is used elsewhere in the repo, it's intentional, not a bug.
+        - When citing coding guidelines (AGENTS.md, CLAUDE.md), quote the specific rule you are applying. Do not paraphrase, extrapolate, or combine rules to fabricate a requirement that is not explicitly stated.
+        - Never claim the PR has a "stated objective" unless you can quote the exact text from the PR description or commit message. Guidelines describe general standards, not PR-specific objectives.
+        - Do not re-raise a comment that was already posted on another file or line in the same review. If a concern was resolved, it is resolved.
     - path: '**/*.go'
       instructions: >
         - This project uses klog (printf-style); do not suggest structured
