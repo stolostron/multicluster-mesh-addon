@@ -26,6 +26,10 @@ jobs:
         id: version
         run: |
           VERSION=$(sed -n 's/^version: *//p' chart/Chart.yaml)
+          if ! printf '%s\n' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$'; then
+            echo "Error: '$VERSION' is not a valid semver version"
+            exit 1
+          fi
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "tag=v$VERSION" >> $GITHUB_OUTPUT
           echo "Release version: v$VERSION"
@@ -62,7 +66,7 @@ jobs:
       - name: Install Helm
         uses: azure/setup-helm@b7246b12e77f7134dc2d460a3d5bad15bbe29390 # v4.1.0
         with:
-          version: v3.16.3
+          version: v4.2.2
 
       - name: Run chart-releaser
         uses: helm/chart-releaser-action@a917fd15b20e8b64b94d9158ad54cd6345335584 # v1.6.0
