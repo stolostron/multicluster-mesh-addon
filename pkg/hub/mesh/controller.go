@@ -147,7 +147,7 @@ func RegisterController(mgr manager.Manager) error {
 //+kubebuilder:rbac:groups=work.open-cluster-management.io,resources=manifestworkreplicasets,verbs=get;list;watch;create;update
 //+kubebuilder:rbac:groups=cert-manager.io,resources=certificates,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=authentication.open-cluster-management.io,resources=managedserviceaccounts,verbs=get;list;watch;create;update;delete
-//+kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;delete
+//+kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
 
 // Reconcile implements the reconcile loop for MultiClusterMesh resources
 func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
@@ -415,10 +415,6 @@ func (r *Reconciler) handleDeletion(ctx context.Context, mesh *meshv1alpha1.Mult
 
 	if err := r.cleanupManagedClusterSetBinding(ctx, mesh); err != nil {
 		return fmt.Errorf("failed to cleanup ManagedClusterSetBinding: %w", err)
-	}
-
-	if err := r.deleteAllRemoteSecrets(ctx, mesh); err != nil {
-		return fmt.Errorf("failed to cleanup Istio remote access secrets: %w", err)
 	}
 
 	// Trigger reconciliation for other meshes targeting the same cluster set.

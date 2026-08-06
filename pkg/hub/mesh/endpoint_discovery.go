@@ -1,6 +1,7 @@
 package mesh
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"maps"
@@ -11,14 +12,21 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/tools/clientcmd"
+	"k8s.io/client-go/tools/clientcmd/api"
+	"k8s.io/client-go/tools/clientcmd/api/latest"
 	"k8s.io/klog/v2"
 	clusterv1 "open-cluster-management.io/api/cluster/v1"
-	clusterv1beta1 "open-cluster-management.io/api/cluster/v1beta1"
 	workv1 "open-cluster-management.io/api/work/v1"
 	workv1alpha1 "open-cluster-management.io/api/work/v1alpha1"
 	msav1beta1 "open-cluster-management.io/managed-serviceaccount/apis/authentication/v1beta1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+)
+
+var (
+	errMissingRootCAKey = fmt.Errorf("no %q data found", corev1.ServiceAccountRootCAKey)
+	errMissingTokenKey  = fmt.Errorf("no %q data found", corev1.ServiceAccountTokenKey)
 )
 
 // ensureManagedServiceAccount applies the desired ManagedServiceAccount state for a specific cluster using mesh's TokenValidity.
@@ -115,11 +123,6 @@ func (r *Reconciler) ensureManagedServiceAccountUpdated(ctx context.Context, mes
 
 // ensureManifestWorkReplicaSet creates a ManifestWorkReplicaSet to distribute remote access secrets for clusters selected by a Placement
 func (r *Reconciler) ensureManifestWorkReplicaSet(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh) error {
-	placement := &clusterv1beta1.Placement{}
-	if err := r.Get(ctx, key.Of(mesh.Name, mesh.Namespace), placement); err != nil {
-		return fmt.Errorf("failed to get Placement %s/%s: %w", mesh.Namespace, mesh.Name, err)
-	}
-
 	workTemplate, err := r.buildManifestWorkSpec(ctx, mesh)
 	if err != nil {
 		return fmt.Errorf("failed to build ManifestWorkSpec Template: %w", err)
@@ -129,14 +132,14 @@ func (r *Reconciler) ensureManifestWorkReplicaSet(ctx context.Context, mesh *mes
 		ObjectMeta: metav1.ObjectMeta{Name: mesh.Name, Namespace: mesh.Namespace},
 	}
 
-	_, err = controllerutil.CreateOrUpdate(ctx, r.Client, mwrset, func() error {
+	result, err := controllerutil.CreateOrUpdate(ctx, r.Client, mwrset, func() error {
 		if mwrset.Labels == nil {
 			mwrset.Labels = make(map[string]string)
 		}
 		mwrset.Labels[ManagedByLabel] = ManagedByValue
 		mwrset.Labels[MeshNameLabel] = mesh.Name
 		mwrset.Labels[MeshNamespaceLabel] = mesh.Namespace
-		mwrset.Spec.PlacementRefs = []workv1alpha1.LocalPlacementReference{{Name: placement.Name}}
+		mwrset.Spec.PlacementRefs = []workv1alpha1.LocalPlacementReference{{Name: mesh.Name}}
 		mwrset.Spec.ManifestWorkTemplate = *workTemplate
 		return controllerutil.SetControllerReference(mesh, mwrset, r.Scheme)
 	})
@@ -145,38 +148,21 @@ func (r *Reconciler) ensureManifestWorkReplicaSet(ctx context.Context, mesh *mes
 		return fmt.Errorf("failed to ensure ManifestWorkReplicaSet %s/%s: %w", mesh.Namespace, mesh.Name, err)
 	}
 
-	klog.Infof("Successfully created a ManifestWorkReplicaSet %s/%s", mesh.Namespace, mesh.Name)
+	var state string
+	switch result {
+	case controllerutil.OperationResultCreated:
+		state = "created"
+	case controllerutil.OperationResultUpdated:
+		state = "updated"
+	case controllerutil.OperationResultNone:
+		state = "up to date"
+	}
+
+	klog.Infof("ManifestWorkReplicaSet %s/%s successfully %s", mesh.Namespace, mesh.Name, state)
 	return nil
 }
 
-// buildMeshRemoteSecret builds a remote API server access secret.
-// The secret includes required label and annotation for Istio remote endpoint discovery and data from a ManageServiceAccount secret.
-func buildMeshRemoteSecret(mesh *meshv1alpha1.MultiClusterMesh, cluster *clusterv1.ManagedCluster, msaSecret *corev1.Secret) *corev1.Secret {
-	istioRemoteSecretName := fmt.Sprintf("%s-%s-%s-%s", mesh.Namespace, mesh.Name, "istio-remote-secret", cluster.Name)
-	istioRemoteSecretLabels := meshOwnedLabels(mesh, cluster.Name)
-	istioRemoteSecretLabels["istio/multiCluster"] = "true"
-
-	return &corev1.Secret{
-		TypeMeta: metav1.TypeMeta{
-			APIVersion: "v1",
-			Kind:       "Secret",
-		},
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      istioRemoteSecretName,
-			Namespace: mesh.GetControlPlaneNamespace(),
-			Labels:    istioRemoteSecretLabels,
-			Annotations: map[string]string{
-				"networking.istio.io/cluster": cluster.Name,
-			},
-			OwnerReferences: msaSecret.OwnerReferences,
-		},
-		Type: corev1.SecretTypeOpaque,
-		Data: msaSecret.Data,
-	}
-}
-
 func (r *Reconciler) buildManifestWorkSpec(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh) (*workv1.ManifestWorkSpec, error) {
-	msaName := fmt.Sprintf("%s-%s-%s", mesh.Namespace, "istio-reader", mesh.Name)
 	clusters, err := r.getClustersFromSet(ctx, mesh.Spec.ClusterSet)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get clusters from set %s: %w", mesh.Spec.ClusterSet, err)
@@ -184,15 +170,10 @@ func (r *Reconciler) buildManifestWorkSpec(ctx context.Context, mesh *meshv1alph
 
 	manifests := []workv1.Manifest{}
 	for _, cluster := range clusters {
-		msaSecret := &corev1.Secret{}
-		if err := r.Get(ctx, key.Of(msaName, cluster.Name), msaSecret); err != nil {
-			if apierrors.IsNotFound(err) {
-				klog.V(4).Infof("ManagedServiceAccount Secret %s/%s not found yet, waiting for ManagedServiceAccount to create it", cluster.Name, msaName)
-				continue
-			}
-			return nil, fmt.Errorf("failed to get ManagedServiceAccount Secret %s/%s: %w", cluster.Name, msaName, err)
+		remoteSecret, err := r.createRemoteSecret(ctx, mesh, &cluster)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create remote secret: %w", err)
 		}
-		remoteSecret := buildMeshRemoteSecret(mesh, &cluster, msaSecret)
 		manifests = append(manifests, workv1.Manifest{
 			RawExtension: runtime.RawExtension{Object: remoteSecret},
 		})
@@ -201,24 +182,147 @@ func (r *Reconciler) buildManifestWorkSpec(ctx context.Context, mesh *meshv1alph
 	return &workv1.ManifestWorkSpec{Workload: workv1.ManifestsTemplate{Manifests: manifests}}, nil
 }
 
-// deleteAllRemoteSecrets deletes all Istio remote access secrets managed by a mesh.
-func (r *Reconciler) deleteAllRemoteSecrets(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh) error {
-	secretList := &corev1.SecretList{}
-	if err := r.List(ctx, secretList, client.InNamespace(mesh.Spec.ControlPlane.Namespace), client.MatchingLabels{
-		"istio/multiCluster": "true",
-		ManagedByLabel:       ManagedByValue,
-		MeshNameLabel:        mesh.Name,
-		MeshNamespaceLabel:   mesh.Namespace,
-	}); err != nil {
-		return fmt.Errorf("failed to list Istio remote secret managed by mesh %s: %w", mesh.Name, err)
+// createRemoteSecret builds a remote API server access secret.
+// The secret includes required label and annotation for Istio remote endpoint discovery and data from a ManageServiceAccount secret.
+func (r *Reconciler) createRemoteSecret(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, cluster *clusterv1.ManagedCluster) (*corev1.Secret, error) {
+	secName := "istio-remote-secret-" + cluster.Name
+	serviceAccountName := fmt.Sprintf("%s-%s-%s", mesh.Namespace, "istio-reader", mesh.Name)
+
+	tokenSecret, err := r.getServiceAccountSecret(ctx, serviceAccountName, cluster.Name)
+	if err != nil {
+		return nil, err
 	}
 
-	for _, secret := range secretList.Items {
-		klog.V(4).Infof("Deleting Istio remote secret %s/%s", secret.Namespace, secret.Name)
-		if err := client.IgnoreNotFound(r.Delete(ctx, &secret)); err != nil {
-			return fmt.Errorf("failed to delete Istio remote secret %s/%s: %w", secret.Namespace, secret.Name, err)
+	server := cluster.Spec.ManagedClusterClientConfigs[0].URL
+	// TODO: Get TLSServerName (SNI) from ManagedCluster if needed. If tlsServerName is empty, the hostname used to contact the server is used.
+	tlsServerName := ""
+	remoteSecret, err := createRemoteSecretFromTokenAndServer(tokenSecret, server, tlsServerName, cluster.Name, secName)
+	if err != nil {
+		return nil, err
+	}
+	remoteSecret.Namespace = mesh.Spec.ControlPlane.Namespace
+	maps.Copy(remoteSecret.Labels, meshOwnedLabels(mesh, cluster.Name))
+	return remoteSecret, nil
+}
+
+func (r *Reconciler) getServiceAccountSecret(ctx context.Context, serviceAccountName, clusterName string) (*corev1.Secret, error) {
+	sa := &corev1.ServiceAccount{}
+	if err := r.Get(ctx, key.Of(serviceAccountName, clusterName), sa); err != nil {
+		return nil, fmt.Errorf("failed to get ManagedServiceAccount %s/%s: %w", clusterName, serviceAccountName, err)
+	}
+
+	secret := &corev1.Secret{}
+	if err := r.Get(ctx, key.Of(serviceAccountName, clusterName), secret); err != nil {
+		if apierrors.IsNotFound(err) {
+			klog.V(4).Infof("secret %s/%s not found yet, waiting for ManagedServiceAccount controller to create it", clusterName, serviceAccountName)
 		}
+		return nil, fmt.Errorf("failed to get ManagedServiceAccount Secret %s/%s: %w", clusterName, serviceAccountName, err)
 	}
 
+	if err := secretReferencesServiceAccount(sa, secret); err != nil {
+		return nil, err
+	}
+	return secret, nil
+}
+
+func secretReferencesServiceAccount(serviceAccount *corev1.ServiceAccount, secret *corev1.Secret) error {
+	if secret.Type != corev1.SecretTypeServiceAccountToken ||
+		secret.Annotations[corev1.ServiceAccountNameKey] != serviceAccount.Name {
+		return fmt.Errorf("secret %s/%s does not reference ServiceAccount %s",
+			secret.Namespace, secret.Name, serviceAccount.Name)
+	}
 	return nil
+}
+
+func createRemoteSecretFromTokenAndServer(tokenSecret *corev1.Secret, server, tlsServerName, clusterName, secName string) (*corev1.Secret, error) {
+	caData, token, err := tokenDataFromSecret(tokenSecret)
+	if err != nil {
+		return nil, err
+	}
+
+	// Create a Kubeconfig to access the remote cluster using the remote service account credentials.
+	kubeconfig := createBearerTokenKubeconfig(caData, token, clusterName, server, tlsServerName)
+	if err := clientcmd.Validate(*kubeconfig); err != nil {
+		return nil, fmt.Errorf("invalid kubeconfig: %w", err)
+	}
+
+	// Encode the Kubeconfig in a secret that can be loaded by Istio to dynamically discover and access the remote cluster.
+	return createRemoteServiceAccountSecret(kubeconfig, clusterName, secName)
+}
+
+func tokenDataFromSecret(tokenSecret *corev1.Secret) (ca, token []byte, err error) {
+	var ok bool
+	ca, ok = tokenSecret.Data[corev1.ServiceAccountRootCAKey]
+	if !ok {
+		err = errMissingRootCAKey
+		return ca, token, err
+	}
+	token, ok = tokenSecret.Data[corev1.ServiceAccountTokenKey]
+	if !ok {
+		err = errMissingTokenKey
+		return ca, token, err
+	}
+	return ca, token, err
+}
+
+func createBearerTokenKubeconfig(caData, token []byte, clusterName, server, tlsServerName string) *api.Config {
+	c := createBaseKubeconfig(caData, clusterName, server, tlsServerName)
+	c.AuthInfos[c.CurrentContext] = &api.AuthInfo{
+		Token: string(token),
+	}
+	return c
+}
+
+func createBaseKubeconfig(caData []byte, clusterName, server, tlsServerName string) *api.Config {
+	return &api.Config{
+		Clusters: map[string]*api.Cluster{
+			clusterName: {
+				CertificateAuthorityData: caData,
+				Server:                   server,
+				TLSServerName:            tlsServerName,
+			},
+		},
+		AuthInfos: map[string]*api.AuthInfo{},
+		Contexts: map[string]*api.Context{
+			clusterName: {
+				Cluster:  clusterName,
+				AuthInfo: clusterName,
+			},
+		},
+		CurrentContext: clusterName,
+	}
+}
+
+func createRemoteServiceAccountSecret(kubeconfig *api.Config, clusterName, secName string) (*corev1.Secret, error) {
+	var data bytes.Buffer
+	if err := latest.Codec.Encode(kubeconfig, &data); err != nil {
+		return nil, err
+	}
+	key := clusterName
+
+	out := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: secName,
+			Annotations: map[string]string{
+				"networking.istio.io/cluster": clusterName,
+			},
+			Labels: map[string]string{
+				"istio/multiCluster": "true",
+			},
+		},
+		Data: map[string][]byte{
+			key: data.Bytes(),
+		},
+	}
+	return out, nil
+}
+
+// convertDataBinaryToString is used in testing expected remoteSecret data
+func convertDataBinaryToString(remoteSecret *corev1.Secret) *corev1.Secret {
+	remoteSecret.StringData = make(map[string]string, len(remoteSecret.Data))
+	for k, v := range remoteSecret.Data {
+		remoteSecret.StringData[k] = string(v)
+	}
+	remoteSecret.Data = nil
+	return remoteSecret
 }

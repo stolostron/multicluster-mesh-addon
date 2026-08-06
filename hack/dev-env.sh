@@ -188,6 +188,12 @@ init_ocm() {
     log "Waiting for OCM hub components to be ready..."
     on "${HUB}" retry kubectl wait --for=condition=Available \
         deployment/cluster-manager -n open-cluster-management --timeout=120s
+
+    log "Enabling feature ManifestWorkReplicaSet on cluster: ${HUB}"
+    on "${HUB}" kubectl patch clustermanager cluster-manager --type=merge \
+        -p '{"spec":{"workConfiguration":{"featureGates":[{"feature":"ManifestWorkReplicaSet","mode":"Enable"}]}}}'
+    on "${HUB}" retry kubectl wait --for=condition=Available \
+        deployment/cluster-manager -n open-cluster-management --timeout=120s
 }
 
 join_clusters() {
