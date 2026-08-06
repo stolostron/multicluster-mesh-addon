@@ -113,20 +113,14 @@ func Success(format string, args ...any) {
 }
 
 func detectPlatform(ctx context.Context, spokeClient client.Client) {
-	ns := &corev1.Namespace{}
-	if err := spokeClient.Get(ctx, client.ObjectKey{Name: "openshift-marketplace"}, ns); err == nil {
-		GinkgoWriter.Println("Detected OCP platform")
-		testOperatorName = "servicemeshoperator3"
-		testOperatorNamespace = "openshift-operators"
-		testCatalogSource = "redhat-operators"
-		testCatalogNamespace = "openshift-marketplace"
-		return
-	}
-	GinkgoWriter.Println("Detected non-OCP platform")
-	testOperatorName = "sailoperator"
-	testOperatorNamespace = "sail-operator"
-	testCatalogSource = "operatorhubio-catalog"
-	testCatalogNamespace = "olm"
+	cfg, err := util.DetectPlatform(ctx, spokeClient)
+	Expect(err).NotTo(HaveOccurred(), "failed to detect platform")
+	GinkgoWriter.Printf("Detected platform: catalog=%s/%s, operator=%s/%s\n",
+		cfg.CatalogNamespace, cfg.CatalogSource, cfg.OperatorNamespace, cfg.OperatorName)
+	testOperatorName = cfg.OperatorName
+	testOperatorNamespace = cfg.OperatorNamespace
+	testCatalogSource = cfg.CatalogSource
+	testCatalogNamespace = cfg.CatalogNamespace
 }
 
 func verifyConnection(ctx context.Context, c client.Client, name string) {
