@@ -102,6 +102,17 @@ var _ = Describe("Multi-primary data plane", Ordered, Serial, func() {
 	}, NodeTimeout(5*time.Minute))
 
 	AfterAll(func(ctx SpecContext) {
+		dir := artifactDir("multi-primary")
+		Step("Collecting artifacts to %s", dir)
+		hubDir := filepath.Join(dir, "hub")
+		hubClient.CollectArtifacts(ctx, hubDir, meshNS, "multicluster-mesh-system")
+		hubClient.DumpResource(ctx, hubDir, "multiclustermeshes")
+		hubClient.DumpResource(ctx, hubDir, "manifestworks")
+		for name, spokeClient := range spokeClients {
+			spokeClient.CollectArtifacts(ctx, filepath.Join(dir, name),
+				cpNamespace, testOperatorNamespace, sampleNS, "istio-cni")
+		}
+
 		Step("Cleaning up spoke resources")
 		for _, spokeClient := range spokeClients {
 			_ = client.IgnoreNotFound(spokeClient.Delete(ctx, &corev1.Namespace{

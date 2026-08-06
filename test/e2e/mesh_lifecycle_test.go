@@ -5,6 +5,7 @@ package e2e
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"reflect"
 	"time"
 
@@ -86,6 +87,17 @@ var _ = Describe("MultiClusterMesh lifecycle", Ordered, func() {
 	})
 
 	AfterAll(func(ctx SpecContext) {
+		dir := artifactDir("mesh-lifecycle")
+		Step("Collecting artifacts to %s", dir)
+		hubDir := filepath.Join(dir, "hub")
+		hubClient.CollectArtifacts(ctx, hubDir, ns, controllerNamespace)
+		hubClient.DumpResource(ctx, hubDir, "multiclustermeshes")
+		hubClient.DumpResource(ctx, hubDir, "manifestworks")
+		for name, spokeClient := range spokeClients {
+			spokeClient.CollectArtifacts(ctx, filepath.Join(dir, name),
+				testOperatorNamespace, "istio-system")
+		}
+
 		Step("Deleting test namespace %s", ns)
 		err := client.IgnoreNotFound(hubClient.Delete(ctx, &corev1.Namespace{
 			ObjectMeta: metav1.ObjectMeta{Name: ns},

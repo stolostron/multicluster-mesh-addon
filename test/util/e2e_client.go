@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"text/template"
 
@@ -64,6 +65,55 @@ func (c *E2EClient) Cleanup(ctx context.Context) {
 		c.DeleteFile(ctx, f.path, f.vars, f.namespace)
 	}
 	c.applied = nil
+}
+
+// CollectArtifacts dumps pod state, events, and container logs from the
+// given namespaces into dir/<namespace>/. Collection is best-effort;
+// errors are silently ignored to avoid masking test failures.
+func (c *E2EClient) CollectArtifacts(ctx context.Context, dir string, namespaces ...string) {
+	for _, ns := range namespaces {
+		nsDir := filepath.Join(dir, ns)
+		c.kubectlToFile(ctx, nsDir, "pods.txt", "get", "pods", "-o", "wide", "-n", ns)
+		c.kubectlToFile(ctx, nsDir, "events.txt", "get", "events", "--sort-by=.lastTimestamp", "-n", ns)
+		c.collectPodLogs(ctx, nsDir, ns)
+	}
+}
+
+// DumpResource runs "kubectl get <resource> -o yaml" and writes the output
+// to dir/<resource>.yaml. Uses --all-namespaces when no namespace is given.
+func (c *E2EClient) DumpResource(ctx context.Context, dir, resource string, namespace ...string) {
+	args := []string{"get", resource, "-o", "yaml"}
+	if len(namespace) > 0 && namespace[0] != "" {
+		args = append(args, "-n", namespace[0])
+	} else {
+		args = append(args, "--all-namespaces")
+	}
+	c.kubectlToFile(ctx, dir, resource+".yaml", args...)
+}
+
+func (c *E2EClient) kubectlToFile(ctx context.Context, dir, filename string, args ...string) {
+	_ = os.MkdirAll(dir, 0o755)
+	fullArgs := append([]string{"--kubeconfig", c.Kubeconfig}, args...)
+	cmd := exec.CommandContext(ctx, "kubectl", fullArgs...)
+	out, _ := cmd.CombinedOutput()
+	if len(out) > 0 {
+		_ = os.WriteFile(filepath.Join(dir, filename), out, 0o644)
+	}
+}
+
+func (c *E2EClient) collectPodLogs(ctx context.Context, dir, namespace string) {
+	cmd := exec.CommandContext(ctx, "kubectl",
+		"--kubeconfig", c.Kubeconfig,
+		"get", "pods", "-n", namespace,
+		"-o", "jsonpath={.items[*].metadata.name}")
+	out, err := cmd.Output()
+	if err != nil || len(out) == 0 {
+		return
+	}
+	for pod := range strings.FieldsSeq(string(out)) {
+		c.kubectlToFile(ctx, dir, pod+".log",
+			"logs", "--all-containers", "-n", namespace, pod)
+	}
 }
 
 func (c *E2EClient) runKubectl(ctx context.Context, path string, vars map[string]string, args []string) {

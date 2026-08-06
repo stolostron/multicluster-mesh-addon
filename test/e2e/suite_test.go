@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -130,6 +131,15 @@ func detectPlatform() {
 	}
 	GinkgoWriter.Printf("Platform %s: operator=%s/%s, catalog=%s/%s\n",
 		platform, testOperatorNamespace, testOperatorName, testCatalogNamespace, testCatalogSource)
+
+		func artifactDir(testName string) string {
+	base := os.Getenv("ARTIFACT_DIR")
+	if base == "" {
+		base = filepath.Join(os.TempDir(), "multicluster-mesh-e2e")
+	}
+	dir := filepath.Join(base, testName)
+	GinkgoWriter.Printf("Artifact directory: %s\n", dir)
+	return dir
 }
 
 func verifyConnection(ctx context.Context, c client.Client, name string) {
