@@ -22,7 +22,7 @@ func DetectPlatform(ctx context.Context, c client.Reader) (PlatformConfig, error
 	if err == nil {
 		return PlatformConfig{
 			OperatorName:      "servicemeshoperator3",
-			OperatorNamespace: "openshift-operators",
+			OperatorNamespace: "sail-operator",
 			CatalogSource:     "redhat-operators",
 			CatalogNamespace:  "openshift-marketplace",
 		}, nil
