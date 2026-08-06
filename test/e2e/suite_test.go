@@ -30,8 +30,6 @@ import (
 const (
 	testOperatorName      = "sailoperator"
 	testOperatorNamespace = "sail-operator"
-	testCatalogSource     = "operatorhubio-catalog"
-	testCatalogNamespace  = "olm"
 )
 
 var (
@@ -39,6 +37,9 @@ var (
 
 	hubClient    *util.E2EClient
 	spokeClients map[string]*util.E2EClient
+
+	testCatalogSource    string
+	testCatalogNamespace string
 )
 
 func TestE2E(t *testing.T) {
@@ -73,6 +74,9 @@ var _ = BeforeSuite(func(ctx context.Context) {
 	} {
 		spokeClients[name] = util.NewE2EClient(clientFrom(kc), kc)
 	}
+
+	Step("Detecting platform (kind vs OCP)")
+	testCatalogSource, testCatalogNamespace = detectCatalog(ctx, spokeClients["cluster1"])
 
 	Step("Verifying cluster connectivity")
 	verifyConnection(ctx, hubClient, "hub")
@@ -109,6 +113,16 @@ func Step(format string, args ...any) {
 
 func Success(format string, args ...any) {
 	GinkgoWriter.Println("* " + fmt.Sprintf(format, args...))
+}
+
+func detectCatalog(ctx context.Context, spokeClient client.Client) (source, namespace string) {
+	ns := &corev1.Namespace{}
+	if err := spokeClient.Get(ctx, client.ObjectKey{Name: "openshift-marketplace"}, ns); err == nil {
+		GinkgoWriter.Println("Detected OCP platform, using redhat-operators catalog")
+		return "redhat-operators", "openshift-marketplace"
+	}
+	GinkgoWriter.Println("Detected non-OCP platform, using operatorhubio-catalog")
+	return "operatorhubio-catalog", "olm"
 }
 
 func verifyConnection(ctx context.Context, c client.Client, name string) {
