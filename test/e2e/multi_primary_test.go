@@ -109,6 +109,16 @@ var _ = Describe("Multi-primary data plane", Ordered, Serial, func() {
 			spokeClient.Cleanup(ctx)
 		}
 
+		Step("Removing network labels from ManagedClusters")
+		for cluster := range spokeClients {
+			mc := &clusterv1.ManagedCluster{}
+			if err := hubClient.Get(ctx, key.Of(cluster), mc); err != nil {
+				continue
+			}
+			delete(mc.Labels, meshcontroller.IstioNetworkLabel)
+			_ = hubClient.Update(ctx, mc)
+		}
+
 		Step("Deleting test mesh %s", meshName)
 		if mesh != nil {
 			_ = client.IgnoreNotFound(hubClient.Delete(ctx, mesh))
