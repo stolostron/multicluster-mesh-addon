@@ -123,12 +123,18 @@ var _ = Describe("Multi-primary data plane", Ordered, Serial, func() {
 
 		Step("Removing network labels from ManagedClusters")
 		for cluster := range spokeClients {
-			mc := &clusterv1.ManagedCluster{}
-			if err := hubClient.Get(ctx, key.Of(cluster), mc); err != nil {
-				continue
-			}
-			delete(mc.Labels, meshcontroller.IstioNetworkLabel)
-			_ = hubClient.Update(ctx, mc)
+			Eventually(func() error {
+				mc := &clusterv1.ManagedCluster{}
+				if err := hubClient.Get(ctx, key.Of(cluster), mc); err != nil {
+					if apierrors.IsNotFound(err) {
+						return nil
+					}
+					return err
+				}
+				delete(mc.Labels, meshcontroller.IstioNetworkLabel)
+				return hubClient.Update(ctx, mc)
+			}).WithTimeout(30*time.Second).WithPolling(1*time.Second).Should(Succeed(),
+				"failed to remove network label from ManagedCluster %s", cluster)
 		}
 
 		Step("Cleaning up hub resources")
