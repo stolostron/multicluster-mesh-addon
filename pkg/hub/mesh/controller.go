@@ -327,7 +327,11 @@ func (r *Reconciler) doReconcile(ctx context.Context, mesh *meshv1alpha1.MultiCl
 	}
 
 	if err := r.ensureManifestWorkReplicaSet(ctx, mesh); err != nil {
-		return fmt.Errorf("failed to ensure ManifestWorkReplicaSet for mesh %s/%s: %w", mesh.Namespace, mesh.Name, err)
+		if apierrors.IsNotFound(err) {
+			klog.V(4).Infof("managedServiceAccount secret not found yet, waiting for ManagedServiceAccount controller to create it: %s", err)
+		} else {
+			return fmt.Errorf("failed to ensure ManifestWorkReplicaSet for mesh %s/%s: %w", mesh.Namespace, mesh.Name, err)
+		}
 	}
 
 	return nil

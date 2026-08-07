@@ -65,8 +65,16 @@ func CreateCacertsSecret(ctx context.Context, k8sClient client.Client, namespace
 	Expect(k8sClient.Create(ctx, secret)).To(Succeed())
 }
 
-// CreateMsaSecret creates a ServiceAccount secret that simulates what ManagedServiceAccount controller would create.
+// CreateMsaSecret creates a ServiceAccount and a secret that simulates what ManagedServiceAccount controller would create.
 func CreateMsaSecret(ctx context.Context, k8sClient client.Client, clusterName, meshName, meshNamespace string) {
+	sa := &corev1.ServiceAccount{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      fmt.Sprintf("%s-%s-%s", meshNamespace, "istio-reader", meshName),
+			Namespace: clusterName,
+		},
+	}
+	Expect(k8sClient.Create(ctx, sa)).To(Succeed())
+
 	secret := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      fmt.Sprintf("%s-%s-%s", meshNamespace, "istio-reader", meshName),

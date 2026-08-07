@@ -123,9 +123,26 @@ func (r *Reconciler) ensureManagedServiceAccountUpdated(ctx context.Context, mes
 
 // ensureManifestWorkReplicaSet creates a ManifestWorkReplicaSet to distribute remote access secrets for clusters selected by a Placement
 func (r *Reconciler) ensureManifestWorkReplicaSet(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh) error {
-	workTemplate, err := r.buildManifestWorkSpec(ctx, mesh)
+	clusters, err := r.getClustersFromSet(ctx, mesh.Spec.ClusterSet)
 	if err != nil {
-		return fmt.Errorf("failed to build ManifestWorkSpec Template: %w", err)
+		return fmt.Errorf("failed to get clusters from set %s: %w", mesh.Spec.ClusterSet, err)
+	}
+
+	msaName := fmt.Sprintf("%s-%s-%s", mesh.Namespace, "istio-reader", mesh.Name)
+	manifests := []workv1.Manifest{}
+	for _, cluster := range clusters {
+		tokenSecret, err := r.getServiceAccountSecret(ctx, msaName, cluster.Name)
+		if err != nil {
+			return err
+		}
+
+		remoteSecret, err := r.createRemoteSecret(ctx, mesh, &cluster, tokenSecret)
+		if err != nil {
+			return fmt.Errorf("failed create Istio remote secret for cluster %s: %w", cluster.Name, err)
+		}
+		manifests = append(manifests, workv1.Manifest{
+			RawExtension: runtime.RawExtension{Object: remoteSecret},
+		})
 	}
 
 	mwrset := &workv1alpha1.ManifestWorkReplicaSet{
@@ -140,7 +157,7 @@ func (r *Reconciler) ensureManifestWorkReplicaSet(ctx context.Context, mesh *mes
 		mwrset.Labels[MeshNameLabel] = mesh.Name
 		mwrset.Labels[MeshNamespaceLabel] = mesh.Namespace
 		mwrset.Spec.PlacementRefs = []workv1alpha1.LocalPlacementReference{{Name: mesh.Name}}
-		mwrset.Spec.ManifestWorkTemplate = *workTemplate
+		mwrset.Spec.ManifestWorkTemplate = workv1.ManifestWorkSpec{Workload: workv1.ManifestsTemplate{Manifests: manifests}}
 		return controllerutil.SetControllerReference(mesh, mwrset, r.Scheme)
 	})
 
@@ -162,61 +179,15 @@ func (r *Reconciler) ensureManifestWorkReplicaSet(ctx context.Context, mesh *mes
 	return nil
 }
 
-func (r *Reconciler) buildManifestWorkSpec(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh) (*workv1.ManifestWorkSpec, error) {
-	clusters, err := r.getClustersFromSet(ctx, mesh.Spec.ClusterSet)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get clusters from set %s: %w", mesh.Spec.ClusterSet, err)
-	}
-
-	manifests := []workv1.Manifest{}
-	for _, cluster := range clusters {
-		remoteSecret, err := r.createRemoteSecret(ctx, mesh, &cluster)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create remote secret: %w", err)
-		}
-		manifests = append(manifests, workv1.Manifest{
-			RawExtension: runtime.RawExtension{Object: remoteSecret},
-		})
-	}
-
-	return &workv1.ManifestWorkSpec{Workload: workv1.ManifestsTemplate{Manifests: manifests}}, nil
-}
-
-// createRemoteSecret builds a remote API server access secret.
-// The secret includes required label and annotation for Istio remote endpoint discovery and data from a ManageServiceAccount secret.
-func (r *Reconciler) createRemoteSecret(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, cluster *clusterv1.ManagedCluster) (*corev1.Secret, error) {
-	secName := "istio-remote-secret-" + cluster.Name
-	serviceAccountName := fmt.Sprintf("%s-%s-%s", mesh.Namespace, "istio-reader", mesh.Name)
-
-	tokenSecret, err := r.getServiceAccountSecret(ctx, serviceAccountName, cluster.Name)
-	if err != nil {
-		return nil, err
-	}
-
-	server := cluster.Spec.ManagedClusterClientConfigs[0].URL
-	// TODO: Get TLSServerName (SNI) from ManagedCluster if needed. If tlsServerName is empty, the hostname used to contact the server is used.
-	tlsServerName := ""
-	remoteSecret, err := createRemoteSecretFromTokenAndServer(tokenSecret, server, tlsServerName, cluster.Name, secName)
-	if err != nil {
-		return nil, err
-	}
-	remoteSecret.Namespace = mesh.Spec.ControlPlane.Namespace
-	maps.Copy(remoteSecret.Labels, meshOwnedLabels(mesh, cluster.Name))
-	return remoteSecret, nil
-}
-
 func (r *Reconciler) getServiceAccountSecret(ctx context.Context, serviceAccountName, clusterName string) (*corev1.Secret, error) {
 	sa := &corev1.ServiceAccount{}
 	if err := r.Get(ctx, key.Of(serviceAccountName, clusterName), sa); err != nil {
-		return nil, fmt.Errorf("failed to get ManagedServiceAccount %s/%s: %w", clusterName, serviceAccountName, err)
+		return nil, err
 	}
 
 	secret := &corev1.Secret{}
 	if err := r.Get(ctx, key.Of(serviceAccountName, clusterName), secret); err != nil {
-		if apierrors.IsNotFound(err) {
-			klog.V(4).Infof("secret %s/%s not found yet, waiting for ManagedServiceAccount controller to create it", clusterName, serviceAccountName)
-		}
-		return nil, fmt.Errorf("failed to get ManagedServiceAccount Secret %s/%s: %w", clusterName, serviceAccountName, err)
+		return nil, err
 	}
 
 	if err := secretReferencesServiceAccount(sa, secret); err != nil {
@@ -232,6 +203,24 @@ func secretReferencesServiceAccount(serviceAccount *corev1.ServiceAccount, secre
 			secret.Namespace, secret.Name, serviceAccount.Name)
 	}
 	return nil
+}
+
+// createRemoteSecret builds a remote API server access secret.
+// The secret includes required label and annotation for Istio remote endpoint discovery and data from a ManageServiceAccount secret.
+func (r *Reconciler) createRemoteSecret(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh,
+	cluster *clusterv1.ManagedCluster, tokenSecret *corev1.Secret) (*corev1.Secret, error) {
+	secName := "istio-remote-secret-" + cluster.Name
+	server := cluster.Spec.ManagedClusterClientConfigs[0].URL
+	// TODO: Get TLSServerName (SNI) from ManagedCluster if needed. If tlsServerName is empty, the hostname used to contact the server is used.
+	tlsServerName := ""
+
+	remoteSecret, err := createRemoteSecretFromTokenAndServer(tokenSecret, server, tlsServerName, cluster.Name, secName)
+	if err != nil {
+		return nil, err
+	}
+	remoteSecret.Namespace = mesh.Spec.ControlPlane.Namespace
+	maps.Copy(remoteSecret.Labels, meshOwnedLabels(mesh, cluster.Name))
+	return remoteSecret, nil
 }
 
 func createRemoteSecretFromTokenAndServer(tokenSecret *corev1.Secret, server, tlsServerName, clusterName, secName string) (*corev1.Secret, error) {
