@@ -14,6 +14,7 @@ import (
 	. "github.com/onsi/gomega"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	clusterv1 "open-cluster-management.io/api/cluster/v1"
@@ -109,6 +110,17 @@ var _ = Describe("Multi-primary data plane", Ordered, Serial, func() {
 			spokeClient.Cleanup(ctx)
 		}
 
+		Step("Deleting test mesh %s", meshName)
+		if mesh != nil {
+			_ = client.IgnoreNotFound(hubClient.Delete(ctx, mesh))
+
+			Step("Waiting for mesh %s to be fully removed", meshName)
+			Eventually(func() bool {
+				err := hubClient.Get(ctx, key.For(mesh), mesh)
+				return apierrors.IsNotFound(err)
+			}).WithTimeout(2 * time.Minute).WithPolling(2 * time.Second).Should(BeTrue())
+		}
+
 		Step("Removing network labels from ManagedClusters")
 		for cluster := range spokeClients {
 			mc := &clusterv1.ManagedCluster{}
@@ -117,11 +129,6 @@ var _ = Describe("Multi-primary data plane", Ordered, Serial, func() {
 			}
 			delete(mc.Labels, meshcontroller.IstioNetworkLabel)
 			_ = hubClient.Update(ctx, mc)
-		}
-
-		Step("Deleting test mesh %s", meshName)
-		if mesh != nil {
-			_ = client.IgnoreNotFound(hubClient.Delete(ctx, mesh))
 		}
 
 		Step("Cleaning up hub resources")
