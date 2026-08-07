@@ -73,7 +73,7 @@ var _ = BeforeSuite(func(ctx context.Context) {
 	}
 
 	Step("Detecting platform (kind vs OCP)")
-	detectPlatform(ctx, spokeClients["cluster1"])
+	detectPlatform(ctx, hubClient, "cluster1")
 
 	Step("Verifying cluster connectivity")
 	verifyConnection(ctx, hubClient, "hub")
@@ -112,8 +112,8 @@ func Success(format string, args ...any) {
 	GinkgoWriter.Println("* " + fmt.Sprintf(format, args...))
 }
 
-func detectPlatform(ctx context.Context, spokeClient client.Client) {
-	cfg, err := util.DetectPlatform(ctx, spokeClient)
+func detectPlatform(ctx context.Context, hubClient client.Client, clusterName string) {
+	cfg, err := util.DetectPlatform(ctx, hubClient, clusterName)
 	Expect(err).NotTo(HaveOccurred(), "failed to detect platform")
 	GinkgoWriter.Printf("Detected platform: catalog=%s/%s, operator=%s/%s\n",
 		cfg.CatalogNamespace, cfg.CatalogSource, cfg.OperatorNamespace, cfg.OperatorName)

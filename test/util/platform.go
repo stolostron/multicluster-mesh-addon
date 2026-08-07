@@ -4,8 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	corev1 "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	clusterv1 "open-cluster-management.io/api/cluster/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -16,10 +15,13 @@ type PlatformConfig struct {
 	CatalogNamespace  string
 }
 
-func DetectPlatform(ctx context.Context, c client.Reader) (PlatformConfig, error) {
-	ns := &corev1.Namespace{}
-	err := c.Get(ctx, client.ObjectKey{Name: "openshift-marketplace"}, ns)
-	if err == nil {
+func DetectPlatform(ctx context.Context, hubClient client.Reader, clusterName string) (PlatformConfig, error) {
+	cluster := &clusterv1.ManagedCluster{}
+	if err := hubClient.Get(ctx, client.ObjectKey{Name: clusterName}, cluster); err != nil {
+		return PlatformConfig{}, fmt.Errorf("failed to get ManagedCluster %s: %w", clusterName, err)
+	}
+
+	if isOpenShift(cluster) {
 		return PlatformConfig{
 			OperatorName:      "servicemeshoperator3",
 			OperatorNamespace: "sail-operator",
@@ -27,13 +29,23 @@ func DetectPlatform(ctx context.Context, c client.Reader) (PlatformConfig, error
 			CatalogNamespace:  "openshift-marketplace",
 		}, nil
 	}
-	if apierrors.IsNotFound(err) {
-		return PlatformConfig{
-			OperatorName:      "sailoperator",
-			OperatorNamespace: "sail-operator",
-			CatalogSource:     "operatorhubio-catalog",
-			CatalogNamespace:  "olm",
-		}, nil
+
+	return PlatformConfig{
+		OperatorName:      "sailoperator",
+		OperatorNamespace: "sail-operator",
+		CatalogSource:     "operatorhubio-catalog",
+		CatalogNamespace:  "olm",
+	}, nil
+}
+
+func isOpenShift(cluster *clusterv1.ManagedCluster) bool {
+	for _, claim := range cluster.Status.ClusterClaims {
+		if claim.Name == "product.open-cluster-management.io" {
+			switch claim.Value {
+			case "OpenShift", "ROSA", "ROSAHcp", "ARO", "OSD", "OpenShiftDedicated":
+				return true
+			}
+		}
 	}
-	return PlatformConfig{}, fmt.Errorf("failed to detect platform: %w", err)
+	return false
 }
