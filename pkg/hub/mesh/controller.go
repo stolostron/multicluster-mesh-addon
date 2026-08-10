@@ -40,6 +40,7 @@ import (
 
 	meshv1alpha1 "github.com/stolostron/multicluster-mesh-addon/pkg/apis/mesh/v1alpha1"
 	"github.com/stolostron/multicluster-mesh-addon/pkg/key"
+	msav1beta1 "open-cluster-management.io/managed-serviceaccount/apis/authentication/v1beta1"
 )
 
 const (
@@ -124,6 +125,10 @@ func RegisterController(mgr manager.Manager) error {
 			builder.WithPredicates(predicate.NewPredicateFuncs(func(obj client.Object) bool {
 				return obj.GetLabels()[MeshNameLabel] != "" && obj.GetLabels()[MeshNamespaceLabel] != ""
 			})),
+		).
+		Watches(&corev1.Secret{},
+			handler.EnqueueRequestsFromMapFunc(reconciler.mapSecretToMSA),
+			builder.WithPredicates(predicate.GenerationChangedPredicate{}),
 		).
 		Watches(
 			&workv1.ManifestWork{},
@@ -759,6 +764,35 @@ func (r *Reconciler) mapSecretToMesh(_ context.Context, obj client.Object) []rec
 		secret.Namespace, secret.Name, meshNamespace, meshName)
 
 	return []reconcile.Request{{NamespacedName: key.Of(meshName, meshNamespace)}}
+}
+
+// mapSecretToMSA maps Secret updates to the parent ManagedServiceAccount
+func (r *Reconciler) mapSecretToMSA(ctx context.Context, obj client.Object) []reconcile.Request {
+	secret, ok := obj.(*corev1.Secret)
+	if !ok {
+		return nil
+	}
+
+	// Fetch all ManagedServiceAccounts in the same namespace to see if one matches this secret
+	msaList := &msav1beta1.ManagedServiceAccountList{}
+	if err := r.Client.List(ctx, msaList, client.InNamespace(secret.Namespace)); err != nil {
+		return nil
+	}
+
+	var requests []reconcile.Request
+	for _, msa := range msaList.Items {
+		// Check if this MSA uses the secret that just triggered the event
+		if msa.Status.TokenSecretRef.Name == secret.Name {
+			meshName := msa.Labels[MeshNameLabel]
+			meshNamespace := msa.Labels[MeshNamespaceLabel]
+
+			klog.V(4).Infof("ManagedServiceAccount Secret %s%s triggered reconcile for mesh %s/%s",
+				secret.Namespace, secret.Name, meshNamespace, meshName)
+
+			requests = append(requests, reconcile.Request{NamespacedName: key.Of(meshName, meshNamespace)})
+		}
+	}
+	return requests
 }
 
 // getCacertsName returns the name for the certificate and secret for a specific cluster

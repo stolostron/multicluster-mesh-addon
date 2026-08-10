@@ -305,13 +305,3 @@ func createRemoteServiceAccountSecret(kubeconfig *api.Config, clusterName, secNa
 	}
 	return out, nil
 }
-
-// convertDataBinaryToString is used in testing expected remoteSecret data
-func convertDataBinaryToString(remoteSecret *corev1.Secret) *corev1.Secret {
-	remoteSecret.StringData = make(map[string]string, len(remoteSecret.Data))
-	for k, v := range remoteSecret.Data {
-		remoteSecret.StringData[k] = string(v)
-	}
-	remoteSecret.Data = nil
-	return remoteSecret
-}
