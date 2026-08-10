@@ -775,7 +775,7 @@ func (r *Reconciler) mapSecretToMSA(ctx context.Context, obj client.Object) []re
 
 	// Fetch all ManagedServiceAccounts in the same namespace to see if one matches this secret
 	msaList := &msav1beta1.ManagedServiceAccountList{}
-	if err := r.Client.List(ctx, msaList, client.InNamespace(secret.Namespace)); err != nil {
+	if err := r.List(ctx, msaList, client.InNamespace(secret.Namespace)); err != nil {
 		return nil
 	}
 
