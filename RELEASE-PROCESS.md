@@ -58,12 +58,11 @@ Branch naming convention: `release-X.Y` (e.g., `release-0.1`, `release-0.2`)
 5. Click **Run workflow**
 
 The workflow will:
-1. Extract version from `chart/Chart.yaml`
-2. Check if tag already exists (fails if it does)
+1. Extract and validate version from `chart/Chart.yaml`
+2. Create and push git tag: `v0.2.0` (fails if tag already exists)
 3. Build and push container image: `quay.io/sail-dev/multicluster-mesh-addon:v0.2.0`
-4. Create and push git tag: `v0.2.0`
-5. Package and publish Helm chart to `gh-pages` branch
-6. Create GitHub release with auto-generated notes
+4. Package and publish Helm chart to `gh-pages` branch
+5. Create GitHub release with auto-generated notes
 
 The workflow takes approximately 5-10 minutes to complete.
 
