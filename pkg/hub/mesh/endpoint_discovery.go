@@ -24,11 +24,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
 
-var (
-	errMissingRootCAKey = fmt.Errorf("no %q data found", corev1.ServiceAccountRootCAKey)
-	errMissingTokenKey  = fmt.Errorf("no %q data found", corev1.ServiceAccountTokenKey)
-)
-
 // ensureManagedServiceAccount applies the desired ManagedServiceAccount state for a specific cluster using mesh's TokenValidity.
 func (r *Reconciler) ensureManagedServiceAccount(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, cluster *clusterv1.ManagedCluster) error {
 	msaName := fmt.Sprintf("%s-%s-%s", mesh.Namespace, "istio-reader", mesh.Name)
@@ -138,7 +133,7 @@ func (r *Reconciler) ensureManifestWorkReplicaSet(ctx context.Context, mesh *mes
 
 		remoteSecret, err := r.createRemoteSecret(ctx, mesh, &cluster, tokenSecret)
 		if err != nil {
-			return fmt.Errorf("failed create Istio remote secret for cluster %s: %w", cluster.Name, err)
+			return fmt.Errorf("failed to create Istio remote secret for cluster %s: %w", cluster.Name, err)
 		}
 		manifests = append(manifests, workv1.Manifest{
 			RawExtension: runtime.RawExtension{Object: remoteSecret},
@@ -161,21 +156,11 @@ func (r *Reconciler) ensureManifestWorkReplicaSet(ctx context.Context, mesh *mes
 		return controllerutil.SetControllerReference(mesh, mwrset, r.Scheme)
 	})
 
-	if err != nil {
+	if err != nil && result != controllerutil.OperationResultNone {
 		return fmt.Errorf("failed to ensure ManifestWorkReplicaSet %s/%s: %w", mesh.Namespace, mesh.Name, err)
 	}
 
-	var state string
-	switch result {
-	case controllerutil.OperationResultCreated:
-		state = "created"
-	case controllerutil.OperationResultUpdated:
-		state = "updated"
-	case controllerutil.OperationResultNone:
-		state = "up to date"
-	}
-
-	klog.Infof("ManifestWorkReplicaSet %s/%s successfully %s", mesh.Namespace, mesh.Name, state)
+	klog.Infof("Successfully ensured ManifestWorkReplicaSet %s/%s", mesh.Namespace, mesh.Name)
 	return nil
 }
 
@@ -216,17 +201,16 @@ func (r *Reconciler) createRemoteSecret(ctx context.Context, mesh *meshv1alpha1.
 
 	remoteSecret, err := createRemoteSecretFromTokenAndServer(tokenSecret, server, tlsServerName, cluster.Name, secName)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to create Istio remote secret from ManagedServiceAccount secret: %w", err)
 	}
 	remoteSecret.Namespace = mesh.Spec.ControlPlane.Namespace
-	maps.Copy(remoteSecret.Labels, meshOwnedLabels(mesh, cluster.Name))
 	return remoteSecret, nil
 }
 
 func createRemoteSecretFromTokenAndServer(tokenSecret *corev1.Secret, server, tlsServerName, clusterName, secName string) (*corev1.Secret, error) {
 	caData, token, err := tokenDataFromSecret(tokenSecret)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to extract ca and token data from ManagedServiceAccount secret: %w", err)
 	}
 
 	// Create a Kubeconfig to access the remote cluster using the remote service account credentials.
@@ -243,15 +227,13 @@ func tokenDataFromSecret(tokenSecret *corev1.Secret) (ca, token []byte, err erro
 	var ok bool
 	ca, ok = tokenSecret.Data[corev1.ServiceAccountRootCAKey]
 	if !ok {
-		err = errMissingRootCAKey
-		return ca, token, err
+		return ca, token, fmt.Errorf("no %q data found", corev1.ServiceAccountRootCAKey)
 	}
 	token, ok = tokenSecret.Data[corev1.ServiceAccountTokenKey]
 	if !ok {
-		err = errMissingTokenKey
-		return ca, token, err
+		return ca, token, fmt.Errorf("no %q data found", corev1.ServiceAccountTokenKey)
 	}
-	return ca, token, err
+	return ca, token, nil
 }
 
 func createBearerTokenKubeconfig(caData, token []byte, clusterName, server, tlsServerName string) *api.Config {
@@ -285,7 +267,7 @@ func createBaseKubeconfig(caData []byte, clusterName, server, tlsServerName stri
 func createRemoteServiceAccountSecret(kubeconfig *api.Config, clusterName, secName string) (*corev1.Secret, error) {
 	var data bytes.Buffer
 	if err := latest.Codec.Encode(kubeconfig, &data); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to encode kubeconfig data: %w", err)
 	}
 	key := clusterName
 

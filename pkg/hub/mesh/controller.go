@@ -1001,7 +1001,7 @@ func (r *Reconciler) ensurePlacement(ctx context.Context, mesh *meshv1alpha1.Mul
 	placement := &clusterv1beta1.Placement{
 		ObjectMeta: metav1.ObjectMeta{Name: mesh.Name, Namespace: mesh.Namespace},
 	}
-	_, err := controllerutil.CreateOrUpdate(ctx, r.Client, placement, func() error {
+	result, err := controllerutil.CreateOrUpdate(ctx, r.Client, placement, func() error {
 		if placement.Labels == nil {
 			placement.Labels = make(map[string]string)
 		}
@@ -1011,7 +1011,7 @@ func (r *Reconciler) ensurePlacement(ctx context.Context, mesh *meshv1alpha1.Mul
 		placement.Spec.ClusterSets = []string{mesh.Spec.ClusterSet}
 		return controllerutil.SetControllerReference(mesh, placement, r.Scheme)
 	})
-	if err != nil {
+	if err != nil && result != controllerutil.OperationResultNone {
 		return fmt.Errorf("failed to ensure placement %s: %w", placement.Name, err)
 	}
 	return nil

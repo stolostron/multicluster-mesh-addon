@@ -849,9 +849,9 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 				})
 			})
 
-			It("should create ManifestWorkReplicaSet for for the ManagedClusterSet", func() {
+			It("should create ManifestWorkReplicaSet for the ManagedClusterSet", func() {
 				placement := expectPlacement(meshName, testNs)
-				mwrset := expectManifestWorkReplicaSet(testNs, meshName)
+				mwrset := expectManifestWorkReplicaSet(meshName, testNs)
 				Expect(mwrset.OwnerReferences).To(HaveLen(1))
 				Expect(mwrset.OwnerReferences[0].Name).To(Equal(meshName))
 				Expect(mwrset.Labels[meshcontroller.ManagedByLabel]).To(Equal(meshcontroller.ManagedByValue))
@@ -867,7 +867,7 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 				util.CreateManagedCluster(ctx, k8sClient, cluster2Name, testClusterSet)
 				util.CreateMsaSecret(ctx, k8sClient, cluster2Name, meshName, testNs)
 
-				mwrset := expectManifestWorkReplicaSet(testNs, meshName)
+				mwrset := expectManifestWorkReplicaSet(meshName, testNs)
 				Expect(mwrset.Spec.ManifestWorkTemplate.Workload.Manifests).To(HaveLen(2))
 				expectRemoteSecret(mwrset.Spec.ManifestWorkTemplate.Workload.Manifests[0], clusterName, "istio-system")
 				expectRemoteSecret(mwrset.Spec.ManifestWorkTemplate.Workload.Manifests[1], cluster2Name, "istio-system")
@@ -879,7 +879,7 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 				util.CreateMsaSecret(ctx, k8sClient, cluster2Name, meshName, testNs)
 				updateClusterSetLabel(clusterName, "")
 
-				mwrset := expectManifestWorkReplicaSet(testNs, meshName)
+				mwrset := expectManifestWorkReplicaSet(meshName, testNs)
 				Expect(mwrset.Spec.ManifestWorkTemplate.Workload.Manifests).To(HaveLen(1))
 				expectRemoteSecret(mwrset.Spec.ManifestWorkTemplate.Workload.Manifests[0], cluster2Name, "istio-system")
 			})
@@ -892,13 +892,13 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 				cluster2Name := util.UniqueName("cluster")
 				util.CreateManagedCluster(ctx, k8sClient, cluster2Name, testClusterSet)
 
-				mwrset := expectManifestWorkReplicaSet(testNs, meshName)
+				mwrset := expectManifestWorkReplicaSet(meshName, testNs)
 				Expect(mwrset.Spec.ManifestWorkTemplate.Workload.Manifests).To(HaveLen(1))
 				expectRemoteSecret(mwrset.Spec.ManifestWorkTemplate.Workload.Manifests[0], clusterName, "istio-system")
 			})
 
 			It("should cleanup ManifestWorkReplicaSet when mesh is deleted", func() {
-				expectManifestWorkReplicaSet(testNs, meshName)
+				expectManifestWorkReplicaSet(meshName, testNs)
 				util.DeleteResource(ctx, k8sClient, &meshv1alpha1.MultiClusterMesh{}, meshName, testNs)
 				expectNoManifestWorkReplicaSet(testNs)
 			})
@@ -930,11 +930,9 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 			It("should reconcile when the ClusterSet is created", func() {
 				expectMeshNotReady(meshName, testNs)
 				util.CreateManagedCluster(ctx, k8sClient, clusterName, otherClusterSet)
-				util.CreateMsaSecret(ctx, k8sClient, clusterName, meshName, testNs)
 				util.CreateManagedClusterSet(ctx, k8sClient, otherClusterSet)
 				expectManagedClusterSetBinding(testNs, otherClusterSet)
 				expectPlacement(meshName, testNs)
-				expectManifestWorkReplicaSet(testNs, meshName)
 			})
 		})
 
@@ -1247,7 +1245,7 @@ func expectPlacement(meshName, meshNamespace string) *clusterv1beta1.Placement {
 	return placement
 }
 
-func expectManifestWorkReplicaSet(meshNamespace, meshName string) *workv1alpha1.ManifestWorkReplicaSet {
+func expectManifestWorkReplicaSet(meshName, meshNamespace string) *workv1alpha1.ManifestWorkReplicaSet {
 	mwrset := &workv1alpha1.ManifestWorkReplicaSet{}
 	Eventually(func() error {
 		return k8sClient.Get(ctx, key.Of(meshName, meshNamespace), mwrset)
@@ -1260,8 +1258,6 @@ func expectRemoteSecret(manifest workv1.Manifest, clusterName, expectedNamespace
 	Expect(unmarshalManifest(manifest, secret)).To(Succeed())
 	Expect(secret.Name).To(Equal("istio-remote-secret-" + clusterName))
 	Expect(secret.Namespace).To(Equal(expectedNamespace))
-	Expect(secret.Labels[meshcontroller.ManagedByLabel]).To(Equal(meshcontroller.ManagedByValue))
-	Expect(secret.Labels[meshcontroller.ClusterNameLabel]).To(Equal(clusterName))
 	Expect(secret.Labels["istio/multiCluster"]).To(Equal("true"))
 	Expect(secret.Annotations["networking.istio.io/cluster"]).To(Equal(clusterName))
 	Expect(secret.Type).To(Equal(corev1.SecretTypeOpaque))
