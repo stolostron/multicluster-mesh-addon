@@ -34,7 +34,7 @@ jobs:
           echo "tag=v$VERSION" >> $GITHUB_OUTPUT
           echo "Release version: v$VERSION"
 
-      # Tag push is atomic — fails if the tag already exists on the remote,
+      # Tag push is atomic - fails if the tag already exists on the remote,
       # we need to be sure not to overwrite existing images in quay which are using given tag.
       # Must happen before chart-releaser, which scans remote tags to discover
       # which chart versions to package and publish to the gh-pages branch.
