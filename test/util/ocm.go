@@ -35,18 +35,10 @@ func CreateManagedCluster(ctx context.Context, k8sClient client.Client, name, cl
 				"cluster.open-cluster-management.io/clusterset": clusterSet,
 			},
 		},
+		Spec: clusterv1.ManagedClusterSpec{
+			ManagedClusterClientConfigs: []clusterv1.ClientConfig{{URL: "https://" + name + ":6443"}},
+		},
 	})).To(Succeed())
-}
-
-// SetManagedClusterURL updates a ManagedCluster's spec managedClusterClientConfigs to include an api server URL,
-// simulating what the OCM controller does on a real spoke cluster.
-func SetManagedClusterURL(ctx context.Context, k8sClient client.Client, clusterName string) {
-	cluster := &clusterv1.ManagedCluster{}
-	Expect(k8sClient.Get(ctx, key.Of(clusterName), cluster)).To(Succeed())
-	cluster.Spec.ManagedClusterClientConfigs = []clusterv1.ClientConfig{
-		{URL: "https://" + clusterName + ":6443"},
-	}
-	Expect(k8sClient.Update(ctx, cluster)).To(Succeed())
 }
 
 // SetMsaStatus updates a ManagedServiceAccount's status TokenSecretRef,

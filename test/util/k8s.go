@@ -67,14 +67,6 @@ func CreateCacertsSecret(ctx context.Context, k8sClient client.Client, namespace
 
 // CreateMsaSecret creates a ServiceAccount and a secret that simulates what ManagedServiceAccount controller would create.
 func CreateMsaSecret(ctx context.Context, k8sClient client.Client, msaName, clusterName string) {
-	sa := &corev1.ServiceAccount{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      msaName,
-			Namespace: clusterName,
-		},
-	}
-	Expect(k8sClient.Create(ctx, sa)).To(Succeed())
-
 	secret := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      msaName,

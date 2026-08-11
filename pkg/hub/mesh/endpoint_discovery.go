@@ -116,32 +116,31 @@ func (r *Reconciler) ensureManagedServiceAccountUpdated(ctx context.Context, mes
 	return nil
 }
 
-// ensureManifestWorkReplicaSet creates a ManifestWorkReplicaSet to distribute remote access secrets for clusters selected by a Placement
-func (r *Reconciler) ensureManifestWorkReplicaSet(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh) error {
-	clusters, err := r.getClustersFromSet(ctx, mesh.Spec.ClusterSet)
-	if err != nil {
-		return fmt.Errorf("failed to get clusters from set %s: %w", mesh.Spec.ClusterSet, err)
-	}
-
-	if len(clusters) == 0 {
-		return nil
-	}
-
+// ensureRemoteSecretDistribution builds Istio remote discovery secrets from ManagedServiceAccount tokens and distributes them via ManifestWorkReplicaSet.
+func (r *Reconciler) ensureRemoteSecretDistribution(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, clusters []clusterv1.ManagedCluster) error {
 	msaName := fmt.Sprintf("%s-%s-%s", mesh.Namespace, "istio-reader", mesh.Name)
 	manifests := []workv1.Manifest{}
 	for _, cluster := range clusters {
-		tokenSecret, err := r.getServiceAccountSecret(ctx, msaName, cluster.Name)
+		if len(cluster.Spec.ManagedClusterClientConfigs) == 0 {
+			return fmt.Errorf("no client configs found for cluster %s", cluster.Name)
+		}
+		server := cluster.Spec.ManagedClusterClientConfigs[0].URL
+
+		tokenSecret, err := r.getMSATokenSecret(ctx, msaName, cluster.Name)
 		if err != nil {
 			if apierrors.IsNotFound(err) {
-				klog.V(4).Infof("managedServiceAccount secret not found yet, waiting for ManagedServiceAccount controller to create it: %s", err)
-				return nil
+				klog.V(4).Infof("managedServiceAccount secret not found yet for cluster %s, skipping", cluster.Name)
+				continue
 			}
 			return err
 		}
+		if tokenSecret == nil {
+			continue
+		}
 
-		remoteSecret, err := r.createRemoteSecret(ctx, mesh, &cluster, tokenSecret)
+		remoteSecret, err := buildIstioRemoteSecret(tokenSecret, cluster.Name, server, mesh.Spec.ControlPlane.Namespace)
 		if err != nil {
-			return fmt.Errorf("failed to create Istio remote secret for cluster %s: %w", cluster.Name, err)
+			return fmt.Errorf("failed to build Istio remote secret for cluster %s: %w", cluster.Name, err)
 		}
 		manifests = append(manifests, workv1.Manifest{
 			RawExtension: runtime.RawExtension{Object: &corev1.Secret{
@@ -155,12 +154,17 @@ func (r *Reconciler) ensureManifestWorkReplicaSet(ctx context.Context, mesh *mes
 			}}})
 	}
 
-	if len(manifests) == 0 {
-		return nil
-	}
-
 	mwrset := &workv1alpha1.ManifestWorkReplicaSet{
 		ObjectMeta: metav1.ObjectMeta{Name: mesh.Name, Namespace: mesh.Namespace},
+	}
+
+	if err := r.Get(ctx, key.Of(mesh.Name, mesh.Namespace), mwrset); err == nil && len(clusters) == 0 {
+		klog.Infof("Deleting ManifestWorkReplicaSet %s/%s (clusterSet is empty)", mesh.Namespace, mesh.Name)
+		return r.Delete(ctx, mwrset)
+	}
+
+	if len(manifests) == 0 {
+		return nil
 	}
 
 	result, err := controllerutil.CreateOrUpdate(ctx, r.Client, mwrset, func() error {
@@ -183,131 +187,53 @@ func (r *Reconciler) ensureManifestWorkReplicaSet(ctx context.Context, mesh *mes
 	return nil
 }
 
-func (r *Reconciler) getServiceAccountSecret(ctx context.Context, serviceAccountName, clusterName string) (*corev1.Secret, error) {
-	sa := &corev1.ServiceAccount{}
-	if err := r.Get(ctx, key.Of(serviceAccountName, clusterName), sa); err != nil {
+func (r *Reconciler) getMSATokenSecret(ctx context.Context, msaName, clusterName string) (*corev1.Secret, error) {
+	msa := &msav1beta1.ManagedServiceAccount{}
+	if err := r.Get(ctx, key.Of(msaName, clusterName), msa); err != nil {
 		return nil, err
 	}
-
+	if msa.Status.TokenSecretRef == nil {
+		return nil, nil
+	}
 	secret := &corev1.Secret{}
-	if err := r.Get(ctx, key.Of(serviceAccountName, clusterName), secret); err != nil {
-		return nil, err
-	}
-
-	if err := secretReferencesServiceAccount(sa, secret); err != nil {
-		return nil, err
-	}
-	return secret, nil
+	return secret, r.Get(ctx, key.Of(msa.Status.TokenSecretRef.Name, clusterName), secret)
 }
 
-func secretReferencesServiceAccount(serviceAccount *corev1.ServiceAccount, secret *corev1.Secret) error {
-	if secret.Type != corev1.SecretTypeServiceAccountToken ||
-		secret.Annotations[corev1.ServiceAccountNameKey] != serviceAccount.Name {
-		return fmt.Errorf("secret %s/%s does not reference ServiceAccount %s",
-			secret.Namespace, secret.Name, serviceAccount.Name)
-	}
-	return nil
-}
-
-// createRemoteSecret builds a remote API server access secret.
+// buildIstioRemoteSecret builds a remote API server access secret.
 // The secret includes required label and annotation for Istio remote endpoint discovery and data from a ManageServiceAccount secret.
-func (r *Reconciler) createRemoteSecret(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh,
-	cluster *clusterv1.ManagedCluster, tokenSecret *corev1.Secret) (*corev1.Secret, error) {
-	secName := "istio-remote-secret-" + cluster.Name
-	if len(cluster.Spec.ManagedClusterClientConfigs) == 0 {
-		return nil, fmt.Errorf("no client configs found for cluster %s", cluster.Name)
+func buildIstioRemoteSecret(tokenSecret *corev1.Secret, clusterName, server, namespace string) (*corev1.Secret, error) {
+	ca, ok := tokenSecret.Data[corev1.ServiceAccountRootCAKey]
+	if !ok {
+		return nil, fmt.Errorf("no %q data found", corev1.ServiceAccountRootCAKey)
+	}
+	token, ok := tokenSecret.Data[corev1.ServiceAccountTokenKey]
+	if !ok {
+		return nil, fmt.Errorf("no %q data found", corev1.ServiceAccountTokenKey)
 	}
 
-	server := cluster.Spec.ManagedClusterClientConfigs[0].URL
-	// TLSServerName (SNI): when tlsServerName is empty, the hostname used to contact the server is used.
-	tlsServerName := ""
-
-	remoteSecret, err := createRemoteSecretFromTokenAndServer(tokenSecret, server, tlsServerName, cluster.Name, secName)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create Istio remote secret from ManagedServiceAccount secret: %w", err)
+	kubeconfig := &api.Config{
+		Clusters:       map[string]*api.Cluster{clusterName: {CertificateAuthorityData: ca, Server: server}},
+		AuthInfos:      map[string]*api.AuthInfo{clusterName: {Token: string(token)}},
+		Contexts:       map[string]*api.Context{clusterName: {Cluster: clusterName, AuthInfo: clusterName}},
+		CurrentContext: clusterName,
 	}
-	remoteSecret.Namespace = mesh.Spec.ControlPlane.Namespace
-	return remoteSecret, nil
-}
-
-func createRemoteSecretFromTokenAndServer(tokenSecret *corev1.Secret, server, tlsServerName, clusterName, secName string) (*corev1.Secret, error) {
-	caData, token, err := tokenDataFromSecret(tokenSecret)
-	if err != nil {
-		return nil, fmt.Errorf("failed to extract ca and token data from ManagedServiceAccount secret: %w", err)
-	}
-
-	// Create a Kubeconfig to access the remote cluster using the remote service account credentials.
-	kubeconfig := createBearerTokenKubeconfig(caData, token, clusterName, server, tlsServerName)
 	if err := clientcmd.Validate(*kubeconfig); err != nil {
 		return nil, fmt.Errorf("invalid kubeconfig: %w", err)
 	}
 
-	// Encode the Kubeconfig in a secret that can be loaded by Istio to dynamically discover and access the remote cluster.
-	return createRemoteServiceAccountSecret(kubeconfig, clusterName, secName)
-}
-
-func tokenDataFromSecret(tokenSecret *corev1.Secret) (ca, token []byte, err error) {
-	var ok bool
-	ca, ok = tokenSecret.Data[corev1.ServiceAccountRootCAKey]
-	if !ok {
-		return ca, token, fmt.Errorf("no %q data found", corev1.ServiceAccountRootCAKey)
+	var buf bytes.Buffer
+	if err := latest.Codec.Encode(kubeconfig, &buf); err != nil {
+		return nil, fmt.Errorf("failed to encode kubeconfig: %w", err)
 	}
-	token, ok = tokenSecret.Data[corev1.ServiceAccountTokenKey]
-	if !ok {
-		return ca, token, fmt.Errorf("no %q data found", corev1.ServiceAccountTokenKey)
-	}
-	return ca, token, err
-}
 
-func createBearerTokenKubeconfig(caData, token []byte, clusterName, server, tlsServerName string) *api.Config {
-	c := createBaseKubeconfig(caData, clusterName, server, tlsServerName)
-	c.AuthInfos[c.CurrentContext] = &api.AuthInfo{
-		Token: string(token),
-	}
-	return c
-}
-
-func createBaseKubeconfig(caData []byte, clusterName, server, tlsServerName string) *api.Config {
-	return &api.Config{
-		Clusters: map[string]*api.Cluster{
-			clusterName: {
-				CertificateAuthorityData: caData,
-				Server:                   server,
-				TLSServerName:            tlsServerName,
-			},
-		},
-		AuthInfos: map[string]*api.AuthInfo{},
-		Contexts: map[string]*api.Context{
-			clusterName: {
-				Cluster:  clusterName,
-				AuthInfo: clusterName,
-			},
-		},
-		CurrentContext: clusterName,
-	}
-}
-
-func createRemoteServiceAccountSecret(kubeconfig *api.Config, clusterName, secName string) (*corev1.Secret, error) {
-	var data bytes.Buffer
-	if err := latest.Codec.Encode(kubeconfig, &data); err != nil {
-		return nil, fmt.Errorf("failed to encode kubeconfig data: %w", err)
-	}
-	key := clusterName
-
-	out := &corev1.Secret{
+	return &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: secName,
-			Annotations: map[string]string{
-				"networking.istio.io/cluster": clusterName,
-			},
-			Labels: map[string]string{
-				"istio/multiCluster": "true",
-			},
+			Name:        "istio-remote-secret-" + clusterName,
+			Namespace:   namespace,
+			Annotations: map[string]string{"networking.istio.io/cluster": clusterName},
+			Labels:      map[string]string{"istio/multiCluster": "true"},
 		},
-		Data: map[string][]byte{
-			key: data.Bytes(),
-		},
+		Data: map[string][]byte{clusterName: buf.Bytes()},
 		Type: corev1.SecretTypeOpaque,
-	}
-	return out, nil
+	}, nil
 }

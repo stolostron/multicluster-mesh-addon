@@ -126,9 +126,11 @@ func RegisterController(mgr manager.Manager) error {
 				return obj.GetLabels()[MeshNameLabel] != "" && obj.GetLabels()[MeshNamespaceLabel] != ""
 			})),
 		).
-		Watches(&corev1.Secret{},
-			handler.EnqueueRequestsFromMapFunc(reconciler.mapSecretToMSA),
-			builder.WithPredicates(predicate.GenerationChangedPredicate{}),
+		Watches(&msav1beta1.ManagedServiceAccount{},
+			handler.EnqueueRequestsFromMapFunc(reconciler.findMeshesForMSA),
+			builder.WithPredicates(predicate.NewPredicateFuncs(func(obj client.Object) bool {
+				return obj.GetLabels()[MeshNameLabel] != "" && obj.GetLabels()[MeshNamespaceLabel] != ""
+			})),
 		).
 		Watches(
 			&workv1.ManifestWork{},
@@ -331,7 +333,7 @@ func (r *Reconciler) doReconcile(ctx context.Context, mesh *meshv1alpha1.MultiCl
 		}
 	}
 
-	if err := r.ensureManifestWorkReplicaSet(ctx, mesh); err != nil {
+	if err := r.ensureRemoteSecretDistribution(ctx, mesh, clusters); err != nil {
 		return fmt.Errorf("failed to ensure ManifestWorkReplicaSet for mesh %s/%s: %w", mesh.Namespace, mesh.Name, err)
 	}
 
@@ -762,36 +764,14 @@ func (r *Reconciler) mapSecretToMesh(_ context.Context, obj client.Object) []rec
 	return []reconcile.Request{{NamespacedName: key.Of(meshName, meshNamespace)}}
 }
 
-// mapSecretToMSA maps Secret updates to the parent ManagedServiceAccount
-func (r *Reconciler) mapSecretToMSA(ctx context.Context, obj client.Object) []reconcile.Request {
-	secret, ok := obj.(*corev1.Secret)
-	if !ok {
-		return nil
-	}
+func (r *Reconciler) findMeshesForMSA(_ context.Context, obj client.Object) []reconcile.Request {
+	meshName := obj.GetLabels()[MeshNameLabel]
+	meshNamespace := obj.GetLabels()[MeshNamespaceLabel]
 
-	// Fetch all ManagedServiceAccounts in the same namespace to see if one matches this secret
-	msaList := &msav1beta1.ManagedServiceAccountList{}
-	if err := r.List(ctx, msaList, client.InNamespace(secret.Namespace)); err != nil {
-		return nil
-	}
+	klog.V(4).Infof("ManagedServiceAccount %s/%s triggered reconcile for mesh %s/%s",
+		obj.GetNamespace(), obj.GetName(), meshNamespace, meshName)
 
-	for _, msa := range msaList.Items {
-		// Check if this MSA uses the secret that just triggered the event
-		if msa.Status.TokenSecretRef == nil {
-			return nil
-		}
-
-		if msa.Status.TokenSecretRef.Name == secret.Name {
-			meshName := msa.Labels[MeshNameLabel]
-			meshNamespace := msa.Labels[MeshNamespaceLabel]
-
-			klog.V(4).Infof("ManagedServiceAccount Secret %s%s triggered reconcile for mesh %s/%s",
-				secret.Namespace, secret.Name, meshNamespace, meshName)
-
-			return []reconcile.Request{{NamespacedName: key.Of(meshName, meshNamespace)}}
-		}
-	}
-	return nil
+	return []reconcile.Request{{NamespacedName: key.Of(meshName, meshNamespace)}}
 }
 
 // getCacertsName returns the name for the certificate and secret for a specific cluster
@@ -1000,7 +980,7 @@ func (r *Reconciler) ensurePlacement(ctx context.Context, mesh *meshv1alpha1.Mul
 	placement := &clusterv1beta1.Placement{
 		ObjectMeta: metav1.ObjectMeta{Name: mesh.Name, Namespace: mesh.Namespace},
 	}
-	result, err := controllerutil.CreateOrUpdate(ctx, r.Client, placement, func() error {
+	_, err := controllerutil.CreateOrUpdate(ctx, r.Client, placement, func() error {
 		if placement.Labels == nil {
 			placement.Labels = make(map[string]string)
 		}
@@ -1010,7 +990,7 @@ func (r *Reconciler) ensurePlacement(ctx context.Context, mesh *meshv1alpha1.Mul
 		placement.Spec.ClusterSets = []string{mesh.Spec.ClusterSet}
 		return controllerutil.SetControllerReference(mesh, placement, r.Scheme)
 	})
-	if err != nil && result != controllerutil.OperationResultNone {
+	if err != nil {
 		return fmt.Errorf("failed to ensure placement %s: %w", placement.Name, err)
 	}
 	return nil
