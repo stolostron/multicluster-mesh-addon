@@ -66,10 +66,10 @@ func CreateCacertsSecret(ctx context.Context, k8sClient client.Client, namespace
 }
 
 // CreateMsaSecret creates a ServiceAccount and a secret that simulates what ManagedServiceAccount controller would create.
-func CreateMsaSecret(ctx context.Context, k8sClient client.Client, clusterName, meshName, meshNamespace string) {
+func CreateMsaSecret(ctx context.Context, k8sClient client.Client, msaName, clusterName string) {
 	sa := &corev1.ServiceAccount{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      fmt.Sprintf("%s-%s-%s", meshNamespace, "istio-reader", meshName),
+			Name:      msaName,
 			Namespace: clusterName,
 		},
 	}
@@ -77,10 +77,10 @@ func CreateMsaSecret(ctx context.Context, k8sClient client.Client, clusterName, 
 
 	secret := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      fmt.Sprintf("%s-%s-%s", meshNamespace, "istio-reader", meshName),
+			Name:      msaName,
 			Namespace: clusterName,
 			Annotations: map[string]string{
-				"kubernetes.io/service-account.name": fmt.Sprintf("%s-%s-%s", meshNamespace, "istio-reader", meshName),
+				"kubernetes.io/service-account.name": msaName,
 			},
 		},
 		Type: corev1.SecretTypeServiceAccountToken,
@@ -90,6 +90,14 @@ func CreateMsaSecret(ctx context.Context, k8sClient client.Client, clusterName, 
 		},
 	}
 	Expect(k8sClient.Create(ctx, secret)).To(Succeed())
+}
+
+// UpdateMsaSecret updates a ManagedServiceAccount secret that simulates token rotation.
+func UpdateMsaSecret(ctx context.Context, k8sClient client.Client, msaName, clusterName string) {
+	secret := &corev1.Secret{}
+	Expect(k8sClient.Get(ctx, key.Of(msaName, clusterName), secret)).To(Succeed())
+	secret.Data["token"] = []byte("new-token-data")
+	Expect(k8sClient.Update(ctx, secret)).To(Succeed())
 }
 
 // DeleteResource deletes a Kubernetes resource and waits for it to be fully removed.

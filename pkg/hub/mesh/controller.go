@@ -332,11 +332,7 @@ func (r *Reconciler) doReconcile(ctx context.Context, mesh *meshv1alpha1.MultiCl
 	}
 
 	if err := r.ensureManifestWorkReplicaSet(ctx, mesh); err != nil {
-		if apierrors.IsNotFound(err) {
-			klog.V(4).Infof("managedServiceAccount secret not found yet, waiting for ManagedServiceAccount controller to create it: %s", err)
-		} else {
-			return fmt.Errorf("failed to ensure ManifestWorkReplicaSet for mesh %s/%s: %w", mesh.Namespace, mesh.Name, err)
-		}
+		return fmt.Errorf("failed to ensure ManifestWorkReplicaSet for mesh %s/%s: %w", mesh.Namespace, mesh.Name, err)
 	}
 
 	return nil
@@ -779,9 +775,12 @@ func (r *Reconciler) mapSecretToMSA(ctx context.Context, obj client.Object) []re
 		return nil
 	}
 
-	var requests []reconcile.Request
 	for _, msa := range msaList.Items {
 		// Check if this MSA uses the secret that just triggered the event
+		if msa.Status.TokenSecretRef == nil {
+			return nil
+		}
+
 		if msa.Status.TokenSecretRef.Name == secret.Name {
 			meshName := msa.Labels[MeshNameLabel]
 			meshNamespace := msa.Labels[MeshNamespaceLabel]
@@ -789,10 +788,10 @@ func (r *Reconciler) mapSecretToMSA(ctx context.Context, obj client.Object) []re
 			klog.V(4).Infof("ManagedServiceAccount Secret %s%s triggered reconcile for mesh %s/%s",
 				secret.Namespace, secret.Name, meshNamespace, meshName)
 
-			requests = append(requests, reconcile.Request{NamespacedName: key.Of(meshName, meshNamespace)})
+			return []reconcile.Request{{NamespacedName: key.Of(meshName, meshNamespace)}}
 		}
 	}
-	return requests
+	return nil
 }
 
 // getCacertsName returns the name for the certificate and secret for a specific cluster

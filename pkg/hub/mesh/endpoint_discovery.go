@@ -123,11 +123,19 @@ func (r *Reconciler) ensureManifestWorkReplicaSet(ctx context.Context, mesh *mes
 		return fmt.Errorf("failed to get clusters from set %s: %w", mesh.Spec.ClusterSet, err)
 	}
 
+	if len(clusters) == 0 {
+		return nil
+	}
+
 	msaName := fmt.Sprintf("%s-%s-%s", mesh.Namespace, "istio-reader", mesh.Name)
 	manifests := []workv1.Manifest{}
 	for _, cluster := range clusters {
 		tokenSecret, err := r.getServiceAccountSecret(ctx, msaName, cluster.Name)
 		if err != nil {
+			if apierrors.IsNotFound(err) {
+				klog.V(4).Infof("managedServiceAccount secret not found yet, waiting for ManagedServiceAccount controller to create it: %s", err)
+				return nil
+			}
 			return err
 		}
 
@@ -136,8 +144,19 @@ func (r *Reconciler) ensureManifestWorkReplicaSet(ctx context.Context, mesh *mes
 			return fmt.Errorf("failed to create Istio remote secret for cluster %s: %w", cluster.Name, err)
 		}
 		manifests = append(manifests, workv1.Manifest{
-			RawExtension: runtime.RawExtension{Object: remoteSecret},
-		})
+			RawExtension: runtime.RawExtension{Object: &corev1.Secret{
+				TypeMeta: metav1.TypeMeta{
+					APIVersion: "v1",
+					Kind:       "Secret",
+				},
+				ObjectMeta: remoteSecret.ObjectMeta,
+				Data:       remoteSecret.Data,
+				Type:       remoteSecret.Type,
+			}}})
+	}
+
+	if len(manifests) == 0 {
+		return nil
 	}
 
 	mwrset := &workv1alpha1.ManifestWorkReplicaSet{
@@ -156,11 +175,11 @@ func (r *Reconciler) ensureManifestWorkReplicaSet(ctx context.Context, mesh *mes
 		return controllerutil.SetControllerReference(mesh, mwrset, r.Scheme)
 	})
 
-	if err != nil && result != controllerutil.OperationResultNone {
+	if err != nil {
 		return fmt.Errorf("failed to ensure ManifestWorkReplicaSet %s/%s: %w", mesh.Namespace, mesh.Name, err)
 	}
 
-	klog.Infof("Successfully ensured ManifestWorkReplicaSet %s/%s", mesh.Namespace, mesh.Name)
+	klog.Infof("Ensured ManifestWorkReplicaSet %s/%s state: %s", mesh.Namespace, mesh.Name, result)
 	return nil
 }
 
@@ -195,8 +214,12 @@ func secretReferencesServiceAccount(serviceAccount *corev1.ServiceAccount, secre
 func (r *Reconciler) createRemoteSecret(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh,
 	cluster *clusterv1.ManagedCluster, tokenSecret *corev1.Secret) (*corev1.Secret, error) {
 	secName := "istio-remote-secret-" + cluster.Name
+	if len(cluster.Spec.ManagedClusterClientConfigs) == 0 {
+		return nil, fmt.Errorf("no client configs found for cluster %s", cluster.Name)
+	}
+
 	server := cluster.Spec.ManagedClusterClientConfigs[0].URL
-	// TODO: Get TLSServerName (SNI) from ManagedCluster if needed. If tlsServerName is empty, the hostname used to contact the server is used.
+	// TLSServerName (SNI): when tlsServerName is empty, the hostname used to contact the server is used.
 	tlsServerName := ""
 
 	remoteSecret, err := createRemoteSecretFromTokenAndServer(tokenSecret, server, tlsServerName, cluster.Name, secName)
@@ -233,7 +256,7 @@ func tokenDataFromSecret(tokenSecret *corev1.Secret) (ca, token []byte, err erro
 	if !ok {
 		return ca, token, fmt.Errorf("no %q data found", corev1.ServiceAccountTokenKey)
 	}
-	return ca, token, nil
+	return ca, token, err
 }
 
 func createBearerTokenKubeconfig(caData, token []byte, clusterName, server, tlsServerName string) *api.Config {
@@ -284,6 +307,7 @@ func createRemoteServiceAccountSecret(kubeconfig *api.Config, clusterName, secNa
 		Data: map[string][]byte{
 			key: data.Bytes(),
 		},
+		Type: corev1.SecretTypeOpaque,
 	}
 	return out, nil
 }

@@ -9,6 +9,7 @@ import (
 	clusterv1 "open-cluster-management.io/api/cluster/v1"
 	clusterv1beta2 "open-cluster-management.io/api/cluster/v1beta2"
 	workv1 "open-cluster-management.io/api/work/v1"
+	msav1beta1 "open-cluster-management.io/managed-serviceaccount/apis/authentication/v1beta1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -35,6 +36,31 @@ func CreateManagedCluster(ctx context.Context, k8sClient client.Client, name, cl
 			},
 		},
 	})).To(Succeed())
+}
+
+// SetManagedClusterURL updates a ManagedCluster's spec managedClusterClientConfigs to include an api server URL,
+// simulating what the OCM controller does on a real spoke cluster.
+func SetManagedClusterURL(ctx context.Context, k8sClient client.Client, clusterName string) {
+	cluster := &clusterv1.ManagedCluster{}
+	Expect(k8sClient.Get(ctx, key.Of(clusterName), cluster)).To(Succeed())
+	cluster.Spec.ManagedClusterClientConfigs = []clusterv1.ClientConfig{
+		{URL: "https://" + clusterName + ":6443"},
+	}
+	Expect(k8sClient.Update(ctx, cluster)).To(Succeed())
+}
+
+// SetMsaStatus updates a ManagedServiceAccount's status TokenSecretRef,
+// simulating what the ManagedServiceAccount controller does
+func SetMsaStatus(ctx context.Context, k8sClient client.Client, msaName, clusterName string) {
+	msa := &msav1beta1.ManagedServiceAccount{}
+	Expect(k8sClient.Get(ctx, key.Of(msaName, clusterName), msa)).To(Succeed())
+	msa.Status = msav1beta1.ManagedServiceAccountStatus{
+		TokenSecretRef: &msav1beta1.SecretRef{
+			Name:                 msaName,
+			LastRefreshTimestamp: metav1.Now(),
+		},
+	}
+	Expect(k8sClient.Status().Update(ctx, msa)).To(Succeed())
 }
 
 // SetManifestWorkFeedback updates a ManifestWork's status to include a string feedback value,
