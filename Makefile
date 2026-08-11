@@ -170,6 +170,7 @@ test-integration: $(ENVTEST) gen-crds deps update-test-crds ## Run integration t
 
 .PHONY: test-e2e
 test-e2e: ## Run e2e tests against dev-env clusters (requires make dev-env)
+	PLATFORM=$(PLATFORM) \
 	HUB_KUBECONFIG=$(HUB_KUBECONFIG) \
 	CLUSTER1_KUBECONFIG=$(DEV_KUBE_DIR)/cluster1.config \
 	CLUSTER2_KUBECONFIG=$(DEV_KUBE_DIR)/cluster2.config \
@@ -181,6 +182,7 @@ test-e2e-multicluster-prereqs:
 
 .PHONY: test-e2e-multicluster
 test-e2e-multicluster: test-e2e-multicluster-prereqs ## Run multi-primary e2e tests (requires make dev-env)
+	PLATFORM=$(PLATFORM) \
 	HUB_KUBECONFIG=$(HUB_KUBECONFIG) \
 	CLUSTER1_KUBECONFIG=$(DEV_KUBE_DIR)/cluster1.config \
 	CLUSTER2_KUBECONFIG=$(DEV_KUBE_DIR)/cluster2.config \

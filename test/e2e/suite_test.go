@@ -27,18 +27,16 @@ import (
 	"github.com/stolostron/multicluster-mesh-addon/test/util"
 )
 
-const (
-	testOperatorName      = "sailoperator"
-	testOperatorNamespace = "sail-operator"
-	testCatalogSource     = "operatorhubio-catalog"
-	testCatalogNamespace  = "olm"
-)
-
 var (
 	clusters = []string{"cluster1", "cluster2"}
 
 	hubClient    *util.E2EClient
 	spokeClients map[string]*util.E2EClient
+
+	testOperatorName      string
+	testOperatorNamespace string
+	testCatalogSource     string
+	testCatalogNamespace  string
 )
 
 func TestE2E(t *testing.T) {
@@ -73,6 +71,9 @@ var _ = BeforeSuite(func(ctx context.Context) {
 	} {
 		spokeClients[name] = util.NewE2EClient(clientFrom(kc), kc)
 	}
+
+	Step("Detecting platform (kind vs OCP)")
+	detectPlatform()
 
 	Step("Verifying cluster connectivity")
 	verifyConnection(ctx, hubClient, "hub")
@@ -109,6 +110,26 @@ func Step(format string, args ...any) {
 
 func Success(format string, args ...any) {
 	GinkgoWriter.Println("* " + fmt.Sprintf(format, args...))
+}
+
+func detectPlatform() {
+	platform := os.Getenv("PLATFORM")
+	switch platform {
+	case "openshift":
+		testOperatorName = "servicemeshoperator3"
+		testOperatorNamespace = "multicluster-mesh-operator"
+		testCatalogSource = "redhat-operators"
+		testCatalogNamespace = "openshift-marketplace"
+	case "kind":
+		testOperatorName = "sailoperator"
+		testOperatorNamespace = "sail-operator"
+		testCatalogSource = "operatorhubio-catalog"
+		testCatalogNamespace = "olm"
+	default:
+		Fail(fmt.Sprintf("PLATFORM env must be set to 'openshift' or 'kind', got %q", platform))
+	}
+	GinkgoWriter.Printf("Platform %s: operator=%s/%s, catalog=%s/%s\n",
+		platform, testOperatorNamespace, testOperatorName, testCatalogNamespace, testCatalogSource)
 }
 
 func verifyConnection(ctx context.Context, c client.Client, name string) {
