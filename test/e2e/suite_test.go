@@ -73,7 +73,7 @@ var _ = BeforeSuite(func(ctx context.Context) {
 	}
 
 	Step("Detecting platform (kind vs OCP)")
-	detectPlatform(ctx, hubClient, "cluster1")
+	detectPlatform()
 
 	Step("Verifying cluster connectivity")
 	verifyConnection(ctx, hubClient, "hub")
@@ -112,15 +112,24 @@ func Success(format string, args ...any) {
 	GinkgoWriter.Println("* " + fmt.Sprintf(format, args...))
 }
 
-func detectPlatform(ctx context.Context, hubClient client.Client, clusterName string) {
-	cfg, err := util.DetectPlatform(ctx, hubClient, clusterName)
-	Expect(err).NotTo(HaveOccurred(), "failed to detect platform")
-	GinkgoWriter.Printf("Detected platform: catalog=%s/%s, operator=%s/%s\n",
-		cfg.CatalogNamespace, cfg.CatalogSource, cfg.OperatorNamespace, cfg.OperatorName)
-	testOperatorName = cfg.OperatorName
-	testOperatorNamespace = cfg.OperatorNamespace
-	testCatalogSource = cfg.CatalogSource
-	testCatalogNamespace = cfg.CatalogNamespace
+func detectPlatform() {
+	platform := os.Getenv("PLATFORM")
+	switch platform {
+	case "openshift":
+		testOperatorName = "servicemeshoperator3"
+		testOperatorNamespace = "multicluster-mesh-operator"
+		testCatalogSource = "redhat-operators"
+		testCatalogNamespace = "openshift-marketplace"
+	case "kind":
+		testOperatorName = "sailoperator"
+		testOperatorNamespace = "sail-operator"
+		testCatalogSource = "operatorhubio-catalog"
+		testCatalogNamespace = "olm"
+	default:
+		Fail(fmt.Sprintf("PLATFORM env must be set to 'openshift' or 'kind', got %q", platform))
+	}
+	GinkgoWriter.Printf("Platform %s: operator=%s/%s, catalog=%s/%s\n",
+		platform, testOperatorNamespace, testOperatorName, testCatalogNamespace, testCatalogSource)
 }
 
 func verifyConnection(ctx context.Context, c client.Client, name string) {
