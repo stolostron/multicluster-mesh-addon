@@ -1,0 +1,19 @@
+# Istio control plane for multi-primary multi-network mesh.
+# Adjust the values per cluster:
+#   MESH_NAME: use the MultiClusterMesh CR name (used as CA trust domain)
+#   CLUSTER_NAME: the managed cluster name
+#   NETWORK: must match the topology.istio.io/network label on the control plane namespace
+apiVersion: sailoperator.io/v1
+kind: Istio
+metadata:
+  name: default
+spec:
+  namespace: istio-system
+  values:
+    meshConfig:
+      trustDomain: ${MESH_NAME}
+    global:
+      meshID: ${MESH_NAME}
+      multiCluster:
+        clusterName: ${CLUSTER_NAME}
+      network: ${NETWORK}

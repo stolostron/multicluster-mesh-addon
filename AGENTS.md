@@ -44,8 +44,9 @@ The controller manages the `MultiClusterMesh` custom resource on the hub cluster
 1. Edit `pkg/apis/mesh/v1alpha1/types.go`
 2. Run `make gen` to regenerate deepcopy code and CRD manifests
 3. Update the controller logic in `pkg/hub/mesh/controller.go`
-4. Add/update integration tests
-5. Run `make verify && make test-integration`
+4. Update docs per [CONTRIBUTING.md - Keeping Docs in Sync](CONTRIBUTING.md#keeping-docs-in-sync)
+5. Add/update integration tests
+6. Run `make verify && make test-integration`
 
 ### Adding a New Watch
 
@@ -72,7 +73,7 @@ The controller manages the `MultiClusterMesh` custom resource on the hub cluster
 
 ## Design
 
-See [docs/design.md](docs/design.md) for architecture, design decisions, and the CRD spec. Implementation should follow the design doc unless the user explicitly requests a deviation and acknowledges it. If a deviation is agreed upon, update the design doc to reflect the change.
+See [docs/dev/design.md](docs/dev/design.md) for architecture, design decisions, and the CRD spec. Implementation should follow the design doc unless the user explicitly requests a deviation and acknowledges it. If a deviation is agreed upon, update the design doc to reflect the change.
 
 ## OCM Concepts
 

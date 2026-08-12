@@ -1,5 +1,9 @@
 # Design
 
+> This document describes the **target design**, not the current implementation.
+> Some sections (ManagedClusterView-based detection, remote secret distribution) are not yet implemented.
+> See the [Phased Approach](#phased-approach) section for implementation status.
+
 ## Table of Contents
 
 - [Overview](#overview)
@@ -207,8 +211,8 @@ The add-on follows a **Do No Harm** strategy: it never forcibly uninstalls or do
 
 The controller handles two types of collisions:
 
-1. **Hub-side (between meshes)**: If two `MultiClusterMesh` resources target the same cluster but request different operator configurations (e.g., different channels or catalog sources), the oldest mesh (by creation timestamp) takes precedence. Newer meshes with conflicting configs are halted with a `ConfigurationConflict` status.
-2. **Spoke-side (pre-existing operator)**: If the ManagedClusterView detects an existing Subscription not created by the add-on, the controller compares the installed configuration against the mesh's `spec.operator`. If compatible, the operator is adopted. If incompatible, the controller halts and reports a `ConfigurationConflict`.
+1. **Hub-side (between meshes)**: If two `MultiClusterMesh` resources target the same cluster but request different operator configurations (e.g., different channels or catalog sources), the oldest mesh (by creation timestamp) takes precedence. Newer meshes with conflicting configs are halted with a `OperatorConfigConflict` status.
+2. **Spoke-side (pre-existing operator)**: If the ManagedClusterView detects an existing Subscription not created by the add-on, the controller compares the installed configuration against the mesh's `spec.operator`. If compatible, the operator is adopted. If incompatible, the controller halts and reports a `OperatorConfigConflict`.
 
 In both cases, the add-on will never forcibly uninstall, downgrade, or overwrite an existing operator. The user must resolve conflicts manually.
 
@@ -234,7 +238,10 @@ The add-on implements Istio's [Plug-in CA] pattern:
 3. Intermediate CAs are distributed to managed clusters as `cacerts` secrets in the control plane namespace
 4. The root CA private key never leaves the hub
 
-The trust domain is derived from the mesh name (one trust domain per mesh, not per cluster). In Phase 1, this is a naming convention: the controller sets the certificate CN accordingly, but the user must configure the matching `trustDomain` in their Istio CR. This simplifies multi-cluster mTLS - all clusters in a mesh share the same trust domain, so workloads can authenticate across clusters without additional configuration.
+The trust domain is derived from the mesh name (one trust domain per mesh, not per cluster).
+The controller encodes the trust domain in the certificate's subject organization and SPIFFE URI, with the CN set to `Istio CA`.
+The user must configure the matching `trustDomain` in their Istio CR.
+All clusters in a mesh share the same trust domain, so workloads can authenticate across clusters without additional configuration.
 
 Certificate rotation is handled automatically by cert-manager. Updated certificates are propagated to clusters when they change.
 
@@ -272,15 +279,15 @@ ArgoCD with ApplicationSets is the recommended approach for managing Istio confi
 Potential additions include observability stack management and full addon framework integration (leveraging `ManagedClusterAddOn` for per-cluster enable/disable).
 
 <!-- Reference links -->
-[OCM]: https://open-cluster-management.io/
-[OSSM]: https://docs.openshift.com/service-mesh/
-[Sail]: https://github.com/istio-ecosystem/sail-operator
+[#72]: https://github.com/stolostron/multicluster-mesh-addon/issues/72
 [cert-manager]: https://cert-manager.io/
-[ManagedServiceAccount]: https://open-cluster-management.io/docs/getting-started/integration/managed-serviceaccount/
-[ManifestWork]: https://open-cluster-management.io/docs/concepts/work-distribution/manifestwork/
+[ClusterManagementAddOn]: https://open-cluster-management.io/docs/concepts/addon/#clustermanagementaddon
 [ManagedClusterSet]: https://open-cluster-management.io/docs/concepts/cluster-inventory/managedclusterset/
 [ManagedClusterView]: https://github.com/stolostron/cluster-lifecycle-api
-[ClusterManagementAddOn]: https://open-cluster-management.io/docs/concepts/addon/#clustermanagementaddon
-[Plug-in CA]: https://istio.io/latest/docs/tasks/security/cert-management/plugin-ca-cert/
+[ManagedServiceAccount]: https://open-cluster-management.io/docs/getting-started/integration/managed-serviceaccount/
+[ManifestWork]: https://open-cluster-management.io/docs/concepts/work-distribution/manifestwork/
 [Multi-Primary Multi-Network]: https://istio.io/latest/docs/setup/install/multicluster/multi-primary_multi-network/
-[#72]: https://github.com/stolostron/multicluster-mesh-addon/issues/72
+[OCM]: https://open-cluster-management.io/
+[OSSM]: https://docs.openshift.com/service-mesh/
+[Plug-in CA]: https://istio.io/latest/docs/tasks/security/cert-management/plugin-ca-cert/
+[Sail]: https://github.com/istio-ecosystem/sail-operator
