@@ -2,6 +2,7 @@ package util
 
 import (
 	"context"
+	"time"
 
 	. "github.com/onsi/gomega"
 	"github.com/stolostron/multicluster-mesh-addon/pkg/key"
@@ -52,6 +53,17 @@ func SetMsaStatus(ctx context.Context, k8sClient client.Client, msaName, cluster
 			LastRefreshTimestamp: metav1.Now(),
 		},
 	}
+	Expect(k8sClient.Status().Update(ctx, msa)).To(Succeed())
+}
+
+func UpdateMsaTokenRotation(ctx context.Context, k8sClient client.Client, msaName, clusterName string) {
+	msa := &msav1beta1.ManagedServiceAccount{}
+	Expect(k8sClient.Get(ctx, key.Of(msaName, clusterName), msa)).To(Succeed())
+	msa.Spec.Rotation.Validity = metav1.Duration{Duration: 10 * time.Minute}
+	msa.Status = msav1beta1.ManagedServiceAccountStatus{
+		ExpirationTimestamp: &metav1.Time{Time: time.Now().Add(10 * time.Minute)},
+	}
+	Expect(k8sClient.Update(ctx, msa)).To(Succeed())
 	Expect(k8sClient.Status().Update(ctx, msa)).To(Succeed())
 }
 
