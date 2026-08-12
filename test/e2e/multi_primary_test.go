@@ -102,16 +102,10 @@ var _ = Describe("Multi-primary data plane", Ordered, Serial, func() {
 	}, NodeTimeout(5*time.Minute))
 
 	AfterAll(func(ctx SpecContext) {
-		dir := artifactDir("multi-primary")
-		Step("Collecting artifacts to %s", dir)
-		hubDir := filepath.Join(dir, "hub")
-		hubClient.CollectArtifacts(ctx, hubDir, meshNS, "multicluster-mesh-system")
-		// ManifestWorks are excluded — they can embed Secrets (e.g. cacerts)
-		hubClient.DumpResource(ctx, hubDir, "multiclustermeshes")
-		for name, spokeClient := range spokeClients {
-			spokeClient.CollectArtifacts(ctx, filepath.Join(dir, name),
-				cpNamespace, testOperatorNamespace, sampleNS, "istio-cni")
-		}
+		collectArtifacts(ctx, "multi-primary",
+			[]string{meshNS},
+			[]string{cpNamespace, testOperatorNamespace, sampleNS, "istio-cni"},
+		)
 
 		Step("Cleaning up spoke resources")
 		for _, spokeClient := range spokeClients {

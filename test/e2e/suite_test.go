@@ -4,9 +4,14 @@ package e2e
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -23,10 +28,14 @@ import (
 	workv1 "open-cluster-management.io/api/work/v1"
 	msav1beta1 "open-cluster-management.io/managed-serviceaccount/apis/authentication/v1beta1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/yaml"
 
 	meshv1alpha1 "github.com/stolostron/multicluster-mesh-addon/pkg/apis/mesh/v1alpha1"
+	meshcontroller "github.com/stolostron/multicluster-mesh-addon/pkg/hub/mesh"
 	"github.com/stolostron/multicluster-mesh-addon/test/util"
 )
+
+const controllerNamespace = "multicluster-mesh-system"
 
 var (
 	clusters = []string{"cluster1", "cluster2"}
@@ -131,16 +140,135 @@ func detectPlatform() {
 	}
 	GinkgoWriter.Printf("Platform %s: operator=%s/%s, catalog=%s/%s\n",
 		platform, testOperatorNamespace, testOperatorName, testCatalogNamespace, testCatalogSource)
-
-		func artifactDir(testName string) string {
-	base := os.Getenv("ARTIFACT_DIR")
-	if base == "" {
-		base = filepath.Join(os.TempDir(), "multicluster-mesh-e2e")
-	}
-	dir := filepath.Join(base, testName)
-	GinkgoWriter.Printf("Artifact directory: %s\n", dir)
-	return dir
 }
+
+func collectArtifacts(ctx context.Context, testName string, hubNamespaces []string, spokeNamespaces []string) {
+	if os.Getenv("ARTIFACT_DIR") == "" {
+		return
+	}
+	dir := filepath.Join(os.Getenv("ARTIFACT_DIR"), testName)
+	Step("Collecting artifacts to %s", dir)
+
+	hubDir := filepath.Join(dir, "hub")
+	collectNamespaceArtifacts(ctx, hubClient, hubDir, append(hubNamespaces, controllerNamespace))
+	collectHubResources(ctx, hubDir)
+
+	for name, spokeClient := range spokeClients {
+		collectNamespaceArtifacts(ctx, spokeClient, filepath.Join(dir, name), spokeNamespaces)
+	}
+}
+
+func collectHubResources(ctx context.Context, dir string) {
+	meshList := &meshv1alpha1.MultiClusterMeshList{}
+	if err := hubClient.List(ctx, meshList); err == nil {
+		writeYAML(dir, "multiclustermeshes.yaml", meshList)
+	}
+	mwList := &workv1.ManifestWorkList{}
+	if err := hubClient.List(ctx, mwList, client.MatchingLabels{
+		meshcontroller.ManagedByLabel: meshcontroller.ManagedByValue,
+	}); err == nil {
+		for i := range mwList.Items {
+			hashSecretsInManifestWork(&mwList.Items[i])
+		}
+		writeYAML(dir, "manifestworks.yaml", mwList)
+	}
+}
+
+func hashSecretsInManifestWork(mw *workv1.ManifestWork) {
+	for i := range mw.Spec.Workload.Manifests {
+		raw := mw.Spec.Workload.Manifests[i].Raw
+		if raw == nil {
+			continue
+		}
+		var obj map[string]any
+		if err := json.Unmarshal(raw, &obj); err != nil {
+			continue
+		}
+		if obj["kind"] != "Secret" {
+			continue
+		}
+		hashStringValues(obj, "data")
+		hashStringValues(obj, "stringData")
+		if updated, err := json.Marshal(obj); err == nil {
+			mw.Spec.Workload.Manifests[i].Raw = updated
+		}
+	}
+}
+
+func hashStringValues(obj map[string]any, field string) {
+	m, ok := obj[field].(map[string]any)
+	if !ok {
+		return
+	}
+	for k, v := range m {
+		h := sha256.Sum256([]byte(fmt.Sprint(v)))
+		m[k] = "sha256:" + hex.EncodeToString(h[:])
+	}
+}
+
+func collectNamespaceArtifacts(ctx context.Context, c *util.E2EClient, dir string, namespaces []string) {
+	for _, ns := range namespaces {
+		nsDir := filepath.Join(dir, ns)
+		collectPods(ctx, c, nsDir, ns)
+		collectEvents(ctx, c, nsDir, ns)
+	}
+}
+
+func collectPods(ctx context.Context, c *util.E2EClient, dir, namespace string) {
+	pods := &corev1.PodList{}
+	if err := c.List(ctx, pods, client.InNamespace(namespace)); err != nil {
+		return
+	}
+
+	var lines []string
+	for _, p := range pods.Items {
+		lines = append(lines, fmt.Sprintf("%-50s %-10s %-20s %s",
+			p.Name, string(p.Status.Phase), p.Status.PodIP, p.Spec.NodeName))
+		c.SaveLogs(ctx, dir, namespace, p.Name)
+	}
+	if len(lines) > 0 {
+		writeFile(dir, "pods.txt", []byte(fmt.Sprintf("%-50s %-10s %-20s %s\n%s\n",
+			"NAME", "STATUS", "IP", "NODE",
+			strings.Join(lines, "\n"))))
+	}
+}
+
+func collectEvents(ctx context.Context, c *util.E2EClient, dir, namespace string) {
+	events := &corev1.EventList{}
+	if err := c.List(ctx, events, client.InNamespace(namespace)); err != nil {
+		return
+	}
+	sort.Slice(events.Items, func(i, j int) bool {
+		return events.Items[i].LastTimestamp.Before(&events.Items[j].LastTimestamp)
+	})
+
+	var lines []string
+	for _, e := range events.Items {
+		lines = append(lines, fmt.Sprintf("%s\t%s\t%s\t%s\t%s",
+			e.LastTimestamp.Format(time.RFC3339),
+			e.Type, e.Reason,
+			e.InvolvedObject.Name, e.Message))
+	}
+	if len(lines) > 0 {
+		writeFile(dir, "events.txt", []byte(fmt.Sprintf("%s\t%s\t%s\t%s\t%s\n%s\n",
+			"LAST SEEN", "TYPE", "REASON", "OBJECT", "MESSAGE",
+			strings.Join(lines, "\n"))))
+	}
+}
+
+func writeYAML(dir, filename string, obj any) {
+	data, err := yaml.Marshal(obj)
+	if err != nil {
+		return
+	}
+	writeFile(dir, filename, data)
+}
+
+func writeFile(dir, filename string, data []byte) {
+	_ = os.MkdirAll(dir, 0o755)
+	_ = os.WriteFile(filepath.Join(dir, filename), data, 0o644)
+}
+
 
 func verifyConnection(ctx context.Context, c client.Client, name string) {
 	nsList := &corev1.NamespaceList{}
