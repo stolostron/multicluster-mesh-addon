@@ -1,3 +1,5 @@
 owner: stolostron
 git-repo: multicluster-mesh-addon
 skip-existing: true
+release-name-template: "v{{ .Version }}"
+generate-release-notes: false

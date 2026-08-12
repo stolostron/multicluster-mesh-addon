@@ -71,23 +71,14 @@ jobs:
         env:
           CR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Create GitHub Release
+      - name: Update GitHub Release
         uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
         with:
           tag_name: v${{ steps.version.outputs.version }}
+          name: Multi Cluster Mesh Add-On v${{ steps.version.outputs.version }}
           generate_release_notes: true
           body: |
             ## Installation
 
             ### Helm Chart
             See [chart/README.md](https://github.com/stolostron/multicluster-mesh-addon/blob/v${{ steps.version.outputs.version }}/chart/README.md) for installation instructions.
-
-            Quick install:
-            ```bash
-            helm repo add multicluster-mesh-addon https://stolostron.github.io/multicluster-mesh-addon
-            helm repo update
-            helm install multicluster-mesh-addon multicluster-mesh-addon/multicluster-mesh-addon \
-              --version ${{ steps.version.outputs.version }} \
-              --namespace multicluster-mesh-system \
-              --create-namespace
-            ```
