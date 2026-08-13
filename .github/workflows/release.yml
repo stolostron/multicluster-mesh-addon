@@ -34,13 +34,22 @@ jobs:
           echo "tag=v$VERSION" >> $GITHUB_OUTPUT
           echo "Release version: v$VERSION"
 
-      - name: Verify image tag in values.yaml matches release version
+      - name: Verify image tag matches release version
         run: |
           EXPECTED="v${{ steps.version.outputs.version }}"
-          ACTUAL=$(sed -n 's/^  tag: *//p' chart/values.yaml)
-          if [ "$ACTUAL" != "$EXPECTED" ]; then
-            echo "Error: image tag in chart/values.yaml is '$ACTUAL', expected '$EXPECTED'"
-            echo "Run 'make gen' on the release branch with TAG=$EXPECTED before releasing."
+          MAKEFILE_TAG=$(make --no-print-directory -f Makefile -f /dev/stdin <<< 'print-tag: ; @echo $(TAG)' print-tag)
+          CHART_TAG=$(sed -n 's/^  tag: *//p' chart/values.yaml)
+          FAIL=0
+          if [ "$MAKEFILE_TAG" != "$EXPECTED" ]; then
+            echo "Error: TAG in Makefile is '$MAKEFILE_TAG', expected '$EXPECTED'"
+            FAIL=1
+          fi
+          if [ "$CHART_TAG" != "$EXPECTED" ]; then
+            echo "Error: image.tag in chart/values.yaml is '$CHART_TAG', expected '$EXPECTED'"
+            FAIL=1
+          fi
+          if [ "$FAIL" -eq 1 ]; then
+            echo "Update TAG in Makefile to '$EXPECTED' and run 'make gen' on the release branch before releasing."
             exit 1
           fi
 
