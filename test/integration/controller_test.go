@@ -910,6 +910,10 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 			})
 
 			It("should update ManifestWorkReplicaSet when ManagedServiceAccount secret is updated", func() {
+				expectManifestWorkReplicaSetContent(meshName, testNs, func(g Gomega, mwrset *workv1alpha1.ManifestWorkReplicaSet) {
+					g.Expect(mwrset.Spec.ManifestWorkTemplate.Workload.Manifests).NotTo(BeEmpty())
+				})
+
 				mwrset := expectManifestWorkReplicaSet(meshName, testNs)
 				manifests := mwrset.Spec.ManifestWorkTemplate.Workload.Manifests
 				oldSec := &corev1.Secret{}
