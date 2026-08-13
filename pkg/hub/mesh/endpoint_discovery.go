@@ -143,7 +143,6 @@ func (r *Reconciler) ensureRemoteSecretDistribution(ctx context.Context, mesh *m
 			continue
 		}
 
-		klog.Infof("ManagedServiceAccount secret found for cluster %s", cluster.Name)
 		remoteSecret, err := buildIstioRemoteSecret(tokenSecret, cluster.Name, server, mesh.Spec.ControlPlane.Namespace)
 		if err != nil {
 			return fmt.Errorf("failed to build Istio remote secret for cluster %s: %w", cluster.Name, err)

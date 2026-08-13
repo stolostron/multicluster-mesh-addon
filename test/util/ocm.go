@@ -2,6 +2,7 @@ package util
 
 import (
 	"context"
+	"time"
 
 	. "github.com/onsi/gomega"
 	"github.com/stolostron/multicluster-mesh-addon/pkg/key"
@@ -43,13 +44,13 @@ func CreateManagedCluster(ctx context.Context, k8sClient client.Client, name, cl
 
 // SetMsaStatus updates a ManagedServiceAccount's status TokenSecretRef,
 // simulating what the ManagedServiceAccount controller does
-func SetMsaStatus(ctx context.Context, k8sClient client.Client, msaName, clusterName string) {
+func SetMsaStatus(ctx context.Context, k8sClient client.Client, msaName, clusterName string, testDuration time.Duration) {
 	msa := &msav1beta1.ManagedServiceAccount{}
 	Expect(k8sClient.Get(ctx, key.Of(msaName, clusterName), msa)).To(Succeed())
 	msa.Status = msav1beta1.ManagedServiceAccountStatus{
 		TokenSecretRef: &msav1beta1.SecretRef{
 			Name:                 msaName,
-			LastRefreshTimestamp: metav1.Now(),
+			LastRefreshTimestamp: metav1.NewTime(metav1.Now().Time.Add(testDuration)),
 		},
 	}
 	Expect(k8sClient.Status().Update(ctx, msa)).To(Succeed())

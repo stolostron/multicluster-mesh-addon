@@ -913,15 +913,22 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 				expectManifestWorkReplicaSetContent(meshName, testNs, func(g Gomega, mwrset *workv1alpha1.ManifestWorkReplicaSet) {
 					g.Expect(mwrset.Spec.ManifestWorkTemplate.Workload.Manifests).NotTo(BeEmpty())
 				})
-
+				msa := &msav1beta1.ManagedServiceAccount{}
+				Expect(k8sClient.Get(ctx, key.Of(expectedManagedServiceAccountName(testNs, meshName), clusterName), msa)).To(Succeed())
+				oldTime := msa.Status.TokenSecretRef.LastRefreshTimestamp
 				mwrset := expectManifestWorkReplicaSet(meshName, testNs)
 				manifests := mwrset.Spec.ManifestWorkTemplate.Workload.Manifests
 				oldSec := &corev1.Secret{}
 				Expect(unmarshalManifest(manifests[0], oldSec)).To(Succeed())
 				oldData := oldSec.Data[clusterName]
+
 				expectMsaSecretUpdated(testNs, meshName, clusterName)
 
 				expectManifestWorkReplicaSetContent(meshName, testNs, func(g Gomega, mwrset *workv1alpha1.ManifestWorkReplicaSet) {
+					msa = &msav1beta1.ManagedServiceAccount{}
+					g.Expect(k8sClient.Get(ctx, key.Of(expectedManagedServiceAccountName(testNs, meshName), clusterName), msa)).To(Succeed())
+					g.Expect(msa.Status.TokenSecretRef.LastRefreshTimestamp).NotTo(Equal(oldTime))
+
 					manifests = mwrset.Spec.ManifestWorkTemplate.Workload.Manifests
 					newSec := &corev1.Secret{}
 					g.Expect(unmarshalManifest(manifests[0], newSec)).To(Succeed())
@@ -1294,14 +1301,14 @@ func expectRemoteSecret(manifest workv1.Manifest, clusterName, expectedNamespace
 func expectMsaSecret(meshNamespace, meshName, clusterName string) {
 	msa := expectManagedServiceAccount(meshNamespace, meshName, clusterName)
 	util.CreateMsaSecret(ctx, k8sClient, msa.Name, clusterName)
-	util.SetMsaStatus(ctx, k8sClient, msa.Name, clusterName)
+	util.SetMsaStatus(ctx, k8sClient, msa.Name, clusterName, time.Duration(0))
 	expectMeshNotReady(meshName, meshNamespace)
 }
 
 func expectMsaSecretUpdated(meshNamespace, meshName, clusterName string) {
 	msa := expectManagedServiceAccount(meshNamespace, meshName, clusterName)
 	util.UpdateMsaSecret(ctx, k8sClient, msa.Name, clusterName)
-	util.SetMsaStatus(ctx, k8sClient, msa.Name, clusterName)
+	util.SetMsaStatus(ctx, k8sClient, msa.Name, clusterName, time.Duration(1 * time.Minute))
 	expectMeshNotReady(meshName, meshNamespace)
 }
 
