@@ -71,11 +71,11 @@ func CreateMsaSecret(ctx context.Context, k8sClient client.Client, msaName, clus
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      msaName,
 			Namespace: clusterName,
-			Annotations: map[string]string{
-				"kubernetes.io/service-account.name": msaName,
+			Labels: map[string]string{
+				"authentication.open-cluster-management.io/is-managed-serviceaccount": "true",
 			},
 		},
-		Type: corev1.SecretTypeServiceAccountToken,
+		Type: corev1.SecretTypeOpaque,
 		Data: map[string][]byte{
 			"ca.crt": []byte("test-ca-data"),
 			"token":  []byte("test-token-data"),

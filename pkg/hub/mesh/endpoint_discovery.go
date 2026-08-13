@@ -24,9 +24,13 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
 
+func msaName(mesh *meshv1alpha1.MultiClusterMesh) string {
+	return fmt.Sprintf("%s-istio-reader-%s", mesh.Namespace, mesh.Name)
+}
+
 // ensureManagedServiceAccount applies the desired ManagedServiceAccount state for a specific cluster using mesh's TokenValidity.
 func (r *Reconciler) ensureManagedServiceAccount(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, cluster *clusterv1.ManagedCluster) error {
-	msaName := fmt.Sprintf("%s-%s-%s", mesh.Namespace, "istio-reader", mesh.Name)
+	msaName := msaName(mesh)
 	existing := &msav1beta1.ManagedServiceAccount{}
 	if err := r.Get(ctx, key.Of(msaName, cluster.Name), existing); err == nil {
 		return r.ensureManagedServiceAccountUpdated(ctx, mesh, existing)
@@ -118,11 +122,12 @@ func (r *Reconciler) ensureManagedServiceAccountUpdated(ctx context.Context, mes
 
 // ensureRemoteSecretDistribution builds Istio remote discovery secrets from ManagedServiceAccount tokens and distributes them via ManifestWorkReplicaSet.
 func (r *Reconciler) ensureRemoteSecretDistribution(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, clusters []clusterv1.ManagedCluster) error {
-	msaName := fmt.Sprintf("%s-%s-%s", mesh.Namespace, "istio-reader", mesh.Name)
+	msaName := msaName(mesh)
 	manifests := []workv1.Manifest{}
 	for _, cluster := range clusters {
 		if len(cluster.Spec.ManagedClusterClientConfigs) == 0 {
-			return fmt.Errorf("no client configs found for cluster %s", cluster.Name)
+			klog.V(4).Infof("Cluster %s has no client configs yet, skipping", cluster.Name)
+			continue
 		}
 		server := cluster.Spec.ManagedClusterClientConfigs[0].URL
 
@@ -143,28 +148,12 @@ func (r *Reconciler) ensureRemoteSecretDistribution(ctx context.Context, mesh *m
 			return fmt.Errorf("failed to build Istio remote secret for cluster %s: %w", cluster.Name, err)
 		}
 		manifests = append(manifests, workv1.Manifest{
-			RawExtension: runtime.RawExtension{Object: &corev1.Secret{
-				TypeMeta: metav1.TypeMeta{
-					APIVersion: "v1",
-					Kind:       "Secret",
-				},
-				ObjectMeta: remoteSecret.ObjectMeta,
-				Data:       remoteSecret.Data,
-				Type:       remoteSecret.Type,
-			}}})
+			RawExtension: runtime.RawExtension{Object: remoteSecret},
+		})
 	}
 
 	mwrset := &workv1alpha1.ManifestWorkReplicaSet{
 		ObjectMeta: metav1.ObjectMeta{Name: mesh.Name, Namespace: mesh.Namespace},
-	}
-
-	if err := r.Get(ctx, key.Of(mesh.Name, mesh.Namespace), mwrset); err == nil && len(clusters) == 0 {
-		klog.Infof("Deleting ManifestWorkReplicaSet %s/%s (clusterSet is empty)", mesh.Namespace, mesh.Name)
-		return r.Delete(ctx, mwrset)
-	}
-
-	if len(manifests) == 0 {
-		return nil
 	}
 
 	result, err := controllerutil.CreateOrUpdate(ctx, r.Client, mwrset, func() error {
@@ -200,7 +189,7 @@ func (r *Reconciler) getMSATokenSecret(ctx context.Context, msaName, clusterName
 }
 
 // buildIstioRemoteSecret builds a remote API server access secret.
-// The secret includes required label and annotation for Istio remote endpoint discovery and data from a ManageServiceAccount secret.
+// The secret includes required label and annotation for Istio remote endpoint discovery and data from a ManagedServiceAccount secret.
 func buildIstioRemoteSecret(tokenSecret *corev1.Secret, clusterName, server, namespace string) (*corev1.Secret, error) {
 	ca, ok := tokenSecret.Data[corev1.ServiceAccountRootCAKey]
 	if !ok {
@@ -227,6 +216,7 @@ func buildIstioRemoteSecret(tokenSecret *corev1.Secret, clusterName, server, nam
 	}
 
 	return &corev1.Secret{
+		TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "Secret"},
 		ObjectMeta: metav1.ObjectMeta{
 			Name:        "istio-remote-secret-" + clusterName,
 			Namespace:   namespace,
