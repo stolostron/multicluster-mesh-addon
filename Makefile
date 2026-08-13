@@ -1,7 +1,7 @@
 .DEFAULT_GOAL := default
 default: all
 
-VERSION ?= 0.1.0
+VERSION ?= 0.2.0
 MINOR_VERSION := $(shell echo "${VERSION}" | cut -f1,2 -d'.')
 GIT_COMMIT ?= $(shell git rev-parse --short "HEAD^{commit}" 2>/dev/null)
 BUILD_DATE ?= $(shell date -u +'%Y-%m-%dT%H:%M:%SZ')
