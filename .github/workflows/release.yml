@@ -35,9 +35,8 @@ jobs:
           echo "Release version: v$VERSION"
 
       # Tag push is atomic - fails if the tag already exists on the remote,
-      # we need to be sure not to overwrite existing images in quay which are using given tag.
-      # Must happen before chart-releaser, which scans remote tags to discover
-      # which chart versions to package and publish to the gh-pages branch.
+      # preventing duplicate releases and ensuring we don't overwrite existing
+      # images in quay which are using the given tag.
       - name: Create and push tag
         run: |
           git config user.name "$GITHUB_ACTOR"
@@ -63,22 +62,38 @@ jobs:
         with:
           version: v4.2.2
 
-      - name: Run chart-releaser
-        uses: helm/chart-releaser-action@a917fd15b20e8b64b94d9158ad54cd6345335584 # v1.6.0
-        with:
-          charts_dir: .
-          config: .github/cr.yaml
-        env:
-          CR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Package Helm chart
+        run: helm package chart/
 
-      - name: Update GitHub Release
+      - name: Create GitHub Release
         uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
         with:
           tag_name: v${{ steps.version.outputs.version }}
           name: Multi Cluster Mesh Add-On v${{ steps.version.outputs.version }}
           generate_release_notes: true
+          files: multicluster-mesh-addon-${{ steps.version.outputs.version }}.tgz
           body: |
             ## Installation
 
             ### Helm Chart
             See [chart/README.md](https://github.com/stolostron/multicluster-mesh-addon/blob/v${{ steps.version.outputs.version }}/chart/README.md) for installation instructions.
+
+      # Pushes directly to gh-pages — will fail if the branch has protection rules.
+      - name: Update Helm repo index
+        run: |
+          git fetch origin gh-pages
+          git worktree add /tmp/gh-pages origin/gh-pages
+
+          helm repo index . \
+            --url "https://github.com/stolostron/multicluster-mesh-addon/releases/download/v${{ steps.version.outputs.version }}" \
+            --merge /tmp/gh-pages/index.yaml
+
+          cp index.yaml /tmp/gh-pages/index.yaml
+          cd /tmp/gh-pages
+          git add index.yaml
+          git commit -m "Update Helm repo index for v${{ steps.version.outputs.version }}"
+          # HEAD:gh-pages is needed because the worktree is in detached HEAD state
+          git push origin HEAD:gh-pages
+
+          cd -
+          git worktree remove /tmp/gh-pages
