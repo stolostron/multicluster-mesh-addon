@@ -144,6 +144,10 @@ var _ = Describe("Multi-primary data plane", Ordered, Serial, func() {
 				Success("istiod is ready on %s", cluster)
 			}
 
+			// TODO(endpoint-discovery): Remove once the controller distributes remote secrets.
+			Step("Creating remote secrets for cross-cluster discovery")
+			util.CreateAndDistributeRemoteSecrets(ctx, hubClient, spokeClients, clusters, cpNamespace)
+
 			for cluster, spokeClient := range spokeClients {
 				Step("Applying east-west Gateway API resource on %s", cluster)
 				spokeClient.ApplyFile(ctx, filepath.Join(testdataDir, "eastwest-gateway.yaml"), map[string]string{
@@ -162,6 +166,8 @@ var _ = Describe("Multi-primary data plane", Ordered, Serial, func() {
 			}
 		}, NodeTimeout(10*time.Minute))
 
+		// REVISIT: Currently, the controller does not support secret distribution.
+		// See PIt specs in mesh_lifecycle_test.go for what the controller will eventually do.
 		It("should distribute remote secrets to spoke clusters", func(ctx SpecContext) {
 			for source := range spokeClients {
 				for target, targetClient := range spokeClients {
