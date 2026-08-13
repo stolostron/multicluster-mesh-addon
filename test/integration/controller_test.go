@@ -1308,7 +1308,7 @@ func expectMsaSecret(meshNamespace, meshName, clusterName string) {
 func expectMsaSecretUpdated(meshNamespace, meshName, clusterName string) {
 	msa := expectManagedServiceAccount(meshNamespace, meshName, clusterName)
 	util.UpdateMsaSecret(ctx, k8sClient, msa.Name, clusterName)
-	util.SetMsaStatus(ctx, k8sClient, msa.Name, clusterName, time.Duration(1 * time.Minute))
+	util.SetMsaStatus(ctx, k8sClient, msa.Name, clusterName, time.Duration(1*time.Minute))
 	expectMeshNotReady(meshName, meshNamespace)
 }
 
