@@ -50,7 +50,7 @@ func SetMsaStatus(ctx context.Context, k8sClient client.Client, msaName, cluster
 	msa.Status = msav1beta1.ManagedServiceAccountStatus{
 		TokenSecretRef: &msav1beta1.SecretRef{
 			Name:                 msaName,
-			LastRefreshTimestamp: metav1.NewTime(metav1.Now().Time.Add(testDuration)),
+			LastRefreshTimestamp: metav1.NewTime(metav1.Now().Add(testDuration)),
 		},
 	}
 	Expect(k8sClient.Status().Update(ctx, msa)).To(Succeed())
