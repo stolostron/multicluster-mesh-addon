@@ -1,0 +1,52 @@
+name: E2E Multicluster Tests (Kind)
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+      - "frontend/docs/**"
+      - "LICENSE"
+      - ".gitignore"
+      - "OWNERS"
+
+jobs:
+  e2e-multicluster:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # GitHub runners have limited disk space (~70-145GB depending on host)
+      # E2E tests with Kind clusters, operator installations, and container images
+      # can consume 40-50GB, so we free up space by removing unused pre-installed tools
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /usr/local/share/boost
+          docker system prune -af
+          df -h
+
+      - name: Increase inotify limits
+        run: |
+          sudo sysctl fs.inotify.max_user_watches=524288
+          sudo sysctl fs.inotify.max_user_instances=512
+
+      - name: Set up dev environment
+        run: make dev-env
+
+      - name: Run multicluster e2e tests
+        run: make test-e2e-multicluster PLATFORM=kind
