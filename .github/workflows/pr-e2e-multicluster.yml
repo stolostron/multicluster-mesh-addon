@@ -12,6 +12,9 @@ on:
       - ".gitignore"
       - "OWNERS"
 
+permissions:
+  contents: read
+
 jobs:
   e2e-multicluster:
     runs-on: ubuntu-latest
