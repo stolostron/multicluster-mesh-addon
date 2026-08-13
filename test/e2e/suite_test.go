@@ -269,7 +269,6 @@ func writeFile(dir, filename string, data []byte) {
 	_ = os.WriteFile(filepath.Join(dir, filename), data, 0o644)
 }
 
-
 func verifyConnection(ctx context.Context, c client.Client, name string) {
 	nsList := &corev1.NamespaceList{}
 	Expect(c.List(ctx, nsList)).To(Succeed(),
