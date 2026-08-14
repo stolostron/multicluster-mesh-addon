@@ -11,6 +11,7 @@ This document describes how to create a new release of the multicluster-mesh-add
 - Repository secrets configured:
   - `QUAY_USERNAME` - Quay.io username
   - `QUAY_PASSWORD` - Quay.io password or robot token
+- `gh` CLI installed and authenticated
 
 ## Release Steps
 
@@ -110,7 +111,7 @@ make gen
 git add Makefile chart/Chart.yaml
 git commit -s -m "Bump version to 0.3.0 for next development cycle"
 git push origin bump-version-0.3.0
-gh pr create --title "Bump version to 0.3.0 for next development cycle" \
+gh pr create --base main --title "Bump version to 0.3.0 for next development cycle" \
   --body "Post-release version bump to prepare for the next development cycle."
 ```
 
