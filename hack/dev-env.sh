@@ -156,9 +156,6 @@ install_olm() {
     on "${cluster}" kubectl rollout status deployment/olm-operator -n olm --timeout=180s
     on "${cluster}" kubectl rollout status deployment/catalog-operator -n olm --timeout=180s
 
-    log "Granting klusterlet-work-sa OLM permissions on ${cluster}"
-    on "${cluster}" kubectl apply -f "${SCRIPT_DIR}/hack/kind/klusterlet-work-olm.yaml"
-
     log "OLM ${OLM_VERSION} installed on ${cluster}"
 }
 
