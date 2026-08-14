@@ -1,1 +1,0 @@
-../../../frontend/docs/skills/track-backend-issues.md
