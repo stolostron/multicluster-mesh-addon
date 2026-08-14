@@ -61,7 +61,7 @@ $(HELM_BIN): $(BIN_DIR)
 # Image registry and name
 # TODO: Change HUB back to quay.io/stolostron when we have access to that registry
 HUB ?= quay.io/sail-dev
-TAG ?= $(MINOR_VERSION)-latest
+TAG ?= v0.1.0
 IMAGE_BASE ?= multicluster-mesh-addon
 IMG ?= $(HUB)/$(IMAGE_BASE):$(TAG)
 
