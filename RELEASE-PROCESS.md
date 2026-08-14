@@ -48,7 +48,30 @@ git push origin release-0.2
 
 Branch naming convention: `release-X.Y` (e.g., `release-0.1`, `release-0.2`)
 
-### 3. Trigger Release Workflow
+### 3. Pin Image Tag on Release Branch
+
+On `main`, the default image tag is `X.Y-latest` (a floating dev tag). The release branch must pin it to the exact release version so the Helm chart deploys the correct image.
+
+Update `TAG` in `Makefile`:
+
+```makefile
+TAG ?= v0.2.0
+```
+
+Regenerate and submit a PR against the release branch:
+
+```bash
+git checkout release-0.2
+git checkout -b pin-tag-0.2.0
+# edit TAG in Makefile
+make gen
+git add Makefile chart/values.yaml
+git commit -s -m "Pin image tag to v0.2.0 for release"
+git push origin pin-tag-0.2.0
+# create PR targeting release-0.2
+```
+
+### 4. Trigger Release Workflow
 
 1. Go to **Actions** tab in GitHub
 2. Select **Release** workflow
@@ -66,7 +89,7 @@ The workflow will:
 
 The workflow takes approximately 5-10 minutes to complete.
 
-### 4. Verify Release
+### 5. Verify Release
 
 After the workflow completes successfully:
 
@@ -87,7 +110,7 @@ You should see the new version listed.
 3. Check that release notes are generated
 4. Verify installation instructions are present
 
-### 5. Bump Version on Main
+### 6. Bump Version on Main
 
 After the release, update the version on `main` to start the next development cycle:
 
@@ -106,7 +129,7 @@ Regenerate and commit:
 
 ```bash
 make gen
-git add Makefile chart/Chart.yaml
+git add Makefile chart/Chart.yaml chart/values.yaml
 git commit -s -m "Bump version to 0.3.0 for next development cycle"
 git push origin main
 ```
