@@ -13,6 +13,7 @@ import (
 	operatorsv1 "github.com/operator-framework/api/pkg/operators/v1"
 	operatorsv1alpha1 "github.com/operator-framework/api/pkg/operators/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -115,6 +116,9 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 				Expect(work1.Labels[meshcontroller.ManagedByLabel]).To(Equal(meshcontroller.ManagedByValue))
 				Expect(work2.Labels[meshcontroller.ManagedByLabel]).To(Equal(meshcontroller.ManagedByValue))
 
+				expectOLMClusterRole(work1, 0)
+				expectOLMClusterRole(work2, 0)
+
 				expectMeshNotReady(meshName, testNs)
 				expectClusterOperatorConditionReason(meshName, testNs, clusterName, meshv1alpha1.ReasonInstallationPending)
 				expectClusterOperatorConditionReason(meshName, testNs, cluster2Name, meshv1alpha1.ReasonInstallationPending)
@@ -171,10 +175,11 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 
 			work := expectOperatorManifestWork(clusterName)
 
-			Expect(work.Spec.Workload.Manifests).To(HaveLen(3))
-			expectNamespace(work, 0, customConfig.Namespace)
-			expectOperatorGroup(work, 1, "operator-group", customConfig.Namespace)
-			expectSubscription(work, 2, customConfig)
+			Expect(work.Spec.Workload.Manifests).To(HaveLen(4))
+			expectOLMClusterRole(work, 0)
+			expectNamespace(work, 1, customConfig.Namespace)
+			expectOperatorGroup(work, 2, "operator-group", customConfig.Namespace)
+			expectSubscription(work, 3, customConfig)
 		})
 
 		When("referencing a non-existent ClusterSet", func() {
@@ -299,18 +304,18 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 				Eventually(func() string {
 					work := expectOperatorManifestWork(clusterName)
 					sub := &operatorsv1alpha1.Subscription{}
-					Expect(unmarshalManifest(work.Spec.Workload.Manifests[2], sub)).To(Succeed())
+					Expect(unmarshalManifest(work.Spec.Workload.Manifests[3], sub)).To(Succeed())
 					return sub.Spec.Channel
 				}).Should(Equal("tech-preview"))
 			})
 
 			It("should restore ManifestWork spec when externally modified", func() {
 				sub := &operatorsv1alpha1.Subscription{}
-				Expect(unmarshalManifest(work.Spec.Workload.Manifests[2], sub)).To(Succeed())
+				Expect(unmarshalManifest(work.Spec.Workload.Manifests[3], sub)).To(Succeed())
 				originalChannel := sub.Spec.Channel
 
 				sub.Spec.Channel = "tampered"
-				work.Spec.Workload.Manifests[2] = workv1.Manifest{
+				work.Spec.Workload.Manifests[3] = workv1.Manifest{
 					RawExtension: runtime.RawExtension{Object: sub},
 				}
 				Expect(k8sClient.Update(ctx, work)).To(Succeed())
@@ -321,7 +326,7 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 				Eventually(func() string {
 					work := expectOperatorManifestWork(clusterName)
 					sub := &operatorsv1alpha1.Subscription{}
-					Expect(unmarshalManifest(work.Spec.Workload.Manifests[2], sub)).To(Succeed())
+					Expect(unmarshalManifest(work.Spec.Workload.Manifests[3], sub)).To(Succeed())
 					return sub.Spec.Channel
 				}).Should(Equal(originalChannel))
 			})
@@ -1165,6 +1170,17 @@ func expectPlacement(meshName, meshNamespace string) *clusterv1beta1.Placement {
 
 func unmarshalManifest(manifest workv1.Manifest, into interface{}) error {
 	return json.Unmarshal(manifest.Raw, into)
+}
+
+func expectOLMClusterRole(work *workv1.ManifestWork, index int) {
+	cr := &rbacv1.ClusterRole{}
+	Expect(unmarshalManifest(work.Spec.Workload.Manifests[index], cr)).To(Succeed())
+	Expect(cr.Name).To(Equal("klusterlet-work-olm"))
+	Expect(cr.Labels).To(HaveKeyWithValue("open-cluster-management.io/aggregate-to-work", "true"))
+	Expect(cr.Rules).To(HaveLen(1))
+	Expect(cr.Rules[0].APIGroups).To(ConsistOf("operators.coreos.com"))
+	Expect(cr.Rules[0].Resources).To(ConsistOf("operatorgroups", "subscriptions", "catalogsources", "clusterserviceversions"))
+	Expect(cr.Rules[0].Verbs).To(ConsistOf("create", "get", "list", "update", "patch", "delete"))
 }
 
 func expectNamespace(work *workv1.ManifestWork, index int, expectedName string) *corev1.Namespace {
