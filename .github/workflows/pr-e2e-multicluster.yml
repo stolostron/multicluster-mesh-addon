@@ -12,6 +12,11 @@ on:
       - ".gitignore"
       - "OWNERS"
 
+# Cancel an older E2E run when the same PR is updated.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
