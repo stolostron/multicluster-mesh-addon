@@ -661,7 +661,7 @@ func (r *Reconciler) buildOperatorManifestWork(mesh *meshv1alpha1.MultiClusterMe
 					Kind:       "ClusterRole",
 				},
 				ObjectMeta: metav1.ObjectMeta{
-					Name: "klusterlet-work-olm",
+					Name: "klusterlet-work-olm-ossm",
 					Labels: map[string]string{
 						"open-cluster-management.io/aggregate-to-work": "true",
 					},

@@ -1175,7 +1175,7 @@ func unmarshalManifest(manifest workv1.Manifest, into interface{}) error {
 func expectOLMClusterRole(work *workv1.ManifestWork, index int) {
 	cr := &rbacv1.ClusterRole{}
 	Expect(unmarshalManifest(work.Spec.Workload.Manifests[index], cr)).To(Succeed())
-	Expect(cr.Name).To(Equal("klusterlet-work-olm"))
+	Expect(cr.Name).To(Equal("klusterlet-work-olm-ossm"))
 	Expect(cr.Labels).To(HaveKeyWithValue("open-cluster-management.io/aggregate-to-work", "true"))
 	Expect(cr.Rules).To(HaveLen(1))
 	Expect(cr.Rules[0].APIGroups).To(ConsistOf("operators.coreos.com"))
