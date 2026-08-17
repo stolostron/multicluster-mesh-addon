@@ -156,9 +156,6 @@ install_olm() {
     on "${cluster}" kubectl rollout status deployment/olm-operator -n olm --timeout=180s
     on "${cluster}" kubectl rollout status deployment/catalog-operator -n olm --timeout=180s
 
-    log "Granting klusterlet-work-sa OLM permissions on ${cluster}"
-    on "${cluster}" kubectl apply -f "${SCRIPT_DIR}/hack/kind/klusterlet-work-olm.yaml"
-
     log "OLM ${OLM_VERSION} installed on ${cluster}"
 }
 
@@ -298,10 +295,12 @@ install_metallb() {
     local kind_subnet
     case "${kind_provider}" in
         podman)
-            kind_subnet="$(podman network inspect kind -f '{{(index .Subnets 0).Subnet}}')" \
+            # Select the IPv4 subnet; Kind networks may be dual-stack and index 0 is not guaranteed IPv4.
+            kind_subnet="$(podman network inspect kind -f '{{range .Subnets}}{{.Subnet}}{{"\n"}}{{end}}' | grep -v ':' | head -1)" \
                 || err "Failed to inspect Kind network with Podman" ;;
         docker)
-            kind_subnet="$(docker network inspect kind -f '{{(index .IPAM.Config 0).Subnet}}')" \
+            # Select the IPv4 subnet; Kind networks may be dual-stack and index 0 is not guaranteed IPv4.
+            kind_subnet="$(docker network inspect kind -f '{{range .IPAM.Config}}{{.Subnet}}{{"\n"}}{{end}}' | grep -v ':' | head -1)" \
                 || err "Failed to inspect Kind network with Docker" ;;
     esac
 

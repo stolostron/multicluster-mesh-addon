@@ -6,23 +6,19 @@ import (
 	"k8s.io/component-base/metrics/legacyregistry"
 )
 
+// Set via -ldflags -X during build (see Makefile LDFLAGS).
 var (
-	// commitFromGit is a constant representing the source version that
-	// generated this build. It should be set during build via -ldflags.
-	commitFromGit string
-	// versionFromGit is a constant representing the version tag that
-	// generated this build. It should be set during build via -ldflags.
-	versionFromGit string
-	// build date in ISO8601 format, output of $(date -u +'%Y-%m-%dT%H:%M:%SZ').
-	buildDate string
+	buildVersion     string
+	buildGitRevision string
+	buildDate        string
 )
 
 // Get returns the overall codebase version. It's for detecting
 // what code a binary was built from.
 func Get() version.Info {
 	return version.Info{
-		GitCommit:  commitFromGit,
-		GitVersion: versionFromGit,
+		GitCommit:  buildGitRevision,
+		GitVersion: buildVersion,
 		BuildDate:  buildDate,
 	}
 }
@@ -35,7 +31,7 @@ func init() {
 		},
 		[]string{"gitVersion", "gitCommit", "buildDate"},
 	)
-	buildInfo.WithLabelValues(versionFromGit, commitFromGit, buildDate).Set(1)
+	buildInfo.WithLabelValues(buildVersion, buildGitRevision, buildDate).Set(1)
 
 	legacyregistry.MustRegister(buildInfo)
 }
