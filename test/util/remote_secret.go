@@ -111,8 +111,8 @@ func CreateAndDistributeRemoteSecrets(ctx context.Context, hubClient client.Clie
 			}
 
 			targetClient := spokeClients[target]
-			Expect(targetClient.Create(ctx, remoteSecret)).To(Succeed(),
-				"failed to create remote secret for %s on %s", source, target)
+			Expect(targetClient.Get(ctx, key.Of(remoteSecret.Name, remoteSecret.Namespace), remoteSecret)).To(Succeed(),
+				"failed to get remote secret for %s on %s", source, target)
 		}
 	}
 }
