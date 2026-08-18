@@ -45,9 +45,12 @@ import (
 )
 
 const (
-	OperatorManifestWorkName   = "multicluster-mesh-operator"
-	ManifestWorkNameCacerts    = "multicluster-mesh-cacerts"
-	ManifestWorkNameCPNSPrefix = "multicluster-mesh-cp-ns-"
+	OperatorManifestWorkName          = "multicluster-mesh-operator"
+	ManifestWorkNameCacerts           = "multicluster-mesh-cacerts"
+	ManifestWorkNameCPNSPrefix        = "multicluster-mesh-cp-ns-"
+	ManifestWorkNameIstioReaderPrefix = "multicluster-mesh-istio-reader-"
+
+	MSANamespace = "open-cluster-management-agent-addon"
 
 	FeedbackInstalledCSV = "installedCSV"
 
@@ -287,6 +290,12 @@ func (r *Reconciler) doReconcile(ctx context.Context, mesh *meshv1alpha1.MultiCl
 		if err := r.ensureManagedServiceAccount(ctx, mesh, &cluster); err != nil {
 			return fmt.Errorf("failed to ensure ManagedServiceAccount for cluster %s: %w", cluster.Name, err)
 		}
+
+		readerWork, err := r.workApplier.Apply(ctx, buildIstioReaderManifestWork(mesh, &cluster))
+		if err != nil {
+			return fmt.Errorf("failed to apply istio-reader ManifestWork on cluster %s: %w", cluster.Name, err)
+		}
+		klog.V(4).Infof("Applied istio-reader ManifestWork %s/%s", readerWork.Namespace, readerWork.Name)
 
 		if mesh.Spec.Security.Trust.CertManager.IssuerRef.Name != "" {
 			if err := r.ensureCertificateForCluster(ctx, mesh, &cluster); err != nil {

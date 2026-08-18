@@ -167,10 +167,6 @@ var _ = Describe("Multi-primary data plane", Ordered, Serial, func() {
 				Success("istiod is ready on %s", cluster)
 			}
 
-			// TODO(endpoint-discovery): Remove once the controller distributes remote secrets.
-			Step("Creating remote secrets for cross-cluster discovery")
-			util.CreateAndDistributeRemoteSecrets(ctx, hubClient, spokeClients, clusters, cpNamespace)
-
 			for cluster, spokeClient := range spokeClients {
 				Step("Applying east-west Gateway API resource on %s", cluster)
 				spokeClient.ApplyFile(ctx, filepath.Join(testdataDir, "eastwest-gateway.yaml"), map[string]string{
@@ -188,23 +184,6 @@ var _ = Describe("Multi-primary data plane", Ordered, Serial, func() {
 				Success("East-west gateway on %s has IP: %s", cluster, ip)
 			}
 		}, NodeTimeout(10*time.Minute))
-
-		// REVISIT: Currently, the controller does not support secret distribution.
-		// See PIt specs in mesh_lifecycle_test.go for what the controller will eventually do.
-		It("should distribute remote secrets to spoke clusters", func(ctx SpecContext) {
-			for source := range spokeClients {
-				for target, targetClient := range spokeClients {
-					if source == target {
-						continue
-					}
-					secret := &corev1.Secret{}
-					Expect(targetClient.Get(ctx, key.Of("istio-remote-secret-"+source, cpNamespace), secret)).
-						To(Succeed(), "remote secret for %s not found on %s", source, target)
-					Expect(secret.Labels).To(HaveKeyWithValue("istio/multiCluster", "true"))
-					Expect(secret.Annotations).To(HaveKeyWithValue("networking.istio.io/cluster", source))
-				}
-			}
-		})
 
 		It("should have cross-cluster data plane traffic working", func(ctx SpecContext) {
 			Step("Creating sample namespace with istio-injection on both clusters")

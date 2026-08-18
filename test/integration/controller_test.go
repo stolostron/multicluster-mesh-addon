@@ -810,6 +810,48 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 				Expect(placement.Spec.ClusterSets).To(ContainElement(testClusterSet))
 			})
 
+			It("should create istio-reader ManifestWork with ClusterRole and ClusterRoleBinding", func() {
+				util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet)
+
+				work := expectIstioReaderManifestWork(clusterName, "istio-system")
+				expectMeshOwnedLabels(work.Labels, meshName, testNs, clusterName)
+				Expect(work.Spec.Workload.Manifests).To(HaveLen(2))
+
+				cr := &rbacv1.ClusterRole{}
+				Expect(unmarshalManifest(work.Spec.Workload.Manifests[0], cr)).To(Succeed())
+				expectedName := expectedManagedServiceAccountName(testNs, meshName)
+				Expect(cr.Name).To(Equal(expectedName))
+				Expect(cr.Labels[meshcontroller.ManagedByLabel]).To(Equal(meshcontroller.ManagedByValue))
+				expectIstioReaderRules(cr.Rules)
+
+				crb := &rbacv1.ClusterRoleBinding{}
+				Expect(unmarshalManifest(work.Spec.Workload.Manifests[1], crb)).To(Succeed())
+				Expect(crb.Name).To(Equal(expectedName))
+				Expect(crb.Labels[meshcontroller.ManagedByLabel]).To(Equal(meshcontroller.ManagedByValue))
+				Expect(crb.RoleRef.Kind).To(Equal("ClusterRole"))
+				Expect(crb.RoleRef.Name).To(Equal(expectedName))
+				Expect(crb.Subjects).To(HaveLen(1))
+				Expect(crb.Subjects[0].Kind).To(Equal("ServiceAccount"))
+				Expect(crb.Subjects[0].Name).To(Equal(expectedName))
+				Expect(crb.Subjects[0].Namespace).To(Equal(meshcontroller.MSANamespace))
+			})
+
+			It("should create istio-reader ManifestWork for newly added cluster", func() {
+				util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet)
+				expectIstioReaderManifestWork(clusterName, "istio-system")
+
+				cluster2 := util.UniqueName("cluster")
+				util.CreateManagedCluster(ctx, k8sClient, cluster2, testClusterSet)
+				expectIstioReaderManifestWork(cluster2, "istio-system")
+			})
+
+			It("should use custom control plane namespace in istio-reader ManifestWork name", func() {
+				util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet, meshv1alpha1.MultiClusterMeshSpec{
+					ControlPlane: meshv1alpha1.ControlPlaneConfig{Namespace: "istio-system-2"},
+				})
+				expectIstioReaderManifestWork(clusterName, "istio-system-2")
+			})
+
 			When("the ManagedServiceAccount exists", func() {
 				BeforeEach(func() {
 					util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet)
@@ -843,6 +885,13 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 					util.ExpectResourceDeleted(ctx, k8sClient, &msav1beta1.ManagedServiceAccount{},
 						expectedManagedServiceAccountName(testNs, meshName), clusterName)
 				})
+
+				It("should cleanup istio-reader ManifestWork when cluster is removed from ClusterSet", func() {
+					expectIstioReaderManifestWork(clusterName, "istio-system")
+					updateClusterSetLabel(clusterName, "")
+					util.ExpectResourceDeleted(ctx, k8sClient, &workv1.ManifestWork{},
+						meshcontroller.ManifestWorkNameIstioReaderPrefix+"istio-system", clusterName)
+				})
 			})
 		})
 
@@ -857,6 +906,9 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 
 			It("should create ManifestWorkReplicaSet for the ManagedClusterSet", func() {
 				placement := expectPlacement(meshName, testNs)
+				expectManifestWorkReplicaSetContent(meshName, testNs, func(g Gomega, mwrset *workv1alpha1.ManifestWorkReplicaSet) {
+					g.Expect(mwrset.Spec.ManifestWorkTemplate.Workload.Manifests).To(HaveLen(1))
+				})
 				mwrset := expectManifestWorkReplicaSet(meshName, testNs)
 				Expect(mwrset.OwnerReferences).To(HaveLen(1))
 				Expect(mwrset.OwnerReferences[0].Name).To(Equal(meshName))
@@ -1033,6 +1085,35 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 				util.DeleteResource(ctx, k8sClient, &meshv1alpha1.MultiClusterMesh{}, meshName, testNs)
 				util.DeleteResource(ctx, k8sClient, &meshv1alpha1.MultiClusterMesh{}, otherMesh, testNs)
 				expectManagedClusterSetBindingDeleted(testNs)
+			})
+
+			It("should create separate istio-reader ManifestWorks for each mesh", func() {
+				work1 := expectIstioReaderManifestWork(clusterName, "istio-system")
+				work2 := expectIstioReaderManifestWork(clusterName, "istio-system-2")
+
+				Expect(work1.Name).NotTo(Equal(work2.Name))
+
+				crb1 := &rbacv1.ClusterRoleBinding{}
+				Expect(unmarshalManifest(work1.Spec.Workload.Manifests[1], crb1)).To(Succeed())
+				crb2 := &rbacv1.ClusterRoleBinding{}
+				Expect(unmarshalManifest(work2.Spec.Workload.Manifests[1], crb2)).To(Succeed())
+
+				Expect(crb1.Subjects[0].Name).To(Equal(expectedManagedServiceAccountName(testNs, meshName)))
+				Expect(crb2.Subjects[0].Name).To(Equal(expectedManagedServiceAccountName(testNs, otherMesh)))
+			})
+
+			It("should delete only the removed mesh's istio-reader ManifestWork when one mesh is deleted", func() {
+				expectIstioReaderManifestWork(clusterName, "istio-system")
+				expectIstioReaderManifestWork(clusterName, "istio-system-2")
+
+				util.DeleteResource(ctx, k8sClient, &meshv1alpha1.MultiClusterMesh{}, meshName, testNs)
+				util.ExpectResourceDeleted(ctx, k8sClient, &workv1.ManifestWork{},
+					meshcontroller.ManifestWorkNameIstioReaderPrefix+"istio-system", clusterName)
+
+				Consistently(func() error {
+					work := &workv1.ManifestWork{}
+					return k8sClient.Get(ctx, key.Of(meshcontroller.ManifestWorkNameIstioReaderPrefix+"istio-system-2", clusterName), work)
+				}).Should(Succeed())
 			})
 		})
 	})
@@ -1349,6 +1430,53 @@ func simulateMsaTokenSecretRotation(meshNamespace, meshName, clusterName string)
 
 func unmarshalManifest(manifest workv1.Manifest, into interface{}) error {
 	return json.Unmarshal(manifest.Raw, into)
+}
+
+func expectIstioReaderManifestWork(clusterNamespace, cpNamespace string) *workv1.ManifestWork {
+	return expectManifestWork(meshcontroller.ManifestWorkNameIstioReaderPrefix+cpNamespace, clusterNamespace)
+}
+
+func expectIstioReaderRules(rules []rbacv1.PolicyRule) {
+	Expect(rules).To(HaveLen(14))
+
+	Expect(rules[0].APIGroups).To(ConsistOf(
+		"config.istio.io", "security.istio.io", "networking.istio.io",
+		"authentication.istio.io", "rbac.istio.io", "telemetry.istio.io", "extensions.istio.io",
+	))
+	Expect(rules[0].Resources).To(ConsistOf("*"))
+	Expect(rules[0].Verbs).To(ConsistOf("get", "list", "watch"))
+
+	Expect(rules[1].APIGroups).To(ConsistOf(""))
+	Expect(rules[1].Resources).To(ConsistOf(
+		"endpoints", "pods", "services", "nodes",
+		"replicationcontrollers", "namespaces", "secrets", "configmaps",
+	))
+	Expect(rules[1].Verbs).To(ConsistOf("get", "list", "watch"))
+
+	Expect(rules[6].APIGroups).To(ConsistOf("multicluster.x-k8s.io"))
+	Expect(rules[6].Resources).To(ConsistOf("serviceexports"))
+	Expect(rules[6].Verbs).To(ConsistOf("get", "list", "watch", "create", "delete"))
+
+	Expect(rules[9].APIGroups).To(ConsistOf("authentication.k8s.io"))
+	Expect(rules[9].Resources).To(ConsistOf("tokenreviews"))
+	Expect(rules[9].Verbs).To(ConsistOf("create"))
+
+	Expect(rules[10].APIGroups).To(ConsistOf("authorization.k8s.io"))
+	Expect(rules[10].Resources).To(ConsistOf("subjectaccessreviews"))
+	Expect(rules[10].Verbs).To(ConsistOf("create"))
+
+	// istiodRemote rules
+	Expect(rules[11].APIGroups).To(ConsistOf(""))
+	Expect(rules[11].Resources).To(ConsistOf("configmaps"))
+	Expect(rules[11].Verbs).To(ConsistOf("create", "get", "list", "watch", "update"))
+
+	Expect(rules[12].APIGroups).To(ConsistOf("admissionregistration.k8s.io"))
+	Expect(rules[12].Resources).To(ConsistOf("mutatingwebhookconfigurations"))
+	Expect(rules[12].Verbs).To(ConsistOf("get", "list", "watch", "update", "patch"))
+
+	Expect(rules[13].APIGroups).To(ConsistOf("admissionregistration.k8s.io"))
+	Expect(rules[13].Resources).To(ConsistOf("validatingwebhookconfigurations"))
+	Expect(rules[13].Verbs).To(ConsistOf("get", "list", "watch", "update"))
 }
 
 func expectOLMClusterRole(work *workv1.ManifestWork, index int) {
