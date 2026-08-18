@@ -2,7 +2,6 @@ package util
 
 import (
 	"context"
-	"time"
 
 	. "github.com/onsi/gomega"
 	"github.com/stolostron/multicluster-mesh-addon/pkg/key"
@@ -10,7 +9,6 @@ import (
 	clusterv1 "open-cluster-management.io/api/cluster/v1"
 	clusterv1beta2 "open-cluster-management.io/api/cluster/v1beta2"
 	workv1 "open-cluster-management.io/api/work/v1"
-	msav1beta1 "open-cluster-management.io/managed-serviceaccount/apis/authentication/v1beta1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -40,20 +38,6 @@ func CreateManagedCluster(ctx context.Context, k8sClient client.Client, name, cl
 			ManagedClusterClientConfigs: []clusterv1.ClientConfig{{URL: "https://" + name + ":6443"}},
 		},
 	})).To(Succeed())
-}
-
-// SetMsaStatus updates a ManagedServiceAccount's status TokenSecretRef,
-// simulating what the ManagedServiceAccount controller does
-func SetMsaStatus(ctx context.Context, k8sClient client.Client, msaName, clusterName string, testDuration time.Duration) {
-	msa := &msav1beta1.ManagedServiceAccount{}
-	Expect(k8sClient.Get(ctx, key.Of(msaName, clusterName), msa)).To(Succeed())
-	msa.Status = msav1beta1.ManagedServiceAccountStatus{
-		TokenSecretRef: &msav1beta1.SecretRef{
-			Name:                 msaName,
-			LastRefreshTimestamp: metav1.NewTime(metav1.Now().Add(testDuration)),
-		},
-	}
-	Expect(k8sClient.Status().Update(ctx, msa)).To(Succeed())
 }
 
 // SetManifestWorkFeedback updates a ManifestWork's status to include a string feedback value,

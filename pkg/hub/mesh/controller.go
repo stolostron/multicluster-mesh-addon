@@ -128,7 +128,7 @@ func RegisterController(mgr manager.Manager) error {
 			})),
 		).
 		Watches(&msav1beta1.ManagedServiceAccount{},
-			handler.EnqueueRequestsFromMapFunc(reconciler.findMeshesForMSA),
+			handler.EnqueueRequestsFromMapFunc(reconciler.mapMsaToMesh),
 			builder.WithPredicates(predicate.NewPredicateFuncs(func(obj client.Object) bool {
 				return obj.GetLabels()[MeshNameLabel] != "" && obj.GetLabels()[MeshNamespaceLabel] != ""
 			})),
@@ -784,7 +784,7 @@ func (r *Reconciler) mapSecretToMesh(_ context.Context, obj client.Object) []rec
 	return []reconcile.Request{{NamespacedName: key.Of(meshName, meshNamespace)}}
 }
 
-func (r *Reconciler) findMeshesForMSA(_ context.Context, obj client.Object) []reconcile.Request {
+func (r *Reconciler) mapMsaToMesh(_ context.Context, obj client.Object) []reconcile.Request {
 	meshName := obj.GetLabels()[MeshNameLabel]
 	meshNamespace := obj.GetLabels()[MeshNamespaceLabel]
 

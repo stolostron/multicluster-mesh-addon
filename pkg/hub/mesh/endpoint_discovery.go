@@ -126,7 +126,7 @@ func (r *Reconciler) ensureRemoteSecretDistribution(ctx context.Context, mesh *m
 	manifests := []workv1.Manifest{}
 	for _, cluster := range clusters {
 		if len(cluster.Spec.ManagedClusterClientConfigs) == 0 {
-			klog.V(4).Infof("Cluster %s has no client configs yet, skipping", cluster.Name)
+			klog.V(4).Infof("no API endpoint found, skipping secret distribution for cluster %s", cluster.Name)
 			continue
 		}
 		server := cluster.Spec.ManagedClusterClientConfigs[0].URL
@@ -172,7 +172,9 @@ func (r *Reconciler) ensureRemoteSecretDistribution(ctx context.Context, mesh *m
 		return fmt.Errorf("failed to ensure ManifestWorkReplicaSet %s/%s: %w", mesh.Namespace, mesh.Name, err)
 	}
 
-	klog.Infof("Ensured ManifestWorkReplicaSet %s/%s state: %s", mesh.Namespace, mesh.Name, result)
+	if result != controllerutil.OperationResultNone {
+		klog.Infof("Ensured ManifestWorkReplicaSet %s/%s state: %s", mesh.Namespace, mesh.Name, result)
+	}
 	return nil
 }
 
@@ -224,6 +226,5 @@ func buildIstioRemoteSecret(tokenSecret *corev1.Secret, clusterName, server, nam
 			Labels:      map[string]string{"istio/multiCluster": "true"},
 		},
 		Data: map[string][]byte{clusterName: buf.Bytes()},
-		Type: corev1.SecretTypeOpaque,
 	}, nil
 }

@@ -65,33 +65,6 @@ func CreateCacertsSecret(ctx context.Context, k8sClient client.Client, namespace
 	Expect(k8sClient.Create(ctx, secret)).To(Succeed())
 }
 
-// CreateMsaSecret creates a ServiceAccount and a secret that simulates what ManagedServiceAccount controller would create.
-func CreateMsaSecret(ctx context.Context, k8sClient client.Client, msaName, clusterName string) {
-	secret := &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      msaName,
-			Namespace: clusterName,
-			Labels: map[string]string{
-				"authentication.open-cluster-management.io/is-managed-serviceaccount": "true",
-			},
-		},
-		Type: corev1.SecretTypeOpaque,
-		Data: map[string][]byte{
-			"ca.crt": []byte("test-ca-data"),
-			"token":  []byte("test-token-data"),
-		},
-	}
-	Expect(k8sClient.Create(ctx, secret)).To(Succeed())
-}
-
-// UpdateMsaSecret updates a ManagedServiceAccount secret that simulates token rotation.
-func UpdateMsaSecret(ctx context.Context, k8sClient client.Client, msaName, clusterName string) {
-	secret := &corev1.Secret{}
-	Expect(k8sClient.Get(ctx, key.Of(msaName, clusterName), secret)).To(Succeed())
-	secret.Data["token"] = []byte("new-token-data")
-	Expect(k8sClient.Update(ctx, secret)).To(Succeed())
-}
-
 // DeleteResource deletes a Kubernetes resource and waits for it to be fully removed.
 func DeleteResource(ctx context.Context, k8sClient client.Client, obj client.Object, name, namespace string) {
 	Expect(k8sClient.Get(ctx, key.Of(name, namespace), obj)).To(Succeed())
