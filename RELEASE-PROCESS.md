@@ -13,7 +13,7 @@ This document describes how to create a new release of the multicluster-mesh-add
   - `QUAY_PASSWORD` - Quay.io password or robot token
 - `gh` CLI installed and authenticated
 
-## Release Steps
+## Minor Release (e.g., 0.2.0 → 0.3.0)
 
 ### 1. Prepare the Release
 
@@ -49,30 +49,35 @@ git push origin release-0.2
 
 Branch naming convention: `release-X.Y` (e.g., `release-0.1`, `release-0.2`)
 
-### 3. Pin Image Tag on Release Branch
+### 3. Update Image Tag on Release Branch
 
 On `main`, the default image tag is `X.Y-latest` (a floating dev tag). The release branch must pin it to the exact release version so the Helm chart deploys the correct image.
 
-Update `TAG` in `Makefile`:
+Update `TAG` in `Makefile` (using `v` prefix):
 
 ```makefile
-TAG ?= v0.2.0
+TAG ?= v$(VERSION)
 ```
 
 Regenerate and submit a PR against the release branch:
 
 ```bash
 git checkout release-0.2
-git checkout -b pin-tag-0.2.0
+git checkout -b update-tag-0.2.0
 # edit TAG in Makefile
 make gen
 git add Makefile chart/values.yaml
-git commit -s -m "Pin image tag to v0.2.0 for release"
-git push origin pin-tag-0.2.0
+git commit -s -m "Update image tag to v0.2.0 for release"
+git push origin update-tag-0.2.0
 # create PR targeting release-0.2
 ```
 
-### 4. Trigger Release Workflow
+### 4. Add OpenShift CI jobs
+
+Add OpenShift CI jobs for newly created branch.
+See [example PR](https://github.com/openshift/release/pull/83567)
+
+### 5. Trigger Release Workflow
 
 1. Go to **Actions** tab in GitHub
 2. Select **Release** workflow
@@ -90,7 +95,7 @@ The workflow will:
 
 The workflow takes approximately 5-10 minutes to complete.
 
-### 5. Verify Release
+### 6. Verify Release
 
 After the workflow completes successfully:
 
@@ -111,7 +116,7 @@ You should see the new version listed.
 3. Check that release notes are generated
 4. Verify installation instructions are present
 
-### 6. Bump Version on Main
+### 7. Bump Version on Main
 
 After the release, update the version on `main` to start the next development cycle:
 
@@ -139,6 +144,44 @@ gh pr create --base main --title "Bump version to 0.3.0 for next development cyc
 ```
 
 Merge the PR once CI passes.
+
+## Patch Release (e.g., 0.2.0 → 0.2.1)
+
+Patch releases are made from an existing release branch. The release branch, CI jobs, and image tag pinning already exist from the minor release.
+
+### 1. Bump VERSION on the Release Branch
+
+Cherry-pick or backport fixes onto the release branch, then bump `VERSION` in `Makefile` to the patch version:
+
+```bash
+git checkout release-0.2
+git pull origin release-0.2
+git checkout -b bump-version-0.2.1
+```
+
+Update `VERSION` in `Makefile`:
+
+```makefile
+VERSION ?= 0.2.1
+```
+
+Regenerate, commit, and open a PR against the release branch:
+
+```bash
+make gen
+git add Makefile chart/Chart.yaml
+git commit -s -m "Bump version to 0.2.1 for patch release"
+git push origin bump-version-0.2.1
+# create PR targeting release-0.2
+```
+
+### 2. Trigger Release Workflow
+
+Follow [step 5](#5-trigger-release-workflow) from the minor release process, selecting the release branch.
+
+### 3. Verify Release
+
+Follow [step 6](#6-verify-release) from the minor release process.
 
 ## Branch Strategy
 
