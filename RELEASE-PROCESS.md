@@ -169,7 +169,7 @@ Regenerate, commit, and open a PR against the release branch:
 
 ```bash
 make gen
-git add Makefile chart/Chart.yaml
+git add Makefile chart/Chart.yaml chart/values.yaml
 git commit -s -m "Bump version to 0.2.1 for patch release"
 git push origin bump-version-0.2.1
 # create PR targeting release-0.2
