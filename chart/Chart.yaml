@@ -2,8 +2,8 @@ apiVersion: v2
 name: multicluster-mesh-addon
 description: OCM Multi-Cluster Mesh Add-on for Istio service mesh
 type: application
-version: 0.1.0
-appVersion: v0.1.0
+version: 0.1.1
+appVersion: v0.1.1
 keywords:
   - ocm
   - open-cluster-management

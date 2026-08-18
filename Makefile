@@ -1,7 +1,7 @@
 .DEFAULT_GOAL := default
 default: all
 
-VERSION ?= 0.1.0
+VERSION ?= 0.1.1
 MINOR_VERSION := $(shell echo "${VERSION}" | cut -f1,2 -d'.')
 GIT_COMMIT ?= $(shell git rev-parse --short "HEAD^{commit}" 2>/dev/null)
 BUILD_DATE ?= $(shell date -u +'%Y-%m-%dT%H:%M:%SZ')
@@ -61,7 +61,7 @@ $(HELM_BIN): $(BIN_DIR)
 # Image registry and name
 # TODO: Change HUB back to quay.io/stolostron when we have access to that registry
 HUB ?= quay.io/sail-dev
-TAG ?= v0.1.0
+TAG ?= v$(VERSION)
 IMAGE_BASE ?= multicluster-mesh-addon
 IMG ?= $(HUB)/$(IMAGE_BASE):$(TAG)
 
