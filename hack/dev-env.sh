@@ -180,7 +180,7 @@ install_cert_manager() {
 init_ocm() {
     require_clusters "${HUB}"
     log "Initializing OCM hub on cluster: ${HUB}"
-    on "${HUB}" "${CLUSTERADM}" init --wait
+    on "${HUB}" "${CLUSTERADM}" init --feature-gates=ManifestWorkReplicaSet=true --wait
 
     log "Waiting for OCM hub components to be ready..."
     on "${HUB}" retry kubectl wait --for=condition=Available \
