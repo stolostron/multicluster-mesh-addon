@@ -102,6 +102,11 @@ var _ = Describe("Multi-primary data plane", Ordered, Serial, func() {
 	}, NodeTimeout(5*time.Minute))
 
 	AfterAll(func(ctx SpecContext) {
+		collectArtifacts(ctx, "multi-primary",
+			[]string{meshNS},
+			[]string{cpNamespace, testOperatorNamespace, sampleNS, "istio-cni"},
+		)
+
 		Step("Cleaning up spoke resources")
 		for _, spokeClient := range spokeClients {
 			_ = client.IgnoreNotFound(spokeClient.Delete(ctx, &corev1.Namespace{

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"text/template"
 
@@ -64,6 +65,19 @@ func (c *E2EClient) Cleanup(ctx context.Context) {
 		c.DeleteFile(ctx, f.path, f.vars, f.namespace)
 	}
 	c.applied = nil
+}
+
+// SaveLogs writes all container logs for a pod to dir/<pod>.log via kubectl.
+// Best-effort; errors are silently ignored to avoid masking test failures.
+func (c *E2EClient) SaveLogs(ctx context.Context, dir, namespace, pod string) {
+	_ = os.MkdirAll(dir, 0o755)
+	args := []string{"--kubeconfig", c.Kubeconfig,
+		"logs", "--all-containers", "-n", namespace, pod}
+	cmd := exec.CommandContext(ctx, "kubectl", args...)
+	out, _ := cmd.CombinedOutput()
+	if len(out) > 0 {
+		_ = os.WriteFile(filepath.Join(dir, pod+".log"), out, 0o644)
+	}
 }
 
 func (c *E2EClient) runKubectl(ctx context.Context, path string, vars map[string]string, args []string) {

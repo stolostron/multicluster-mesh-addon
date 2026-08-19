@@ -29,9 +29,8 @@ import (
 )
 
 const (
-	controllerNamespace = "multicluster-mesh-system"
-	controllerName      = "multicluster-mesh-controller"
-	testDefaultChannel  = "stable"
+	controllerName     = "multicluster-mesh-controller"
+	testDefaultChannel = "stable"
 
 	msaSpokeNamespace = "open-cluster-management-agent-addon"
 
@@ -92,6 +91,11 @@ var _ = Describe("MultiClusterMesh lifecycle", Ordered, func() {
 	})
 
 	AfterAll(func(ctx SpecContext) {
+		collectArtifacts(ctx, "mesh-lifecycle",
+			[]string{ns},
+			[]string{testOperatorNamespace, "istio-system"},
+		)
+
 		Step("Deleting test namespace %s", ns)
 		err := client.IgnoreNotFound(hubClient.Delete(ctx, &corev1.Namespace{
 			ObjectMeta: metav1.ObjectMeta{Name: ns},
