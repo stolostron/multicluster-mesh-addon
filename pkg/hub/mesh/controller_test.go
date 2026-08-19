@@ -133,7 +133,7 @@ func TestDetermineStatusPreservesLastTransitionTime(t *testing.T) {
 	client := fake.NewClientBuilder().
 		WithScheme(scheme).
 		WithObjects(operatorManifestWorkWithInstalledCSV(clusterName)).
-		WithStatusSubresource(operatorManifestWorkWithInstalledCSV(clusterName)).
+		WithStatusSubresource(&workv1.ManifestWork{}).
 		Build()
 
 	r := &Reconciler{Client: client, Scheme: scheme}
@@ -169,7 +169,7 @@ func TestDetermineStatusPrunesStaleCluster(t *testing.T) {
 	client := fake.NewClientBuilder().
 		WithScheme(scheme).
 		WithObjects(operatorManifestWorkWithInstalledCSV(activeCluster)).
-		WithStatusSubresource(operatorManifestWorkWithInstalledCSV(activeCluster)).
+		WithStatusSubresource(&workv1.ManifestWork{}).
 		Build()
 
 	r := &Reconciler{Client: client, Scheme: scheme}
@@ -211,7 +211,7 @@ func TestDetermineStatusUpdatesLastTransitionTimeOnStatusChange(t *testing.T) {
 	client := fake.NewClientBuilder().
 		WithScheme(scheme).
 		WithObjects(operatorManifestWorkWithInstalledCSV(clusterName)).
-		WithStatusSubresource(operatorManifestWorkWithInstalledCSV(clusterName)).
+		WithStatusSubresource(&workv1.ManifestWork{}).
 		Build()
 
 	r := &Reconciler{Client: client, Scheme: scheme}
