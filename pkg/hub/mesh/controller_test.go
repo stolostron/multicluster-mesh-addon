@@ -109,46 +109,73 @@ func TestIsOlderMesh(t *testing.T) {
 	}
 }
 
-func TestDetermineStatusPreservesLastTransitionTime(t *testing.T) {
-	scheme := newTestScheme()
-	clusterName := "cluster-a"
-
-	hourAgo := metav1.NewTime(time.Now().Add(-time.Hour))
-	mesh := &meshv1alpha1.MultiClusterMesh{
-		ObjectMeta: metav1.ObjectMeta{Name: "test-mesh", Namespace: "default", Generation: 1},
-		Status: meshv1alpha1.MultiClusterMeshStatus{
-			ClusterStatus: []meshv1alpha1.ClusterMeshStatus{{
-				ClusterName: clusterName,
-				Conditions: []metav1.Condition{{
-					Type:               meshv1alpha1.ConditionOperatorInstalled,
-					Status:             metav1.ConditionTrue,
-					Reason:             meshv1alpha1.ReasonOperatorInstalled,
-					Message:            "Operator installed: " + testInstalledCSV,
-					LastTransitionTime: hourAgo,
-				}},
-			}},
-		},
+func TestDetermineStatusLastTransitionTime(t *testing.T) {
+	tests := []struct {
+		name              string
+		initialStatus     metav1.ConditionStatus
+		initialReason     string
+		withCSV           bool
+		expectStatus      metav1.ConditionStatus
+		expectTimeChanged bool
+	}{
+		{"preserves when unchanged (True->True)", metav1.ConditionTrue, meshv1alpha1.ReasonOperatorInstalled, true, metav1.ConditionTrue, false},
+		{"updates on install (False->True)", metav1.ConditionFalse, meshv1alpha1.ReasonInstallationPending, true, metav1.ConditionTrue, true},
+		{"preserves when still pending (False->False)", metav1.ConditionFalse, meshv1alpha1.ReasonInstallationPending, false, metav1.ConditionFalse, false},
+		{"updates on CSV removal (True->False)", metav1.ConditionTrue, meshv1alpha1.ReasonOperatorInstalled, false, metav1.ConditionFalse, true},
 	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			scheme := newTestScheme()
+			clusterName := "cluster-a"
+			hourAgo := metav1.NewTime(time.Now().Add(-time.Hour))
 
-	client := fake.NewClientBuilder().
-		WithScheme(scheme).
-		WithObjects(operatorManifestWorkWithInstalledCSV(clusterName)).
-		WithStatusSubresource(&workv1.ManifestWork{}).
-		Build()
+			mesh := &meshv1alpha1.MultiClusterMesh{
+				ObjectMeta: metav1.ObjectMeta{Name: "test-mesh", Namespace: "default", Generation: 1},
+				Status: meshv1alpha1.MultiClusterMeshStatus{
+					ClusterStatus: []meshv1alpha1.ClusterMeshStatus{{
+						ClusterName: clusterName,
+						Conditions: []metav1.Condition{{
+							Type:               meshv1alpha1.ConditionOperatorInstalled,
+							Status:             tt.initialStatus,
+							Reason:             tt.initialReason,
+							LastTransitionTime: hourAgo,
+						}},
+					}},
+				},
+			}
 
-	r := &Reconciler{Client: client, Scheme: scheme}
-	clusters := []clusterv1.ManagedCluster{{ObjectMeta: metav1.ObjectMeta{Name: clusterName}}}
+			var mw *workv1.ManifestWork
+			if tt.withCSV {
+				mw = operatorManifestWorkWithInstalledCSV(clusterName)
+			} else {
+				mw = operatorManifestWork(clusterName)
+			}
 
-	if err := r.determineStatus(context.Background(), mesh, clusters); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+			c := fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithObjects(mw).
+				WithStatusSubresource(&workv1.ManifestWork{}).
+				Build()
 
-	c := meta.FindStatusCondition(mesh.Status.ClusterStatus[0].Conditions, meshv1alpha1.ConditionOperatorInstalled)
-	if c == nil {
-		t.Fatal("OperatorInstalled condition not found")
-	}
-	if !c.LastTransitionTime.Equal(&hourAgo) {
-		t.Errorf("LastTransitionTime changed from %v to %v", hourAgo, c.LastTransitionTime)
+			r := &Reconciler{Client: c, Scheme: scheme}
+			clusters := []clusterv1.ManagedCluster{{ObjectMeta: metav1.ObjectMeta{Name: clusterName}}}
+
+			if err := r.determineStatus(context.Background(), mesh, clusters); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			cond := meta.FindStatusCondition(mesh.Status.ClusterStatus[0].Conditions, meshv1alpha1.ConditionOperatorInstalled)
+			if cond == nil {
+				t.Fatal("OperatorInstalled condition not found")
+			}
+			if cond.Status != tt.expectStatus {
+				t.Errorf("expected status %s, got %s", tt.expectStatus, cond.Status)
+			}
+			timeChanged := !cond.LastTransitionTime.Equal(&hourAgo)
+			if timeChanged != tt.expectTimeChanged {
+				t.Errorf("LastTransitionTime changed=%v, want changed=%v", timeChanged, tt.expectTimeChanged)
+			}
+		})
 	}
 }
 
@@ -187,52 +214,6 @@ func TestDetermineStatusPrunesStaleCluster(t *testing.T) {
 	}
 }
 
-func TestDetermineStatusUpdatesLastTransitionTimeOnStatusChange(t *testing.T) {
-	scheme := newTestScheme()
-	clusterName := "cluster-a"
-
-	hourAgo := metav1.NewTime(time.Now().Add(-time.Hour))
-	mesh := &meshv1alpha1.MultiClusterMesh{
-		ObjectMeta: metav1.ObjectMeta{Name: "test-mesh", Namespace: "default", Generation: 1},
-		Status: meshv1alpha1.MultiClusterMeshStatus{
-			ClusterStatus: []meshv1alpha1.ClusterMeshStatus{{
-				ClusterName: clusterName,
-				Conditions: []metav1.Condition{{
-					Type:               meshv1alpha1.ConditionOperatorInstalled,
-					Status:             metav1.ConditionFalse,
-					Reason:             meshv1alpha1.ReasonInstallationPending,
-					Message:            "Operator installation is pending",
-					LastTransitionTime: hourAgo,
-				}},
-			}},
-		},
-	}
-
-	client := fake.NewClientBuilder().
-		WithScheme(scheme).
-		WithObjects(operatorManifestWorkWithInstalledCSV(clusterName)).
-		WithStatusSubresource(&workv1.ManifestWork{}).
-		Build()
-
-	r := &Reconciler{Client: client, Scheme: scheme}
-	clusters := []clusterv1.ManagedCluster{{ObjectMeta: metav1.ObjectMeta{Name: clusterName}}}
-
-	if err := r.determineStatus(context.Background(), mesh, clusters); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	c := meta.FindStatusCondition(mesh.Status.ClusterStatus[0].Conditions, meshv1alpha1.ConditionOperatorInstalled)
-	if c == nil {
-		t.Fatal("OperatorInstalled condition not found")
-	}
-	if c.Status != metav1.ConditionTrue {
-		t.Errorf("expected status %s, got %s", metav1.ConditionTrue, c.Status)
-	}
-	if c.LastTransitionTime.Equal(&hourAgo) {
-		t.Error("LastTransitionTime should have changed after status transition")
-	}
-}
-
 func meshWith(namespace, name string, ts metav1.Time) *meshv1alpha1.MultiClusterMesh {
 	return &meshv1alpha1.MultiClusterMesh{
 		ObjectMeta: metav1.ObjectMeta{
@@ -253,6 +234,15 @@ func newTestScheme() *runtime.Scheme {
 }
 
 const testInstalledCSV = "istio-operator.v1.0.0"
+
+func operatorManifestWork(clusterName string) *workv1.ManifestWork {
+	return &workv1.ManifestWork{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      OperatorManifestWorkName,
+			Namespace: clusterName,
+		},
+	}
+}
 
 func operatorManifestWorkWithInstalledCSV(clusterName string) *workv1.ManifestWork {
 	csv := testInstalledCSV
