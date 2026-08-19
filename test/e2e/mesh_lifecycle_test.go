@@ -92,6 +92,13 @@ var _ = Describe("MultiClusterMesh lifecycle", Ordered, func() {
 	})
 
 	AfterAll(func(ctx SpecContext) {
+		// Do not leave behind any resources to be able to reuse the same env.
+		if mesh != nil {
+			Step("Deleting test mesh %s/%s", mesh.Namespace, mesh.Name)
+			err := client.IgnoreNotFound(hubClient.Delete(ctx, mesh))
+			Expect(err).NotTo(HaveOccurred())
+		}
+
 		Step("Deleting test namespace %s", ns)
 		err := client.IgnoreNotFound(hubClient.Delete(ctx, &corev1.Namespace{
 			ObjectMeta: metav1.ObjectMeta{Name: ns},
