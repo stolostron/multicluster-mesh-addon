@@ -2,6 +2,7 @@
 
 End-to-end walkthrough for setting up a multi-cluster service mesh.
 For a quick overview of what the addon does, see the [architecture](architecture.md).
+New to OCM? See the [OCM concepts docs][ocm-concepts] for background on terms like ManagedCluster and ManifestWork.
 
 This guide uses predefined sample manifests suitable for development and testing.
 For production, use your own configurations (e.g., your organization's CA instead of the self-signed example).
@@ -12,6 +13,7 @@ For production, use your own configurations (e.g., your organization's CA instea
 - [cert-manager] installed on the hub cluster (mints per-cluster intermediate CAs for mTLS trust)
 - [OLM] installed on managed clusters (installs the service mesh operator)
 - A [ManagedClusterSet] with `ExclusiveClusterSetLabel` selector (the default type, where each cluster belongs to exactly one set).
+- [`ManifestWorkReplicaSet`][mwrs] feature gate enabled on the hub's `ClusterManager`
 
 ## Step 1: Install the Addon
 
@@ -27,7 +29,7 @@ For more install options, see the [Helm chart docs](../chart/README.md).
 
 ## Step 2: Set Up Clusters
 
-Create a ManagedClusterSet and assign your clusters using [`clusteradm`][clusteradm]:
+If you don't already have a ManagedClusterSet, create one and assign your clusters using [`clusteradm`][clusteradm]:
 
 ```bash
 clusteradm create clusterset mesh-cluster-set
@@ -39,6 +41,20 @@ Verify the clusters are in the set:
 ```bash
 clusteradm get clustersets
 ```
+
+### Network identity (optional)
+
+In a multi-network mesh, each cluster needs a network identity.
+By default the addon uses the managed cluster name.
+To override it, label the ManagedCluster on the hub before creating the mesh:
+
+```bash
+kubectl label managedcluster cluster1 topology.istio.io/network=network-a
+kubectl label managedcluster cluster2 topology.istio.io/network=network-b
+```
+
+The addon applies this value as `topology.istio.io/network` on the control plane namespace.
+Your Istio CR and east-west gateway must use the same value (see [Step 6](#step-6-configure-istio)).
 
 ## Step 3: Create a Trust Chain
 
@@ -57,13 +73,21 @@ kubectl apply -n mesh-system -f samples/cert-manager-issuer.yaml
 
 This creates a self-signed `Issuer`, a root CA `Certificate`, and a root CA-backed `Issuer` that the addon will use to mint intermediate certificates.
 
-For production, replace the self-signed root with your preferred root CA.
+> **Note:** For production, replace the self-signed root with your preferred root CA.
 
 ## Step 4: Create a MultiClusterMesh
 
 The CRD defaults target OSSM on OpenShift (`servicemeshoperator3` from `redhat-operators`).
 For vanilla Kubernetes clusters, override `spec.operator` fields to use Sail.
 See [samples/basic.yaml](../samples/basic.yaml) for a Sail example and [samples/openshift.yaml](../samples/openshift.yaml) for OSSM.
+
+OpenShift (OSSM):
+
+```bash
+kubectl apply -n mesh-system -f samples/openshift.yaml
+```
+
+Kubernetes (Sail):
 
 ```bash
 kubectl apply -n mesh-system -f samples/basic.yaml
@@ -81,6 +105,7 @@ kubectl get multiclustermesh -n mesh-system -o yaml
 ```
 
 When all operators are installed, the mesh shows `Ready=True`.
+That means operator installation succeeded, not that cross-cluster traffic works yet.
 See the [API reference](api-reference.md#status-conditions) for all reported conditions.
 
 If something isn't working, see the [troubleshooting guide](troubleshooting.md).
@@ -142,6 +167,8 @@ kubectl delete multiclustermesh -n mesh-system <mesh-name>
 [Gateway API]: https://gateway-api.sigs.k8s.io/
 [kind]: https://kind.sigs.k8s.io/
 [ManagedClusterSet]: https://open-cluster-management.io/docs/concepts/cluster-inventory/managedclusterset/
+[mwrs]: https://open-cluster-management.io/docs/concepts/work-distribution/manifestworkreplicaset/
+[ocm-concepts]: https://open-cluster-management.io/docs/concepts/
 [OLM]: https://olm.operatorframework.io/
 [Plug-in CA]: https://istio.io/latest/docs/tasks/security/cert-management/plugin-ca-cert/
 [sail-multicluster]: https://github.com/istio-ecosystem/sail-operator/blob/main/docs/deployment-models/multicluster.adoc#multi-primary---multi-network

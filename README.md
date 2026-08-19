@@ -24,6 +24,8 @@ You bring the clusters and configure Istio; the addon handles the rest.
 
 ## Quick Start
 
+> **Note:** Requires an OCM hub with [cert-manager] and managed clusters with [OLM]. See [prerequisites](docs/user-guide.md#prerequisites) for details.
+
 ```bash
 # Install the addon
 helm repo add multicluster-mesh-addon https://stolostron.github.io/multicluster-mesh-addon
@@ -42,8 +44,12 @@ kubectl apply -n mesh-system -f samples/cert-manager-issuer.yaml
 kubectl apply -n mesh-system -f samples/basic.yaml
 ```
 
-See the [User Guide](docs/user-guide.md) for prerequisites, what each step does, verification, and next steps (configuring Istio).
+> **Note:** For OpenShift, use `samples/openshift.yaml` instead of `samples/basic.yaml`.
+
+This installs the operator and distributes trust. For a working multi-cluster mesh setup, see the [User Guide](docs/user-guide.md) for prerequisites, what each step does, verification, and next steps (configuring Istio).
 
 <!-- Reference links -->
+[cert-manager]: https://cert-manager.io/
 [OCM]: https://open-cluster-management.io/
+[OLM]: https://olm.operatorframework.io/
 [sail]: https://github.com/istio-ecosystem/sail-operator

@@ -15,10 +15,11 @@
 ## Running Tests
 
 ```bash
-make verify              # gofmt, modules, vet
-make test                # unit tests
-make test-integration    # integration tests (envtest - K8s cluster API running in memory)
-make test-e2e            # e2e tests (requires a running development environment)
+make verify                  # gofmt, modules, vet
+make test                    # unit tests
+make test-integration        # integration tests (envtest - K8s cluster API running in memory)
+make test-e2e                # e2e tests (requires a running development environment)
+make test-e2e-multicluster   # multi-primary e2e tests (requires make dev-env)
 ```
 
 For e2e tests, the addon must be deployed first (`make dev-env` or `make deploy`).
