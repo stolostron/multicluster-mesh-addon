@@ -35,8 +35,9 @@ const (
 
 	msaSpokeNamespace = "open-cluster-management-agent-addon"
 
-	testIssuerName = "mesh-test-root-ca"
-	testIssuerKind = "ClusterIssuer"
+	testIssuerName       = "mesh-test-root-ca"
+	testIssuerKind       = "ClusterIssuer"
+	testIssuerSecretName = "mesh-test-root-ca-secret"
 )
 
 type trackedResource struct {
@@ -181,9 +182,10 @@ var _ = Describe("MultiClusterMesh lifecycle", Ordered, func() {
 	It("should distribute cacerts secrets to spoke clusters", func(ctx SpecContext) {
 		cpNamespace := mesh.GetControlPlaneNamespace()
 
+		// The root CA is expected to be pre-created by setup-test-issuer before the test run.
 		Step("Fetching hub root CA certificate")
 		rootCASecret := &corev1.Secret{}
-		Expect(hubClient.Get(ctx, key.Of("mesh-test-root-ca-secret", "cert-manager"), rootCASecret)).To(Succeed())
+		Expect(hubClient.Get(ctx, key.Of(testIssuerSecretName, "cert-manager"), rootCASecret)).To(Succeed())
 		hubRootCert := rootCASecret.Data["tls.crt"]
 		Expect(hubRootCert).NotTo(BeEmpty())
 
