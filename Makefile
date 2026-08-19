@@ -171,6 +171,8 @@ test-integration: $(ENVTEST) gen-crds deps update-test-crds ## Run integration t
 	go run github.com/onsi/ginkgo/v2/ginkgo -v --tags=integration ./test/integration/...
 
 .PHONY: test-e2e
+# Configure default PLATFORM as kind for test-e2e target, you can override with make test-e2e PLATFORM=openshift.
+test-e2e: PLATFORM=kind
 test-e2e: ## Run e2e tests against dev-env clusters (requires make dev-env)
 	PLATFORM=$(PLATFORM) \
 	HUB_KUBECONFIG=$(HUB_KUBECONFIG) \
@@ -183,6 +185,8 @@ test-e2e-multicluster-prereqs:
 	$(MAKE) --no-print-directory -j$(PARALLEL) --output-sync=line install-metallb install-gateway-api
 
 .PHONY: test-e2e-multicluster
+# Configure default PLATFORM as kind for test-e2e-multicluster target, you can override with make test-e2e-multicluster PLATFORM=openshift.
+test-e2e-multicluster: PLATFORM=kind
 test-e2e-multicluster: test-e2e-multicluster-prereqs ## Run multi-primary e2e tests (requires make dev-env)
 	PLATFORM=$(PLATFORM) \
 	HUB_KUBECONFIG=$(HUB_KUBECONFIG) \
