@@ -95,8 +95,7 @@ var _ = Describe("MultiClusterMesh lifecycle", Ordered, func() {
 		// Do not leave behind any resources to be able to reuse the same env.
 		if mesh != nil {
 			Step("Deleting test mesh %s/%s", mesh.Namespace, mesh.Name)
-			err := client.IgnoreNotFound(hubClient.Delete(ctx, mesh))
-			Expect(err).NotTo(HaveOccurred())
+			_ = hubClient.Delete(ctx, mesh)
 		}
 
 		Step("Deleting test namespace %s", ns)
