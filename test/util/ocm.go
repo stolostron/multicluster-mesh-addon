@@ -34,6 +34,9 @@ func CreateManagedCluster(ctx context.Context, k8sClient client.Client, name, cl
 				"cluster.open-cluster-management.io/clusterset": clusterSet,
 			},
 		},
+		Spec: clusterv1.ManagedClusterSpec{
+			ManagedClusterClientConfigs: []clusterv1.ClientConfig{{URL: "https://" + name + ":6443"}},
+		},
 	})).To(Succeed())
 }
 

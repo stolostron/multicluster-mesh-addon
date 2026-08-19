@@ -1,0 +1,52 @@
+# ClusterIssuer trust chain for e2e tests.
+#
+# Architecture (same as samples/cert-manager-issuer.yaml, but cluster-scoped):
+#   ClusterIssuer (self-signed) --> Certificate (root CA) --> ClusterIssuer (CA-backed)
+#
+# The CA-backed ClusterIssuer can be referenced from any namespace, so e2e tests
+# create meshes in unique test namespaces without per-test trust chain setup.
+#
+# The Certificate's Secret is created in the cert-manager namespace, which is where
+# ClusterIssuers look for secrets by default (--cluster-resource-namespace).
+
+---
+# Step 1: Bootstrap issuer (self-signed)
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: mesh-test-selfsigned
+spec:
+  selfSigned: {}
+
+---
+# Step 2: Root CA certificate (signed by the bootstrap ClusterIssuer)
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: mesh-test-root-ca
+  namespace: cert-manager
+spec:
+  isCA: true
+  commonName: Mesh Test Root CA
+  secretName: mesh-test-root-ca-secret
+  duration: 87600h   # 10 years
+  renewBefore: 720h  # 30 days
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  issuerRef:
+    name: mesh-test-selfsigned
+    kind: ClusterIssuer
+    group: cert-manager.io
+
+---
+# Step 3: CA-backed ClusterIssuer (references the root CA secret)
+# This is the ClusterIssuer referenced by e2e test meshes via
+# spec.security.trust.certManager.issuerRef (kind: ClusterIssuer).
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: mesh-test-root-ca
+spec:
+  ca:
+    secretName: mesh-test-root-ca-secret

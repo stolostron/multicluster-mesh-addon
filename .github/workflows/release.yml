@@ -34,10 +34,28 @@ jobs:
           echo "tag=v$VERSION" >> $GITHUB_OUTPUT
           echo "Release version: v$VERSION"
 
+      - name: Verify image tag matches release version
+        run: |
+          EXPECTED="v${{ steps.version.outputs.version }}"
+          MAKEFILE_TAG=$(make --no-print-directory -f Makefile -f /dev/stdin <<< 'print-tag: ; @echo $(TAG)' print-tag)
+          CHART_TAG=$(sed -n 's/^  tag: *//p' chart/values.yaml)
+          FAIL=0
+          if [ "$MAKEFILE_TAG" != "$EXPECTED" ]; then
+            echo "Error: TAG in Makefile is '$MAKEFILE_TAG', expected '$EXPECTED'"
+            FAIL=1
+          fi
+          if [ "$CHART_TAG" != "$EXPECTED" ]; then
+            echo "Error: image.tag in chart/values.yaml is '$CHART_TAG', expected '$EXPECTED'"
+            FAIL=1
+          fi
+          if [ "$FAIL" -eq 1 ]; then
+            echo "Update TAG in Makefile to '$EXPECTED' and run 'make gen' on the release branch before releasing."
+            exit 1
+          fi
+
       # Tag push is atomic - fails if the tag already exists on the remote,
-      # we need to be sure not to overwrite existing images in quay which are using given tag.
-      # Must happen before chart-releaser, which scans remote tags to discover
-      # which chart versions to package and publish to the gh-pages branch.
+      # preventing duplicate releases and ensuring we don't overwrite existing
+      # images in quay which are using the given tag.
       - name: Create and push tag
         run: |
           git config user.name "$GITHUB_ACTOR"
@@ -53,41 +71,45 @@ jobs:
           password: ${{ secrets.QUAY_PASSWORD }}
 
       - name: Build and push image
-        run: |
-          make images push
-        env:
-          TAG: v${{ steps.version.outputs.version }}
+        run: make images push
 
       - name: Install Helm
         uses: azure/setup-helm@b7246b12e77f7134dc2d460a3d5bad15bbe29390 # v4.1.0
         with:
           version: v4.2.2
 
-      - name: Run chart-releaser
-        uses: helm/chart-releaser-action@a917fd15b20e8b64b94d9158ad54cd6345335584 # v1.6.0
-        with:
-          charts_dir: .
-          config: .github/cr.yaml
-        env:
-          CR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Package Helm chart
+        run: helm package chart/
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@da05d552573ad5d49f27b8ba0c6c92e8c6011a94 # v2.2.1
+        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
         with:
           tag_name: v${{ steps.version.outputs.version }}
+          name: Multi Cluster Mesh Add-On v${{ steps.version.outputs.version }}
           generate_release_notes: true
+          files: multicluster-mesh-addon-${{ steps.version.outputs.version }}.tgz
           body: |
             ## Installation
 
             ### Helm Chart
             See [chart/README.md](https://github.com/stolostron/multicluster-mesh-addon/blob/v${{ steps.version.outputs.version }}/chart/README.md) for installation instructions.
 
-            Quick install:
-            ```bash
-            helm repo add multicluster-mesh-addon https://stolostron.github.io/multicluster-mesh-addon
-            helm repo update
-            helm install multicluster-mesh-addon multicluster-mesh-addon/multicluster-mesh-addon \
-              --version ${{ steps.version.outputs.version }} \
-              --namespace multicluster-mesh-system \
-              --create-namespace
-            ```
+      # Pushes directly to gh-pages — will fail if the branch has protection rules.
+      - name: Update Helm repo index
+        run: |
+          git fetch origin gh-pages
+          git worktree add /tmp/gh-pages origin/gh-pages
+
+          helm repo index . \
+            --url "https://github.com/stolostron/multicluster-mesh-addon/releases/download/v${{ steps.version.outputs.version }}" \
+            --merge /tmp/gh-pages/index.yaml
+
+          cp index.yaml /tmp/gh-pages/index.yaml
+          cd /tmp/gh-pages
+          git add index.yaml
+          git commit -m "Update Helm repo index for v${{ steps.version.outputs.version }}"
+          # HEAD:gh-pages is needed because the worktree is in detached HEAD state
+          git push origin HEAD:gh-pages
+
+          cd -
+          git worktree remove /tmp/gh-pages

@@ -4,7 +4,8 @@
 #
 # Usage: hack/dev-env.sh <action> [args...]
 # Actions: check-host, create-cluster <name>, install-olm <name>, install-cert-manager,
-#          install-managed-serviceaccount, init-ocm, join-clusters, setup-mesh
+#          install-managed-serviceaccount, init-ocm, join-clusters, setup-mesh,
+#          setup-test-issuer
 
 set -euo pipefail
 
@@ -156,9 +157,6 @@ install_olm() {
     on "${cluster}" kubectl rollout status deployment/olm-operator -n olm --timeout=180s
     on "${cluster}" kubectl rollout status deployment/catalog-operator -n olm --timeout=180s
 
-    log "Granting klusterlet-work-sa OLM permissions on ${cluster}"
-    on "${cluster}" kubectl apply -f "${SCRIPT_DIR}/hack/kind/klusterlet-work-olm.yaml"
-
     log "OLM ${OLM_VERSION} installed on ${cluster}"
 }
 
@@ -180,10 +178,38 @@ install_cert_manager() {
     log "cert-manager ${CERT_MANAGER_VERSION} installed on hub"
 }
 
+setup_test_issuer() {
+    if on "${HUB}" kubectl get clusterissuer mesh-test-root-ca &>/dev/null; then
+        log "Test ClusterIssuer already exists, skipping"
+        return
+    fi
+
+    log "Waiting for cert-manager-cainjector to be ready..."
+    on "${HUB}" kubectl rollout status deployment/cert-manager-cainjector \
+        -n cert-manager --timeout=120s
+
+    log "Creating test ClusterIssuer trust chain"
+    on "${HUB}" kubectl apply -f "${SCRIPT_DIR}/hack/kind/cert-manager-test-issuer.yaml"
+
+    log "Waiting for bootstrap ClusterIssuer to be ready..."
+    on "${HUB}" retry kubectl wait clusterissuer/mesh-test-selfsigned \
+        --for=condition=Ready --timeout=60s
+
+    log "Waiting for test root CA Certificate to be issued..."
+    on "${HUB}" retry kubectl wait certificate/mesh-test-root-ca \
+        -n cert-manager --for=condition=Ready --timeout=120s
+
+    log "Waiting for CA-backed ClusterIssuer to be ready..."
+    on "${HUB}" retry kubectl wait clusterissuer/mesh-test-root-ca \
+        --for=condition=Ready --timeout=60s
+
+    log "Test ClusterIssuer trust chain ready"
+}
+
 init_ocm() {
     require_clusters "${HUB}"
     log "Initializing OCM hub on cluster: ${HUB}"
-    on "${HUB}" "${CLUSTERADM}" init --wait
+    on "${HUB}" "${CLUSTERADM}" init --feature-gates=ManifestWorkReplicaSet=true --wait
 
     log "Waiting for OCM hub components to be ready..."
     on "${HUB}" retry kubectl wait --for=condition=Available \
@@ -292,10 +318,12 @@ install_metallb() {
     local kind_subnet
     case "${kind_provider}" in
         podman)
-            kind_subnet="$(podman network inspect kind -f '{{(index .Subnets 0).Subnet}}')" \
+            # Select the IPv4 subnet; Kind networks may be dual-stack and index 0 is not guaranteed IPv4.
+            kind_subnet="$(podman network inspect kind -f '{{range .Subnets}}{{.Subnet}}{{"\n"}}{{end}}' | grep -v ':' | head -1)" \
                 || err "Failed to inspect Kind network with Podman" ;;
         docker)
-            kind_subnet="$(docker network inspect kind -f '{{(index .IPAM.Config 0).Subnet}}')" \
+            # Select the IPv4 subnet; Kind networks may be dual-stack and index 0 is not guaranteed IPv4.
+            kind_subnet="$(docker network inspect kind -f '{{range .IPAM.Config}}{{.Subnet}}{{"\n"}}{{end}}' | grep -v ':' | head -1)" \
                 || err "Failed to inspect Kind network with Docker" ;;
     esac
 
@@ -395,6 +423,7 @@ case "${ACTION}" in
     setup-mesh)                      setup_mesh ;;
     install-metallb)                 install_metallb "${2}" ;;
     install-gateway-api)             install_gateway_api "${2}" ;;
+    setup-test-issuer)               setup_test_issuer ;;
     *)
-        err "Unknown action: '${ACTION}'. Valid: check-host, create-cluster, install-olm, install-cert-manager, install-managed-serviceaccount, init-ocm, join-clusters, setup-mesh, install-metallb, install-gateway-api" ;;
+        err "Unknown action: '${ACTION}'. Valid: check-host, create-cluster, install-olm, install-cert-manager, install-managed-serviceaccount, init-ocm, join-clusters, setup-mesh, install-metallb, install-gateway-api, setup-test-issuer" ;;
 esac

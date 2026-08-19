@@ -15,6 +15,7 @@ import (
 	operatorsv1 "github.com/operator-framework/api/pkg/operators/v1"
 	operatorsv1alpha1 "github.com/operator-framework/api/pkg/operators/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -40,6 +41,7 @@ import (
 
 	meshv1alpha1 "github.com/stolostron/multicluster-mesh-addon/pkg/apis/mesh/v1alpha1"
 	"github.com/stolostron/multicluster-mesh-addon/pkg/key"
+	msav1beta1 "open-cluster-management.io/managed-serviceaccount/apis/authentication/v1beta1"
 )
 
 const (
@@ -125,6 +127,12 @@ func RegisterController(mgr manager.Manager) error {
 				return obj.GetLabels()[MeshNameLabel] != "" && obj.GetLabels()[MeshNamespaceLabel] != ""
 			})),
 		).
+		Watches(&msav1beta1.ManagedServiceAccount{},
+			handler.EnqueueRequestsFromMapFunc(reconciler.mapMsaToMesh),
+			builder.WithPredicates(predicate.NewPredicateFuncs(func(obj client.Object) bool {
+				return obj.GetLabels()[MeshNameLabel] != "" && obj.GetLabels()[MeshNamespaceLabel] != ""
+			})),
+		).
 		Watches(
 			&workv1.ManifestWork{},
 			handler.EnqueueRequestsFromMapFunc(reconciler.findMeshesForManifestWork),
@@ -144,6 +152,7 @@ func RegisterController(mgr manager.Manager) error {
 //+kubebuilder:rbac:groups=cluster.open-cluster-management.io,resources=managedclustersets/bind,verbs=create
 //+kubebuilder:rbac:groups=cluster.open-cluster-management.io,resources=placements,verbs=get;list;watch;create;update
 //+kubebuilder:rbac:groups=work.open-cluster-management.io,resources=manifestworks,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=work.open-cluster-management.io,resources=manifestworkreplicasets,verbs=get;list;watch;create;update
 //+kubebuilder:rbac:groups=cert-manager.io,resources=certificates,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=authentication.open-cluster-management.io,resources=managedserviceaccounts,verbs=get;list;watch;create;update;delete
 //+kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
@@ -323,6 +332,10 @@ func (r *Reconciler) doReconcile(ctx context.Context, mesh *meshv1alpha1.MultiCl
 		if err := r.ensurePlacement(ctx, mesh); err != nil {
 			return fmt.Errorf("failed to ensure Placement for mesh %s/%s: %w", mesh.Namespace, mesh.Name, err)
 		}
+	}
+
+	if err := r.ensureRemoteSecretDistribution(ctx, mesh, clusters); err != nil {
+		return fmt.Errorf("failed to ensure ManifestWorkReplicaSet for mesh %s/%s: %w", mesh.Namespace, mesh.Name, err)
 	}
 
 	return nil
@@ -654,6 +667,25 @@ func (r *Reconciler) buildOperatorManifestWork(mesh *meshv1alpha1.MultiClusterMe
 	config := mesh.Spec.Operator
 	manifests := []workv1.Manifest{
 		{
+			RawExtension: runtime.RawExtension{Object: &rbacv1.ClusterRole{
+				TypeMeta: metav1.TypeMeta{
+					APIVersion: "rbac.authorization.k8s.io/v1",
+					Kind:       "ClusterRole",
+				},
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "klusterlet-work-olm-ossm",
+					Labels: map[string]string{
+						"open-cluster-management.io/aggregate-to-work": "true",
+					},
+				},
+				Rules: []rbacv1.PolicyRule{{
+					APIGroups: []string{"operators.coreos.com"},
+					Resources: []string{"operatorgroups", "subscriptions", "catalogsources", "clusterserviceversions"},
+					Verbs:     []string{"create", "get", "list", "update", "patch", "delete"},
+				}},
+			}},
+		},
+		{
 			RawExtension: runtime.RawExtension{Object: &corev1.Namespace{
 				TypeMeta: metav1.TypeMeta{
 					APIVersion: "v1",
@@ -748,6 +780,16 @@ func (r *Reconciler) mapSecretToMesh(_ context.Context, obj client.Object) []rec
 
 	klog.V(4).Infof("Secret %s/%s triggered reconcile for mesh %s/%s",
 		secret.Namespace, secret.Name, meshNamespace, meshName)
+
+	return []reconcile.Request{{NamespacedName: key.Of(meshName, meshNamespace)}}
+}
+
+func (r *Reconciler) mapMsaToMesh(_ context.Context, obj client.Object) []reconcile.Request {
+	meshName := obj.GetLabels()[MeshNameLabel]
+	meshNamespace := obj.GetLabels()[MeshNamespaceLabel]
+
+	klog.V(4).Infof("ManagedServiceAccount %s/%s triggered reconcile for mesh %s/%s",
+		obj.GetNamespace(), obj.GetName(), meshNamespace, meshName)
 
 	return []reconcile.Request{{NamespacedName: key.Of(meshName, meshNamespace)}}
 }
