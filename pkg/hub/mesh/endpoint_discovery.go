@@ -38,6 +38,12 @@ var (
 	baseClusterRoleBinding = mustUnmarshal[rbacv1.ClusterRoleBinding](istioReaderClusterRoleBindingYAML, "ClusterRoleBinding")
 )
 
+const (
+	ManifestWorkNameIstioReaderPrefix = "multicluster-mesh-istio-reader-"
+
+	MSANamespace = "open-cluster-management-agent-addon"
+)
+
 func mustUnmarshal[T any](data []byte, name string) T {
 	var obj T
 	if err := sigsyaml.Unmarshal(data, &obj); err != nil {
@@ -253,15 +259,12 @@ func buildIstioRemoteSecret(tokenSecret *corev1.Secret, clusterName, server, nam
 
 func buildIstioReaderManifestWork(mesh *meshv1alpha1.MultiClusterMesh, cluster *clusterv1.ManagedCluster) *workv1.ManifestWork {
 	name := msaName(mesh)
-	cpNamespace := mesh.GetControlPlaneNamespace()
 
 	cr := baseClusterRole.DeepCopy()
 	cr.Name = name
-	cr.Labels = map[string]string{ManagedByLabel: ManagedByValue}
 
 	crb := baseClusterRoleBinding.DeepCopy()
 	crb.Name = name
-	crb.Labels = map[string]string{ManagedByLabel: ManagedByValue}
 	crb.RoleRef.Name = name
 	crb.Subjects = []rbacv1.Subject{{
 		Kind:      "ServiceAccount",
@@ -271,7 +274,7 @@ func buildIstioReaderManifestWork(mesh *meshv1alpha1.MultiClusterMesh, cluster *
 
 	return &workv1.ManifestWork{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      ManifestWorkNameIstioReaderPrefix + cpNamespace,
+			Name:      ManifestWorkNameIstioReaderPrefix + mesh.GetControlPlaneNamespace(),
 			Namespace: cluster.Name,
 			Labels:    meshOwnedLabels(mesh, cluster.Name),
 		},

@@ -45,12 +45,9 @@ import (
 )
 
 const (
-	OperatorManifestWorkName          = "multicluster-mesh-operator"
-	ManifestWorkNameCacerts           = "multicluster-mesh-cacerts"
-	ManifestWorkNameCPNSPrefix        = "multicluster-mesh-cp-ns-"
-	ManifestWorkNameIstioReaderPrefix = "multicluster-mesh-istio-reader-"
-
-	MSANamespace = "open-cluster-management-agent-addon"
+	OperatorManifestWorkName   = "multicluster-mesh-operator"
+	ManifestWorkNameCacerts    = "multicluster-mesh-cacerts"
+	ManifestWorkNameCPNSPrefix = "multicluster-mesh-cp-ns-"
 
 	FeedbackInstalledCSV = "installedCSV"
 
