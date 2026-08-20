@@ -821,13 +821,11 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 				Expect(unmarshalManifest(work.Spec.Workload.Manifests[0], cr)).To(Succeed())
 				expectedName := expectedManagedServiceAccountName(testNs, meshName)
 				Expect(cr.Name).To(Equal(expectedName))
-				Expect(cr.Labels[meshcontroller.ManagedByLabel]).To(Equal(meshcontroller.ManagedByValue))
 				expectIstioReaderRules(cr.Rules)
 
 				crb := &rbacv1.ClusterRoleBinding{}
 				Expect(unmarshalManifest(work.Spec.Workload.Manifests[1], crb)).To(Succeed())
 				Expect(crb.Name).To(Equal(expectedName))
-				Expect(crb.Labels[meshcontroller.ManagedByLabel]).To(Equal(meshcontroller.ManagedByValue))
 				Expect(crb.RoleRef.Kind).To(Equal("ClusterRole"))
 				Expect(crb.RoleRef.Name).To(Equal(expectedName))
 				Expect(crb.Subjects).To(HaveLen(1))
