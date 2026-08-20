@@ -7,6 +7,8 @@ New to OCM? See the [OCM concepts docs][ocm-concepts] for background on terms li
 This guide uses predefined sample manifests suitable for development and testing.
 For production, use your own configurations (e.g., your organization's CA instead of the self-signed example).
 
+> **Note:** Commands use `kubectl`. On OpenShift, `oc` is a drop-in replacement for every command in this guide.
+
 ## Prerequisites
 
 - An OCM hub cluster with managed clusters registered
@@ -129,7 +131,7 @@ The east-west gateway sample uses [Gateway API].
 On OCP 4.19+ the CRDs ship by default, while on [kind] or vanilla K8s clusters they need to be installed:
 
 ```bash
-kubectl apply --server-side -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.4.1/experimental-install.yaml
+kubectl apply --server-side -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.5.1/experimental-install.yaml
 ```
 
 Notes:
@@ -142,6 +144,7 @@ export MESH_NAME=my-mesh
 
 for CLUSTER_NAME in cluster1 cluster2; do
   export CLUSTER_NAME
+  # If you set a custom network label in Step 2, override NETWORK here to match it.
   export NETWORK=$CLUSTER_NAME
 
   kubectl apply --context $CLUSTER_NAME -f samples/istio/istiocni.yaml

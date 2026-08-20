@@ -26,6 +26,8 @@ You bring the clusters and configure Istio; the addon handles the rest.
 
 > **Note:** Requires an OCM hub with [cert-manager] and managed clusters with [OLM]. See [prerequisites](docs/user-guide.md#prerequisites) for details.
 
+> **Note:** Commands use `kubectl`; on OpenShift, `oc` is a drop-in replacement.
+
 ```bash
 # Install the addon
 helm repo add multicluster-mesh-addon https://stolostron.github.io/multicluster-mesh-addon
