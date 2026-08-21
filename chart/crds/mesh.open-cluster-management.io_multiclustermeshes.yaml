@@ -19,7 +19,7 @@ spec:
       name: Ready
       type: string
     - jsonPath: .status.conditions[?(@.type=="Ready")].reason
-      name: Status
+      name: Reason
       type: string
     - jsonPath: .spec.clusterSet
       name: ClusterSet
