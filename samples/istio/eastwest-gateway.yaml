@@ -1,0 +1,18 @@
+# East-west gateway for cross-network traffic using Gateway API.
+# Adjust the network label to match the cluster's network identity.
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: eastwestgateway
+  namespace: istio-system
+  labels:
+    topology.istio.io/network: ${NETWORK}
+spec:
+  gatewayClassName: istio
+  listeners:
+  - name: cross-network
+    hostname: "*.local"
+    port: 15443
+    protocol: TLS
+    tls:
+      mode: Passthrough

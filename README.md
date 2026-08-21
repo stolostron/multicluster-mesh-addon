@@ -1,208 +1,57 @@
 # Multi Cluster Mesh Add On
 
-A pluggable addon working on [Open Cluster Management (OCM)](https://open-cluster-management.io/).
+Automates [multi-cluster Istio service mesh][sail] setup on [Open Cluster Management (OCM)][OCM].
 
-## What is Multi Cluster Mesh Add On?
+The addon installs service mesh operators on managed clusters and distributes CA certificates for mTLS trust.
+You bring the clusters and configure Istio; the addon handles the rest.
 
-The Multi Cluster Mesh Add On automates the complex setup of multi-cluster service mesh deployments by managing OLM-installed service mesh operators such as OSSM and [Sail](https://github.com/istio-ecosystem/sail-operator/).
-It eliminates the manual, error-prone process of establishing trust between clusters, installing mesh components, and sharing credentials for endpoint discovery.
+## Documentation
 
-The addon acts as an infrastructure provisioner and federation broker, automating:
+### For Users
 
-- **Trust Distribution**: Establishes mTLS trust between clusters using cert-manager to distribute intermediate CAs
-- **Operator Lifecycle**: Installs and manages the service mesh operator on managed clusters via OLM
-- **Endpoint Discovery**: Automates secure, rotatable token exchange between control planes using ManagedServiceAccount
+- [Quick Start](#quick-start) - Get up and running in minutes
+- [Architecture](docs/architecture.md) - How the addon works
+- [User Guide](docs/user-guide.md) - Detailed setup walkthrough with explanations
+- [API Reference](docs/api-reference.md) - `MultiClusterMesh` CRD fields and examples
+- [Troubleshooting](docs/troubleshooting.md) - Common issues and resolutions
+- [Helm Chart](chart/README.md) - Installation options
+- [Samples](samples/) - Example manifests for common configurations
 
-## Architecture
+### For Contributors
 
-The addon leverages OCM's hub-and-spoke architecture and integrates with core OCM components:
+- [Contributing](CONTRIBUTING.md) - PR process, DCO, development workflow, doc-sync requirements
+- [Development](docs/dev/README.md) - Building, dev environment, testing, design
 
-- **ManagedClusterSet**: Defines cluster membership in the mesh
-- **ManifestWork**: Distributes certificates and configurations to spoke clusters
-- **ManagedServiceAccount**: Provides short-lived discovery tokens for cross-cluster endpoint resolution
-- **cert-manager**: Manages Root CA lifecycle and mints intermediate certificates for each cluster
+## Quick Start
 
-The addon manages the "plumbing" (trust and connectivity) while users configure their mesh control planes using GitOps or the Istio CR directly.
+> **Note:** Requires an OCM hub with [cert-manager] and managed clusters with [OLM]. See [prerequisites](docs/user-guide.md#prerequisites) for details.
 
-For detailed architecture and design decisions, see [docs/design.md](docs/design.md).
+> **Note:** Commands use `kubectl`; on OpenShift, `oc` is a drop-in replacement.
 
-## Getting Started
-
-### Prerequisites
-
-- OCM hub cluster
-- [cert-manager](https://cert-manager.io/) installed on the hub cluster
-- Managed clusters registered with OCM
-
-### Installation
-
-#### Using Helm
-
-For installation via Helm, see the [Helm Chart README](chart/README.md).
-
-Quick install:
 ```bash
+# Install the addon
 helm repo add multicluster-mesh-addon https://stolostron.github.io/multicluster-mesh-addon
 helm repo update
 helm install multicluster-mesh-addon multicluster-mesh-addon/multicluster-mesh-addon \
   --namespace multicluster-mesh-system \
   --create-namespace
-```
 
-#### Development Deployment
+# Create a ClusterSet and assign clusters
+clusteradm create clusterset mesh-cluster-set
+clusteradm clusterset set mesh-cluster-set --clusters cluster1,cluster2
 
-**Prerequisites:**
-- Valid kubeconfig pointing to an existing cluster
-- ACM or OCM (Advanced Cluster Management or Open Cluster Management) installed on the cluster
-- `kubectl` CLI installed
-- `make` and Go toolchain installed
-- Push access to the container registry (default: `quay.io/sail-dev`, override with `HUB`)
-
-To build and deploy the controller to your cluster:
-
-```bash
-# Build, push image, and deploy to cluster
-make deploy
-
-# Or run individual steps:
-make images      # Build container image
-make push        # Push to registry
-make deploy      # Deploy using Helm
-```
-
-The `deploy` target will:
-1. Build and push the container image to the registry (default: `quay.io/sail-dev`)
-2. Install the controller using Helm chart from `chart/`
-3. Create the namespace and deploy all resources (CRDs, RBAC, Deployment)
-
-**Configuration:**
-- `VERSION`: Build/chart version string (default: see `Makefile`)
-- `HUB`: Image registry (default: `quay.io/sail-dev`)
-- `TAG`: Image tag (default: `${MINOR_VERSION}-latest`, e.g., `0.1-latest`)
-- `IMG`: Full image reference (default: `${HUB}/${IMAGE_BASE}:${TAG}`)
-- `ADDON_NAMESPACE`: Namespace where addon will be deployed (default: `multicluster-mesh-system`)
-- `PLATFORM`: Platform type (default: `openshift`, or `kind` for Kind clusters)
-
-To remove the deployment:
-
-```bash
-make undeploy
-```
-
-#### Running Locally
-
-To run the controller from localhost for development:
-
-```bash
-# Generate and install CRDs
-make gen-crds
-kubectl apply -f chart/crds/
-
-# Build the binary
-make build
-
-# Run with leader election disabled (no namespace/RBAC requirements). It's necessary to specify the kubeconfig explicitly.
-./bin/multicluster-mesh-addon controller --leader-elect=false --kubeconfig=/path/to/kubeconfig
-```
-
-**Prerequisites:**
-- CRDs must be installed in the cluster (via `kubectl apply -f chart/crds/`)
-- Valid kubeconfig pointing to your cluster (specify with `--kubeconfig` flag)
-
-The controller runs against the specified kubeconfig context. Leader election is disabled to avoid requiring the `multicluster-mesh-system` namespace and associated RBAC permissions during local development.
-
-If you need to test with leader election enabled:
-
-```bash
-# Create the required namespace
-kubectl create namespace multicluster-mesh-system
-
-# Run with leader election (default)
-./bin/multicluster-mesh-addon controller --kubeconfig=/path/to/kubeconfig
-```
-
-#### Local Kind+OCM Dev Environment
-
-Provisions a complete multi-cluster topology (1 hub + 2 managed clusters) using Kind and OCM, then builds and deploys the addon controller:
-
-```bash
-make dev-env
-```
-
-Individual targets are also available:
-
-| Target                      | Description                                            |
-|-----------------------------|--------------------------------------------------------|
-| `make create-clusters`      | Create three Kind clusters (hub, cluster1, cluster2)   |
-| `make install-olm`          | Install OLM on managed clusters                        |
-| `make install-cert-manager` | Install cert-manager on the hub cluster                |
-| `make init-ocm`             | Initialize hub as OCM control plane                    |
-| `make join-clusters`        | Register managed clusters and create ManagedClusterSet |
-| `make deploy-addon`         | Build and deploy addon to the hub Kind cluster         |
-| `make setup-mesh`           | Create cert-manager trust chain and MultiClusterMesh CR|
-| `make dev-clean`            | Destroy clusters and remove `.kube/`                   |
-| `make dev-clean-meshes`     | Delete mesh resources only (re-run `setup-mesh` to recreate) |
-
-**Configuration (override via environment or command-line):**
-
-```bash
-make dev-env K8S_VERSION=v1.31.0 OLM_VERSION=v0.42.0
-```
-
-##### Known Issues
-
-**"Too many open files" on Linux:**
-Kind clusters may fail to start or pods may crash with `too many open files` errors due to low inotify limits. Increase them on the host:
-
-```bash
-sudo sysctl fs.inotify.max_user_watches=524288
-sudo sysctl fs.inotify.max_user_instances=512
-```
-
-To persist across reboots, add to `/etc/sysctl.conf`:
-
-```
-fs.inotify.max_user_watches = 524288
-fs.inotify.max_user_instances = 512
-```
-
-See the [Kind known issues](https://kind.sigs.k8s.io/docs/user/known-issues/#pod-errors-due-to-too-many-open-files) documentation for more details.
-
-### Usage
-
-#### Quick Start
-
-1. Create a namespace for your mesh resources:
-```bash
+# Set up trust chain and create a mesh
 kubectl create namespace mesh-system
-```
-
-2. Create the cert-manager trust chain (self-signed Issuer, root CA Certificate, and CA-backed Issuer):
-```bash
 kubectl apply -n mesh-system -f samples/cert-manager-issuer.yaml
-```
-
-3. Deploy a basic MultiClusterMesh:
-```bash
 kubectl apply -n mesh-system -f samples/basic.yaml
 ```
 
-> **Note:** The `basic.yaml` sample uses `clusterSet: mesh-cluster-set`. Update this field to match your actual ManagedClusterSet name as needed.
+> **Note:** For OpenShift, use `samples/openshift.yaml` instead of `samples/basic.yaml`.
 
-For more configuration options, see the [samples](./samples/) directory:
+This installs the operator and distributes trust. For a working multi-cluster mesh setup, see the [User Guide](docs/user-guide.md) for prerequisites, what each step does, verification, and next steps (configuring Istio).
 
-- **[basic.yaml](./samples/basic.yaml)** - Minimal configuration for K8s clusters (Sail operator)
-- **[complete.yaml](./samples/complete.yaml)** - All available fields with documentation
-- **[openshift.yaml](./samples/openshift.yaml)** - OpenShift-specific configuration
-- **[pinned-version.yaml](./samples/pinned-version.yaml)** - Version pinning with manual approval
-- **[cert-manager-issuer.yaml](./samples/cert-manager-issuer.yaml)** - cert-manager trust chain (self-signed Issuer + root CA + CA-backed Issuer)
-
-#### What the Addon Does
-
-The addon will:
-1. Install the configured service mesh operator on all clusters in the referenced ManagedClusterSet
-2. Generate and distribute intermediate CA certificates to establish trust
-3. Exchange discovery tokens between clusters for endpoint resolution
-4. Manage automatic rotation of certificates and tokens
-
-Users must then create `Istio` Custom Resources on each spoke cluster to configure the mesh control plane.
+<!-- Reference links -->
+[cert-manager]: https://cert-manager.io/
+[OCM]: https://open-cluster-management.io/
+[OLM]: https://olm.operatorframework.io/
+[sail]: https://github.com/istio-ecosystem/sail-operator

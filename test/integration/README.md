@@ -1,6 +1,6 @@
 # Integration Tests
 
-Integration tests for the multicluster-mesh-addon controller using [envtest](https://book.kubebuilder.io/reference/envtest.html).
+Integration tests for the multicluster-mesh-addon controller using [envtest].
 
 ## Running Tests
 
@@ -95,3 +95,6 @@ Each test verifies:
 - Each test uses unique resource names (with UnixNano timestamps) to avoid conflicts
 - CRDs in `test/integration/crds/ocm/` are auto-generated from go mod dependencies
 - ClusterClaims are persisted via status subresource updates (fetch-then-update pattern)
+
+<!-- Reference links -->
+[envtest]: https://book.kubebuilder.io/reference/envtest.html

@@ -46,6 +46,9 @@ spec:
           # This Issuer must exist in the same namespace as the MultiClusterMesh
           name: mesh-root-ca
 
+          # Set to ClusterIssuer for a shared root CA across meshes in different namespaces (defaults to Issuer)
+          # kind: ClusterIssuer
+
     # Endpoint discovery token configuration
     discovery:
       # How long discovery tokens remain valid
