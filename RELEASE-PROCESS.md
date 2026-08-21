@@ -111,6 +111,16 @@ You should see the new version listed.
 3. Check that release notes are generated
 4. Verify installation instructions are present
 
+#### Verify Installation
+
+Install the released chart following the [Helm installation documentation](chart/README.md) and verify the addon starts correctly:
+
+```bash
+kubectl get pods -n multicluster-mesh-system
+```
+
+The controller pod should be `Running` and `Ready`.
+
 ### 6. Bump Version on Main
 
 After the release, update the version on `main` to start the next development cycle:
