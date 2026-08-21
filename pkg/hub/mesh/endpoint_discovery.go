@@ -3,12 +3,14 @@ package mesh
 import (
 	"bytes"
 	"context"
+	_ "embed"
 	"fmt"
 	"maps"
 
 	meshv1alpha1 "github.com/stolostron/multicluster-mesh-addon/pkg/apis/mesh/v1alpha1"
 	"github.com/stolostron/multicluster-mesh-addon/pkg/key"
 	corev1 "k8s.io/api/core/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -22,7 +24,33 @@ import (
 	msav1beta1 "open-cluster-management.io/managed-serviceaccount/apis/authentication/v1beta1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	sigsyaml "sigs.k8s.io/yaml"
 )
+
+//go:embed manifests/istio-reader-clusterrole.yaml
+var istioReaderClusterRoleYAML []byte
+
+//go:embed manifests/istio-reader-clusterrolebinding.yaml
+var istioReaderClusterRoleBindingYAML []byte
+
+var (
+	baseClusterRole        = mustUnmarshal[rbacv1.ClusterRole](istioReaderClusterRoleYAML, "ClusterRole")
+	baseClusterRoleBinding = mustUnmarshal[rbacv1.ClusterRoleBinding](istioReaderClusterRoleBindingYAML, "ClusterRoleBinding")
+)
+
+const (
+	ManifestWorkNameIstioReaderPrefix = "multicluster-mesh-istio-reader-"
+
+	MSANamespace = "open-cluster-management-agent-addon"
+)
+
+func mustUnmarshal[T any](data []byte, name string) T {
+	var obj T
+	if err := sigsyaml.Unmarshal(data, &obj); err != nil {
+		panic(fmt.Sprintf("failed to unmarshal embedded istio-reader %s: %v", name, err))
+	}
+	return obj
+}
 
 func msaName(mesh *meshv1alpha1.MultiClusterMesh) string {
 	return fmt.Sprintf("%s-istio-reader-%s", mesh.Namespace, mesh.Name)
@@ -227,4 +255,36 @@ func buildIstioRemoteSecret(tokenSecret *corev1.Secret, clusterName, server, nam
 		},
 		Data: map[string][]byte{clusterName: buf.Bytes()},
 	}, nil
+}
+
+func buildIstioReaderManifestWork(mesh *meshv1alpha1.MultiClusterMesh, cluster *clusterv1.ManagedCluster) *workv1.ManifestWork {
+	name := msaName(mesh)
+
+	cr := baseClusterRole.DeepCopy()
+	cr.Name = name
+
+	crb := baseClusterRoleBinding.DeepCopy()
+	crb.Name = name
+	crb.RoleRef.Name = name
+	crb.Subjects = []rbacv1.Subject{{
+		Kind:      "ServiceAccount",
+		Name:      name,
+		Namespace: MSANamespace,
+	}}
+
+	return &workv1.ManifestWork{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      ManifestWorkNameIstioReaderPrefix + mesh.GetControlPlaneNamespace(),
+			Namespace: cluster.Name,
+			Labels:    meshOwnedLabels(mesh, cluster.Name),
+		},
+		Spec: workv1.ManifestWorkSpec{
+			Workload: workv1.ManifestsTemplate{
+				Manifests: []workv1.Manifest{
+					{RawExtension: runtime.RawExtension{Object: cr}},
+					{RawExtension: runtime.RawExtension{Object: crb}},
+				},
+			},
+		},
+	}
 }

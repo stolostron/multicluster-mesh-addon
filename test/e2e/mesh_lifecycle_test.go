@@ -16,6 +16,7 @@ import (
 	operatorsv1alpha1 "github.com/operator-framework/api/pkg/operators/v1alpha1"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	addonv1beta1 "open-cluster-management.io/api/addon/v1beta1"
@@ -247,6 +248,35 @@ var _ = Describe("MultiClusterMesh lifecycle", Ordered, func() {
 				g.Expect(hubClient.Get(ctx, key.Of(msa.Status.TokenSecretRef.Name, cluster), secret)).To(Succeed(),
 					"token secret %s/%s should exist on hub", cluster, msa.Status.TokenSecretRef.Name)
 				track(cluster, hubClient, secret)
+			}).Should(Succeed())
+		}
+	})
+
+	It("should create istio-reader ClusterRole and ClusterRoleBinding on each spoke cluster", func(ctx SpecContext) {
+		for cluster, spokeClient := range spokeClients {
+			Step("Verifying istio-reader RBAC for %s", cluster)
+			Eventually(func(g Gomega) {
+				msaList := listMeshMSAs(g, ctx, mesh, client.InNamespace(cluster))
+				g.Expect(msaList.Items).To(HaveLen(1),
+					"expected exactly one MSA for cluster %s", cluster)
+				msaName := msaList.Items[0].Name
+
+				cr := &rbacv1.ClusterRole{}
+				g.Expect(spokeClient.Get(ctx, key.Of(msaName), cr)).To(Succeed(),
+					"ClusterRole %s should exist on spoke %s", msaName, cluster)
+				g.Expect(cr.Rules).NotTo(BeEmpty())
+				track(cluster, spokeClient, cr)
+
+				crb := &rbacv1.ClusterRoleBinding{}
+				g.Expect(spokeClient.Get(ctx, key.Of(msaName), crb)).To(Succeed(),
+					"ClusterRoleBinding %s should exist on spoke %s", msaName, cluster)
+				g.Expect(crb.RoleRef.Kind).To(Equal("ClusterRole"))
+				g.Expect(crb.RoleRef.Name).To(Equal(msaName))
+				g.Expect(crb.Subjects).To(HaveLen(1))
+				g.Expect(crb.Subjects[0].Kind).To(Equal("ServiceAccount"))
+				g.Expect(crb.Subjects[0].Name).To(Equal(msaName))
+				g.Expect(crb.Subjects[0].Namespace).To(Equal(msaSpokeNamespace))
+				track(cluster, spokeClient, crb)
 			}).Should(Succeed())
 		}
 	})
