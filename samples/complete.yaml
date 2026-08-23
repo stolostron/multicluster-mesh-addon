@@ -43,7 +43,7 @@ spec:
       certManager:
         issuerRef:
           # Name of the cert-manager Issuer to use as Root CA
-          # This Issuer must exist in the same namespace as the MultiClusterMesh
+          # This Issuer must exist in the same namespace as the MultiClusterMesh (unless using a ClusterIssuer)
           name: mesh-root-ca
 
           # Set to ClusterIssuer for a shared root CA across meshes in different namespaces (defaults to Issuer)

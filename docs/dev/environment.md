@@ -36,7 +36,7 @@ make deploy HUB=quay.io/myorg TAG=dev-latest
 
 **Prerequisites:**
 - Valid kubeconfig pointing to your OCP hub cluster
-- OCM installed on the cluster
+- OCM installed on the cluster (or [Red Hat Advanced Cluster Management][ACM] which includes OCM out of the box)
 - Push access to the container registry
 
 To remove the deployment:
@@ -62,4 +62,5 @@ make build
 ```
 
 <!-- Reference links -->
+[ACM]: https://www.redhat.com/en/technologies/management/advanced-cluster-management
 [kind]: https://kind.sigs.k8s.io/

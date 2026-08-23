@@ -1,6 +1,6 @@
 # Multi Cluster Mesh Add On
 
-Automates [multi-cluster Istio service mesh][sail] setup on [Open Cluster Management (OCM)][OCM].
+Automates [multi-cluster Istio service mesh][sail] setup on [Open Cluster Management (OCM)][OCM] (or [Red Hat Advanced Cluster Management][ACM], which includes OCM).
 
 The addon installs service mesh operators on managed clusters and distributes CA certificates for mTLS trust.
 You bring the clusters and configure Istio; the addon handles the rest.
@@ -26,7 +26,7 @@ You bring the clusters and configure Istio; the addon handles the rest.
 
 > **Note:** Requires an OCM hub with [cert-manager] and managed clusters with [OLM]. See [prerequisites](docs/user-guide.md#prerequisites) for details.
 
-> **Note:** Commands use `kubectl`; on OpenShift, `oc` is a drop-in replacement.
+> **Note:** Commands use `kubectl`; on OpenShift, `oc` is a drop-in replacement for the `kubectl` commands.
 
 ```bash
 # Install the addon
@@ -51,6 +51,7 @@ kubectl apply -n mesh-system -f samples/basic.yaml
 This installs the operator and distributes trust. For a working multi-cluster mesh setup, see the [User Guide](docs/user-guide.md) for prerequisites, what each step does, verification, and next steps (configuring Istio).
 
 <!-- Reference links -->
+[ACM]: https://www.redhat.com/en/technologies/management/advanced-cluster-management
 [cert-manager]: https://cert-manager.io/
 [OCM]: https://open-cluster-management.io/
 [OLM]: https://olm.operatorframework.io/

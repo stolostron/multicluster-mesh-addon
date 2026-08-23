@@ -7,7 +7,7 @@ New to OCM? See the [OCM concepts docs][ocm-concepts] for background on terms li
 This guide uses predefined sample manifests suitable for development and testing.
 For production, use your own configurations (e.g., your organization's CA instead of the self-signed example).
 
-> **Note:** Commands use `kubectl`. On OpenShift, `oc` is a drop-in replacement for every command in this guide.
+> **Note:** Commands use `kubectl`. On OpenShift, `oc` is a drop-in replacement for the `kubectl` commands in this guide.
 
 ## Prerequisites
 
@@ -38,6 +38,9 @@ clusteradm create clusterset mesh-cluster-set
 clusteradm clusterset set mesh-cluster-set --clusters cluster1,cluster2,...
 ```
 
+> **Note:** `cluster1` and `cluster2` are example ManagedCluster names.
+> Run `clusteradm get clusters` to list the actual names in your environment.
+
 Verify the clusters are in the set:
 
 ```bash
@@ -55,7 +58,7 @@ kubectl label managedcluster cluster1 topology.istio.io/network=network-a
 kubectl label managedcluster cluster2 topology.istio.io/network=network-b
 ```
 
-The addon applies this value as `topology.istio.io/network` on the control plane namespace.
+The addon applies this value as `topology.istio.io/network` on the control plane namespace on the managed cluster.
 Your Istio CR and east-west gateway must use the same value (see [Step 6](#step-6-configure-istio)).
 
 ## Step 3: Create a Trust Chain

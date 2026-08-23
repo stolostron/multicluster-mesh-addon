@@ -68,7 +68,7 @@ When your change touches any of the following, update the corresponding docs in 
 | CRD fields, defaults, or validation (`types.go`) | [docs/api-reference.md](docs/api-reference.md) |
 | Status conditions or reason constants (`types.go`) | [docs/api-reference.md](docs/api-reference.md), [docs/troubleshooting.md](docs/troubleshooting.md) |
 | Controller behavior, lifecycle, or collision handling | [docs/architecture.md](docs/architecture.md) |
-| Adding or removing sample manifests | [docs/api-reference.md](docs/api-reference.md), [docs/user-guide.md](docs/user-guide.md) |
+| Adding or removing sample manifests | [docs/user-guide.md](docs/user-guide.md) |
 | New prerequisites or user-facing features | [docs/user-guide.md](docs/user-guide.md), [README.md](README.md) |
 | Helm chart resource names or labels (`chart/templates/`) | [docs/troubleshooting.md](docs/troubleshooting.md), [chart/README.md](chart/README.md) |
 | Make targets or dev-env flow | [docs/dev/environment.md](docs/dev/environment.md) |
