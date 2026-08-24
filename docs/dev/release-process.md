@@ -113,7 +113,7 @@ You should see the new version listed.
 
 #### Verify Installation
 
-Install the released chart following the [Helm installation documentation](chart/README.md) and verify the addon starts correctly:
+Install the released chart following the [Helm installation documentation](../../chart/README.md) and verify the addon starts correctly:
 
 ```bash
 kubectl get pods -n multicluster-mesh-system
