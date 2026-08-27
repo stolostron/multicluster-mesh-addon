@@ -2,7 +2,6 @@ package util
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	. "github.com/onsi/gomega"
@@ -14,6 +13,7 @@ import (
 	"k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	meshv1alpha1 "github.com/stolostron/multicluster-mesh-addon/pkg/apis/mesh/v1alpha1"
 	meshcontroller "github.com/stolostron/multicluster-mesh-addon/pkg/hub/mesh"
 	"github.com/stolostron/multicluster-mesh-addon/pkg/key"
 )
@@ -43,15 +43,16 @@ func CreateNamespace(ctx context.Context, k8sClient client.Client, name string, 
 }
 
 // CreateCacertsSecret creates a TLS secret that simulates what cert-manager would create.
-func CreateCacertsSecret(ctx context.Context, k8sClient client.Client, namespace, clusterName, meshName, meshNamespace string) {
+// The name mirrors the controller's cacerts naming scheme (cacerts-<meshName>.<clusterName>)
+func CreateCacertsSecret(ctx context.Context, k8sClient client.Client, mesh *meshv1alpha1.MultiClusterMesh, clusterName string) *corev1.Secret {
 	secret := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      fmt.Sprintf("cacerts-%s", clusterName),
-			Namespace: namespace,
+			Name:      meshcontroller.CacertsName(mesh, clusterName),
+			Namespace: mesh.Namespace,
 			Labels: map[string]string{
 				meshcontroller.ManagedByLabel:     meshcontroller.ManagedByValue,
-				meshcontroller.MeshNameLabel:      meshName,
-				meshcontroller.MeshNamespaceLabel: meshNamespace,
+				meshcontroller.MeshNameLabel:      mesh.Name,
+				meshcontroller.MeshNamespaceLabel: mesh.Namespace,
 				meshcontroller.ClusterNameLabel:   clusterName,
 			},
 		},
@@ -63,6 +64,7 @@ func CreateCacertsSecret(ctx context.Context, k8sClient client.Client, namespace
 		},
 	}
 	Expect(k8sClient.Create(ctx, secret)).To(Succeed())
+	return secret
 }
 
 // DeleteResource deletes a Kubernetes resource and waits for it to be fully removed.

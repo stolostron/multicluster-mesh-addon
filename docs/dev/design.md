@@ -198,7 +198,7 @@ The `spec.clusterSet` field is immutable after creation. With exclusive ClusterS
 
 The add-on defaults to OSSM (OpenShift Service Mesh) operator configuration. All `spec.operator` fields can be overridden to use a different operator (e.g., upstream Sail on non-OCP clusters).
 
-Plumbing resources (ManifestWorks, ManagedServiceAccounts) must use a deterministic naming strategy scoped to the owning mesh, so that multiple meshes on the same cluster don't collide. The operator ManifestWork is an exception - it is shared across meshes since the operator is a cluster-wide singleton. See [#72] for the naming convention discussion.
+Plumbing resources (ManifestWorks, ManagedServiceAccounts, Certificates) must use a deterministic naming strategy scoped to the owning mesh, so that multiple meshes on the same cluster don't collide. The operator ManifestWork is an exception - it is shared across meshes since the operator is a cluster-wide singleton.
 
 ## Operator Lifecycle
 
@@ -254,7 +254,7 @@ Certificate rotation is handled automatically by cert-manager. Updated certifica
 
 For multi-primary mesh topologies, each control plane needs API access to its peers. The add-on automates this using [ManagedServiceAccount]:
 
-1. Creates a `ManagedServiceAccount` per cluster per mesh, yielding short-lived tokens. See [#72] for the naming convention discussion.
+1. Creates a `ManagedServiceAccount` per cluster per mesh, yielding short-lived tokens.
 2. Grants the MSA's ServiceAccount an istio-reader ClusterRole and ClusterRoleBinding (per-mesh, cleaned up with the mesh) so it has the read permissions Istio's remote endpoint discovery needs
 3. Constructs kubeconfig-style remote secrets from these tokens
 4. Distributes remote secrets to all peer clusters in the mesh
@@ -285,7 +285,6 @@ ArgoCD with ApplicationSets is the recommended approach for managing Istio confi
 Potential additions include observability stack management and full addon framework integration (leveraging `ManagedClusterAddOn` for per-cluster enable/disable).
 
 <!-- Reference links -->
-[#72]: https://github.com/stolostron/multicluster-mesh-addon/issues/72
 [cert-manager]: https://cert-manager.io/
 [ClusterManagementAddOn]: https://open-cluster-management.io/docs/concepts/addon/#clustermanagementaddon
 [ManagedClusterSet]: https://open-cluster-management.io/docs/concepts/cluster-inventory/managedclusterset/
