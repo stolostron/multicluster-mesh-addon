@@ -2,6 +2,27 @@ apiVersion: v1
 entries:
   multicluster-mesh-addon:
   - apiVersion: v2
+    appVersion: v0.2.0
+    created: "2026-08-27T06:19:49.655893574Z"
+    description: OCM Multi-Cluster Mesh Add-on for Istio service mesh
+    digest: 2091a241415fa90c81f1e2b6dd455b919829ce80cb4398b2e41c8e55e813fd43
+    home: https://github.com/stolostron/multicluster-mesh-addon
+    keywords:
+    - ocm
+    - open-cluster-management
+    - service-mesh
+    - istio
+    - multicluster
+    maintainers:
+    - name: OpenShift Service Mesh Team
+    name: multicluster-mesh-addon
+    sources:
+    - https://github.com/stolostron/multicluster-mesh-addon
+    type: application
+    urls:
+    - https://github.com/stolostron/multicluster-mesh-addon/releases/download/v0.2.0/multicluster-mesh-addon-0.2.0.tgz
+    version: 0.2.0
+  - apiVersion: v2
     appVersion: v0.1.1
     created: "2026-08-18T10:26:25.916256181Z"
     description: OCM Multi-Cluster Mesh Add-on for Istio service mesh
@@ -43,4 +64,4 @@ entries:
     urls:
     - https://github.com/stolostron/multicluster-mesh-addon/releases/download/v0.1.0/multicluster-mesh-addon-0.1.0.tgz
     version: 0.1.0
-generated: "2026-08-18T10:26:25.915785057Z"
+generated: "2026-08-27T06:19:49.654893897Z"
