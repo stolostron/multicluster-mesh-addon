@@ -1,8 +1,9 @@
-# ClusterRoleBinding that binds the ManagedServiceAccount's ServiceAccount
+# ClusterRoleBinding that binds the endpoint-discovery ServiceAccount
 # to the istio-reader ClusterRole for multi-cluster endpoint discovery.
 #
-# The name, roleRef.name, and subjects are overridden at runtime to match
-# the per-mesh ManagedServiceAccount naming convention.
+# The name and roleRef.name are overridden at runtime with the per-mesh
+# istio-reader name; the subject is overridden with the mesh's endpoint-discovery
+# ServiceAccount in the addon namespace.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:

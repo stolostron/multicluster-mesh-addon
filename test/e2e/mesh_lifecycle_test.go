@@ -259,22 +259,22 @@ var _ = Describe("MultiClusterMesh lifecycle", Ordered, func() {
 				msaList := listMeshMSAs(g, ctx, mesh, client.InNamespace(cluster))
 				g.Expect(msaList.Items).To(HaveLen(1),
 					"expected exactly one MSA for cluster %s", cluster)
-				msaName := msaList.Items[0].Name
+				rbacName := meshcontroller.IstioReaderName(mesh)
 
 				cr := &rbacv1.ClusterRole{}
-				g.Expect(spokeClient.Get(ctx, key.Of(msaName), cr)).To(Succeed(),
-					"ClusterRole %s should exist on spoke %s", msaName, cluster)
+				g.Expect(spokeClient.Get(ctx, key.Of(rbacName), cr)).To(Succeed(),
+					"ClusterRole %s should exist on spoke %s", rbacName, cluster)
 				g.Expect(cr.Rules).NotTo(BeEmpty())
 				track(cluster, spokeClient, cr)
 
 				crb := &rbacv1.ClusterRoleBinding{}
-				g.Expect(spokeClient.Get(ctx, key.Of(msaName), crb)).To(Succeed(),
-					"ClusterRoleBinding %s should exist on spoke %s", msaName, cluster)
+				g.Expect(spokeClient.Get(ctx, key.Of(rbacName), crb)).To(Succeed(),
+					"ClusterRoleBinding %s should exist on spoke %s", rbacName, cluster)
 				g.Expect(crb.RoleRef.Kind).To(Equal("ClusterRole"))
-				g.Expect(crb.RoleRef.Name).To(Equal(msaName))
+				g.Expect(crb.RoleRef.Name).To(Equal(rbacName))
 				g.Expect(crb.Subjects).To(HaveLen(1))
 				g.Expect(crb.Subjects[0].Kind).To(Equal("ServiceAccount"))
-				g.Expect(crb.Subjects[0].Name).To(Equal(msaName))
+				g.Expect(crb.Subjects[0].Name).To(Equal(msaList.Items[0].Name))
 				g.Expect(crb.Subjects[0].Namespace).To(Equal(msaSpokeNamespace))
 				track(cluster, spokeClient, crb)
 			}).Should(Succeed())

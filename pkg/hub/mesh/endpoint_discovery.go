@@ -38,11 +38,7 @@ var (
 	baseClusterRoleBinding = mustUnmarshal[rbacv1.ClusterRoleBinding](istioReaderClusterRoleBindingYAML, "ClusterRoleBinding")
 )
 
-const (
-	ManifestWorkNameIstioReaderPrefix = "multicluster-mesh-istio-reader-"
-
-	MSANamespace = "open-cluster-management-agent-addon"
-)
+const MSANamespace = "open-cluster-management-agent-addon"
 
 func mustUnmarshal[T any](data []byte, name string) T {
 	var obj T
@@ -52,13 +48,24 @@ func mustUnmarshal[T any](data []byte, name string) T {
 	return obj
 }
 
-func msaName(mesh *meshv1alpha1.MultiClusterMesh) string {
-	return fmt.Sprintf("%s-istio-reader-%s", mesh.Namespace, mesh.Name)
+// EndpointDiscoveryName is the identity for cross-cluster endpoint discovery.
+func EndpointDiscoveryName(mesh *meshv1alpha1.MultiClusterMesh) string {
+	return fmt.Sprintf("endpoint-discovery-%s.%s", mesh.Namespace, mesh.Name)
+}
+
+// IstioReaderName is the name for RBAC granting the "endpoint discovery" identity read access.
+func IstioReaderName(mesh *meshv1alpha1.MultiClusterMesh) string {
+	return fmt.Sprintf("istio-reader-%s.%s", mesh.Namespace, mesh.Name)
+}
+
+// IstioReaderManifestWorkName is the addon-prefixed name of the ManifestWork that delivers the istio-reader RBAC to a spoke.
+func IstioReaderManifestWorkName(mesh *meshv1alpha1.MultiClusterMesh) string {
+	return "multicluster-mesh-" + IstioReaderName(mesh)
 }
 
 // ensureManagedServiceAccount applies the desired ManagedServiceAccount state for a specific cluster using mesh's TokenValidity.
 func (r *Reconciler) ensureManagedServiceAccount(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, cluster *clusterv1.ManagedCluster) error {
-	msaName := msaName(mesh)
+	msaName := EndpointDiscoveryName(mesh)
 	existing := &msav1beta1.ManagedServiceAccount{}
 	if err := r.Get(ctx, key.Of(msaName, cluster.Name), existing); err == nil {
 		return r.ensureManagedServiceAccountUpdated(ctx, mesh, existing)
@@ -150,7 +157,6 @@ func (r *Reconciler) ensureManagedServiceAccountUpdated(ctx context.Context, mes
 
 // ensureRemoteSecretDistribution builds Istio remote discovery secrets from ManagedServiceAccount tokens and distributes them via ManifestWorkReplicaSet.
 func (r *Reconciler) ensureRemoteSecretDistribution(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, clusters []clusterv1.ManagedCluster) error {
-	msaName := msaName(mesh)
 	manifests := []workv1.Manifest{}
 	for _, cluster := range clusters {
 		if len(cluster.Spec.ManagedClusterClientConfigs) == 0 {
@@ -159,7 +165,7 @@ func (r *Reconciler) ensureRemoteSecretDistribution(ctx context.Context, mesh *m
 		}
 		server := cluster.Spec.ManagedClusterClientConfigs[0].URL
 
-		tokenSecret, err := r.getMSATokenSecret(ctx, msaName, cluster.Name)
+		tokenSecret, err := r.getMSATokenSecret(ctx, EndpointDiscoveryName(mesh), cluster.Name)
 		if err != nil {
 			if apierrors.IsNotFound(err) {
 				klog.V(4).Infof("managedServiceAccount secret not found yet for cluster %s, skipping", cluster.Name)
@@ -258,33 +264,19 @@ func buildIstioRemoteSecret(tokenSecret *corev1.Secret, clusterName, server, nam
 }
 
 func buildIstioReaderManifestWork(mesh *meshv1alpha1.MultiClusterMesh, cluster *clusterv1.ManagedCluster) *workv1.ManifestWork {
-	name := msaName(mesh)
+	rbacName := IstioReaderName(mesh)
 
 	cr := baseClusterRole.DeepCopy()
-	cr.Name = name
+	cr.Name = rbacName
 
 	crb := baseClusterRoleBinding.DeepCopy()
-	crb.Name = name
-	crb.RoleRef.Name = name
+	crb.Name = rbacName
+	crb.RoleRef.Name = rbacName
 	crb.Subjects = []rbacv1.Subject{{
 		Kind:      "ServiceAccount",
-		Name:      name,
+		Name:      EndpointDiscoveryName(mesh),
 		Namespace: MSANamespace,
 	}}
 
-	return &workv1.ManifestWork{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      ManifestWorkNameIstioReaderPrefix + mesh.GetControlPlaneNamespace(),
-			Namespace: cluster.Name,
-			Labels:    meshOwnedLabels(mesh, cluster.Name),
-		},
-		Spec: workv1.ManifestWorkSpec{
-			Workload: workv1.ManifestsTemplate{
-				Manifests: []workv1.Manifest{
-					{RawExtension: runtime.RawExtension{Object: cr}},
-					{RawExtension: runtime.RawExtension{Object: crb}},
-				},
-			},
-		},
-	}
+	return buildMeshOwnedManifestWork(mesh, cluster.Name, IstioReaderManifestWorkName(mesh), cr, crb)
 }
