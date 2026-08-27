@@ -254,8 +254,8 @@ Certificate rotation is handled automatically by cert-manager. Updated certifica
 
 For multi-primary mesh topologies, each control plane needs API access to its peers. The add-on automates this using [ManagedServiceAccount]:
 
-1. Creates a `ManagedServiceAccount` per cluster per mesh, yielding short-lived tokens. See [#72] for the naming convention discussion.
-2. Grants the MSA's ServiceAccount an istio-reader ClusterRole and ClusterRoleBinding (per-mesh, cleaned up with the mesh) so it has the read permissions Istio's remote endpoint discovery needs
+1. Creates a `ManagedServiceAccount` per cluster per mesh, yielding short-lived tokens and a `ServiceAccount` on the clusters.
+2. Grants each `ServiceAccount` on each cluster an istio-reader `ClusterRole` and `ClusterRoleBinding` (per-mesh, cleaned up with the mesh) so it has the read permissions Istio's remote endpoint discovery needs
 3. Constructs kubeconfig-style remote secrets from these tokens
 4. Distributes remote secrets to all peer clusters in the mesh
 5. Token rotation is handled automatically by the OCM platform
