@@ -5,7 +5,6 @@ package integration
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"time"
 
 	certmanagerv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
