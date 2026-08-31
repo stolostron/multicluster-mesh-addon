@@ -4,8 +4,8 @@
 # diff it against the upstream Istio template and flag any drift:
 # https://github.com/istio/istio/blob/master/manifests/charts/istio-control/istio-discovery/templates/reader-clusterrole.yaml
 #
-# The metadata.name is a placeholder; it is overridden at runtime to match
-# the per-mesh ManagedServiceAccount naming convention.
+# The metadata.name is a placeholder; it is overridden at runtime with the
+# per-mesh istio-reader name.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:

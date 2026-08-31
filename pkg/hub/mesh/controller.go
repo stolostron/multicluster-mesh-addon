@@ -920,7 +920,11 @@ func (r *Reconciler) buildCacertsManifestWork(mesh *meshv1alpha1.MultiClusterMes
 	return buildMeshOwnedManifestWork(mesh, clusterName, ManifestWorkNameCacerts, cacertsSecret)
 }
 
-func buildMeshOwnedManifestWork(mesh *meshv1alpha1.MultiClusterMesh, clusterName, name string, obj runtime.Object) *workv1.ManifestWork {
+func buildMeshOwnedManifestWork(mesh *meshv1alpha1.MultiClusterMesh, clusterName, name string, objs ...runtime.Object) *workv1.ManifestWork {
+	manifests := make([]workv1.Manifest, len(objs))
+	for i, obj := range objs {
+		manifests[i] = workv1.Manifest{RawExtension: runtime.RawExtension{Object: obj}}
+	}
 	return &workv1.ManifestWork{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
@@ -929,9 +933,7 @@ func buildMeshOwnedManifestWork(mesh *meshv1alpha1.MultiClusterMesh, clusterName
 		},
 		Spec: workv1.ManifestWorkSpec{
 			Workload: workv1.ManifestsTemplate{
-				Manifests: []workv1.Manifest{{
-					RawExtension: runtime.RawExtension{Object: obj},
-				}},
+				Manifests: manifests,
 			},
 		},
 	}
