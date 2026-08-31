@@ -917,7 +917,7 @@ func (r *Reconciler) buildCacertsManifestWork(mesh *meshv1alpha1.MultiClusterMes
 		},
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      CacertsSecretName,
-			Namespace: mesh.Spec.ControlPlane.Namespace,
+			Namespace: mesh.GetControlPlaneNamespace(),
 		},
 		Type: corev1.SecretTypeTLS,
 		Data: secret.Data,
