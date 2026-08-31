@@ -14,6 +14,7 @@ You bring the clusters and configure Istio; the addon handles the rest.
 - [User Guide](docs/user-guide.md) - Detailed setup walkthrough with explanations
 - [API Reference](docs/api-reference.md) - `MultiClusterMesh` CRD fields and examples
 - [Troubleshooting](docs/troubleshooting.md) - Common issues and resolutions
+- [Fleet Service Mesh (Dev Preview)][fleet-mesh] - Multi-cluster mesh observability
 - [Helm Chart](chart/README.md) - Installation options
 - [Samples](samples/) - Example manifests for common configurations
 
@@ -55,4 +56,5 @@ This installs the operator and distributes trust. For a working multi-cluster me
 [cert-manager]: https://cert-manager.io/
 [OCM]: https://open-cluster-management.io/
 [OLM]: https://olm.operatorframework.io/
+[fleet-mesh]: https://github.com/kiali/openshift-servicemesh-plugin/blob/main/docs/fleet-mesh/DEV-PREVIEW-GUIDE.md
 [sail]: https://github.com/istio-ecosystem/sail-operator
