@@ -198,7 +198,7 @@ The `spec.clusterSet` field is immutable after creation. With exclusive ClusterS
 
 The add-on defaults to OSSM (OpenShift Service Mesh) operator configuration. All `spec.operator` fields can be overridden to use a different operator (e.g., upstream Sail on non-OCP clusters).
 
-Plumbing resources (ManifestWorks, ManagedServiceAccounts) must use a deterministic naming strategy scoped to the owning mesh, so that multiple meshes on the same cluster don't collide. The operator ManifestWork is an exception - it is shared across meshes since the operator is a cluster-wide singleton. See [#72] for the naming convention discussion.
+Plumbing resources (ManifestWorks, ManagedServiceAccounts, Certificates) must use a deterministic naming strategy scoped to the owning mesh, so that multiple meshes on the same cluster don't collide. The operator ManifestWork is an exception - it is shared across meshes since the operator is a cluster-wide singleton.
 
 ## Operator Lifecycle
 
@@ -285,7 +285,6 @@ ArgoCD with ApplicationSets is the recommended approach for managing Istio confi
 Potential additions include observability stack management and full addon framework integration (leveraging `ManagedClusterAddOn` for per-cluster enable/disable).
 
 <!-- Reference links -->
-[#72]: https://github.com/stolostron/multicluster-mesh-addon/issues/72
 [cert-manager]: https://cert-manager.io/
 [ClusterManagementAddOn]: https://open-cluster-management.io/docs/concepts/addon/#clustermanagementaddon
 [ManagedClusterSet]: https://open-cluster-management.io/docs/concepts/cluster-inventory/managedclusterset/
