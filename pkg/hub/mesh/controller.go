@@ -46,7 +46,6 @@ import (
 
 const (
 	OperatorManifestWorkName   = "multicluster-mesh-operator"
-	ManifestWorkNameCacerts    = "multicluster-mesh-cacerts"
 	ManifestWorkNameCPNSPrefix = "multicluster-mesh-cp-ns-"
 
 	FeedbackInstalledCSV = "installedCSV"
@@ -805,14 +804,21 @@ func (r *Reconciler) mapMsaToMesh(_ context.Context, obj client.Object) []reconc
 	return []reconcile.Request{{NamespacedName: key.Of(meshName, meshNamespace)}}
 }
 
-// getCacertsName returns the name for the certificate and secret for a specific cluster
-func getCacertsName(clusterName string) string {
-	return fmt.Sprintf("cacerts-%s", clusterName)
+// CacertsName returns a unique name to use for cacert resources in the mesh's hub namespace.
+// The cert/secret are namespaced to the mesh's namespace, so the mesh name and cluster name identify each resource uniquely enough.
+func CacertsName(mesh *meshv1alpha1.MultiClusterMesh, clusterName string) string {
+	return fmt.Sprintf("cacerts-%s.%s", mesh.Name, clusterName)
+}
+
+// CacertsManifestWorkName returns the name of the ManifestWork distributing the cacerts secret for a mesh.
+// It lives in a cluster's namespace, so it is keyed on the mesh namespace and name to stay unique per mesh.
+func CacertsManifestWorkName(mesh *meshv1alpha1.MultiClusterMesh) string {
+	return fmt.Sprintf("multicluster-mesh-cacerts-%s.%s", mesh.Namespace, mesh.Name)
 }
 
 // ensureCertificateForCluster applies the desired Certificate state for a specific cluster using server-side apply.
 func (r *Reconciler) ensureCertificateForCluster(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, cluster *clusterv1.ManagedCluster) error {
-	certName := getCacertsName(cluster.Name)
+	certName := CacertsName(mesh, cluster.Name)
 
 	gvk, err := r.GroupVersionKindFor(mesh)
 	if err != nil {
@@ -859,7 +865,7 @@ func (r *Reconciler) ensureCertificateForCluster(ctx context.Context, mesh *mesh
 
 // ensureCacertsManifestWork creates a ManifestWork to distribute the cacerts secret to a cluster
 func (r *Reconciler) ensureCacertsManifestWork(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, cluster *clusterv1.ManagedCluster) error {
-	secretName := getCacertsName(cluster.Name)
+	secretName := CacertsName(mesh, cluster.Name)
 	secret := &corev1.Secret{}
 	err := r.Get(ctx, key.Of(secretName, mesh.Namespace), secret)
 
@@ -904,7 +910,7 @@ func (r *Reconciler) buildControlPlaneNamespaceManifestWork(mesh *meshv1alpha1.M
 
 // buildCacertsManifestWork builds a ManifestWork for distributing the cacerts secret
 func (r *Reconciler) buildCacertsManifestWork(mesh *meshv1alpha1.MultiClusterMesh, clusterName string, secret *corev1.Secret) *workv1.ManifestWork {
-	cacertsSecret := &corev1.Secret{
+	return buildMeshOwnedManifestWork(mesh, clusterName, CacertsManifestWorkName(mesh), &corev1.Secret{
 		TypeMeta: metav1.TypeMeta{
 			APIVersion: "v1",
 			Kind:       "Secret",
@@ -915,9 +921,7 @@ func (r *Reconciler) buildCacertsManifestWork(mesh *meshv1alpha1.MultiClusterMes
 		},
 		Type: corev1.SecretTypeTLS,
 		Data: secret.Data,
-	}
-
-	return buildMeshOwnedManifestWork(mesh, clusterName, ManifestWorkNameCacerts, cacertsSecret)
+	})
 }
 
 func buildMeshOwnedManifestWork(mesh *meshv1alpha1.MultiClusterMesh, clusterName, name string, objs ...runtime.Object) *workv1.ManifestWork {
