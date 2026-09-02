@@ -346,6 +346,38 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 		})
 	})
 
+	Context("Mesh Ready status", func() {
+		var cluster2Name string
+
+		BeforeEach(func() {
+			cluster2Name = util.UniqueName("cluster")
+
+			util.CreateManagedCluster(ctx, k8sClient, clusterName)
+			util.CreateManagedCluster(ctx, k8sClient, cluster2Name)
+			util.CreatePlacement(ctx, k8sClient, testPlacement, testNs)
+			util.CreatePlacementDecision(ctx, k8sClient, testPlacement, testNs, clusterName, cluster2Name)
+		})
+
+		When("trust is configured", func() {
+			var mesh *meshv1alpha1.MultiClusterMesh
+
+			BeforeEach(func() {
+				mesh = util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testPlacement, util.CertManagerSpec("mesh-issuer"))
+				expectMeshNotReady(meshName, testNs)
+			})
+
+			It("should require trust distributed on all clusters", func() {
+				By("trust distributed on one cluster, mesh should stay not-ready")
+				simulateTrustDistributed(mesh, clusterName)
+				expectMeshNotReady(meshName, testNs)
+
+				By("trust distributed on all clusters, mesh should become ready")
+				simulateTrustDistributed(mesh, cluster2Name)
+				expectMeshReady(meshName, testNs)
+			})
+		})
+	})
+
 	Context("Validation", func() {
 		var otherMesh string
 
@@ -531,31 +563,47 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 				}).ShouldNot(Equal(originalUID))
 			})
 
-			It("should create ManifestWork when cacerts secret is created", func() {
-				util.CreateCacertsSecret(ctx, k8sClient, mesh, clusterName)
-
-				work := expectCacertsManifestWork(mesh, clusterName)
-				expectCacertsSecretManifest(work, "istio-system")
+			It("should report the TrustDistributed condition is DistributionPending before cacerts secret exists", func() {
+				expectClusterTrustCondition(meshName, testNs, clusterName, meshv1alpha1.ReasonDistributionPending)
 			})
 
-			It("should update ManifestWork when cacerts secret is updated", func() {
-				secret := util.CreateCacertsSecret(ctx, k8sClient, mesh, clusterName)
-				expectCacertsManifestWork(mesh, clusterName)
+			When("cacerts secret is created", func() {
+				BeforeEach(func() {
+					util.CreateCacertsSecret(ctx, k8sClient, mesh, clusterName)
+				})
 
-				secret.Data["tls.crt"] = []byte("updated-cert-data")
-				Expect(k8sClient.Update(ctx, secret)).To(Succeed())
+				It("should create ManifestWork", func() {
+					work := expectCacertsManifestWork(mesh, clusterName)
+					expectCacertsSecretManifest(work, "istio-system")
+					expectClusterTrustCondition(meshName, testNs, clusterName, meshv1alpha1.ReasonDistributionPending)
+				})
 
-				Eventually(func() string {
-					work := &workv1.ManifestWork{}
-					if err := k8sClient.Get(ctx, key.Of(meshcontroller.CacertsManifestWorkName(mesh), clusterName), work); err != nil {
-						return ""
-					}
-					manifestSecret := &corev1.Secret{}
-					if err := unmarshalManifest(work.Spec.Workload.Manifests[0], manifestSecret); err != nil {
-						return ""
-					}
-					return string(manifestSecret.Data["tls.crt"])
-				}).Should(Equal("updated-cert-data"))
+				It("should report the TrustDistributed condition is Distributed after ManifestWork is applied", func() {
+					work := expectCacertsManifestWork(mesh, clusterName)
+					util.SetManifestWorkApplied(ctx, k8sClient, work)
+					expectClusterTrustCondition(meshName, testNs, clusterName, meshv1alpha1.ReasonDistributed)
+				})
+
+				It("should update ManifestWork when cacerts secret is updated", func() {
+					expectCacertsManifestWork(mesh, clusterName)
+
+					secret := &corev1.Secret{}
+					Expect(k8sClient.Get(ctx, key.Of(meshcontroller.CacertsName(mesh, clusterName), testNs), secret)).To(Succeed())
+					secret.Data["tls.crt"] = []byte("updated-cert-data")
+					Expect(k8sClient.Update(ctx, secret)).To(Succeed())
+
+					Eventually(func() string {
+						work := &workv1.ManifestWork{}
+						if err := k8sClient.Get(ctx, key.Of(meshcontroller.CacertsManifestWorkName(mesh), clusterName), work); err != nil {
+							return ""
+						}
+						manifestSecret := &corev1.Secret{}
+						if err := unmarshalManifest(work.Spec.Workload.Manifests[0], manifestSecret); err != nil {
+							return ""
+						}
+						return string(manifestSecret.Data["tls.crt"])
+					}).Should(Equal("updated-cert-data"))
+				})
 			})
 
 			When("another mesh is targeting the same cluster", func() {
@@ -634,11 +682,14 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 		})
 
 		When("issuer is removed after initial configuration", func() {
-			It("should cleanup all Certificates", func() {
+			BeforeEach(func() {
 				util.CreateManagedCluster(ctx, k8sClient, clusterName)
 				util.CreatePlacement(ctx, k8sClient, testPlacement, testNs)
 				util.CreatePlacementDecision(ctx, k8sClient, testPlacement, testNs, clusterName)
 				util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testPlacement, util.CertManagerSpec("mesh-issuer"))
+			})
+
+			It("should cleanup all Certificates", func() {
 				cert := expectCertificate(testNs, clusterName, meshName, "mesh-issuer", "Issuer")
 
 				updateMesh(meshName, testNs, func(mesh *meshv1alpha1.MultiClusterMesh) {
@@ -646,6 +697,20 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 				})
 
 				util.ExpectResourceDeleted(ctx, k8sClient, &certmanagerv1.Certificate{}, cert.Name, testNs)
+			})
+
+			It("should remove TrustDistributed condition", func() {
+				expectClusterTrustCondition(meshName, testNs, clusterName, meshv1alpha1.ReasonDistributionPending)
+
+				updateMesh(meshName, testNs, func(mesh *meshv1alpha1.MultiClusterMesh) {
+					mesh.Spec.Security.Trust.CertManager.IssuerRef.Name = ""
+				})
+
+				Eventually(func(g Gomega) *metav1.Condition {
+					mesh := &meshv1alpha1.MultiClusterMesh{}
+					g.Expect(k8sClient.Get(ctx, key.Of(meshName, testNs), mesh)).To(Succeed())
+					return findClusterCondition(g, mesh, clusterName, meshv1alpha1.ConditionTrustDistributed)
+				}).Should(BeNil())
 			})
 		})
 
@@ -1222,6 +1287,13 @@ func simulateMsaTokenSecretRotation(mesh *meshv1alpha1.MultiClusterMesh, cluster
 	setMsaStatus(ctx, k8sClient, msa.Name, clusterName, time.Duration(time.Minute))
 }
 
+func simulateTrustDistributed(mesh *meshv1alpha1.MultiClusterMesh, clusterName string) {
+	util.CreateCacertsSecret(ctx, k8sClient, mesh, clusterName)
+	work := expectCacertsManifestWork(mesh, clusterName)
+	util.SetManifestWorkApplied(ctx, k8sClient, work)
+	expectClusterTrustCondition(mesh.Name, mesh.Namespace, clusterName, meshv1alpha1.ReasonDistributed)
+}
+
 func unmarshalManifest(manifest workv1.Manifest, into interface{}) error {
 	return json.Unmarshal(manifest.Raw, into)
 }
@@ -1247,12 +1319,50 @@ func findCondition(g Gomega, conditions []metav1.Condition, conditionType string
 	return c
 }
 
-func expectMeshReady(meshName, namespace string) {
+func findClusterCondition(g Gomega, mesh *meshv1alpha1.MultiClusterMesh, clusterName, conditionType string) *metav1.Condition {
+	for _, cs := range mesh.Status.ClusterStatus {
+		if cs.ClusterName == clusterName {
+			return meta.FindStatusCondition(cs.Conditions, conditionType)
+		}
+	}
+	return nil
+}
+
+func expectMeshReadyStatus(meshName, namespace string, expected metav1.ConditionStatus) {
 	Eventually(func(g Gomega) {
 		mesh := &meshv1alpha1.MultiClusterMesh{}
 		g.Expect(k8sClient.Get(ctx, key.Of(meshName, namespace), mesh)).To(Succeed())
 		c := findCondition(g, mesh.Status.Conditions, meshv1alpha1.ConditionReady)
-		g.Expect(c.Status).To(Equal(metav1.ConditionTrue))
+		g.Expect(c.Status).To(Equal(expected))
+		g.Expect(c.ObservedGeneration).To(Equal(mesh.Generation))
+	}).Should(Succeed())
+}
+
+func expectMeshNotReady(meshName, namespace string) {
+	expectMeshReadyStatus(meshName, namespace, metav1.ConditionFalse)
+}
+
+func expectMeshReady(meshName, namespace string) {
+	expectMeshReadyStatus(meshName, namespace, metav1.ConditionTrue)
+}
+
+func expectClusterTrustCondition(meshName, namespace, clusterName, reason string) {
+	status := metav1.ConditionFalse
+	if reason == meshv1alpha1.ReasonDistributed {
+		status = metav1.ConditionTrue
+	}
+
+	expectClusterCondition(meshName, namespace, clusterName, meshv1alpha1.ConditionTrustDistributed, reason, status)
+}
+
+func expectClusterCondition(meshName, namespace, clusterName, conditionType, reason string, status metav1.ConditionStatus) {
+	Eventually(func(g Gomega) {
+		mesh := &meshv1alpha1.MultiClusterMesh{}
+		g.Expect(k8sClient.Get(ctx, key.Of(meshName, namespace), mesh)).To(Succeed())
+		c := findClusterCondition(g, mesh, clusterName, conditionType)
+		g.Expect(c).NotTo(BeNil(), "cluster condition %s/%s not found in status", clusterName, conditionType)
+		g.Expect(c.Reason).To(Equal(reason))
+		g.Expect(c.Status).To(Equal(status))
 		g.Expect(c.ObservedGeneration).To(Equal(mesh.Generation))
 	}).Should(Succeed())
 }

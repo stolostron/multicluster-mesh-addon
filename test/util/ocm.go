@@ -9,6 +9,7 @@ import (
 	clusterv1 "open-cluster-management.io/api/cluster/v1"
 	clusterv1beta1 "open-cluster-management.io/api/cluster/v1beta1"
 	clusterv1beta2 "open-cluster-management.io/api/cluster/v1beta2"
+	workv1 "open-cluster-management.io/api/work/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -100,4 +101,16 @@ func CreateManagedCluster(ctx context.Context, k8sClient client.Client, name str
 			ManagedClusterClientConfigs: []clusterv1.ClientConfig{{URL: "https://" + name + ":6443"}},
 		},
 	})).To(Succeed())
+}
+
+// SetManifestWorkApplied simulates the MW being applied on the spoke.
+func SetManifestWorkApplied(ctx context.Context, k8sClient client.Client, work *workv1.ManifestWork) {
+	patch := client.MergeFrom(work.DeepCopy())
+	work.Status.Conditions = []metav1.Condition{{
+		Type:               workv1.WorkApplied,
+		Status:             metav1.ConditionTrue,
+		Reason:             "Applied",
+		LastTransitionTime: metav1.Now(),
+	}}
+	Expect(k8sClient.Status().Patch(ctx, work, patch)).To(Succeed())
 }

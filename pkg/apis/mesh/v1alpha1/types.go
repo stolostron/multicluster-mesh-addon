@@ -32,6 +32,11 @@ func (m *MultiClusterMesh) GetTrustDomain() string {
 	return m.Name
 }
 
+// HasTrustConfigured returns true if trust distribution is configured.
+func (m *MultiClusterMesh) HasTrustConfigured() bool {
+	return m.Spec.Security.Trust.CertManager.IssuerRef.Name != ""
+}
+
 // GetControlPlaneNamespace returns the control plane namespace, defaulting to "istio-system".
 func (m *MultiClusterMesh) GetControlPlaneNamespace() string {
 	if m.Spec.ControlPlane.Namespace == "" {
@@ -61,6 +66,16 @@ func (m *MultiClusterMesh) SetClusterCondition(clusterName string, conditionType
 		ObservedGeneration: m.Generation,
 		Message:            fmt.Sprintf(messageFmt, args...),
 	})
+}
+
+// RemoveClusterCondition removes a condition from a cluster's status, if present.
+func (m *MultiClusterMesh) RemoveClusterCondition(clusterName string, conditionType string) {
+	for i := range m.Status.ClusterStatus {
+		if m.Status.ClusterStatus[i].ClusterName == clusterName {
+			meta.RemoveStatusCondition(&m.Status.ClusterStatus[i].Conditions, conditionType)
+			return
+		}
+	}
 }
 
 func (m *MultiClusterMesh) getOrCreateClusterStatus(clusterName string) *ClusterMeshStatus {
@@ -162,11 +177,20 @@ const (
 	// ConditionReady indicates whether mesh resources have been reconciled
 	ConditionReady = "Ready"
 
+	// ConditionTrustDistributed indicates whether trust has been distributed to a cluster
+	ConditionTrustDistributed = "TrustDistributed"
+
 	// ReasonAllClustersReady indicates mesh resources have been reconciled for all clusters
 	ReasonAllClustersReady = "AllClustersReady"
 
-	// ReasonClustersNotReady indicates that the mesh has no selected clusters
+	// ReasonClustersNotReady indicates that one or more clusters are not ready
 	ReasonClustersNotReady = "ClustersNotReady"
+
+	// ReasonDistributionPending indicates trust distribution is in progress
+	ReasonDistributionPending = "DistributionPending"
+
+	// ReasonDistributed indicates trust has been distributed to the cluster
+	ReasonDistributed = "Distributed"
 
 	// ReasonReconcileError indicates an error occurred during reconciliation
 	ReasonReconcileError = "ReconcileError"
