@@ -16,6 +16,7 @@ import (
 	clusterv1 "open-cluster-management.io/api/cluster/v1"
 	clusterv1beta1 "open-cluster-management.io/api/cluster/v1beta1"
 	workv1 "open-cluster-management.io/api/work/v1"
+	workv1alpha1 "open-cluster-management.io/api/work/v1alpha1"
 	msav1beta1 "open-cluster-management.io/managed-serviceaccount/apis/authentication/v1beta1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -263,10 +264,30 @@ func TestDetermineStatusLastTransitionTime(t *testing.T) {
 
 			var clusters []clusterv1.ManagedCluster
 			if tt.withClusters {
-				clusters = []clusterv1.ManagedCluster{{ObjectMeta: metav1.ObjectMeta{Name: "cluster-a"}}}
+				clusters = []clusterv1.ManagedCluster{{
+					ObjectMeta: metav1.ObjectMeta{Name: "cluster-a"},
+					Spec: clusterv1.ManagedClusterSpec{ManagedClusterClientConfigs: []clusterv1.ClientConfig{{
+						URL: "https://cluster-a:6443",
+					}}},
+				}}
 			}
 
-			r := &Reconciler{}
+			mwrset := &workv1alpha1.ManifestWorkReplicaSet{
+				ObjectMeta: metav1.ObjectMeta{Name: mesh.Name, Namespace: mesh.Namespace},
+			}
+			mwrset.Spec.ManifestWorkTemplate.Workload.Manifests = []workv1.Manifest{{
+				RawExtension: runtime.RawExtension{Raw: []byte(`{"apiVersion":"v1","kind":"Secret","metadata":{"name":"istio-remote-secret-cluster-a"}}`)},
+			}}
+			mwrset.Status.Conditions = []metav1.Condition{{
+				Type: workv1alpha1.ManifestWorkReplicaSetConditionManifestworkApplied, Status: metav1.ConditionTrue,
+			}}
+			rbacWork := &workv1.ManifestWork{
+				ObjectMeta: metav1.ObjectMeta{Name: IstioReaderManifestWorkName(mesh), Namespace: "cluster-a"},
+				Status: workv1.ManifestWorkStatus{Conditions: []metav1.Condition{{
+					Type: workv1.WorkApplied, Status: metav1.ConditionTrue,
+				}}},
+			}
+			r := &Reconciler{Client: fake.NewClientBuilder().WithScheme(newTestScheme()).WithObjects(mwrset, rbacWork).Build()}
 			if err := r.determineStatus(context.Background(), mesh, clusters); err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
@@ -300,7 +321,7 @@ func TestDetermineStatusPrunesStaleCluster(t *testing.T) {
 		},
 	}
 
-	r := &Reconciler{}
+	r := &Reconciler{Client: fake.NewClientBuilder().WithScheme(newTestScheme()).Build()}
 	clusters := []clusterv1.ManagedCluster{{ObjectMeta: metav1.ObjectMeta{Name: activeCluster}}}
 
 	r.pruneStaleClusterStatus(mesh, []string{activeCluster})
@@ -1013,6 +1034,7 @@ func newTestScheme() *runtime.Scheme {
 	_ = clusterv1beta1.Install(scheme)
 	_ = meshv1alpha1.Install(scheme)
 	_ = workv1.Install(scheme)
+	_ = workv1alpha1.Install(scheme)
 	return scheme
 }
 

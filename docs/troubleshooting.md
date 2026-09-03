@@ -154,9 +154,12 @@ Either:
 
 Use a different control plane or operator namespace to resolve.
 
-### No remote secrets on spoke clusters
+### No remote secrets on spoke clusters (DiscoveryConfigured=False)
 
 The addon creates ManagedServiceAccounts to obtain tokens, grants istio-reader RBAC via ManifestWork, and distributes remote secrets to peer clusters via ManifestWorkReplicaSet.
+
+The `DiscoveryConfigured` condition tracks whether this chain completed successfully, per spoke cluster.
+A `NoAPIEndpoint` reason means the cluster has no API endpoint configured in its `ManagedCluster` spec, which blocks remote secret distribution.
 
 Check each step:
 

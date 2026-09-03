@@ -26,6 +26,7 @@ import (
 	clusterv1 "open-cluster-management.io/api/cluster/v1"
 	clusterv1beta1 "open-cluster-management.io/api/cluster/v1beta1"
 	workv1 "open-cluster-management.io/api/work/v1"
+	workv1alpha1 "open-cluster-management.io/api/work/v1alpha1"
 	"open-cluster-management.io/sdk-go/pkg/apis/work/v1/applier"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
@@ -711,8 +712,19 @@ func (r *Reconciler) pruneStaleClusterStatus(mesh *meshv1alpha1.MultiClusterMesh
 func (r *Reconciler) determineStatus(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, clusters []clusterv1.ManagedCluster) error {
 	allReady := len(clusters) > 0
 
+	mwrset := &workv1alpha1.ManifestWorkReplicaSet{}
+	if err := r.Get(ctx, key.Of(mesh.Name, mesh.Namespace), mwrset); client.IgnoreNotFound(err) != nil {
+		return fmt.Errorf("failed to get ManifestWorkReplicaSet %s/%s: %w", mesh.Namespace, mesh.Name, err)
+	}
+
 	for _, cluster := range clusters {
 		if ready, err := r.updateTrustStatusCondition(ctx, mesh, cluster.Name); err != nil {
+			return err
+		} else if !ready {
+			allReady = false
+		}
+
+		if ready, err := r.updateDiscoveryStatusCondition(ctx, mesh, &cluster, mwrset); err != nil {
 			return err
 		} else if !ready {
 			allReady = false

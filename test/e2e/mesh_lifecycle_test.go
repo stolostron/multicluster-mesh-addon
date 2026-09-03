@@ -173,6 +173,10 @@ var _ = Describe("MultiClusterMesh lifecycle", Ordered, func() {
 			Expect(meta.IsStatusConditionTrue(cs.Conditions, meshv1alpha1.ConditionTrustDistributed)).To(BeTrue(),
 				"expected TrustDistributed=True for %s", cluster)
 
+			Step("Verifying DiscoveryConfigured condition for %s", cluster)
+			Expect(meta.IsStatusConditionTrue(cs.Conditions, meshv1alpha1.ConditionDiscoveryConfigured)).To(BeTrue(),
+				"expected DiscoveryConfigured=True for %s", cluster)
+
 			Step("Verifying cacerts secret on %s", cluster)
 			secret := &corev1.Secret{}
 			Eventually(func(g Gomega) {

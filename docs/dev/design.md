@@ -273,6 +273,18 @@ For multi-primary mesh topologies, each control plane needs API access to its pe
 5. Token rotation is handled automatically by the OCM platform
 6. When a cluster is removed from the mesh, its MSA is deleted and its remote secrets are removed from all peers
 
+### Discovery Status
+
+The controller reports a per-cluster `DiscoveryConfigured` condition that tracks the progress of endpoint discovery configuration:
+
+| Status | Reason | When |
+|---|---|---|
+| False | `NoAPIEndpoint` | Cluster has no API endpoint configured |
+| False | `ConfigurationPending` | Discovery infrastructure is being set up |
+| True | `Configured` | Discovery is fully configured for the cluster |
+
+The condition checks four components in order: the cluster has an API endpoint, the ManagedServiceAccount has a token, the istio-reader RBAC ManifestWork is applied, and the cluster's remote secret is present and distributed.
+
 ## Lifecycle Events
 
 - **Scale Up**: When a new cluster is selected by the Placement, the controller automatically provisions the mesh plumbing for it: installs the operator, mints an intermediate CA, and distributes discovery tokens to all peers. This is the same process as the initial mesh bootstrap, applied incrementally to the new cluster.
