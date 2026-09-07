@@ -2,19 +2,99 @@ package mesh
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"testing"
 	"time"
 
+	certmanagerv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	clusterv1 "open-cluster-management.io/api/cluster/v1"
 	clusterv1beta2 "open-cluster-management.io/api/cluster/v1beta2"
 	workv1 "open-cluster-management.io/api/work/v1"
+	msav1beta1 "open-cluster-management.io/managed-serviceaccount/apis/authentication/v1beta1"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	meshv1alpha1 "github.com/stolostron/multicluster-mesh-addon/pkg/apis/mesh/v1alpha1"
 )
+
+func TestCheckPrerequisiteCRDs(t *testing.T) {
+	certGVK := certmanagerv1.SchemeGroupVersion.WithKind("Certificate")
+	msaGVK := msav1beta1.GroupVersion.WithKind("ManagedServiceAccount")
+
+	tests := []struct {
+		name        string
+		gvks        []schema.GroupVersionKind
+		expectError bool
+		contains    []string
+	}{
+		{
+			name:        "all present",
+			gvks:        []schema.GroupVersionKind{certGVK, msaGVK},
+			expectError: false,
+		},
+		{
+			name:        "cert-manager missing",
+			gvks:        []schema.GroupVersionKind{msaGVK},
+			expectError: true,
+			contains:    []string{"cert-manager"},
+		},
+		{
+			name:        "managed-serviceaccount missing",
+			gvks:        []schema.GroupVersionKind{certGVK},
+			expectError: true,
+			contains:    []string{"managed-serviceaccount"},
+		},
+		{
+			name:        "both missing",
+			gvks:        nil,
+			expectError: true,
+			contains:    []string{"cert-manager", "managed-serviceaccount"},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			mapper := meta.NewDefaultRESTMapper(nil)
+			for _, gvk := range tc.gvks {
+				mapper.Add(gvk, meta.RESTScopeNamespace)
+			}
+
+			err := checkPrerequisiteCRDs(mapper)
+			if (err != nil) != tc.expectError {
+				t.Fatalf("expectError=%v, got: %v", tc.expectError, err)
+			}
+			for _, s := range tc.contains {
+				if err != nil && !strings.Contains(err.Error(), s) {
+					t.Errorf("expected error to contain %q, got: %v", s, err)
+				}
+			}
+		})
+	}
+}
+
+var errAPIServerUnreachable = errors.New("API server unreachable")
+
+type errorMapper struct {
+	meta.RESTMapper
+}
+
+func (m *errorMapper) RESTMapping(gk schema.GroupKind, versions ...string) (*meta.RESTMapping, error) {
+	return nil, errAPIServerUnreachable
+}
+
+func TestCheckPrerequisiteCRDsUnexpectedError(t *testing.T) {
+	err := checkPrerequisiteCRDs(&errorMapper{})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !errors.Is(err, errAPIServerUnreachable) {
+		t.Errorf("expected original error, got: %v", err)
+	}
+}
 
 func TestGetClustersFromSetReturnsSortedClusters(t *testing.T) {
 	scheme := newTestScheme()

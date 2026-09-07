@@ -20,6 +20,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	applyconfigv1 "k8s.io/client-go/applyconfigurations/meta/v1"
 	"k8s.io/client-go/util/retry"
 	"k8s.io/klog/v2"
@@ -73,8 +74,34 @@ type Reconciler struct {
 	workApplier *applier.WorkApplier
 }
 
+var prerequisiteCRDs = map[string]schema.GroupVersionKind{
+	"cert-manager (Certificate)":                     certmanagerv1.SchemeGroupVersion.WithKind("Certificate"),
+	"managed-serviceaccount (ManagedServiceAccount)": msav1beta1.GroupVersion.WithKind("ManagedServiceAccount"),
+}
+
+func checkPrerequisiteCRDs(mapper meta.RESTMapper) error {
+	var missing []string
+	for name, gvk := range prerequisiteCRDs {
+		if _, err := mapper.RESTMapping(gvk.GroupKind(), gvk.Version); err != nil {
+			if !meta.IsNoMatchError(err) {
+				return fmt.Errorf("failed to check prerequisite CRD %s: %w", name, err)
+			}
+			missing = append(missing, name)
+		}
+	}
+	if len(missing) > 0 {
+		slices.Sort(missing)
+		return fmt.Errorf("prerequisite CRDs not installed on the hub: %s", strings.Join(missing, ", "))
+	}
+	return nil
+}
+
 // RegisterController registers the MultiClusterMesh controller with the manager
 func RegisterController(mgr manager.Manager) error {
+	if err := checkPrerequisiteCRDs(mgr.GetRESTMapper()); err != nil {
+		return err
+	}
+
 	if err := mgr.GetFieldIndexer().IndexField(context.Background(), &meshv1alpha1.MultiClusterMesh{}, "spec.clusterSet", func(obj client.Object) []string {
 		return []string{obj.(*meshv1alpha1.MultiClusterMesh).Spec.ClusterSet}
 	}); err != nil {
