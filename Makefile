@@ -351,7 +351,7 @@ install-managed-serviceaccount: $(HELM_BIN) join-clusters ## Install managed-ser
 install-metallb: $(addprefix install-metallb-,$(SPOKE_CLUSTERS)) ## Install MetalLB on spoke Kind clusters
 
 .PHONY: $(addprefix install-metallb-,$(SPOKE_CLUSTERS))
-$(addprefix install-metallb-,$(SPOKE_CLUSTERS)): install-metallb-%:
+$(addprefix install-metallb-,$(SPOKE_CLUSTERS)): install-metallb-%: create-%
 	$(call log,Installing MetalLB: $*)
 	$(DEV_ENV_SCRIPT) install-metallb $*
 
@@ -359,7 +359,7 @@ $(addprefix install-metallb-,$(SPOKE_CLUSTERS)): install-metallb-%:
 install-gateway-api: $(addprefix install-gateway-api-,$(SPOKE_CLUSTERS)) ## Install Gateway API CRDs on spoke Kind clusters
 
 .PHONY: $(addprefix install-gateway-api-,$(SPOKE_CLUSTERS))
-$(addprefix install-gateway-api-,$(SPOKE_CLUSTERS)): install-gateway-api-%:
+$(addprefix install-gateway-api-,$(SPOKE_CLUSTERS)): install-gateway-api-%: create-%
 	$(call log,Installing Gateway API: $*)
 	$(DEV_ENV_SCRIPT) install-gateway-api $*
 
@@ -384,7 +384,7 @@ deploy-addon: $(KIND) $(HELM_BIN) gen images join-clusters install-cert-manager 
 	$(call log,Addon controller deployed successfully. Use KUBECONFIG=$(HUB_KUBECONFIG) to interact with the hub.)
 
 .PHONY: setup-mesh
-setup-mesh: ## Create cert-manager trust chain, mesh-system namespace, and MultiClusterMesh CR
+setup-mesh: create-hub ## Create cert-manager trust chain, mesh-system namespace, and MultiClusterMesh CR
 	$(DEV_ENV_SCRIPT) setup-mesh
 
 .PHONY: dev-clean-meshes

@@ -92,34 +92,25 @@ on() {
     "$@" --kubeconfig="${DEV_KUBE_DIR}/${cluster}.config"
 }
 
-require_clusters() {
-    for cluster in "$@"; do
-        if [[ ! -f "${DEV_KUBE_DIR}/${cluster}.config" ]]; then
-            err "Kubeconfig not found for ${cluster}. Run 'make create-clusters' first."
-        fi
-    done
-}
-
 check_host() {
     check_inotify_limits
     check_kernel_keyring_limits
-
-    local existing
-    existing="$(${KIND} get clusters 2>/dev/null || true)"
-    local found=()
-    for cluster in "${HUB}" "${CLUSTER1}" "${CLUSTER2}"; do
-        if echo "${existing}" | grep -qx "${cluster}"; then
-            found+=("${cluster}")
-        fi
-    done
-    if [[ ${#found[@]} -gt 0 ]]; then
-        err "Kind clusters already exist: ${found[*]}. Run 'make dev-clean' to tear them down first."
-    fi
 }
 
 create_cluster() {
     local cluster="${1}"
     mkdir -p "${DEV_KUBE_DIR}"
+
+    local existing
+    existing="$(${KIND} get clusters 2>/dev/null || true)"
+    if echo "${existing}" | grep -qx "${cluster}"; then
+        log "Kind cluster ${cluster} already exists, skipping creation"
+        if [[ ! -f "${DEV_KUBE_DIR}/${cluster}.config" ]]; then
+            log "Exporting kubeconfig for existing cluster ${cluster}"
+            ${KIND} get kubeconfig --name "${cluster}" > "${DEV_KUBE_DIR}/${cluster}.config"
+        fi
+        return
+    fi
 
     log "Creating Kind cluster: ${cluster}"
     on "${cluster}" "${KIND}" create cluster \
@@ -134,7 +125,6 @@ create_cluster() {
 
 install_olm() {
     local cluster="${1}"
-    require_clusters "${cluster}"
     local olm_base_url="https://github.com/operator-framework/operator-lifecycle-manager/releases/download/${OLM_VERSION}"
 
     if on "${cluster}" kubectl get deployment olm-operator -n olm &>/dev/null; then
@@ -161,7 +151,6 @@ install_olm() {
 }
 
 install_cert_manager() {
-    require_clusters "${HUB}"
     if on "${HUB}" kubectl get deployment cert-manager -n cert-manager &>/dev/null; then
         log "cert-manager already installed on hub, skipping"
         return
@@ -207,7 +196,6 @@ setup_test_issuer() {
 }
 
 init_ocm() {
-    require_clusters "${HUB}"
     log "Initializing OCM hub on cluster: ${HUB}"
     on "${HUB}" "${CLUSTERADM}" init --feature-gates=ManifestWorkReplicaSet=true --wait
 
@@ -217,7 +205,6 @@ init_ocm() {
 }
 
 join_clusters() {
-    require_clusters "${HUB}" "${CLUSTER1}" "${CLUSTER2}"
     log "Retrieving hub token..."
     local token_json hub_token hub_apiserver
     token_json="$(on "${HUB}" "${CLUSTERADM}" get token -o json)"
@@ -273,7 +260,6 @@ join_clusters() {
 }
 
 install_managed_serviceaccount() {
-    require_clusters "${HUB}" "${CLUSTER1}" "${CLUSTER2}"
     if on "${HUB}" kubectl get deployment managed-serviceaccount-addon-manager -n open-cluster-management-addon &>/dev/null; then
         log "managed-serviceaccount addon already installed on hub, skipping"
         return
@@ -299,7 +285,6 @@ install_managed_serviceaccount() {
 
 install_metallb() {
     local cluster="${1}"
-    require_clusters "${cluster}"
     local metallb_version="${METALLB_VERSION}"
 
     if on "${cluster}" kubectl get deployment controller -n metallb-system &>/dev/null; then
@@ -358,7 +343,6 @@ install_metallb() {
 
 install_gateway_api() {
     local cluster="${1}"
-    require_clusters "${cluster}"
     local gw_api_version="${GATEWAY_API_VERSION}"
 
     if on "${cluster}" kubectl get crd gateways.gateway.networking.k8s.io &>/dev/null; then
@@ -377,7 +361,6 @@ install_gateway_api() {
 }
 
 setup_mesh() {
-    require_clusters "${HUB}"
     if on "${HUB}" kubectl get namespace mesh-system &>/dev/null; then
         log "Namespace mesh-system already exists, skipping"
     else
