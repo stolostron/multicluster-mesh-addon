@@ -1,6 +1,10 @@
 # using registry.ci.openshift.org instead of brew.registry.redhat.io to avoid authorization
 FROM registry.ci.openshift.org/stolostron/builder:go1.25-linux AS builder
 WORKDIR /go/src/github.com/stolostron/multicluster-mesh-addon
+
+COPY go.mod go.sum ./
+RUN go mod download
+
 COPY . .
 RUN make build
 
