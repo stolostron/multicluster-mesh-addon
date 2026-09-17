@@ -86,9 +86,12 @@ Common causes:
   (e.g., `redhat-operators` only exists on OpenShift; for [kind]/vanilla K8s, override `spec.operator` fields).
 - OCM issues: work agent not running, cluster not accepted, or cluster unreachable.
 
-### No cacerts secret on spoke clusters
+### No cacerts secret on spoke clusters (TrustDistributed=False)
 
-The addon creates cert-manager `Certificate` resources on the hub, which produce `Secret` resources that get distributed to spokes via `ManifestWork` resources.
+When `spec.security.trust` is configured, the addon creates cert-manager `Certificate` resources on the hub,
+which produce `Secret` resources that get distributed to spokes via `ManifestWork` resources.
+
+The `TrustDistributed` condition tracks whether this chain completed successfully, per spoke cluster.
 
 Check each step:
 
@@ -103,12 +106,16 @@ kubectl get certificate -n <mesh-namespace> -o jsonpath='{.items[*].status.condi
 kubectl get issuer -n <mesh-namespace>
 # Or if using a ClusterIssuer:
 kubectl get clusterissuer
+
+# Cacerts ManifestWork applied to the spoke?
+kubectl get manifestwork -n <cluster-name> multicluster-mesh-cacerts-<mesh-namespace>.<mesh-name> -o yaml
 ```
 
 Common causes:
 - cert-manager not installed or not running on the hub.
 - The `Issuer` (or `ClusterIssuer`) referenced in `spec.security.trust.certManager.issuerRef` doesn't exist or isn't ready.
 - cert-manager failed to issue the certificate (check cert-manager controller logs for details).
+- The cacerts ManifestWork exists but hasn't been applied on the spoke (e.g., the control plane namespace doesn't exist on the spoke cluster).
 
 ### Mesh shows OperatorConfigConflict
 
