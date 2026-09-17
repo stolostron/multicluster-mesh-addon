@@ -1,23 +1,28 @@
 #!/usr/bin/env bash
-# Provisions and manages a local 3-cluster Kind/OCM development environment.
+# Provisions and manages a local Kind/OCM development environment.
 # This file is invoked by Makefile targets with an action argument.
 #
 # Usage: hack/dev-env.sh <action> [args...]
 # Actions: check-host, create-cluster <name>, install-olm <name>, install-cert-manager,
-#          install-managed-serviceaccount, init-ocm, join-clusters, setup-mesh,
-#          setup-test-issuer
+#          install-managed-serviceaccount, init-ocm, join-clusters, create-clusterset,
+#          setup-mesh, setup-test-issuer
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 HUB="hub"
-CLUSTER1="cluster1"
-CLUSTER2="cluster2"
+read -r -a SPOKE_CLUSTERS <<< "${SPOKE_CLUSTERS:-cluster1 cluster2}"
+declare -A SPOKE_CLUSTER_INDEX=()
+for index in "${!SPOKE_CLUSTERS[@]}"; do
+    SPOKE_CLUSTER_INDEX["${SPOKE_CLUSTERS[${index}]}"]="${index}"
+done
 
 log() { echo "==> $*"; }
 warn() { echo "WARNING: $*" >&2; }
 err() { echo "ERROR: $*" >&2; exit 1; }
+
+[[ ${#SPOKE_CLUSTERS[@]} -gt 0 ]] || err "SPOKE_CLUSTERS must contain at least one cluster"
 
 retry() {
     local attempts=3 delay=2 attempt=1
@@ -92,6 +97,19 @@ on() {
     "$@" --kubeconfig="${DEV_KUBE_DIR}/${cluster}.config"
 }
 
+require_clusters() {
+    for cluster in "$@"; do
+        if [[ ! -f "${DEV_KUBE_DIR}/${cluster}.config" ]]; then
+            err "Kubeconfig not found for ${cluster}. Run 'make create-clusters' first."
+        fi
+    done
+}
+
+join_by_comma() {
+    local IFS=,
+    printf '%s' "$*"
+}
+
 check_host() {
     check_inotify_limits
     check_kernel_keyring_limits
@@ -127,42 +145,46 @@ install_olm() {
     local cluster="${1}"
     local olm_base_url="https://github.com/operator-framework/operator-lifecycle-manager/releases/download/${OLM_VERSION}"
 
-    if on "${cluster}" kubectl get deployment olm-operator -n olm &>/dev/null; then
-        log "OLM already installed on ${cluster}, skipping"
-        return
+    if on "${cluster}" kubectl get deployment olm-operator -n olm &>/dev/null &&
+        on "${cluster}" kubectl get deployment catalog-operator -n olm &>/dev/null; then
+        log "OLM already installed on ${cluster}"
+    else
+        log "Installing OLM ${OLM_VERSION} on ${cluster}..."
+
+        on "${cluster}" kubectl apply --server-side -f "${olm_base_url}/crds.yaml"
+        on "${cluster}" retry kubectl wait --for=condition=Established \
+            crd/catalogsources.operators.coreos.com \
+            crd/subscriptions.operators.coreos.com \
+            --timeout=60s
+
+        log "Applying OLM components on ${cluster}..."
+        on "${cluster}" kubectl apply -f "${olm_base_url}/olm.yaml"
     fi
 
-    log "Installing OLM ${OLM_VERSION} on ${cluster}..."
-
-    on "${cluster}" kubectl apply --server-side -f "${olm_base_url}/crds.yaml"
-    on "${cluster}" retry kubectl wait --for=condition=Established \
-        crd/catalogsources.operators.coreos.com \
-        crd/subscriptions.operators.coreos.com \
-        --timeout=60s
-
-    log "Applying OLM components on ${cluster}..."
-    on "${cluster}" kubectl apply -f "${olm_base_url}/olm.yaml"
-
     log "Waiting for OLM components to be ready on ${cluster}..."
-    on "${cluster}" kubectl rollout status deployment/olm-operator -n olm --timeout=180s
-    on "${cluster}" kubectl rollout status deployment/catalog-operator -n olm --timeout=180s
+    on "${cluster}" kubectl wait --for=condition=Available \
+        deployment/olm-operator deployment/catalog-operator \
+        -n olm --timeout=10m
 
     log "OLM ${OLM_VERSION} installed on ${cluster}"
 }
 
 install_cert_manager() {
-    if on "${HUB}" kubectl get deployment cert-manager -n cert-manager &>/dev/null; then
-        log "cert-manager already installed on hub, skipping"
-        return
+    require_clusters "${HUB}"
+    if on "${HUB}" kubectl get deployment cert-manager -n cert-manager &>/dev/null &&
+        on "${HUB}" kubectl get deployment cert-manager-cainjector -n cert-manager &>/dev/null &&
+        on "${HUB}" kubectl get deployment cert-manager-webhook -n cert-manager &>/dev/null; then
+        log "cert-manager already installed on hub"
+    else
+        log "Installing cert-manager ${CERT_MANAGER_VERSION} on hub..."
+        on "${HUB}" kubectl apply -f \
+            "https://github.com/cert-manager/cert-manager/releases/download/${CERT_MANAGER_VERSION}/cert-manager.yaml"
     fi
 
-    log "Installing cert-manager ${CERT_MANAGER_VERSION} on hub..."
-    on "${HUB}" kubectl apply -f \
-        "https://github.com/cert-manager/cert-manager/releases/download/${CERT_MANAGER_VERSION}/cert-manager.yaml"
-
     log "Waiting for cert-manager to be ready..."
-    on "${HUB}" kubectl rollout status deployment/cert-manager -n cert-manager --timeout=120s
-    on "${HUB}" kubectl rollout status deployment/cert-manager-webhook -n cert-manager --timeout=120s
+    on "${HUB}" kubectl wait --for=condition=Available \
+        deployment/cert-manager deployment/cert-manager-cainjector deployment/cert-manager-webhook \
+        -n cert-manager --timeout=10m
 
     log "cert-manager ${CERT_MANAGER_VERSION} installed on hub"
 }
@@ -174,8 +196,8 @@ setup_test_issuer() {
     fi
 
     log "Waiting for cert-manager-cainjector to be ready..."
-    on "${HUB}" kubectl rollout status deployment/cert-manager-cainjector \
-        -n cert-manager --timeout=120s
+    on "${HUB}" kubectl wait --for=condition=Available deployment/cert-manager-cainjector \
+        -n cert-manager --timeout=10m
 
     log "Creating test ClusterIssuer trust chain"
     on "${HUB}" kubectl apply -f "${SCRIPT_DIR}/hack/kind/cert-manager-test-issuer.yaml"
@@ -200,11 +222,12 @@ init_ocm() {
     on "${HUB}" "${CLUSTERADM}" init --feature-gates=ManifestWorkReplicaSet=true --wait
 
     log "Waiting for OCM hub components to be ready..."
-    on "${HUB}" retry kubectl wait --for=condition=Available \
-        deployment/cluster-manager -n open-cluster-management --timeout=120s
+    on "${HUB}" kubectl wait --for=condition=Available \
+        deployment/cluster-manager -n open-cluster-management --timeout=10m
 }
 
 join_clusters() {
+    require_clusters "${HUB}" "${SPOKE_CLUSTERS[@]}"
     log "Retrieving hub token..."
     local token_json hub_token hub_apiserver
     token_json="$(on "${HUB}" "${CLUSTERADM}" get token -o json)"
@@ -215,7 +238,7 @@ join_clusters() {
         err "Failed to extract hub token/apiserver from 'clusteradm get token'"
     fi
 
-    for cluster in "${CLUSTER1}" "${CLUSTER2}"; do
+    for cluster in "${SPOKE_CLUSTERS[@]}"; do
         if on "${HUB}" kubectl get managedcluster "${cluster}" &>/dev/null; then
             log "ManagedCluster ${cluster} already exists on hub, skipping join"
             continue
@@ -226,18 +249,17 @@ join_clusters() {
             --hub-token "${hub_token}" \
             --hub-apiserver "${hub_apiserver}" \
             --cluster-name "${cluster}" \
-            --force-internal-endpoint-lookup \
-            --wait
+            --force-internal-endpoint-lookup
     done
 
     log "Accepting managed clusters on hub..."
     on "${HUB}" "${CLUSTERADM}" accept \
-        --clusters="${CLUSTER1},${CLUSTER2}" \
+        --clusters="$(join_by_comma "${SPOKE_CLUSTERS[@]}")" \
         --skip-approve-check \
         --wait
 
     log "Waiting for ManagedCluster conditions..."
-    for cluster in "${CLUSTER1}" "${CLUSTER2}"; do
+    for cluster in "${SPOKE_CLUSTERS[@]}"; do
         on "${HUB}" retry kubectl wait managedcluster/"${cluster}" \
             --for=condition=HubAcceptedManagedCluster=True \
             --timeout=120s
@@ -250,9 +272,19 @@ join_clusters() {
         log "Cluster ${cluster} joined, accepted, and available"
     done
 
+}
+
+create_clusterset() {
+    require_clusters "${HUB}" "${SPOKE_CLUSTERS[@]}"
+
+    if on "${HUB}" kubectl get managedclusterset mesh-cluster-set &>/dev/null; then
+        log "ManagedClusterSet mesh-cluster-set already exists, skipping creation"
+        return
+    fi
+
     log "Creating ManagedClusterSet: mesh-cluster-set"
     on "${HUB}" "${CLUSTERADM}" create clusterset mesh-cluster-set
-    on "${HUB}" "${CLUSTERADM}" clusterset set mesh-cluster-set --clusters "${CLUSTER1},${CLUSTER2}"
+    on "${HUB}" "${CLUSTERADM}" clusterset set mesh-cluster-set --clusters "$(join_by_comma "${SPOKE_CLUSTERS[@]}")"
 
     log "OCM topology ready"
     on "${HUB}" kubectl get managedclusters
@@ -260,23 +292,28 @@ join_clusters() {
 }
 
 install_managed_serviceaccount() {
+    require_clusters "${HUB}" "${SPOKE_CLUSTERS[@]}"
     if on "${HUB}" kubectl get deployment managed-serviceaccount-addon-manager -n open-cluster-management-addon &>/dev/null; then
-        log "managed-serviceaccount addon already installed on hub, skipping"
-        return
+        log "managed-serviceaccount addon already installed on hub"
+    else
+        log "Installing managed-serviceaccount addon on hub..."
+        ${HELM} repo add ocm "https://open-cluster-management.io/helm-charts/"
+        on "${HUB}" "${HELM}" upgrade --install managed-serviceaccount ocm/managed-serviceaccount \
+            --version "${MSA_VERSION}" \
+            --create-namespace \
+            --namespace open-cluster-management-addon \
+            --wait --timeout 10m
     fi
 
-    log "Installing managed-serviceaccount addon on hub..."
-    ${HELM} repo add ocm "https://open-cluster-management.io/helm-charts/"
-    on "${HUB}" ${HELM} upgrade --install managed-serviceaccount ocm/managed-serviceaccount \
-        --version "${MSA_VERSION}" \
-        --create-namespace \
-        --namespace open-cluster-management-addon \
-        --wait --timeout 180s
+    log "Waiting for managed-serviceaccount addon manager to be ready..."
+    on "${HUB}" kubectl wait --for=condition=Available \
+        deployment/managed-serviceaccount-addon-manager \
+        -n open-cluster-management-addon --timeout=10m
 
-    log "Waiting for managed-serviceaccount addon to be ready..."
-    for cluster in "${CLUSTER1}" "${CLUSTER2}"; do
-        on "${HUB}" retry kubectl wait managedclusteraddon/managed-serviceaccount \
-            -n "${cluster}" --for=condition=Available --timeout=60s
+    log "Waiting for managed-serviceaccount addon on spokes..."
+    for cluster in "${SPOKE_CLUSTERS[@]}"; do
+        on "${HUB}" kubectl wait managedclusteraddon/managed-serviceaccount \
+            -n "${cluster}" --for=condition=Available --timeout=10m
     done
 
     log "managed-serviceaccount addon installed on hub"
@@ -315,12 +352,7 @@ install_metallb() {
     local base_prefix
     base_prefix="$(echo "${kind_subnet}" | cut -d'/' -f1 | cut -d'.' -f1-3)"
 
-    local idx
-    case "${cluster}" in
-        "${CLUSTER1}") idx=0 ;;
-        "${CLUSTER2}") idx=1 ;;
-        *) err "Unknown cluster for MetalLB IP assignment: ${cluster}" ;;
-    esac
+    local idx="${SPOKE_CLUSTER_INDEX[${cluster}]}"
     local range_start="${base_prefix}.$((200 + idx * 10 + 1))"
     local range_end="${base_prefix}.$((200 + idx * 10 + 10))"
 
@@ -403,10 +435,11 @@ case "${ACTION}" in
     install-managed-serviceaccount)  install_managed_serviceaccount ;;
     init-ocm)                        init_ocm ;;
     join-clusters)                   join_clusters ;;
+    create-clusterset)               create_clusterset ;;
     setup-mesh)                      setup_mesh ;;
     install-metallb)                 install_metallb "${2}" ;;
     install-gateway-api)             install_gateway_api "${2}" ;;
     setup-test-issuer)               setup_test_issuer ;;
     *)
-        err "Unknown action: '${ACTION}'. Valid: check-host, create-cluster, install-olm, install-cert-manager, install-managed-serviceaccount, init-ocm, join-clusters, setup-mesh, install-metallb, install-gateway-api, setup-test-issuer" ;;
+        err "Unknown action: '${ACTION}'. Valid: check-host, create-cluster, install-olm, install-cert-manager, install-managed-serviceaccount, init-ocm, join-clusters, create-clusterset, setup-mesh, install-metallb, install-gateway-api, setup-test-issuer" ;;
 esac
