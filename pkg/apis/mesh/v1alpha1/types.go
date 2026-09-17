@@ -33,6 +33,11 @@ func (m *MultiClusterMesh) GetTrustDomain() string {
 	return m.Name
 }
 
+// HasTrustConfigured returns true if trust distribution is configured.
+func (m *MultiClusterMesh) HasTrustConfigured() bool {
+	return m.Spec.Security.Trust.CertManager.IssuerRef.Name != ""
+}
+
 // GetControlPlaneNamespace returns the control plane namespace, defaulting to "istio-system".
 func (m *MultiClusterMesh) GetControlPlaneNamespace() string {
 	if m.Spec.ControlPlane.Namespace == "" {
@@ -62,6 +67,16 @@ func (m *MultiClusterMesh) SetClusterCondition(clusterName string, conditionType
 		ObservedGeneration: m.Generation,
 		Message:            fmt.Sprintf(messageFmt, args...),
 	})
+}
+
+// RemoveClusterCondition removes a condition from a cluster's status, if present.
+func (m *MultiClusterMesh) RemoveClusterCondition(clusterName string, conditionType string) {
+	for i := range m.Status.ClusterStatus {
+		if m.Status.ClusterStatus[i].ClusterName == clusterName {
+			meta.RemoveStatusCondition(&m.Status.ClusterStatus[i].Conditions, conditionType)
+			return
+		}
+	}
 }
 
 func (m *MultiClusterMesh) getOrCreateClusterStatus(clusterName string) *ClusterMeshStatus {
@@ -207,6 +222,12 @@ const (
 	// ConditionOperatorInstalled indicates whether the operator is installed on a cluster
 	ConditionOperatorInstalled = "OperatorInstalled"
 
+	// ConditionTrustDistributed indicates whether trust has been distributed to a cluster
+	ConditionTrustDistributed = "TrustDistributed"
+
+	// ConditionDiscoveryConfigured indicates whether endpoint discovery is configured on a cluster
+	ConditionDiscoveryConfigured = "DiscoveryConfigured"
+
 	// ReasonAllClustersReady indicates all clusters have confirmed operator installation
 	ReasonAllClustersReady = "AllClustersReady"
 
@@ -218,6 +239,21 @@ const (
 
 	// ReasonOperatorInstalled indicates the operator CSV has been successfully installed
 	ReasonOperatorInstalled = "Installed"
+
+	// ReasonDistributionPending indicates trust distribution is in progress
+	ReasonDistributionPending = "DistributionPending"
+
+	// ReasonConfigured indicates endpoint discovery is fully configured
+	ReasonConfigured = "Configured"
+
+	// ReasonConfigurationPending indicates endpoint discovery configuration is in progress
+	ReasonConfigurationPending = "ConfigurationPending"
+
+	// ReasonNoAPIEndpoint indicates the cluster has no API endpoint configured
+	ReasonNoAPIEndpoint = "NoAPIEndpoint"
+
+	// ReasonDistributed indicates trust has been distributed to the cluster
+	ReasonDistributed = "Distributed"
 
 	// ReasonReconcileError indicates an error occurred during reconciliation
 	ReasonReconcileError = "ReconcileError"

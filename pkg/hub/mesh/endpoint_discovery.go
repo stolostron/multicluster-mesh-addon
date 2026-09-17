@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	_ "embed"
+	"encoding/json"
 	"fmt"
 	"maps"
 
@@ -12,6 +13,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/tools/clientcmd"
@@ -56,6 +58,11 @@ func EndpointDiscoveryName(mesh *meshv1alpha1.MultiClusterMesh) string {
 // IstioReaderName is the name for RBAC granting the "endpoint discovery" identity read access.
 func IstioReaderName(mesh *meshv1alpha1.MultiClusterMesh) string {
 	return fmt.Sprintf("istio-reader-%s.%s", mesh.Namespace, mesh.Name)
+}
+
+// RemoteSecretName returns the name of the Istio remote discovery secret for a cluster.
+func RemoteSecretName(clusterName string) string {
+	return "istio-remote-secret-" + clusterName
 }
 
 // IstioReaderManifestWorkName is the addon-prefixed name of the ManifestWork that delivers the istio-reader RBAC to a spoke.
@@ -254,7 +261,7 @@ func buildIstioRemoteSecret(tokenSecret *corev1.Secret, clusterName, server, nam
 	return &corev1.Secret{
 		TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "Secret"},
 		ObjectMeta: metav1.ObjectMeta{
-			Name:        "istio-remote-secret-" + clusterName,
+			Name:        RemoteSecretName(clusterName),
 			Namespace:   namespace,
 			Annotations: map[string]string{"networking.istio.io/cluster": clusterName},
 			Labels:      map[string]string{"istio/multiCluster": "true"},
@@ -279,4 +286,39 @@ func buildIstioReaderManifestWork(mesh *meshv1alpha1.MultiClusterMesh, cluster *
 	}}
 
 	return buildMeshOwnedManifestWork(mesh, cluster.Name, IstioReaderManifestWorkName(mesh), cr, crb)
+}
+
+func (r *Reconciler) updateDiscoveryStatusCondition(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, cluster *clusterv1.ManagedCluster, mwrset *workv1alpha1.ManifestWorkReplicaSet) (ready bool, err error) {
+	if len(cluster.Spec.ManagedClusterClientConfigs) == 0 {
+		mesh.SetClusterCondition(cluster.Name, meshv1alpha1.ConditionDiscoveryConfigured, metav1.ConditionFalse,
+			meshv1alpha1.ReasonNoAPIEndpoint, "Cluster has no API endpoint configured")
+		return false, nil
+	}
+
+	rbacWork := &workv1.ManifestWork{}
+	if err := r.Get(ctx, key.Of(IstioReaderManifestWorkName(mesh), cluster.Name), rbacWork); client.IgnoreNotFound(err) != nil {
+		return false, fmt.Errorf("failed to get istio-reader ManifestWork for cluster %s: %w", cluster.Name, err)
+	}
+
+	if !meta.IsStatusConditionTrue(rbacWork.Status.Conditions, workv1.WorkApplied) ||
+		!mwrsContainsClusterSecret(mwrset, cluster.Name) ||
+		!meta.IsStatusConditionTrue(mwrset.Status.Conditions, workv1alpha1.ManifestWorkReplicaSetConditionManifestworkApplied) {
+		mesh.SetClusterCondition(cluster.Name, meshv1alpha1.ConditionDiscoveryConfigured, metav1.ConditionFalse,
+			meshv1alpha1.ReasonConfigurationPending, "Discovery configuration pending")
+		return false, nil
+	}
+
+	mesh.SetClusterCondition(cluster.Name, meshv1alpha1.ConditionDiscoveryConfigured, metav1.ConditionTrue,
+		meshv1alpha1.ReasonConfigured, "Discovery configured")
+	return true, nil
+}
+
+func mwrsContainsClusterSecret(mwrset *workv1alpha1.ManifestWorkReplicaSet, clusterName string) bool {
+	for _, manifest := range mwrset.Spec.ManifestWorkTemplate.Workload.Manifests {
+		secret := &corev1.Secret{}
+		if err := json.Unmarshal(manifest.Raw, secret); err == nil && secret.Name == RemoteSecretName(clusterName) {
+			return true
+		}
+	}
+	return false
 }

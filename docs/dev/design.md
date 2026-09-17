@@ -250,6 +250,17 @@ All clusters in a mesh share the same trust domain, so workloads can authenticat
 
 Certificate rotation is handled automatically by cert-manager. Updated certificates are propagated to clusters when they change.
 
+### Trust Status
+
+When trust is configured (`spec.security.trust`), the controller reports a per-cluster `TrustDistributed` condition that tracks the progress of trust distribution:
+
+| Status | Reason | When |
+|---|---|---|
+| False | `DistributionPending` | Trust has not yet been distributed to the cluster |
+| True | `Distributed` | Trust has been distributed to the cluster |
+
+When trust is not configured, the `TrustDistributed` condition is omitted entirely.
+
 ## Endpoint Discovery
 
 For multi-primary mesh topologies, each control plane needs API access to its peers. The add-on automates this using [ManagedServiceAccount]:
@@ -260,6 +271,18 @@ For multi-primary mesh topologies, each control plane needs API access to its pe
 4. Distributes remote secrets to all peer clusters in the mesh
 5. Token rotation is handled automatically by the OCM platform
 6. When a cluster is removed from the mesh, its MSA is deleted and its remote secrets are removed from all peers
+
+### Discovery Status
+
+The controller reports a per-cluster `DiscoveryConfigured` condition that tracks the progress of endpoint discovery configuration:
+
+| Status | Reason | When |
+|---|---|---|
+| False | `NoAPIEndpoint` | Cluster has no API endpoint configured |
+| False | `ConfigurationPending` | Discovery infrastructure is being set up |
+| True | `Configured` | Discovery is fully configured for the cluster |
+
+The condition checks four components in order: the cluster has an API endpoint, the ManagedServiceAccount has a token, the istio-reader RBAC ManifestWork is applied, and the cluster's remote secret is present and distributed.
 
 ## Lifecycle Events
 
