@@ -11,6 +11,7 @@ You bring the clusters and configure Istio; the addon handles the rest.
 
 - [Quick Start](#quick-start) - Get up and running in minutes
 - [Architecture](docs/architecture.md) - How the addon works
+- [Multi-Tenancy Guide](docs/multi-tenancy.md) - Running multiple meshes on the same ClusterSet
 - [User Guide](docs/user-guide.md) - Detailed setup walkthrough with explanations
 - [API Reference](docs/api-reference.md) - `MultiClusterMesh` CRD fields and examples
 - [Troubleshooting](docs/troubleshooting.md) - Common issues and resolutions
