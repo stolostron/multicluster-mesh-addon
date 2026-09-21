@@ -116,7 +116,7 @@ vet: ## Run go vet
 	go vet ./...
 
 .PHONY: verify
-verify: verify-gofmt verify-modules verify-gen vet verify-istio-reader-rbac ## Run all checks (may regenerate files)
+verify: verify-gofmt verify-modules verify-gen vet verify-istio-reader-rbac verify-demo ## Run all checks (may regenerate files)
 
 .PHONY: verify-gofmt
 verify-gofmt: ## Verify code is formatted correctly
@@ -127,6 +127,12 @@ verify-gofmt: ## Verify code is formatted correctly
 verify-modules: ## Verify go modules are up to date
 	@echo "Verifying go modules..."
 	@go mod tidy -diff || (echo "ERROR: go.mod/go.sum are out of date. Run 'go mod tidy'" && exit 1)
+
+.PHONY: verify-demo
+verify-demo: ## Verify demo script syntax
+	@echo "Verifying demo script syntax..."
+	@bash -n $(DEMO_SCRIPT)
+	@bash -n $(DEV_ENV_SCRIPT)
 
 .PHONY: verify-istio-reader-rbac
 verify-istio-reader-rbac: ## Verify istio-reader ClusterRole/ClusterRoleBinding match upstream Istio (requires network; set ISTIO_READER_SKIP=1 to skip)
@@ -344,6 +350,12 @@ demo-dev-clean: ## Destroy the local 3-spoke demo environment
 .PHONY: demo
 demo: $(CLUSTERADM) $(HELM_BIN) $(ISTIOCTL_BIN)
 demo: ## Run the interactive OpenShift ACM and OSSM demo
+	@if [ -z "$(DEMO_KUBECONFIG)" ]; then \
+		echo "ERROR: DEMO_KUBECONFIG is required (hub:spoke1:spoke2:spoke3 kubeconfig paths)"; exit 1; \
+	fi
+	@if [ $$(echo $(SPOKE_CLUSTERS) | wc -w) -ne 3 ]; then \
+		echo "ERROR: SPOKE_CLUSTERS must contain exactly three cluster names (got: $(SPOKE_CLUSTERS))"; exit 1; \
+	fi
 	@$(DEMO_SCRIPT)
 
 .PHONY: demo-sail

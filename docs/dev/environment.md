@@ -54,9 +54,9 @@ make deploy
 
 This builds the container image, pushes it to the registry, and installs the controller via Helm.
 
-To run the interactive OpenShift demo, pass one colon-separated `DEMO_KUBECONFIG` value.
-The kubeconfig files must be ordered as hub, first spoke, second spoke, and third spoke.
-Use the existing `SPOKE_CLUSTERS` Make variable for the three ACM managed-cluster names:
+To run the interactive OpenShift demo, both `DEMO_KUBECONFIG` and `SPOKE_CLUSTERS` are required.
+`DEMO_KUBECONFIG` is a colon-separated list of four kubeconfig file paths ordered as hub, first spoke, second spoke, and third spoke.
+`SPOKE_CLUSTERS` is a space-separated list of exactly three ACM managed-cluster names matching the spoke kubeconfigs:
 
 ```bash
 make demo \
@@ -65,6 +65,7 @@ make demo \
 ```
 
 The demo checks that all four kubeconfig files exist and are readable before it starts.
+The three managed clusters must not already belong to another ManagedClusterSet (the demo creates one interactively).
 Use `DEMO_DRY_RUN=1` to print the demo flow without changing the clusters.
 
 To use a different registry or tag:

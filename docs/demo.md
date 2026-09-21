@@ -460,6 +460,14 @@ kubectl --context "$SPOKE_C_CONTEXT" wait \
   -n istio-system --timeout=15m
 ~~~
 
+Verify that all three control planes can see each other:
+
+~~~bash
+istioctl remote-clusters --context "$SPOKE_A_CONTEXT"
+istioctl remote-clusters --context "$SPOKE_B_CONTEXT"
+istioctl remote-clusters --context "$SPOKE_C_CONTEXT"
+~~~
+
 ### 8.3. Deploy Bookinfo v3 and verify traffic
 
 Deploy Bookinfo v3 on cluster3. Keep the same service names so the three reviews versions form one multi-cluster service:
@@ -495,6 +503,19 @@ done
 ~~~
 
 Expected output now includes reviews-v1, reviews-v2, and reviews-v3, showing traffic across all three mesh members.
+
+To see the Bookinfo productpage in a browser, expose it through an OpenShift Route:
+
+~~~bash
+kubectl --context "$SPOKE_A_CONTEXT" create route edge productpage \
+  --service=productpage --port=9080 -n bookinfo
+kubectl --context "$SPOKE_A_CONTEXT" get route productpage \
+  -n bookinfo -o jsonpath='https://{.spec.host}/productpage{"\n"}'
+~~~
+
+Open the printed URL and refresh a few times.
+Reviews with no stars come from v1, black stars from v2, and red stars from v3.
+The version that appears changes because Istio load-balances the reviews service across all three clusters.
 
 ## 9. Open the Fleet Service Mesh console plugin
 
@@ -532,9 +553,12 @@ kubectl --context "$HUB_CONTEXT" get ossmconsole -A
 kubectl --context "$HUB_CONTEXT" get consoleplugin ossmconsole
 ~~~
 
-Refresh the OpenShift Console on the ACM hub.
-Open the perspective switcher and select Fleet Service Mesh.
-Use the Meshes page to open the managed mesh and show the ClusterSet, trust issuer, per-cluster operator status, and control planes.
+Refresh the OpenShift Console on the ACM hub and navigate to the Fleet Service Mesh perspective:
+
+1. Click the perspective switcher (top-left) and select **Fleet Service Mesh**.
+2. Open the **Meshes** page. The managed mesh should appear with its ClusterSet, trust issuer, and member clusters.
+3. Click the mesh name to see per-cluster operator status and control plane details.
+4. Expand individual cluster entries to confirm the operator is installed and healthy on all three members.
 
 Fleet Service Mesh is a developer preview.
 It is an inventory and status view.
@@ -560,7 +584,13 @@ kubectl --context "$HUB_CONTEXT" delete \
 kubectl --context "$HUB_CONTEXT" delete namespace "$MESH_NAMESPACE"
 ~~~
 
-Remove the Bookinfo namespace and any demo-only Istio configuration separately if the mesh resource has already been deleted.
+Remove the Bookinfo namespace from each spoke:
+
+~~~bash
+for CONTEXT in "$SPOKE_A_CONTEXT" "$SPOKE_B_CONTEXT" "$SPOKE_C_CONTEXT"; do
+  kubectl --context "$CONTEXT" delete namespace bookinfo --ignore-not-found
+done
+~~~
 
 ## References
 
