@@ -130,7 +130,7 @@ The east-west gateway sample uses [Gateway API].
 On OCP 4.19+ the CRDs ship by default, while on [kind] or vanilla K8s clusters they need to be installed:
 
 ```bash
-kubectl apply --server-side -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.5.1/experimental-install.yaml
+kubectl apply --server-side -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.2.1/standard-install.yaml
 ```
 
 Notes:

@@ -12,6 +12,7 @@ You bring the clusters and configure Istio; the addon handles the rest.
 - [Quick Start](#quick-start) - Get up and running in minutes
 - [Architecture](docs/architecture.md) - How the addon works
 - [User Guide](docs/user-guide.md) - Detailed setup walkthrough with explanations
+- [OCP ACM and OSSM Demo](docs/demo.md) - Manual customer demo walkthrough
 - [API Reference](docs/api-reference.md) - `MultiClusterMesh` CRD fields and examples
 - [Troubleshooting](docs/troubleshooting.md) - Common issues and resolutions
 - [Fleet Service Mesh (Dev Preview)][fleet-mesh] - Multi-cluster mesh observability

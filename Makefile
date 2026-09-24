@@ -57,7 +57,6 @@ $(HELM_BIN): $(BIN_DIR)
 		chmod +x $(HELM_BIN); \
 		rm -rf $$tmp_dir; \
 	fi
-
 # Image registry and name
 # TODO: Change HUB back to quay.io/stolostron when we have access to that registry
 HUB ?= quay.io/sail-dev
@@ -117,7 +116,7 @@ vet: ## Run go vet
 	go vet ./...
 
 .PHONY: verify
-verify: verify-gofmt verify-modules verify-gen vet verify-istio-reader-rbac ## Run all checks (may regenerate files)
+verify: verify-gofmt verify-modules verify-gen vet verify-istio-reader-rbac verify-demo ## Run all checks (may regenerate files)
 
 .PHONY: verify-gofmt
 verify-gofmt: ## Verify code is formatted correctly
@@ -128,6 +127,12 @@ verify-gofmt: ## Verify code is formatted correctly
 verify-modules: ## Verify go modules are up to date
 	@echo "Verifying go modules..."
 	@go mod tidy -diff || (echo "ERROR: go.mod/go.sum are out of date. Run 'go mod tidy'" && exit 1)
+
+.PHONY: verify-demo
+verify-demo: ## Verify demo script syntax
+	@echo "Verifying demo script syntax..."
+	@bash -n $(DEMO_SCRIPT)
+	@bash -n $(DEV_ENV_SCRIPT)
 
 .PHONY: verify-istio-reader-rbac
 verify-istio-reader-rbac: ## Verify istio-reader ClusterRole/ClusterRoleBinding match upstream Istio (requires network; set ISTIO_READER_SKIP=1 to skip)
@@ -286,10 +291,18 @@ $(CLUSTERADM): | $(BIN_DIR)
 	fi
 
 DEV_ENV_SCRIPT := $(CURDIR)/hack/dev-env.sh
+DEMO_SCRIPT := $(CURDIR)/hack/demo.sh
+DEMO_DRY_RUN ?= 0
+DEMO_KUBECONFIG ?=
+ISTIO_VERSION ?= 1.30.4
+ISTIOCTL_BIN := $(BIN_DIR)/istioctl
+ISTIOCTL ?= $(shell which istioctl 2>/dev/null || echo $(ISTIOCTL_BIN))
 
 export DEV_KUBE_DIR K8S_VERSION OLM_VERSION CERT_MANAGER_VERSION MSA_VERSION
 export METALLB_VERSION GATEWAY_API_VERSION
-export KIND CLUSTERADM HELM CONTAINER_ENGINE
+export KIND CLUSTERADM HELM ISTIOCTL CONTAINER_ENGINE
+export SPOKE_CLUSTERS
+export DEMO_DRY_RUN DEMO_KUBECONFIG ISTIO_VERSION
 
 # PARALLEL controls concurrent job count for dev-env/dev-clean (default: half of CPU cores).
 # Set PARALLEL=1 or PARALLEL=0 to run sequentially.
@@ -300,14 +313,61 @@ endif
 
 log = @echo "==> $(1)"
 
-.PHONY: dev-env
-dev-env: ## Provision full dev environment (Kind + OCM + addon)
+$(ISTIOCTL_BIN): $(BIN_DIR)
+	@if test -x $(ISTIOCTL_BIN) && $(ISTIOCTL_BIN) version --remote=false 2>/dev/null | grep -q $(ISTIO_VERSION); then \
+		echo "istioctl $(ISTIO_VERSION) already installed"; \
+	else \
+		echo "Installing istioctl $(ISTIO_VERSION)..."; \
+		tmp_dir=$$(mktemp -d); \
+		curl -sSL https://github.com/istio/istio/releases/download/$(ISTIO_VERSION)/istio-$(ISTIO_VERSION)-$(OS)-$(ARCH).tar.gz -o $$tmp_dir/istio.tar.gz; \
+		tar xzf $$tmp_dir/istio.tar.gz -C $$tmp_dir; \
+		mv $$tmp_dir/istio-$(ISTIO_VERSION)/bin/istioctl $(ISTIOCTL_BIN); \
+		chmod +x $(ISTIOCTL_BIN); \
+		rm -rf $$tmp_dir; \
+	fi
+
+.PHONY: dev-env-base
+dev-env-base:
 	$(DEV_ENV_SCRIPT) check-host
-	$(MAKE) --no-print-directory -j$(PARALLEL) --output-sync=line install-olm install-cert-manager setup-test-issuer install-managed-serviceaccount deploy-addon
+	$(MAKE) --no-print-directory -j$(PARALLEL) --output-sync=line install-olm install-cert-manager setup-test-issuer install-managed-serviceaccount
+
+.PHONY: dev-env
+dev-env: dev-env-base ## Provision full dev environment (Kind + OCM + addon)
+	$(MAKE) --no-print-directory deploy-addon create-clusterset
 	$(call log,Dev environment ready. Use KUBECONFIG=$(HUB_KUBECONFIG) to interact with the hub.)
 
+.PHONY: demo-dev-env
+demo-dev-env: ## Provision the local demo environment (Kind + OCM + 3 spokes + addon image)
+	$(MAKE) --no-print-directory \
+		SPOKE_CLUSTERS="cluster1 cluster2 cluster3" \
+		dev-env-base load-addon-image install-metallb
+	$(call log,Demo environment ready. Run 'make demo-sail' to start the local Sail demo.)
+
+.PHONY: demo-dev-clean
+demo-dev-clean: ## Destroy the local 3-spoke demo environment
+	$(MAKE) --no-print-directory SPOKE_CLUSTERS="cluster1 cluster2 cluster3" dev-clean
+
+.PHONY: demo
+demo: $(CLUSTERADM) $(HELM_BIN) $(ISTIOCTL_BIN)
+demo: ## Run the interactive OpenShift ACM and OSSM demo
+	@if [ -z "$(DEMO_KUBECONFIG)" ]; then \
+		echo "ERROR: DEMO_KUBECONFIG is required (hub:spoke1:spoke2:spoke3 kubeconfig paths)"; exit 1; \
+	fi
+	@if [ $$(echo $(SPOKE_CLUSTERS) | wc -w) -ne 3 ]; then \
+		echo "ERROR: SPOKE_CLUSTERS must contain exactly three cluster names (got: $(SPOKE_CLUSTERS))"; exit 1; \
+	fi
+	@$(DEMO_SCRIPT)
+
+.PHONY: demo-sail
+demo-sail: $(CLUSTERADM) $(HELM_BIN) $(ISTIOCTL_BIN)
+demo-sail: export PLATFORM=kind
+demo-sail: export SPOKE_CLUSTERS=cluster1 cluster2 cluster3
+demo-sail: export DEMO_KUBECONFIG=.kube/hub.config:.kube/cluster1.config:.kube/cluster2.config:.kube/cluster3.config
+demo-sail: ## Run the interactive local Sail demo (requires demo-dev-env to be up)
+	@$(DEMO_SCRIPT)
+
 .PHONY: create-clusters
-create-clusters: $(addprefix create-,$(CLUSTERS)) ## Create 3 Kind clusters (hub, cluster1, cluster2)
+create-clusters: $(addprefix create-,$(CLUSTERS)) ## Create the configured Kind clusters
 
 .PHONY: $(addprefix create-,$(CLUSTERS))
 $(addprefix create-,$(CLUSTERS)): create-%: $(KIND)
@@ -315,7 +375,7 @@ $(addprefix create-,$(CLUSTERS)): create-%: $(KIND)
 	$(DEV_ENV_SCRIPT) create-cluster $*
 
 .PHONY: install-olm
-install-olm: $(addprefix install-olm-,$(SPOKE_CLUSTERS)) ## Install OLM on managed clusters (cluster1, cluster2)
+install-olm: $(addprefix install-olm-,$(SPOKE_CLUSTERS)) ## Install OLM on the configured managed clusters
 
 .PHONY: $(addprefix install-olm-,$(SPOKE_CLUSTERS))
 $(addprefix install-olm-,$(SPOKE_CLUSTERS)): install-olm-%: create-%
@@ -338,9 +398,14 @@ init-ocm: $(CLUSTERADM) create-hub ## Initialize hub as OCM control plane
 	$(DEV_ENV_SCRIPT) init-ocm
 
 .PHONY: join-clusters
-join-clusters: $(CLUSTERADM) init-ocm $(addprefix create-,$(SPOKE_CLUSTERS)) ## Register managed clusters and create ManagedClusterSet
+join-clusters: $(CLUSTERADM) init-ocm $(addprefix create-,$(SPOKE_CLUSTERS)) ## Register and wait for the configured managed clusters
 	$(call log,Joining clusters to hub)
 	$(DEV_ENV_SCRIPT) join-clusters
+
+.PHONY: create-clusterset
+create-clusterset: $(CLUSTERADM) join-clusters ## Create the ManagedClusterSet for the configured clusters
+	$(call log,Creating ManagedClusterSet: mesh-cluster-set)
+	$(DEV_ENV_SCRIPT) create-clusterset
 
 .PHONY: install-managed-serviceaccount
 install-managed-serviceaccount: $(HELM_BIN) join-clusters ## Install managed-serviceaccount addon to the hub cluster
@@ -363,13 +428,16 @@ $(addprefix install-gateway-api-,$(SPOKE_CLUSTERS)): install-gateway-api-%: crea
 	$(call log,Installing Gateway API: $*)
 	$(DEV_ENV_SCRIPT) install-gateway-api $*
 
-.PHONY: deploy-addon
-deploy-addon: $(KIND) $(HELM_BIN) gen images join-clusters install-cert-manager ## Build and deploy addon to the hub Kind cluster
+.PHONY: load-addon-image
+load-addon-image: $(KIND) gen images join-clusters ## Build and load the addon image into the hub Kind cluster
 	# We use image-archive instead of docker-image because the latter is Docker-specific
 	# and fails when images are built with Podman (separate image stores).
 	$(CONTAINER_ENGINE) save $(IMG) -o $(DEV_KUBE_DIR)/.addon-image.tar
 	$(KIND) load image-archive $(DEV_KUBE_DIR)/.addon-image.tar --name hub
 	rm -f $(DEV_KUBE_DIR)/.addon-image.tar
+
+.PHONY: deploy-addon
+deploy-addon: $(HELM_BIN) load-addon-image install-cert-manager ## Deploy addon to the hub Kind cluster
 	$(HELM) upgrade --install $(HELM_RELEASE_NAME) $(CHART_DIR) \
 		--kubeconfig=$(HUB_KUBECONFIG) \
 		--create-namespace \
@@ -384,7 +452,7 @@ deploy-addon: $(KIND) $(HELM_BIN) gen images join-clusters install-cert-manager 
 	$(call log,Addon controller deployed successfully. Use KUBECONFIG=$(HUB_KUBECONFIG) to interact with the hub.)
 
 .PHONY: setup-mesh
-setup-mesh: create-hub ## Create cert-manager trust chain, mesh-system namespace, and MultiClusterMesh CR
+setup-mesh: create-clusterset ## Create cert-manager trust chain, mesh-system namespace, and MultiClusterMesh CR
 	$(DEV_ENV_SCRIPT) setup-mesh
 
 .PHONY: dev-clean-meshes
