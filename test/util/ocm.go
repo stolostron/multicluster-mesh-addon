@@ -4,7 +4,7 @@ import (
 	"context"
 
 	. "github.com/onsi/gomega"
-	"github.com/stolostron/multicluster-mesh-addon/pkg/key"
+	meshcontroller "github.com/stolostron/multicluster-mesh-addon/pkg/hub/mesh"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	clusterv1 "open-cluster-management.io/api/cluster/v1"
 	clusterv1beta2 "open-cluster-management.io/api/cluster/v1beta2"
@@ -40,11 +40,10 @@ func CreateManagedCluster(ctx context.Context, k8sClient client.Client, name, cl
 	})).To(Succeed())
 }
 
-// SetManifestWorkFeedback updates a ManifestWork's status to include a string feedback value,
-// simulating what the OCM work agent does on a real spoke cluster.
-func SetManifestWorkFeedback(ctx context.Context, k8sClient client.Client, workName, namespace, feedbackName, feedbackValue string) {
-	work := &workv1.ManifestWork{}
-	Expect(k8sClient.Get(ctx, key.Of(workName, namespace), work)).To(Succeed())
+// SetOperatorInstalled simulates the operator being reported as installed on the spoke.
+func SetOperatorInstalled(ctx context.Context, k8sClient client.Client, work *workv1.ManifestWork) {
+	patch := client.MergeFrom(work.DeepCopy())
+	installedCSV := "operator.v1.0.0"
 	work.Status.ResourceStatus = workv1.ManifestResourceStatus{
 		Manifests: []workv1.ManifestCondition{{
 			Conditions: []metav1.Condition{{
@@ -55,14 +54,14 @@ func SetManifestWorkFeedback(ctx context.Context, k8sClient client.Client, workN
 			}},
 			StatusFeedbacks: workv1.StatusFeedbackResult{
 				Values: []workv1.FeedbackValue{{
-					Name: feedbackName,
+					Name: meshcontroller.FeedbackInstalledCSV,
 					Value: workv1.FieldValue{
 						Type:   workv1.String,
-						String: &feedbackValue,
+						String: &installedCSV,
 					},
 				}},
 			},
 		}},
 	}
-	Expect(k8sClient.Status().Update(ctx, work)).To(Succeed())
+	Expect(k8sClient.Status().Patch(ctx, work, patch)).To(Succeed())
 }
