@@ -224,7 +224,13 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 
 			if reconcileErr == nil {
 				klog.Infof("Successfully reconciled MultiClusterMesh %s/%s", mesh.Namespace, mesh.Name)
-				reconcileErr = r.determineStatus(ctx, mesh, clusters)
+				r.pruneStaleClusterStatus(mesh, clusters)
+				// Only determine cluster-level status when clusters are selected.
+				// When 0 clusters, getClustersFromPlacement already set the appropriate
+				// condition (PlacementNotFound or NoClustersSelected).
+				if len(clusters) > 0 {
+					reconcileErr = r.determineStatus(ctx, mesh, clusters)
+				}
 			}
 
 			if reconcileErr != nil {
@@ -381,11 +387,14 @@ func (r *Reconciler) doReconcile(ctx context.Context, mesh *meshv1alpha1.MultiCl
 		}
 	}
 
+	// Collect previous cluster namespaces before cleanup deletes the ManifestWorks
+	previousClusters := r.getClusterNamespacesFromManifestWorks(ctx, mesh)
+
 	if err := r.cleanupMeshOwnedManifestWorks(ctx, mesh, clusters); err != nil {
 		return fmt.Errorf("failed to cleanup mesh-owned ManifestWorks: %w", err)
 	}
 
-	if err := r.cleanupOperatorManifestWorks(ctx, mesh, clusters); err != nil {
+	if err := r.cleanupOperatorManifestWorksForRemovedClusters(ctx, mesh, clusters, previousClusters); err != nil {
 		return fmt.Errorf("failed to cleanup operator ManifestWorks: %w", err)
 	}
 
@@ -452,17 +461,19 @@ func (r *Reconciler) findMeshesForCluster(ctx context.Context, obj client.Object
 	return requests
 }
 
-// findMeshesForManifestWork returns reconcile requests for the mesh that owns the ManifestWork.
-func (r *Reconciler) findMeshesForManifestWork(_ context.Context, obj client.Object) []reconcile.Request {
+// findMeshesForManifestWork returns reconcile requests for meshes affected by a ManifestWork change.
+// For mesh-owned ManifestWorks (with mesh labels), returns the owning mesh directly.
+// For shared ManifestWorks (operator MW), finds meshes via other ManifestWorks in the same namespace.
+func (r *Reconciler) findMeshesForManifestWork(ctx context.Context, obj client.Object) []reconcile.Request {
 	labels := obj.GetLabels()
 	meshName := labels[MeshNameLabel]
 	meshNamespace := labels[MeshNamespaceLabel]
-	if meshName == "" || meshNamespace == "" {
-		return nil
+	if meshName != "" && meshNamespace != "" {
+		klog.V(4).Infof("ManifestWork %s/%s changed, reconciling mesh %s/%s", obj.GetNamespace(), obj.GetName(), meshNamespace, meshName)
+		return []reconcile.Request{{NamespacedName: key.Of(meshName, meshNamespace)}}
 	}
 
-	klog.V(4).Infof("ManifestWork %s/%s changed, reconciling mesh %s/%s", obj.GetNamespace(), obj.GetName(), meshNamespace, meshName)
-	return []reconcile.Request{{NamespacedName: key.Of(meshName, meshNamespace)}}
+	return r.findMeshesForCluster(ctx, &clusterv1.ManagedCluster{ObjectMeta: metav1.ObjectMeta{Name: obj.GetNamespace()}})
 }
 
 func (r *Reconciler) reconcileRequestsForPlacement(ctx context.Context, placementName, namespace string) []reconcile.Request {
@@ -499,7 +510,7 @@ func (r *Reconciler) handleDeletion(ctx context.Context, mesh *meshv1alpha1.Mult
 		return fmt.Errorf("failed to cleanup mesh-owned ManifestWorks: %w", err)
 	}
 
-	if err := r.cleanupOperatorManifestWorksForClusters(ctx, clusterNamespaces); err != nil {
+	if err := r.cleanupOperatorManifestWorksForClusters(ctx, clusterNamespaces, mesh); err != nil {
 		return fmt.Errorf("failed to cleanup operator ManifestWorks: %w", err)
 	}
 
@@ -519,31 +530,17 @@ func (r *Reconciler) handleDeletion(ctx context.Context, mesh *meshv1alpha1.Mult
 	return nil
 }
 
-// cleanupOperatorManifestWorks deletes operator ManifestWorks on clusters that no active mesh needs.
-// Called during normal reconciliation when PlacementDecision clusters change.
-func (r *Reconciler) cleanupOperatorManifestWorks(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, clusters []clusterv1.ManagedCluster) error {
+// cleanupOperatorManifestWorksForRemovedClusters deletes operator ManifestWorks on clusters
+// that this mesh no longer targets, if no other active mesh still needs them.
+// previousClusters must be collected before cleanupMeshOwnedManifestWorks runs.
+func (r *Reconciler) cleanupOperatorManifestWorksForRemovedClusters(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, clusters []clusterv1.ManagedCluster, previousClusters []string) error {
 	clusterNames := clusterNameSet(clusters)
 
-	workList := &workv1.ManifestWorkList{}
-	if err := r.List(ctx, workList,
-		client.InNamespace(""),
-		client.MatchingLabels{ManagedByLabel: ManagedByValue, MeshNameLabel: mesh.Name, MeshNamespaceLabel: mesh.Namespace},
-	); err != nil {
-		return fmt.Errorf("failed to list ManifestWorks for mesh %s/%s: %w", mesh.Namespace, mesh.Name, err)
-	}
-
-	removedClusters := make(map[string]bool)
-	for _, work := range workList.Items {
-		if work.Name != OperatorManifestWorkName {
+	for _, clusterName := range previousClusters {
+		if clusterNames[clusterName] {
 			continue
 		}
-		if !clusterNames[work.Namespace] {
-			removedClusters[work.Namespace] = true
-		}
-	}
-
-	for clusterName := range removedClusters {
-		if err := r.deleteOperatorManifestWorkIfUnused(ctx, clusterName); err != nil {
+		if err := r.deleteOperatorManifestWorkIfUnused(ctx, clusterName, mesh); err != nil {
 			return err
 		}
 	}
@@ -553,9 +550,9 @@ func (r *Reconciler) cleanupOperatorManifestWorks(ctx context.Context, mesh *mes
 
 // cleanupOperatorManifestWorksForClusters deletes operator ManifestWorks on clusters
 // if no other mesh still needs them. Used during mesh deletion.
-func (r *Reconciler) cleanupOperatorManifestWorksForClusters(ctx context.Context, clusterNamespaces []string) error {
+func (r *Reconciler) cleanupOperatorManifestWorksForClusters(ctx context.Context, clusterNamespaces []string, mesh *meshv1alpha1.MultiClusterMesh) error {
 	for _, clusterName := range clusterNamespaces {
-		if err := r.deleteOperatorManifestWorkIfUnused(ctx, clusterName); err != nil {
+		if err := r.deleteOperatorManifestWorkIfUnused(ctx, clusterName, mesh); err != nil {
 			return err
 		}
 	}
@@ -563,8 +560,10 @@ func (r *Reconciler) cleanupOperatorManifestWorksForClusters(ctx context.Context
 }
 
 // deleteOperatorManifestWorkIfUnused deletes the operator ManifestWork on a cluster
-// if no non-deleting mesh still has ManifestWorks on that cluster.
-func (r *Reconciler) deleteOperatorManifestWorkIfUnused(ctx context.Context, clusterName string) error {
+// if no other non-deleting mesh still has ManifestWorks on that cluster.
+// The excludeMesh parameter identifies the mesh being reconciled/deleted, whose
+// ManifestWorks should be ignored (they are being or have been cleaned up).
+func (r *Reconciler) deleteOperatorManifestWorkIfUnused(ctx context.Context, clusterName string, excludeMesh *meshv1alpha1.MultiClusterMesh) error {
 	workList := &workv1.ManifestWorkList{}
 	if err := r.List(ctx, workList,
 		client.InNamespace(clusterName),
@@ -580,6 +579,9 @@ func (r *Reconciler) deleteOperatorManifestWorkIfUnused(ctx context.Context, clu
 		meshName := work.Labels[MeshNameLabel]
 		meshNamespace := work.Labels[MeshNamespaceLabel]
 		if meshName == "" || meshNamespace == "" {
+			continue
+		}
+		if excludeMesh != nil && meshName == excludeMesh.Name && meshNamespace == excludeMesh.Namespace {
 			continue
 		}
 		other := &meshv1alpha1.MultiClusterMesh{}
@@ -772,13 +774,17 @@ func (r *Reconciler) cleanupMeshOwnedManifestWorks(ctx context.Context, mesh *me
 	return nil
 }
 
+func (r *Reconciler) pruneStaleClusterStatus(mesh *meshv1alpha1.MultiClusterMesh, clusters []clusterv1.ManagedCluster) {
+	activeClusterNames := clusterNameSet(clusters)
+	mesh.Status.ClusterStatus = slices.DeleteFunc(mesh.Status.ClusterStatus, func(cs meshv1alpha1.ClusterMeshStatus) bool {
+		return !activeClusterNames[cs.ClusterName]
+	})
+}
+
 func (r *Reconciler) determineStatus(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, clusters []clusterv1.ManagedCluster) error {
 	allReady := len(clusters) > 0
 
-	activeClusterNames := make(map[string]bool, len(clusters))
 	for _, cluster := range clusters {
-		activeClusterNames[cluster.Name] = true
-
 		operatorWork := &workv1.ManifestWork{}
 		if err := r.Get(ctx, key.Of(OperatorManifestWorkName, cluster.Name), operatorWork); err != nil {
 			return fmt.Errorf("failed to get operator ManifestWork for cluster %s: %w", cluster.Name, err)
@@ -793,10 +799,6 @@ func (r *Reconciler) determineStatus(ctx context.Context, mesh *meshv1alpha1.Mul
 				meshv1alpha1.ReasonInstallationPending, "Operator installation is pending")
 		}
 	}
-
-	mesh.Status.ClusterStatus = slices.DeleteFunc(mesh.Status.ClusterStatus, func(cs meshv1alpha1.ClusterMeshStatus) bool {
-		return !activeClusterNames[cs.ClusterName]
-	})
 
 	if allReady {
 		mesh.SetReadyCondition(metav1.ConditionTrue,
@@ -903,9 +905,7 @@ func (r *Reconciler) buildOperatorManifestWork(mesh *meshv1alpha1.MultiClusterMe
 			Name:      OperatorManifestWorkName,
 			Namespace: cluster.Name,
 			Labels: map[string]string{
-				ManagedByLabel:     ManagedByValue,
-				MeshNameLabel:      mesh.Name,
-				MeshNamespaceLabel: mesh.Namespace,
+				ManagedByLabel: ManagedByValue,
 			},
 		},
 		Spec: workv1.ManifestWorkSpec{
@@ -1116,7 +1116,7 @@ func (r *Reconciler) getClustersFromPlacement(ctx context.Context, mesh *meshv1a
 		if apierrors.IsNotFound(err) {
 			mesh.SetReadyCondition(metav1.ConditionFalse, meshv1alpha1.ReasonPlacementNotFound,
 				"Placement %s not found in namespace %s", mesh.Spec.PlacementRef.Name, mesh.Namespace)
-			return nil, nil
+			return []clusterv1.ManagedCluster{}, nil
 		}
 		return nil, fmt.Errorf("failed to get Placement %s: %w", mesh.Spec.PlacementRef.Name, err)
 	}
@@ -1139,7 +1139,7 @@ func (r *Reconciler) getClustersFromPlacement(ctx context.Context, mesh *meshv1a
 	if len(clusterNames) == 0 {
 		mesh.SetReadyCondition(metav1.ConditionFalse, meshv1alpha1.ReasonNoClustersSelected,
 			"Placement %s has not selected any clusters", placement.Name)
-		return nil, nil
+		return []clusterv1.ManagedCluster{}, nil
 	}
 
 	slices.Sort(clusterNames)

@@ -317,6 +317,7 @@ func TestDetermineStatusPrunesStaleCluster(t *testing.T) {
 	r := &Reconciler{Client: client, Scheme: scheme}
 	clusters := []clusterv1.ManagedCluster{{ObjectMeta: metav1.ObjectMeta{Name: activeCluster}}}
 
+	r.pruneStaleClusterStatus(mesh, clusters)
 	if err := r.determineStatus(context.Background(), mesh, clusters); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
