@@ -21,8 +21,8 @@ spec:
     - jsonPath: .status.conditions[?(@.type=="Ready")].reason
       name: Reason
       type: string
-    - jsonPath: .spec.clusterSet
-      name: ClusterSet
+    - jsonPath: .spec.placementRef.name
+      name: Placement
       type: string
     - jsonPath: .metadata.creationTimestamp
       name: Age
@@ -57,14 +57,6 @@ spec:
             description: MultiClusterMeshSpec defines the desired state of a multi-cluster
               mesh
             properties:
-              clusterSet:
-                description: ClusterSet references the ACM ManagedClusterSet that
-                  defines cluster membership
-                minLength: 1
-                type: string
-                x-kubernetes-validations:
-                - message: spec.clusterSet is immutable
-                  rule: self == oldSelf
               controlPlane:
                 description: ControlPlane defines the target configuration for the
                   mesh control plane
@@ -129,6 +121,19 @@ spec:
                       Useful for testing or pinning to a specific version
                     type: string
                 type: object
+              placementRef:
+                description: |-
+                  PlacementRef references a Placement resource in the same namespace
+                  that determines which clusters are members of this mesh.
+                  The controller reads PlacementDecisions to resolve cluster membership.
+                properties:
+                  name:
+                    description: Name of the Placement resource
+                    minLength: 1
+                    type: string
+                required:
+                - name
+                type: object
               security:
                 description: Security defines the trust and discovery configuration
                 properties:
@@ -174,7 +179,7 @@ spec:
                     type: object
                 type: object
             required:
-            - clusterSet
+            - placementRef
             type: object
           status:
             description: MultiClusterMeshStatus defines the observed state of MultiClusterMesh
