@@ -13,7 +13,7 @@ Example manifests for common configurations.
 | [pinned-version.yaml](pinned-version.yaml) | Pin the operator CSV version |
 
 Apply hub samples on the hub cluster in your mesh namespace (for example `mesh-system`).
-Update `spec.clusterSet` to match your ManagedClusterSet.
+Update `spec.placementRef.name` to match your Placement name.
 
 ## Spoke (Istio)
 
@@ -24,4 +24,4 @@ Update `spec.clusterSet` to match your ManagedClusterSet.
 | [istio/istiocni.yaml](istio/istiocni.yaml) | IstioCNI (required on OpenShift and ambient) |
 
 Apply spoke samples on each managed cluster.
-See the [User Guide](../docs/user-guide.md#step-6-configure-istio) for the full procedure.
+See the [User Guide](../docs/user-guide.md#step-7-configure-istio) for the full procedure.

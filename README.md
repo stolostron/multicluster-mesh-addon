@@ -38,11 +38,7 @@ helm install multicluster-mesh-addon multicluster-mesh-addon/multicluster-mesh-a
   --namespace multicluster-mesh-system \
   --create-namespace
 
-# Create a ClusterSet and assign clusters
-clusteradm create clusterset mesh-cluster-set
-clusteradm clusterset set mesh-cluster-set --clusters cluster1,cluster2
-
-# Set up trust chain and create a mesh
+# Set up trust chain, Placement, and create a mesh
 kubectl create namespace mesh-system
 kubectl apply -n mesh-system -f samples/cert-manager-issuer.yaml
 kubectl apply -n mesh-system -f samples/basic.yaml
