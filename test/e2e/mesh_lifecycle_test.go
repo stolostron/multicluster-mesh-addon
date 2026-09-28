@@ -75,6 +75,11 @@ var _ = Describe("Controller health", func() {
 })
 
 var _ = Describe("MultiClusterMesh lifecycle", Ordered, func() {
+	const (
+		clusterSet    = "mesh-cluster-set"
+		placementName = "test-mesh-placement"
+	)
+
 	var (
 		mesh    *meshv1alpha1.MultiClusterMesh
 		ns      string
@@ -89,6 +94,12 @@ var _ = Describe("MultiClusterMesh lifecycle", Ordered, func() {
 	BeforeAll(func(ctx SpecContext) {
 		ns = util.UniqueName("test-ns")
 		util.CreateNamespace(ctx, hubClient, ns)
+
+		Step("Binding ManagedClusterSet %s to namespace %s", clusterSet, ns)
+		util.CreateManagedClusterSetBinding(ctx, hubClient, clusterSet, ns)
+
+		Step("Creating Placement %s in namespace %s", placementName, ns)
+		util.CreatePlacementForClusterSet(ctx, hubClient, placementName, ns, clusterSet)
 	})
 
 	AfterAll(func(ctx SpecContext) {
@@ -112,7 +123,7 @@ var _ = Describe("MultiClusterMesh lifecycle", Ordered, func() {
 
 	It("should deploy the mesh", func(ctx SpecContext) {
 		Step("Creating test mesh")
-		mesh = util.CreateMultiClusterMesh(ctx, hubClient, util.UniqueName("test-mesh"), ns, "mesh-cluster-set",
+		mesh = util.CreateMultiClusterMesh(ctx, hubClient, util.UniqueName("test-mesh"), ns, placementName,
 			meshv1alpha1.MultiClusterMeshSpec{
 				Operator: meshv1alpha1.OperatorConfig{
 					Name:            testOperatorName,

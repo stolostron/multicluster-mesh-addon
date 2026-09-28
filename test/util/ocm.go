@@ -8,6 +8,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	clusterv1 "open-cluster-management.io/api/cluster/v1"
 	clusterv1beta1 "open-cluster-management.io/api/cluster/v1beta1"
+	clusterv1beta2 "open-cluster-management.io/api/cluster/v1beta2"
 	workv1 "open-cluster-management.io/api/work/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -52,6 +53,27 @@ func UpdatePlacementDecision(ctx context.Context, k8sClient client.Client, place
 	}
 	pd.Status.Decisions = decisions
 	Expect(k8sClient.Status().Update(ctx, pd)).To(Succeed())
+}
+
+// CreateManagedClusterSetBinding binds a ManagedClusterSet to a namespace,
+// allowing Placements in that namespace to select clusters from the set.
+func CreateManagedClusterSetBinding(ctx context.Context, k8sClient client.Client, clusterSetName, namespace string) {
+	Expect(client.IgnoreAlreadyExists(k8sClient.Create(ctx, &clusterv1beta2.ManagedClusterSetBinding{
+		ObjectMeta: metav1.ObjectMeta{Name: clusterSetName, Namespace: namespace},
+		Spec:       clusterv1beta2.ManagedClusterSetBindingSpec{ClusterSet: clusterSetName},
+	}))).To(Succeed())
+}
+
+// CreatePlacementForClusterSet creates a Placement that selects clusters from the given ClusterSet.
+// In an environment with the ACM Placement controller running (e2e), this will
+// automatically produce PlacementDecision resources.
+func CreatePlacementForClusterSet(ctx context.Context, k8sClient client.Client, name, namespace, clusterSetName string) {
+	Expect(k8sClient.Create(ctx, &clusterv1beta1.Placement{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
+		Spec: clusterv1beta1.PlacementSpec{
+			ClusterSets: []string{clusterSetName},
+		},
+	})).To(Succeed())
 }
 
 // CreateManagedCluster creates a ManagedCluster and its namespace (required for ManifestWorks).
