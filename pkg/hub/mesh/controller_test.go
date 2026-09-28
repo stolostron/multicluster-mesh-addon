@@ -13,7 +13,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	clusterv1 "open-cluster-management.io/api/cluster/v1"
-	clusterv1beta2 "open-cluster-management.io/api/cluster/v1beta2"
+	clusterv1beta1 "open-cluster-management.io/api/cluster/v1beta1"
 	workv1 "open-cluster-management.io/api/work/v1"
 	msav1beta1 "open-cluster-management.io/managed-serviceaccount/apis/authentication/v1beta1"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -96,27 +96,62 @@ func TestCheckPrerequisiteCRDsUnexpectedError(t *testing.T) {
 	}
 }
 
-func TestGetClustersFromSetReturnsSortedClusters(t *testing.T) {
+func TestGetClustersFromPlacementReturnsSortedClusters(t *testing.T) {
 	scheme := newTestScheme()
 
-	clusterSet := &clusterv1beta2.ManagedClusterSet{
-		ObjectMeta: metav1.ObjectMeta{Name: "test-set"},
+	placement := &clusterv1beta1.Placement{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-placement", Namespace: "default"},
+	}
+
+	pd := &clusterv1beta1.PlacementDecision{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-placement-decision-1",
+			Namespace: "default",
+			Labels:    map[string]string{PlacementLabel: "test-placement"},
+		},
+		Status: clusterv1beta1.PlacementDecisionStatus{
+			Decisions: []clusterv1beta1.ClusterDecision{
+				{ClusterName: "cluster-c"},
+				{ClusterName: "cluster-a"},
+				{ClusterName: "cluster-b"},
+			},
+		},
 	}
 
 	clusters := []clusterv1.ManagedCluster{
-		{ObjectMeta: metav1.ObjectMeta{Name: "cluster-c", Labels: map[string]string{ClusterSetLabel: "test-set"}}},
-		{ObjectMeta: metav1.ObjectMeta{Name: "cluster-a", Labels: map[string]string{ClusterSetLabel: "test-set"}}},
-		{ObjectMeta: metav1.ObjectMeta{Name: "cluster-b", Labels: map[string]string{ClusterSetLabel: "test-set"}}},
+		{ObjectMeta: metav1.ObjectMeta{Name: "cluster-c"}},
+		{ObjectMeta: metav1.ObjectMeta{Name: "cluster-a"}},
+		{ObjectMeta: metav1.ObjectMeta{Name: "cluster-b"}},
 	}
 
-	client := fake.NewClientBuilder().
+	c := fake.NewClientBuilder().
 		WithScheme(scheme).
-		WithObjects(clusterSet, &clusters[0], &clusters[1], &clusters[2]).
+		WithObjects(placement, pd, &clusters[0], &clusters[1], &clusters[2]).
+		WithStatusSubresource(&clusterv1beta1.PlacementDecision{}).
 		Build()
 
-	r := &Reconciler{Client: client, Scheme: scheme}
+	// Fake client doesn't handle status subresources via WithObjects, so update status separately
+	pd.Status = clusterv1beta1.PlacementDecisionStatus{
+		Decisions: []clusterv1beta1.ClusterDecision{
+			{ClusterName: "cluster-c"},
+			{ClusterName: "cluster-a"},
+			{ClusterName: "cluster-b"},
+		},
+	}
+	if err := c.Status().Update(context.Background(), pd); err != nil {
+		t.Fatalf("failed to update PlacementDecision status: %v", err)
+	}
 
-	result, err := r.getClustersFromSet(context.Background(), "test-set")
+	mesh := &meshv1alpha1.MultiClusterMesh{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-mesh", Namespace: "default"},
+		Spec: meshv1alpha1.MultiClusterMeshSpec{
+			PlacementRef: meshv1alpha1.PlacementReference{Name: "test-placement"},
+		},
+	}
+
+	r := &Reconciler{Client: c, Scheme: scheme}
+
+	result, err := r.getClustersFromPlacement(context.Background(), mesh)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -307,7 +342,7 @@ func meshWith(namespace, name string, ts metav1.Time) *meshv1alpha1.MultiCluster
 func newTestScheme() *runtime.Scheme {
 	scheme := runtime.NewScheme()
 	_ = clusterv1.Install(scheme)
-	_ = clusterv1beta2.Install(scheme)
+	_ = clusterv1beta1.Install(scheme)
 	_ = meshv1alpha1.Install(scheme)
 	_ = workv1.Install(scheme)
 	return scheme

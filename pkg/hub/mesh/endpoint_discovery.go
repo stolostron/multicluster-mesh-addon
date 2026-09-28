@@ -110,7 +110,7 @@ func (r *Reconciler) cleanupManagedServiceAccounts(ctx context.Context, mesh *me
 			continue
 		}
 
-		klog.Infof("Deleting ManagedServiceAccount %s/%s (cluster %s no longer in ClusterSet %s)", msa.Namespace, msa.Name, clusterName, mesh.Spec.ClusterSet)
+		klog.Infof("Deleting ManagedServiceAccount %s/%s (cluster %s no longer selected by Placement)", msa.Namespace, msa.Name, clusterName)
 		if err := client.IgnoreNotFound(r.Delete(ctx, &msa)); err != nil {
 			return fmt.Errorf("failed to delete ManagedServiceAccount %s/%s: %w", msa.Namespace, msa.Name, err)
 		}
@@ -197,7 +197,7 @@ func (r *Reconciler) ensureRemoteSecretDistribution(ctx context.Context, mesh *m
 		mwrset.Labels[ManagedByLabel] = ManagedByValue
 		mwrset.Labels[MeshNameLabel] = mesh.Name
 		mwrset.Labels[MeshNamespaceLabel] = mesh.Namespace
-		mwrset.Spec.PlacementRefs = []workv1alpha1.LocalPlacementReference{{Name: mesh.Name}}
+		mwrset.Spec.PlacementRefs = []workv1alpha1.LocalPlacementReference{{Name: mesh.Spec.PlacementRef.Name}}
 		mwrset.Spec.ManifestWorkTemplate = workv1.ManifestWorkSpec{Workload: workv1.ManifestsTemplate{Manifests: manifests}}
 		return controllerutil.SetControllerReference(mesh, mwrset, r.Scheme)
 	})
