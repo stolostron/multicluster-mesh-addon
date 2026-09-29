@@ -268,34 +268,33 @@ func (r *Reconciler) validate(ctx context.Context, mesh *meshv1alpha1.MultiClust
 	}
 
 	for _, cluster := range clusters {
-		other, err := r.findConflictingMesh(ctx, mesh, cluster.Name)
+		peers, err := r.findOlderPeerMeshes(ctx, mesh, cluster.Name)
 		if err != nil {
 			return false, fmt.Errorf("failed to check for conflicts on cluster %s: %w", cluster.Name, err)
 		}
-		if other == nil {
-			continue
-		}
 
-		if mesh.GetControlPlaneNamespace() == other.GetControlPlaneNamespace() {
-			mesh.SetReadyCondition(metav1.ConditionFalse, meshv1alpha1.ReasonNamespaceConflict,
-				"controlPlane.namespace %q conflicts with older mesh %s/%s on cluster %s",
-				mesh.GetControlPlaneNamespace(), other.Namespace, other.Name, cluster.Name)
-			return true, nil
-		}
-		if mesh.Spec.Operator != other.Spec.Operator {
-			mesh.SetReadyCondition(metav1.ConditionFalse, meshv1alpha1.ReasonOperatorConfigConflict,
-				"operator config conflicts with older mesh %s/%s on cluster %s",
-				other.Namespace, other.Name, cluster.Name)
-			return true, nil
+		for _, peer := range peers {
+			if mesh.GetControlPlaneNamespace() == peer.GetControlPlaneNamespace() {
+				mesh.SetReadyCondition(metav1.ConditionFalse, meshv1alpha1.ReasonNamespaceConflict,
+					"controlPlane.namespace %q conflicts with older mesh %s/%s on cluster %s",
+					mesh.GetControlPlaneNamespace(), peer.Namespace, peer.Name, cluster.Name)
+				return true, nil
+			}
+			if mesh.Spec.Operator != peer.Spec.Operator {
+				mesh.SetReadyCondition(metav1.ConditionFalse, meshv1alpha1.ReasonOperatorConfigConflict,
+					"operator config conflicts with older mesh %s/%s on cluster %s",
+					peer.Namespace, peer.Name, cluster.Name)
+				return true, nil
+			}
 		}
 	}
 
 	return false, nil
 }
 
-// findConflictingMesh checks if another older mesh has ManifestWorks on the given cluster.
-// Returns the conflicting mesh or nil if none found.
-func (r *Reconciler) findConflictingMesh(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, clusterName string) (*meshv1alpha1.MultiClusterMesh, error) {
+// findOlderPeerMeshes returns all older, non-deleting meshes that have ManifestWorks
+// on the given cluster. Multiple ManifestWorks from the same mesh are deduplicated.
+func (r *Reconciler) findOlderPeerMeshes(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, clusterName string) ([]*meshv1alpha1.MultiClusterMesh, error) {
 	workList := &workv1.ManifestWorkList{}
 	if err := r.List(ctx, workList,
 		client.InNamespace(clusterName),
@@ -304,6 +303,8 @@ func (r *Reconciler) findConflictingMesh(ctx context.Context, mesh *meshv1alpha1
 		return nil, fmt.Errorf("failed to list ManifestWorks in namespace %s: %w", clusterName, err)
 	}
 
+	seen := map[string]bool{}
+	var peers []*meshv1alpha1.MultiClusterMesh
 	for _, work := range workList.Items {
 		otherName := work.Labels[MeshNameLabel]
 		otherNamespace := work.Labels[MeshNamespaceLabel]
@@ -313,6 +314,11 @@ func (r *Reconciler) findConflictingMesh(ctx context.Context, mesh *meshv1alpha1
 		if otherName == mesh.Name && otherNamespace == mesh.Namespace {
 			continue
 		}
+		meshKey := otherNamespace + "/" + otherName
+		if seen[meshKey] {
+			continue
+		}
+		seen[meshKey] = true
 
 		other := &meshv1alpha1.MultiClusterMesh{}
 		if err := r.Get(ctx, key.Of(otherName, otherNamespace), other); err != nil {
@@ -328,10 +334,10 @@ func (r *Reconciler) findConflictingMesh(ctx context.Context, mesh *meshv1alpha1
 			continue
 		}
 
-		return other, nil
+		peers = append(peers, other)
 	}
 
-	return nil, nil
+	return peers, nil
 }
 
 // isOlderMesh returns true if a is older than b, using namespace/name as tiebreaker for equal timestamps.

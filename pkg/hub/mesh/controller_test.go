@@ -648,7 +648,7 @@ func TestFindMeshesForPlacementDecision(t *testing.T) {
 	}
 }
 
-func TestFindConflictingMesh(t *testing.T) {
+func TestFindOlderPeerMeshes(t *testing.T) {
 	scheme := newTestScheme()
 	now := metav1.Now()
 	earlier := metav1.NewTime(now.Add(-time.Minute))
@@ -661,15 +661,15 @@ func TestFindConflictingMesh(t *testing.T) {
 	}
 
 	tests := []struct {
-		name           string
-		works          []workv1.ManifestWork
-		otherMeshes    []*meshv1alpha1.MultiClusterMesh
-		expectConflict string
+		name        string
+		works       []workv1.ManifestWork
+		otherMeshes []*meshv1alpha1.MultiClusterMesh
+		expectPeers []string
 	}{
 		{
-			name:           "no ManifestWorks on cluster",
-			works:          nil,
-			expectConflict: "",
+			name:        "no ManifestWorks on cluster",
+			works:       nil,
+			expectPeers: nil,
 		},
 		{
 			name: "only operator ManifestWork (no mesh labels)",
@@ -679,17 +679,17 @@ func TestFindConflictingMesh(t *testing.T) {
 					Labels: map[string]string{ManagedByLabel: ManagedByValue},
 				},
 			}},
-			expectConflict: "",
+			expectPeers: nil,
 		},
 		{
 			name: "own ManifestWork is skipped",
 			works: []workv1.ManifestWork{
 				meshOwnedWork("cluster-a", "work-1", "current-mesh", "default"),
 			},
-			expectConflict: "",
+			expectPeers: nil,
 		},
 		{
-			name: "older mesh on same cluster is a conflict",
+			name: "older mesh on same cluster is returned",
 			works: []workv1.ManifestWork{
 				meshOwnedWork("cluster-a", "work-1", "older-mesh", "default"),
 			},
@@ -699,10 +699,10 @@ func TestFindConflictingMesh(t *testing.T) {
 					CreationTimestamp: earlier,
 				},
 			}},
-			expectConflict: "older-mesh",
+			expectPeers: []string{"older-mesh"},
 		},
 		{
-			name: "newer mesh on same cluster is not a conflict",
+			name: "newer mesh on same cluster is not returned",
 			works: []workv1.ManifestWork{
 				meshOwnedWork("cluster-a", "work-1", "newer-mesh", "default"),
 			},
@@ -712,10 +712,10 @@ func TestFindConflictingMesh(t *testing.T) {
 					CreationTimestamp: metav1.NewTime(now.Add(time.Minute)),
 				},
 			}},
-			expectConflict: "",
+			expectPeers: nil,
 		},
 		{
-			name: "deleting mesh is not a conflict",
+			name: "deleting mesh is not returned",
 			works: []workv1.ManifestWork{
 				meshOwnedWork("cluster-a", "work-1", "deleting-mesh", "default"),
 			},
@@ -727,7 +727,30 @@ func TestFindConflictingMesh(t *testing.T) {
 					Finalizers:        []string{"test"},
 				},
 			}},
-			expectConflict: "",
+			expectPeers: nil,
+		},
+		{
+			name: "returns all older peers not just the first",
+			works: []workv1.ManifestWork{
+				meshOwnedWork("cluster-a", "work-1", "mesh-a", "default"),
+				meshOwnedWork("cluster-a", "work-2", "mesh-b", "default"),
+			},
+			otherMeshes: []*meshv1alpha1.MultiClusterMesh{
+				{ObjectMeta: metav1.ObjectMeta{Name: "mesh-a", Namespace: "default", CreationTimestamp: earlier}},
+				{ObjectMeta: metav1.ObjectMeta{Name: "mesh-b", Namespace: "default", CreationTimestamp: earlier}},
+			},
+			expectPeers: []string{"mesh-a", "mesh-b"},
+		},
+		{
+			name: "deduplicates multiple ManifestWorks from same mesh",
+			works: []workv1.ManifestWork{
+				meshOwnedWork("cluster-a", "work-1", "mesh-a", "default"),
+				meshOwnedWork("cluster-a", "work-2", "mesh-a", "default"),
+			},
+			otherMeshes: []*meshv1alpha1.MultiClusterMesh{
+				{ObjectMeta: metav1.ObjectMeta{Name: "mesh-a", Namespace: "default", CreationTimestamp: earlier}},
+			},
+			expectPeers: []string{"mesh-a"},
 		},
 	}
 
@@ -743,21 +766,25 @@ func TestFindConflictingMesh(t *testing.T) {
 			c := fake.NewClientBuilder().WithScheme(scheme).WithRuntimeObjects(objs...).Build()
 			r := &Reconciler{Client: c, Scheme: scheme}
 
-			result, err := r.findConflictingMesh(context.Background(), currentMesh, "cluster-a")
+			result, err := r.findOlderPeerMeshes(context.Background(), currentMesh, "cluster-a")
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
 
-			if tc.expectConflict == "" {
-				if result != nil {
-					t.Errorf("expected no conflict, got %s/%s", result.Namespace, result.Name)
+			if len(result) != len(tc.expectPeers) {
+				names := make([]string, len(result))
+				for i, p := range result {
+					names[i] = p.Name
 				}
-			} else {
-				if result == nil {
-					t.Fatal("expected conflict, got nil")
-				}
-				if result.Name != tc.expectConflict {
-					t.Errorf("expected conflict with %s, got %s", tc.expectConflict, result.Name)
+				t.Fatalf("expected %d peers %v, got %d: %v", len(tc.expectPeers), tc.expectPeers, len(result), names)
+			}
+			resultNames := map[string]bool{}
+			for _, p := range result {
+				resultNames[p.Name] = true
+			}
+			for _, exp := range tc.expectPeers {
+				if !resultNames[exp] {
+					t.Errorf("expected peer %s not found in result", exp)
 				}
 			}
 		})
