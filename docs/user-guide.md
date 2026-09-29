@@ -74,7 +74,48 @@ This creates a self-signed `Issuer`, a root CA `Certificate`, and a root CA-back
 
 ## Step 4: Create a Placement
 
-Create a [Placement] to select which clusters should join the mesh.
+A [Placement] selects which clusters join the mesh.
+Placements only consider clusters from [ManagedClusterSets][clusterset] that are bound to the Placement's namespace, so you need three things in order:
+
+1. **ClusterSet membership** — each cluster must belong to a ClusterSet (via the `cluster.open-cluster-management.io/clusterset` label).
+2. **ManagedClusterSetBinding** — the ClusterSet must be bound to the mesh namespace.
+3. **Placement** — selects from the bound ClusterSets using predicates.
+
+### Create and bind a ClusterSet
+
+Create a dedicated [ManagedClusterSet] for the mesh and assign your clusters to it:
+
+```bash
+kubectl apply -f - <<EOF
+apiVersion: cluster.open-cluster-management.io/v1beta2
+kind: ManagedClusterSet
+metadata:
+  name: mesh-clusters
+EOF
+
+kubectl label managedcluster cluster1 cluster.open-cluster-management.io/clusterset=mesh-clusters
+kubectl label managedcluster cluster2 cluster.open-cluster-management.io/clusterset=mesh-clusters
+```
+
+Then bind the ClusterSet to the mesh namespace (the binding name must match the ClusterSet name):
+
+```bash
+kubectl apply -n mesh-system -f - <<EOF
+apiVersion: cluster.open-cluster-management.io/v1beta2
+kind: ManagedClusterSetBinding
+metadata:
+  name: mesh-clusters
+spec:
+  clusterSet: mesh-clusters
+EOF
+```
+
+> **Tip:** For quick testing on ACM, you can bind the `global` ClusterSet instead — it automatically includes
+> all managed clusters and doesn't require labeling. For production, use a dedicated ClusterSet to limit
+> which clusters the Placement can select.
+
+### Create the Placement
+
 The Placement must be in the same namespace as the `MultiClusterMesh` resource.
 
 ```bash
@@ -201,6 +242,8 @@ kubectl delete multiclustermesh -n mesh-system <mesh-name>
 [fleet-mesh]: https://github.com/kiali/openshift-servicemesh-plugin/blob/main/docs/fleet-mesh/DEV-PREVIEW-GUIDE.md
 [kind]: https://kind.sigs.k8s.io/
 [mwrs]: https://open-cluster-management.io/docs/concepts/work-distribution/manifestworkreplicaset/
+[clusterset]: https://open-cluster-management.io/docs/concepts/cluster-inventory/managedclusterset/
+[ManagedClusterSet]: https://open-cluster-management.io/docs/concepts/cluster-inventory/managedclusterset/
 [Placement]: https://open-cluster-management.io/docs/concepts/cluster-inventory/placement/
 [ocm-concepts]: https://open-cluster-management.io/docs/concepts/
 [OLM]: https://olm.operatorframework.io/

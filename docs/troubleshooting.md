@@ -119,7 +119,16 @@ Create the Placement or fix the reference.
 ### Mesh shows NoClustersSelected
 
 The Placement exists but has not selected any clusters.
-Check the Placement's predicates, cluster sets, and tolerations.
+Common causes:
+
+1. **Missing ManagedClusterSetBinding** — Placements only select from ClusterSets bound to the namespace.
+   Check that a `ManagedClusterSetBinding` exists in the mesh namespace:
+   ```bash
+   kubectl get managedclustersetbinding -n <mesh-namespace>
+   ```
+2. **Clusters not in a ClusterSet** — each cluster needs the `cluster.open-cluster-management.io/clusterset` label
+   to be a member of the bound ClusterSet.
+3. **Predicate mismatch** — the Placement's label selector doesn't match any clusters.
 
 ### Mesh shows OperatorConfigConflict
 

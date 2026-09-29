@@ -38,15 +38,42 @@ helm install multicluster-mesh-addon multicluster-mesh-addon/multicluster-mesh-a
   --namespace multicluster-mesh-system \
   --create-namespace
 
-# Set up trust chain, Placement, and create a mesh
+# Set up trust chain
 kubectl create namespace mesh-system
 kubectl apply -n mesh-system -f samples/cert-manager-issuer.yaml
+
+# Bind a ClusterSet to the mesh namespace so the Placement can select clusters.
+# This example uses the ACM "global" set for simplicity; for production, create
+# a dedicated ManagedClusterSet (see user guide).
+kubectl apply -n mesh-system -f - <<EOF
+apiVersion: cluster.open-cluster-management.io/v1beta2
+kind: ManagedClusterSetBinding
+metadata:
+  name: global
+spec:
+  clusterSet: global
+EOF
+
+# Create a Placement that selects all clusters in the bound ClusterSet
+kubectl apply -n mesh-system -f - <<EOF
+apiVersion: cluster.open-cluster-management.io/v1beta1
+kind: Placement
+metadata:
+  name: mesh-placement
+spec: {}
+EOF
+
+# Create the mesh (uses the Placement above to determine target clusters)
 kubectl apply -n mesh-system -f samples/basic.yaml
 ```
 
 > **Note:** For OpenShift, use `samples/openshift.yaml` instead of `samples/basic.yaml`.
 
-This installs the operator and distributes trust. For a working multi-cluster mesh setup, see the [User Guide](docs/user-guide.md) for prerequisites, what each step does, verification, and next steps (configuring Istio).
+This example uses the ACM `global` ClusterSet, which includes all managed clusters.
+For production, create a dedicated [ManagedClusterSet] with only the clusters that should participate in the mesh and bind it to the mesh namespace.
+See the [User Guide](docs/user-guide.md) for a complete walkthrough including prerequisites, dedicated ClusterSet setup, verification, and configuring Istio on the spoke clusters.
+
+[ManagedClusterSet]: https://open-cluster-management.io/docs/concepts/cluster-inventory/managedclusterset/
 
 <!-- Reference links -->
 [ACM]: https://www.redhat.com/en/technologies/management/advanced-cluster-management
