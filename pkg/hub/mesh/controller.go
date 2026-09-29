@@ -215,11 +215,10 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	clusters, err := r.getClustersFromPlacement(ctx, mesh)
 	if err != nil {
 		reconcileErr = err
-	} else if len(clusters) == 0 {
-		// getClustersFromPlacement already set the appropriate condition
-		// (PlacementNotFound, NoClustersSelected). Do not call doReconcile
-		// with an empty cluster list — cleanup functions would interpret it
-		// as "all clusters removed" and tear down all infrastructure.
+	} else if cond := meta.FindStatusCondition(mesh.Status.Conditions, meshv1alpha1.ConditionReady); cond != nil && cond.Reason == meshv1alpha1.ReasonPlacementNotFound {
+		// Placement doesn't exist — don't call doReconcile because cleanup
+		// functions would tear down all infrastructure. The Placement might
+		// be created later or the reference might be fixed.
 		r.pruneStaleClusterStatus(mesh, clusters)
 	} else {
 		var conflict bool
@@ -231,7 +230,9 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 			if reconcileErr == nil {
 				klog.Infof("Successfully reconciled MultiClusterMesh %s/%s", mesh.Namespace, mesh.Name)
 				r.pruneStaleClusterStatus(mesh, clusters)
-				reconcileErr = r.determineStatus(ctx, mesh, clusters)
+				if len(clusters) > 0 {
+					reconcileErr = r.determineStatus(ctx, mesh, clusters)
+				}
 			}
 
 			if reconcileErr != nil {
