@@ -233,7 +233,16 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		var conflict bool
 		if conflict, reconcileErr = r.validate(ctx, mesh, clusters); reconcileErr != nil {
 			mesh.SetReadyCondition(metav1.ConditionFalse, meshv1alpha1.ReasonReconcileError, "%v", reconcileErr)
-		} else if !conflict {
+		} else if conflict {
+			// Mesh lost the conflict — clean up all its resources.
+			// validate already set the conflict condition. Pass nil
+			// clusters so doReconcile treats this as targeting zero
+			// clusters, removing all mesh-owned ManifestWorks,
+			// certificates, ManagedServiceAccounts, and operator
+			// ManifestWorks (when no other mesh still needs them).
+			reconcileErr = r.doReconcile(ctx, mesh, nil)
+			r.pruneStaleClusterStatus(mesh, nil)
+		} else {
 			reconcileErr = r.doReconcile(ctx, mesh, clusters)
 
 			if reconcileErr == nil {
