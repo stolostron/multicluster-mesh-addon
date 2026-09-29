@@ -21,7 +21,9 @@ func CreatePlacement(ctx context.Context, k8sClient client.Client, name, namespa
 }
 
 // CreatePlacementDecision creates a PlacementDecision for the given Placement and
-// updates its status with the specified cluster decisions.
+// updates its status with the specified cluster decisions. Also updates the
+// Placement's NumberOfSelectedClusters to match, simulating what the real
+// Placement controller does.
 func CreatePlacementDecision(ctx context.Context, k8sClient client.Client, placementName, namespace string, clusterNames ...string) {
 	pd := &clusterv1beta1.PlacementDecision{
 		ObjectMeta: metav1.ObjectMeta{
@@ -40,9 +42,12 @@ func CreatePlacementDecision(ctx context.Context, k8sClient client.Client, place
 	}
 	pd.Status.Decisions = decisions
 	Expect(k8sClient.Status().Update(ctx, pd)).To(Succeed())
+
+	updatePlacementSelectedCount(ctx, k8sClient, placementName, namespace, int32(len(clusterNames)))
 }
 
 // UpdatePlacementDecision updates an existing PlacementDecision's status with new cluster decisions.
+// Also updates the Placement's NumberOfSelectedClusters to match.
 func UpdatePlacementDecision(ctx context.Context, k8sClient client.Client, placementName, namespace string, clusterNames ...string) {
 	pd := &clusterv1beta1.PlacementDecision{}
 	Expect(k8sClient.Get(ctx, key.Of(placementName+"-decision-1", namespace), pd)).To(Succeed())
@@ -53,6 +58,15 @@ func UpdatePlacementDecision(ctx context.Context, k8sClient client.Client, place
 	}
 	pd.Status.Decisions = decisions
 	Expect(k8sClient.Status().Update(ctx, pd)).To(Succeed())
+
+	updatePlacementSelectedCount(ctx, k8sClient, placementName, namespace, int32(len(clusterNames)))
+}
+
+func updatePlacementSelectedCount(ctx context.Context, k8sClient client.Client, name, namespace string, count int32) {
+	placement := &clusterv1beta1.Placement{}
+	Expect(k8sClient.Get(ctx, key.Of(name, namespace), placement)).To(Succeed())
+	placement.Status.NumberOfSelectedClusters = count
+	Expect(k8sClient.Status().Update(ctx, placement)).To(Succeed())
 }
 
 // CreateManagedClusterSetBinding binds a ManagedClusterSet to a namespace,

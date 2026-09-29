@@ -103,6 +103,7 @@ func TestGetClustersFromPlacementReturnsSortedClusters(t *testing.T) {
 
 	placement := &clusterv1beta1.Placement{
 		ObjectMeta: metav1.ObjectMeta{Name: "test-placement", Namespace: "default"},
+		Status:     clusterv1beta1.PlacementStatus{NumberOfSelectedClusters: 3},
 	}
 
 	pd := &clusterv1beta1.PlacementDecision{
@@ -403,6 +404,7 @@ func TestGetClustersFromPlacementSkipsMissingCluster(t *testing.T) {
 
 	placement := &clusterv1beta1.Placement{
 		ObjectMeta: metav1.ObjectMeta{Name: "test-placement", Namespace: "default"},
+		Status:     clusterv1beta1.PlacementStatus{NumberOfSelectedClusters: 2},
 	}
 
 	pd := placementDecision("test-placement", "default", "cluster-exists", "cluster-missing")
@@ -453,6 +455,7 @@ func TestGetClustersFromPlacementAllMissing(t *testing.T) {
 
 	placement := &clusterv1beta1.Placement{
 		ObjectMeta: metav1.ObjectMeta{Name: "test-placement", Namespace: "default"},
+		Status:     clusterv1beta1.PlacementStatus{NumberOfSelectedClusters: 2},
 	}
 
 	pd := placementDecision("test-placement", "default", "gone-cluster-1", "gone-cluster-2")

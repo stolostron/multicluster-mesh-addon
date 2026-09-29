@@ -66,6 +66,13 @@ const (
 	Day = 24 * time.Hour
 )
 
+// errDecisionsPending means the PlacementDecision entries don't yet match
+// Placement.Status.NumberOfSelectedClusters. ACM's Placement controller writes
+// PlacementDecision objects one at a time, so during cluster redistribution a
+// cluster can temporarily be missing from all decisions (see ACM-27799). The
+// reconciler requeues without making changes until the counts converge.
+var errDecisionsPending = errors.New("PlacementDecision entries do not match Placement status")
+
 // Reconciler reconciles MultiClusterMesh resources
 type Reconciler struct {
 	client.Client
@@ -213,7 +220,9 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	var reconcileErr error
 
 	clusters, placementFound, err := r.getClustersFromPlacement(ctx, mesh)
-	if err != nil {
+	if errors.Is(err, errDecisionsPending) {
+		return reconcile.Result{RequeueAfter: 2 * time.Second}, nil
+	} else if err != nil {
 		reconcileErr = err
 	} else if !placementFound {
 		// Placement doesn't exist — don't call doReconcile because cleanup
@@ -1144,6 +1153,17 @@ func (r *Reconciler) getClustersFromPlacement(ctx context.Context, mesh *meshv1a
 		for _, decision := range pd.Status.Decisions {
 			clusterNames = append(clusterNames, decision.ClusterName)
 		}
+	}
+
+	// The Placement controller updates NumberOfSelectedClusters atomically on
+	// the Placement before writing PlacementDecision objects one at a time.
+	// A mismatch means decisions are still being redistributed — proceeding
+	// would cause spurious deletion of ManifestWorks for clusters that are
+	// between PlacementDecisions.
+	if int32(len(clusterNames)) != placement.Status.NumberOfSelectedClusters {
+		klog.Infof("PlacementDecision entries (%d) do not match Placement %s/%s NumberOfSelectedClusters (%d), requeueing",
+			len(clusterNames), placement.Namespace, placement.Name, placement.Status.NumberOfSelectedClusters)
+		return nil, true, errDecisionsPending
 	}
 
 	if len(clusterNames) == 0 {

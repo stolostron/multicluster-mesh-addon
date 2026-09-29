@@ -231,6 +231,31 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 			})
 		})
 
+		It("should not tear down infrastructure when PlacementDecision count is inconsistent with NumberOfSelectedClusters", func() {
+			util.CreateManagedCluster(ctx, k8sClient, clusterName)
+			util.CreatePlacement(ctx, k8sClient, testPlacement, testNs)
+			util.CreatePlacementDecision(ctx, k8sClient, testPlacement, testNs, clusterName)
+			util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testPlacement)
+			expectOperatorManifestWork(clusterName)
+
+			By("simulating a transient PlacementDecision gap — decisions emptied but NumberOfSelectedClusters still 1")
+			pd := &clusterv1beta1.PlacementDecision{}
+			Expect(k8sClient.Get(ctx, key.Of(testPlacement+"-decision-1", testNs), pd)).To(Succeed())
+			pd.Status.Decisions = []clusterv1beta1.ClusterDecision{}
+			Expect(k8sClient.Status().Update(ctx, pd)).To(Succeed())
+
+			By("verifying ManifestWorks are NOT deleted during the inconsistency")
+			Consistently(func() []workv1.ManifestWork {
+				workList := &workv1.ManifestWorkList{}
+				Expect(k8sClient.List(ctx, workList)).To(Succeed())
+				return workList.Items
+			}).ShouldNot(BeEmpty())
+
+			By("resolving the inconsistency — setting NumberOfSelectedClusters to 0")
+			util.UpdatePlacementDecision(ctx, k8sClient, testPlacement, testNs)
+			expectAllManifestWorksDeleted()
+		})
+
 		It("should add finalizer on MultiClusterMesh creation", func() {
 			util.CreatePlacement(ctx, k8sClient, testPlacement, testNs)
 			util.CreatePlacementDecision(ctx, k8sClient, testPlacement, testNs)
