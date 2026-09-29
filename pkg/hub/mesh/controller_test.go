@@ -897,7 +897,10 @@ func TestGetClusterNamespacesFromManifestWorks(t *testing.T) {
 			mesh := &meshv1alpha1.MultiClusterMesh{
 				ObjectMeta: metav1.ObjectMeta{Name: "my-mesh", Namespace: "default"},
 			}
-			result := r.getClusterNamespacesFromManifestWorks(context.Background(), mesh)
+			result, err := r.getClusterNamespacesFromManifestWorks(context.Background(), mesh)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
 
 			if len(result) != len(tc.expected) {
 				t.Fatalf("expected %d namespaces, got %d: %v", len(tc.expected), len(result), result)

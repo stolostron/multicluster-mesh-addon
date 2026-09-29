@@ -404,15 +404,23 @@ func (r *Reconciler) doReconcile(ctx context.Context, mesh *meshv1alpha1.MultiCl
 		}
 	}
 
-	// Collect previous cluster namespaces before cleanup deletes the ManifestWorks
-	previousClusters := r.getClusterNamespacesFromManifestWorks(ctx, mesh)
-
-	if err := r.cleanupMeshOwnedManifestWorks(ctx, mesh, clusters); err != nil {
-		return fmt.Errorf("failed to cleanup mesh-owned ManifestWorks: %w", err)
+	// Discover which clusters previously had mesh-owned ManifestWorks, then
+	// delete operator ManifestWorks BEFORE mesh-owned ones. This ordering
+	// matters for retries: if operator cleanup fails, mesh-owned MWs are
+	// still present so the next attempt can rediscover the cluster list.
+	// Reversing the order would lose the cluster list on retry because
+	// getClusterNamespacesFromManifestWorks relies on mesh-owned MWs.
+	previousClusters, err := r.getClusterNamespacesFromManifestWorks(ctx, mesh)
+	if err != nil {
+		return err
 	}
 
 	if err := r.cleanupOperatorManifestWorksForRemovedClusters(ctx, mesh, clusters, previousClusters); err != nil {
 		return fmt.Errorf("failed to cleanup operator ManifestWorks: %w", err)
+	}
+
+	if err := r.cleanupMeshOwnedManifestWorks(ctx, mesh, clusters); err != nil {
+		return fmt.Errorf("failed to cleanup mesh-owned ManifestWorks: %w", err)
 	}
 
 	if err := r.cleanupManagedServiceAccounts(ctx, mesh, clusters); err != nil {
@@ -519,16 +527,20 @@ func (r *Reconciler) handleDeletion(ctx context.Context, mesh *meshv1alpha1.Mult
 
 	klog.Infof("Handling deletion for MultiClusterMesh %s/%s", mesh.Namespace, mesh.Name)
 
-	// Collect cluster namespaces from mesh-owned ManifestWorks before deleting them,
-	// because PlacementDecisions may already be gone during deletion.
-	clusterNamespaces := r.getClusterNamespacesFromManifestWorks(ctx, mesh)
-
-	if err := r.cleanupMeshOwnedManifestWorks(ctx, mesh, nil); err != nil {
-		return fmt.Errorf("failed to cleanup mesh-owned ManifestWorks: %w", err)
+	// Collect cluster namespaces from mesh-owned ManifestWorks before deleting
+	// them, because PlacementDecisions may already be gone during deletion.
+	// Delete operator ManifestWorks first — see doReconcile comment for why.
+	clusterNamespaces, err := r.getClusterNamespacesFromManifestWorks(ctx, mesh)
+	if err != nil {
+		return err
 	}
 
 	if err := r.cleanupOperatorManifestWorksForClusters(ctx, clusterNamespaces, mesh); err != nil {
 		return fmt.Errorf("failed to cleanup operator ManifestWorks: %w", err)
+	}
+
+	if err := r.cleanupMeshOwnedManifestWorks(ctx, mesh, nil); err != nil {
+		return fmt.Errorf("failed to cleanup mesh-owned ManifestWorks: %w", err)
 	}
 
 	if err := r.deleteAllManagedServiceAccounts(ctx, mesh); err != nil {
@@ -627,13 +639,12 @@ func (r *Reconciler) deleteOperatorManifestWorkIfUnused(ctx context.Context, clu
 
 // getClusterNamespacesFromManifestWorks collects unique cluster namespaces from
 // mesh-owned ManifestWorks. Used during deletion when PlacementDecisions may be gone.
-func (r *Reconciler) getClusterNamespacesFromManifestWorks(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh) []string {
+func (r *Reconciler) getClusterNamespacesFromManifestWorks(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh) ([]string, error) {
 	workList := &workv1.ManifestWorkList{}
 	if err := r.List(ctx, workList,
 		client.MatchingLabels{MeshNameLabel: mesh.Name, MeshNamespaceLabel: mesh.Namespace},
 	); err != nil {
-		klog.Errorf("Failed to list ManifestWorks for mesh %s/%s: %v", mesh.Namespace, mesh.Name, err)
-		return nil
+		return nil, fmt.Errorf("failed to list ManifestWorks for mesh %s/%s: %w", mesh.Namespace, mesh.Name, err)
 	}
 
 	seen := make(map[string]bool)
@@ -644,7 +655,7 @@ func (r *Reconciler) getClusterNamespacesFromManifestWorks(ctx context.Context, 
 			clusters = append(clusters, work.Namespace)
 		}
 	}
-	return clusters
+	return clusters, nil
 }
 
 // triggerReconcileForConflictedMeshes triggers reconciliation for not-ready meshes
