@@ -212,10 +212,10 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 
 	var reconcileErr error
 
-	clusters, err := r.getClustersFromPlacement(ctx, mesh)
+	clusters, placementFound, err := r.getClustersFromPlacement(ctx, mesh)
 	if err != nil {
 		reconcileErr = err
-	} else if cond := meta.FindStatusCondition(mesh.Status.Conditions, meshv1alpha1.ConditionReady); cond != nil && cond.Reason == meshv1alpha1.ReasonPlacementNotFound {
+	} else if !placementFound {
 		// Placement doesn't exist — don't call doReconcile because cleanup
 		// functions would tear down all infrastructure. The Placement might
 		// be created later or the reference might be fixed.
@@ -1118,16 +1118,17 @@ func meshOwnedLabels(mesh *meshv1alpha1.MultiClusterMesh, clusterName string) ma
 }
 
 // getClustersFromPlacement reads PlacementDecisions to determine the selected clusters.
-// Sets appropriate status conditions when the Placement is not found or selects no clusters.
-func (r *Reconciler) getClustersFromPlacement(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh) ([]clusterv1.ManagedCluster, error) {
+// Returns (clusters, placementFound, error). Sets appropriate status conditions when
+// the Placement is not found or selects no clusters.
+func (r *Reconciler) getClustersFromPlacement(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh) ([]clusterv1.ManagedCluster, bool, error) {
 	placement := &clusterv1beta1.Placement{}
 	if err := r.Get(ctx, key.Of(mesh.Spec.PlacementRef.Name, mesh.Namespace), placement); err != nil {
 		if apierrors.IsNotFound(err) {
 			mesh.SetReadyCondition(metav1.ConditionFalse, meshv1alpha1.ReasonPlacementNotFound,
 				"Placement %s not found in namespace %s", mesh.Spec.PlacementRef.Name, mesh.Namespace)
-			return []clusterv1.ManagedCluster{}, nil
+			return nil, false, nil
 		}
-		return nil, fmt.Errorf("failed to get Placement %s: %w", mesh.Spec.PlacementRef.Name, err)
+		return nil, false, fmt.Errorf("failed to get Placement %s: %w", mesh.Spec.PlacementRef.Name, err)
 	}
 
 	pdList := &clusterv1beta1.PlacementDecisionList{}
@@ -1135,7 +1136,7 @@ func (r *Reconciler) getClustersFromPlacement(ctx context.Context, mesh *meshv1a
 		client.InNamespace(mesh.Namespace),
 		client.MatchingLabels{PlacementLabel: mesh.Spec.PlacementRef.Name},
 	); err != nil {
-		return nil, fmt.Errorf("failed to list PlacementDecisions for Placement %s: %w", mesh.Spec.PlacementRef.Name, err)
+		return nil, false, fmt.Errorf("failed to list PlacementDecisions for Placement %s: %w", mesh.Spec.PlacementRef.Name, err)
 	}
 
 	var clusterNames []string
@@ -1148,7 +1149,7 @@ func (r *Reconciler) getClustersFromPlacement(ctx context.Context, mesh *meshv1a
 	if len(clusterNames) == 0 {
 		mesh.SetReadyCondition(metav1.ConditionFalse, meshv1alpha1.ReasonNoClustersSelected,
 			"Placement %s has not selected any clusters", placement.Name)
-		return []clusterv1.ManagedCluster{}, nil
+		return nil, true, nil
 	}
 
 	slices.Sort(clusterNames)
@@ -1161,7 +1162,7 @@ func (r *Reconciler) getClustersFromPlacement(ctx context.Context, mesh *meshv1a
 				klog.V(4).Infof("Cluster %s from PlacementDecision not found, skipping", name)
 				continue
 			}
-			return nil, fmt.Errorf("failed to get ManagedCluster %s: %w", name, err)
+			return nil, false, fmt.Errorf("failed to get ManagedCluster %s: %w", name, err)
 		}
 		clusters = append(clusters, *cluster)
 	}
@@ -1169,8 +1170,8 @@ func (r *Reconciler) getClustersFromPlacement(ctx context.Context, mesh *meshv1a
 	if len(clusters) == 0 {
 		mesh.SetReadyCondition(metav1.ConditionFalse, meshv1alpha1.ReasonNoClustersSelected,
 			"Placement %s has decisions but none of the selected ManagedClusters exist", placement.Name)
-		return []clusterv1.ManagedCluster{}, nil
+		return nil, true, nil
 	}
 
-	return clusters, nil
+	return clusters, true, nil
 }

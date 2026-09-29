@@ -146,9 +146,12 @@ func TestGetClustersFromPlacementReturnsSortedClusters(t *testing.T) {
 
 	r := &Reconciler{Client: c, Scheme: scheme}
 
-	result, err := r.getClustersFromPlacement(context.Background(), mesh)
+	result, found, err := r.getClustersFromPlacement(context.Background(), mesh)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+	if !found {
+		t.Fatal("expected placementFound=true")
 	}
 
 	if len(result) != 3 {
@@ -338,9 +341,12 @@ func TestGetClustersFromPlacementNotFound(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(scheme).Build()
 	r := &Reconciler{Client: c, Scheme: scheme}
 
-	result, err := r.getClustersFromPlacement(context.Background(), mesh)
+	result, found, err := r.getClustersFromPlacement(context.Background(), mesh)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+	if found {
+		t.Fatal("expected placementFound=false")
 	}
 	if len(result) != 0 {
 		t.Fatalf("expected 0 clusters, got %d", len(result))
@@ -372,9 +378,12 @@ func TestGetClustersFromPlacementNoClustersSelected(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(placement).Build()
 	r := &Reconciler{Client: c, Scheme: scheme}
 
-	result, err := r.getClustersFromPlacement(context.Background(), mesh)
+	result, found, err := r.getClustersFromPlacement(context.Background(), mesh)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+	if !found {
+		t.Fatal("expected placementFound=true")
 	}
 	if len(result) != 0 {
 		t.Fatalf("expected 0 clusters, got %d", len(result))
@@ -424,9 +433,12 @@ func TestGetClustersFromPlacementSkipsMissingCluster(t *testing.T) {
 
 	r := &Reconciler{Client: c, Scheme: scheme}
 
-	result, err := r.getClustersFromPlacement(context.Background(), mesh)
+	result, found, err := r.getClustersFromPlacement(context.Background(), mesh)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+	if !found {
+		t.Fatal("expected placementFound=true")
 	}
 	if len(result) != 1 {
 		t.Fatalf("expected 1 cluster, got %d", len(result))
@@ -467,9 +479,12 @@ func TestGetClustersFromPlacementAllMissing(t *testing.T) {
 
 	r := &Reconciler{Client: c, Scheme: scheme}
 
-	result, err := r.getClustersFromPlacement(context.Background(), mesh)
+	result, found, err := r.getClustersFromPlacement(context.Background(), mesh)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+	if !found {
+		t.Fatal("expected placementFound=true")
 	}
 	if len(result) != 0 {
 		t.Fatalf("expected 0 clusters, got %d", len(result))
