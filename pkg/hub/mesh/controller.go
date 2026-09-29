@@ -1163,5 +1163,11 @@ func (r *Reconciler) getClustersFromPlacement(ctx context.Context, mesh *meshv1a
 		clusters = append(clusters, *cluster)
 	}
 
+	if len(clusters) == 0 {
+		mesh.SetReadyCondition(metav1.ConditionFalse, meshv1alpha1.ReasonNoClustersSelected,
+			"Placement %s has decisions but none of the selected ManagedClusters exist", placement.Name)
+		return []clusterv1.ManagedCluster{}, nil
+	}
+
 	return clusters, nil
 }

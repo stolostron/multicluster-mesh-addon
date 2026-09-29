@@ -443,6 +443,57 @@ func TestGetClustersFromPlacementSkipsMissingCluster(t *testing.T) {
 	}
 }
 
+func TestGetClustersFromPlacementAllMissing(t *testing.T) {
+	scheme := newTestScheme()
+
+	placement := &clusterv1beta1.Placement{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-placement", Namespace: "default"},
+	}
+
+	pd := placementDecision("test-placement", "default", "gone-cluster-1", "gone-cluster-2")
+
+	mesh := &meshv1alpha1.MultiClusterMesh{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-mesh", Namespace: "default"},
+		Spec: meshv1alpha1.MultiClusterMeshSpec{
+			PlacementRef: meshv1alpha1.PlacementReference{Name: "test-placement"},
+		},
+	}
+
+	c := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(placement, pd).
+		WithStatusSubresource(&clusterv1beta1.PlacementDecision{}).
+		Build()
+	pd.Status.Decisions = []clusterv1beta1.ClusterDecision{
+		{ClusterName: "gone-cluster-1"},
+		{ClusterName: "gone-cluster-2"},
+	}
+	if err := c.Status().Update(context.Background(), pd); err != nil {
+		t.Fatalf("failed to update PlacementDecision status: %v", err)
+	}
+
+	r := &Reconciler{Client: c, Scheme: scheme}
+
+	result, err := r.getClustersFromPlacement(context.Background(), mesh)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(result) != 0 {
+		t.Fatalf("expected 0 clusters, got %d", len(result))
+	}
+
+	cond := meta.FindStatusCondition(mesh.Status.Conditions, meshv1alpha1.ConditionReady)
+	if cond == nil {
+		t.Fatal("expected Ready condition to be set")
+	}
+	if cond.Reason != meshv1alpha1.ReasonNoClustersSelected {
+		t.Errorf("expected reason %s, got %s", meshv1alpha1.ReasonNoClustersSelected, cond.Reason)
+	}
+	if !strings.Contains(cond.Message, "none of the selected ManagedClusters exist") {
+		t.Errorf("expected message about missing ManagedClusters, got: %s", cond.Message)
+	}
+}
+
 func TestFindMeshesForCluster(t *testing.T) {
 	scheme := newTestScheme()
 
