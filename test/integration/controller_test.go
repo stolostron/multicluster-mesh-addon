@@ -528,6 +528,28 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 				expectClusterOperatorConditionReason(otherMesh, testNs, clusterName, meshv1alpha1.ReasonInstallationPending)
 			})
 		})
+
+		It("should unblock a cross-namespace mesh when the conflicting mesh is deleted", func() {
+			// Append "z" without a dash so the cross-mesh's key sorts after
+			// the first mesh's key. isOlderMesh uses namespace/name as a
+			// tiebreaker when timestamps fall within the same second, and
+			// "-" (ASCII 45) sorts before "/" (ASCII 47) in the compound key.
+			crossNs := testNs + "z"
+			util.CreateNamespace(ctx, k8sClient, crossNs)
+			crossPlacement := testPlacement + "z"
+			util.CreatePlacement(ctx, k8sClient, crossPlacement, crossNs)
+			util.CreatePlacementDecision(ctx, k8sClient, crossPlacement, crossNs, clusterName)
+
+			crossMesh := meshName + "-cross"
+			util.CreateMultiClusterMesh(ctx, k8sClient, crossMesh, crossNs, crossPlacement, meshv1alpha1.MultiClusterMeshSpec{
+				ControlPlane: meshv1alpha1.ControlPlaneConfig{Namespace: "istio-system-2"},
+				Operator:     meshv1alpha1.OperatorConfig{Channel: "different-channel"},
+			})
+			expectMeshConditionReason(crossMesh, crossNs, meshv1alpha1.ConditionReady, meshv1alpha1.ReasonOperatorConfigConflict)
+
+			util.DeleteResource(ctx, k8sClient, &meshv1alpha1.MultiClusterMesh{}, meshName, testNs)
+			expectClusterOperatorConditionReason(crossMesh, crossNs, clusterName, meshv1alpha1.ReasonInstallationPending)
+		})
 	})
 
 	Context("Deleting MultiClusterMesh", func() {

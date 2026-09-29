@@ -111,13 +111,6 @@ func TestGetClustersFromPlacementReturnsSortedClusters(t *testing.T) {
 			Namespace: "default",
 			Labels:    map[string]string{PlacementLabel: "test-placement"},
 		},
-		Status: clusterv1beta1.PlacementDecisionStatus{
-			Decisions: []clusterv1beta1.ClusterDecision{
-				{ClusterName: "cluster-c"},
-				{ClusterName: "cluster-a"},
-				{ClusterName: "cluster-b"},
-			},
-		},
 	}
 
 	clusters := []clusterv1.ManagedCluster{

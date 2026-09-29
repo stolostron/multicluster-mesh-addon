@@ -485,17 +485,17 @@ func (r *Reconciler) findMeshesForManifestWork(ctx context.Context, obj client.O
 
 func (r *Reconciler) reconcileRequestsForPlacement(ctx context.Context, placementName, namespace string) []reconcile.Request {
 	meshList := &meshv1alpha1.MultiClusterMeshList{}
-	if err := r.List(ctx, meshList, client.MatchingFields{"spec.placementRef.name": placementName}); err != nil {
-		klog.Errorf("Failed to list meshes for Placement %s: %v", placementName, err)
+	if err := r.List(ctx, meshList,
+		client.InNamespace(namespace),
+		client.MatchingFields{"spec.placementRef.name": placementName},
+	); err != nil {
+		klog.Errorf("Failed to list meshes for Placement %s/%s: %v", namespace, placementName, err)
 		return nil
 	}
 
 	var requests []reconcile.Request
 	for i := range meshList.Items {
-		mesh := &meshList.Items[i]
-		if mesh.Namespace == namespace {
-			requests = append(requests, reconcile.Request{NamespacedName: key.For(mesh)})
-		}
+		requests = append(requests, reconcile.Request{NamespacedName: key.For(&meshList.Items[i])})
 	}
 	return requests
 }
@@ -731,7 +731,7 @@ func (r *Reconciler) deleteAllCertificates(ctx context.Context, mesh *meshv1alph
 	return nil
 }
 
-// deleteCertificatesForRemovedClusters deletes Certificates for clusters no longer in the ClusterSet.
+// deleteCertificatesForRemovedClusters deletes Certificates for clusters no longer selected by Placement.
 func (r *Reconciler) deleteCertificatesForRemovedClusters(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, clusters []clusterv1.ManagedCluster) error {
 	clusterNames := clusterNameSet(clusters)
 
