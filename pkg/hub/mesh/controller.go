@@ -215,6 +215,12 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	clusters, err := r.getClustersFromPlacement(ctx, mesh)
 	if err != nil {
 		reconcileErr = err
+	} else if len(clusters) == 0 {
+		// getClustersFromPlacement already set the appropriate condition
+		// (PlacementNotFound, NoClustersSelected). Do not call doReconcile
+		// with an empty cluster list — cleanup functions would interpret it
+		// as "all clusters removed" and tear down all infrastructure.
+		r.pruneStaleClusterStatus(mesh, clusters)
 	} else {
 		var conflict bool
 		if conflict, reconcileErr = r.validate(ctx, mesh, clusters); reconcileErr != nil {
@@ -225,12 +231,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 			if reconcileErr == nil {
 				klog.Infof("Successfully reconciled MultiClusterMesh %s/%s", mesh.Namespace, mesh.Name)
 				r.pruneStaleClusterStatus(mesh, clusters)
-				// Only determine cluster-level status when clusters are selected.
-				// When 0 clusters, getClustersFromPlacement already set the appropriate
-				// condition (PlacementNotFound or NoClustersSelected).
-				if len(clusters) > 0 {
-					reconcileErr = r.determineStatus(ctx, mesh, clusters)
-				}
+				reconcileErr = r.determineStatus(ctx, mesh, clusters)
 			}
 
 			if reconcileErr != nil {
@@ -667,11 +668,12 @@ func (r *Reconciler) triggerReconcileForConflictedMeshes(ctx context.Context, me
 		}
 	}
 
-	// Fallback: trigger all not-ready meshes in the same namespace.
-	// Catches meshes that were rejected before they could create any ManifestWorks.
+	// Fallback: trigger all not-ready meshes across all namespaces.
+	// Catches meshes that were rejected before they could create any ManifestWorks
+	// (e.g., a mesh in ns-b blocked by conflict with this mesh in ns-a).
 	meshList := &meshv1alpha1.MultiClusterMeshList{}
-	if err := r.List(ctx, meshList, client.InNamespace(mesh.Namespace)); err != nil {
-		klog.Errorf("Failed to list meshes in namespace %s: %v", mesh.Namespace, err)
+	if err := r.List(ctx, meshList); err != nil {
+		klog.Errorf("Failed to list meshes: %v", err)
 		return
 	}
 	for i := range meshList.Items {
