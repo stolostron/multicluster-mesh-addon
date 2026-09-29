@@ -698,9 +698,11 @@ func (r *Reconciler) triggerReconcileForConflictedMeshes(ctx context.Context, me
 		}
 	}
 
-	// Fallback: trigger all not-ready meshes across all namespaces.
-	// Catches meshes that were rejected before they could create any ManifestWorks
-	// (e.g., a mesh in ns-b blocked by conflict with this mesh in ns-a).
+	// Fallback: trigger meshes blocked by a conflict with this mesh but that
+	// never created ManifestWorks (so the MW-based lookup above can't find them).
+	// Only OperatorConfigConflict and NamespaceConflict are conflict conditions;
+	// other not-ready reasons (InstallationPending, PlacementNotFound, etc.)
+	// are unrelated to this mesh's deletion.
 	meshList := &meshv1alpha1.MultiClusterMeshList{}
 	if err := r.List(ctx, meshList); err != nil {
 		klog.Errorf("Failed to list meshes: %v", err)
@@ -715,7 +717,11 @@ func (r *Reconciler) triggerReconcileForConflictedMeshes(ctx context.Context, me
 		if triggered[meshKey] {
 			continue
 		}
-		if meta.IsStatusConditionTrue(other.Status.Conditions, meshv1alpha1.ConditionReady) {
+		cond := meta.FindStatusCondition(other.Status.Conditions, meshv1alpha1.ConditionReady)
+		if cond == nil || cond.Status == metav1.ConditionTrue {
+			continue
+		}
+		if cond.Reason != meshv1alpha1.ReasonOperatorConfigConflict && cond.Reason != meshv1alpha1.ReasonNamespaceConflict {
 			continue
 		}
 		r.triggerReconcile(ctx, other)
