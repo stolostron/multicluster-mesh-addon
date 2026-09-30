@@ -111,6 +111,13 @@ demo_title() {
     demo_comment "${1//?/=}"
 }
 
+demo_logo() {
+    local line
+    while IFS= read -r line || [[ -n "${line}" ]]; do
+        TYPEWRITER_DELAY=0.005 demo_comment $'\033[1;36m'"${line}"
+    done
+}
+
 demo_run() {
     local command="$*"
     typewriter $'\033[93m'"${command}"$'\033[0m\n'
@@ -337,18 +344,19 @@ show_bookinfo_productpage() {
 }
 
 clear
-printf '\n'
-printf '\033[1;36m'
-printf '  ███╗   ███╗███████╗███████╗██╗  ██╗    █████╗ ██████╗ ██████╗  █████╗ ███╗   ██╗\n'
-printf '  ████╗ ████║██╔════╝██╔════╝██║  ██║   ██╔══██╗██╔══██╗██╔══██╗██╔══██╗████╗  ██║\n'
-printf '  ██╔████╔██║█████╗  ███████╗███████║   ███████║██║  ██║██║  ██║██║  ██║██╔██╗ ██║\n'
-printf '  ██║╚██╔╝██║██╔══╝  ╚════██║██╔══██║   ██╔══██║██║  ██║██║  ██║██║  ██║██║╚██╗██║\n'
-printf '  ██║ ╚═╝ ██║███████╗███████║██║  ██║   ██║  ██║██████╔╝██████╔╝╚█████╔╝██║ ╚████║\n'
-printf '  ╚═╝     ╚═╝╚══════╝╚══════╝╚═╝  ╚═╝   ╚═╝  ╚═╝╚═════╝ ╚═════╝  ╚════╝ ╚═╝  ╚═══╝\n'
-printf '\033[0m\n'
-printf '\033[1;37m                   Multicluster Mesh Addon · DP1\033[0m\n'
-printf '\033[36m                      ── ACM × OSSM Demo ──\033[0m\n'
-printf '\n'
+demo_logo <<'EOF'
+
+███╗   ███╗███████╗███████╗██╗  ██╗    █████╗ ██████╗ ██████╗  █████╗ ███╗   ██╗
+████╗ ████║██╔════╝██╔════╝██║  ██║   ██╔══██╗██╔══██╗██╔══██╗██╔══██╗████╗  ██║
+██╔████╔██║█████╗  ███████╗███████║   ███████║██║  ██║██║  ██║██║  ██║██╔██╗ ██║
+██║╚██╔╝██║██╔══╝  ╚════██║██╔══██║   ██╔══██║██║  ██║██║  ██║██║  ██║██║╚██╗██║
+██║ ╚═╝ ██║███████╗███████║██║  ██║   ██║  ██║██████╔╝██████╔╝╚█████╔╝██║ ╚████║
+╚═╝     ╚═╝╚══════╝╚══════╝╚═╝  ╚═╝   ╚═╝  ╚═╝╚═════╝ ╚═════╝  ╚════╝ ╚═╝  ╚═══╝
+
+                          Multicluster Mesh Addon - DP1
+                              ── ACM x OSSM Demo ──
+
+EOF
 demo_comment "Welcome to the multi-cluster service mesh demo."
 demo_comment "We will use Bookinfo to make traffic between clusters visible."
 demo_comment "ACM and the mesh add-on coordinate the clusters; the mesh operator is installed via OperatorPolicy."
