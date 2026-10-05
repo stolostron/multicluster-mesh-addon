@@ -193,7 +193,7 @@ spec:
 
 The add-on uses OCM [Placement] for cluster selection. The user creates a `Placement` resource in the same namespace as the `MultiClusterMesh`, and the mesh references it via `spec.placementRef.name`. The controller reads the resulting [PlacementDecision] resources (labeled with `cluster.open-cluster-management.io/placement={name}`) to determine which clusters to target.
 
-This design gives the user full control over cluster selection using Placement's rich scheduling capabilities: label selectors, cluster sets, tolerations, priority-based scheduling, spread policies, etc. The add-on is agnostic to how clusters are selected — it simply reads the decisions.
+This design gives the user full control over cluster selection using Placement's rich scheduling capabilities: label selectors, cluster sets, tolerations, priority-based scheduling, spread policies, etc. The add-on is agnostic to how clusters are selected - it simply reads the decisions.
 
 `MultiClusterMesh` is namespace-scoped, enabling tenant isolation on the hub. Each mesh operates independently - its certificates, discovery tokens, and operator configuration are scoped to its namespace. Multiple meshes can target overlapping clusters, provided they use different control plane namespaces. For example, Mesh A and Mesh B can both target cluster-1, as long as they use different control plane namespaces (e.g., `istio-system-a` and `istio-system-b`). Each mesh gets its own trust domain, certificates, and discovery tokens. If two meshes target the same control plane namespace on the same cluster, the older resource (by creation timestamp) wins and the newer one is rejected.
 

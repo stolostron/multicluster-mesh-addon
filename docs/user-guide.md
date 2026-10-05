@@ -77,9 +77,9 @@ This creates a self-signed `Issuer`, a root CA `Certificate`, and a root CA-back
 A [Placement] selects which clusters join the mesh.
 Placements only consider clusters from [ManagedClusterSets][clusterset] that are bound to the Placement's namespace, so you need three things in order:
 
-1. **ClusterSet membership** — each cluster must belong to a ClusterSet (via the `cluster.open-cluster-management.io/clusterset` label).
-2. **ManagedClusterSetBinding** — the ClusterSet must be bound to the mesh namespace.
-3. **Placement** — selects from the bound ClusterSets using predicates.
+1. **ClusterSet membership** - each cluster must belong to a ClusterSet (via the `cluster.open-cluster-management.io/clusterset` label).
+2. **ManagedClusterSetBinding** - the ClusterSet must be bound to the mesh namespace.
+3. **Placement** - selects from the bound ClusterSets using predicates.
 
 ### Create and bind a ClusterSet
 
@@ -110,7 +110,7 @@ spec:
 EOF
 ```
 
-> **Tip:** For quick testing on ACM, you can bind the `global` ClusterSet instead — it automatically includes
+> **Tip:** For quick testing on ACM, you can bind the `global` ClusterSet instead - it automatically includes
 > all managed clusters and doesn't require labeling. For production, use a dedicated ClusterSet to limit
 > which clusters the Placement can select.
 
@@ -139,6 +139,8 @@ Label your clusters to match the Placement's selector:
 kubectl label managedcluster cluster1 mesh-role=member
 kubectl label managedcluster cluster2 mesh-role=member
 ```
+
+> **Note:** To select all the clusters from a specific clusterSet, you can specify spec.clusterSets and remove spec.predicates.
 
 Verify the Placement selected your clusters:
 

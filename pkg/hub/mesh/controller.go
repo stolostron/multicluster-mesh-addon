@@ -108,6 +108,9 @@ func RegisterController(mgr manager.Manager) error {
 		return err
 	}
 
+	// Controller-runtime prefixes namespaced index keys with the object's namespace.
+	// A mesh team-a/mesh-a that references mesh-placement is stored as team-a/mesh-placement.
+	// The same Placement name in team-b is stored as team-b/mesh-placement.
 	if err := mgr.GetFieldIndexer().IndexField(context.Background(), &meshv1alpha1.MultiClusterMesh{}, "spec.placementRef.name", func(obj client.Object) []string {
 		return []string{obj.(*meshv1alpha1.MultiClusterMesh).Spec.PlacementRef.Name}
 	}); err != nil {
