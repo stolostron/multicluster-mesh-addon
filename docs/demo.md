@@ -1,42 +1,93 @@
-# OpenShift ACM and OSSM demo
+# Build and expand a multicluster mesh with ACM and OSSM
 
-This walkthrough tells a simple Bookinfo story across three OpenShift clusters.
-ACM provides the hub, the mesh add-on prepares the selected clusters, and you create the Istio and application resources just as a customer would.
-We start with two clusters, show reviews traffic crossing them, and then add a third cluster to show scale-out.
+Connect two OpenShift clusters in a service mesh, send requests between them, and then add a third cluster without changing how the client calls the service.
+Bookinfo's reviews service makes the result visible: each response identifies the cluster that served it.
 
-The commands are deliberately explicit and the demo pauses between sections.
-Follow this guide by hand. The interactive script covers the same scenario, but its ordering and readiness checks can differ; the commands here check prerequisites before starting the addon and wait for individual new members during scale-out.
-ManifestWorks and other implementation details are used behind the scenes but are not the focus here.
+Red Hat Advanced Cluster Management (ACM) provides the hub and manages the clusters.
+The mesh add-on distributes the shared trust and endpoint-discovery resources that connect their Istio control planes.
+You'll install Istio and the application on each cluster.
+On OpenShift, you'll also explore the mesh in the OpenShift Service Mesh (OSSM) Console.
 
-The final section opens the Fleet Service Mesh console plugin so you can continue exploring the same MultiClusterMesh from the OpenShift Console.
+You can [run an interactive demo](#run-the-interactive-demo) or [follow the OpenShift walkthrough](#openshift-walkthrough) at your own pace.
+A local kind demo is also available if you don't have an OpenShift environment.
 
-This is a demo flow, not a production installation.
-Use the certificate issuer, OSSM version, network configuration, and application deployment process required by your organization in production.
+> **Note:** The walkthrough uses `oc` for OpenShift. Use `kubectl` for these commands if you're using a local kind environment.
 
-## Before you start
+## Before you begin
 
-The following must already exist:
+Choose an OpenShift environment or a local kind environment, then prepare the tools for the way you want to run the demo.
+Run all commands from the root of a local checkout of this repository.
 
-- An OpenShift cluster that is an ACM hub.
-- Three ACM managed clusters that are joined and available.
-- The ACM managed-serviceaccount add-on installed and available.
-- OLM on all three managed clusters.
-- Permission to enable the ManifestWorkReplicaSet feature gate on the ACM hub if it is not already enabled.
-- kubectl, helm, clusteradm, istioctl, envsubst, yq, and bat on the machine running the commands.
-- A kubeconfig context for the hub and each spoke.
-- Permission to install cluster-scoped operators and the add-on.
+### Tools to install
 
-The third cluster is registered and available, but it is intentionally not in the mesh ClusterSet at the beginning.
-Do not install the OSSM operator subscription by hand on the spokes.
-A later step installs it with OperatorPolicy before the MultiClusterMesh is created.
+| How you run the demo | Tools you need on your workstation |
+| --- | --- |
+| Interactive demo on OpenShift | Bash 4 or newer, Go, `make`, `oc`, `envsubst`, `yq`, and `bat` |
+| Interactive demo on kind | Bash 4 or newer, Go, `make`, `kubectl`, `envsubst`, `yq`, `bat`, and Docker or Podman |
+| OpenShift walkthrough by hand | Bash 4 or newer, `oc`, Helm, `istioctl`, `envsubst`, and `yq` |
 
-The commands below use kubectl.
-On OpenShift, oc can be substituted for kubectl.
+For either interactive demo, use the Go version specified in [go.mod](../go.mod).
 
-## Set the demo names
+### Using an existing OpenShift environment
 
-Replace the contexts and cluster names with the values from your ACM inventory.
-Keep the mesh namespace, mesh name, and ClusterSet names shown below unless you also edit the sample manifests.
+Use an ACM hub with three registered OpenShift managed clusters, all available, and administrator access to all four clusters.
+The managed clusters need LoadBalancer support for the gateways that carry traffic between them; on bare-metal clusters, you can use MetalLB.
+
+For the interactive demo, save a separate kubeconfig file for the hub and each managed cluster.
+For the manual walkthrough, configure a kubeconfig context for each cluster.
+You'll install cert-manager if needed, the mesh add-on, and the OSSM operator during the demo.
+
+### Using a local kind environment
+
+Start your container engine and make sure your workstation has enough CPU and memory to run four local Kubernetes clusters.
+Then prepare the environment:
+
+~~~bash
+make demo-dev-env
+~~~
+
+This creates an OCM hub and three managed clusters with the platform components needed for the Sail demo.
+Wait for setup to finish before starting the demo.
+
+## Run the interactive demo
+
+Choose the command for your environment.
+The demo pauses after applying manifests so you can inspect them and their results before continuing.
+
+### On OpenShift
+
+Provide the hub kubeconfig first, followed by the three spoke kubeconfigs in the same order as the cluster names:
+
+~~~bash
+make demo \
+  SPOKE_CLUSTERS="cluster1 cluster2 cluster3" \
+  DEMO_KUBECONFIG="/path/hub.config:/path/cluster1.config:/path/cluster2.config:/path/cluster3.config"
+~~~
+
+The OpenShift demo finishes by opening the OSSM Console on the hub.
+
+### Locally with kind
+
+The local kind demo uses the upstream Sail operator instead of the OSSM operator used on OpenShift.
+With the local environment prepared, start the demo:
+
+~~~bash
+make demo-sail
+~~~
+
+The Sail demo shows the same traffic and scale-out scenario without the OSSM Console, which requires OpenShift.
+When finished, remove the local environment with `make demo-dev-clean`.
+
+## OpenShift walkthrough
+
+Follow these steps using your [OpenShift environment](#using-an-existing-openshift-environment) and the tools listed for the manual walkthrough.
+
+### Set your cluster names
+
+Set the kubeconfig contexts and managed-cluster names for your environment.
+The hub context connects to ACM; the spoke contexts connect to the clusters that will join the mesh.
+The `CLUSTER_A`, `CLUSTER_B`, and `CLUSTER_C` values are the managed-cluster names shown in ACM.
+Keep `mesh-system` and `openshift-mesh` as shown, because the sample manifests use those names.
 
 ~~~bash
 export HUB_CONTEXT=acm-hub
@@ -50,92 +101,50 @@ export CLUSTER_C=cluster3
 
 export MESH_NAMESPACE=mesh-system
 export MESH_NAME=openshift-mesh
-export CLUSTER_SET=mesh-cluster-set
-export OPERATOR_POLICY_NAMESPACE=mesh-operator-policy
 ~~~
 
-Confirm that the contexts point to the intended clusters before continuing:
+### 1. Prepare the hub and gateways
+
+Begin with the three managed clusters registered with your hub.
+List them to see the starting topology:
 
 ~~~bash
-kubectl --context "$HUB_CONTEXT" cluster-info
-kubectl --context "$SPOKE_A_CONTEXT" cluster-info
-kubectl --context "$SPOKE_B_CONTEXT" cluster-info
-kubectl --context "$SPOKE_C_CONTEXT" cluster-info
+oc --context "$HUB_CONTEXT" get managedclusters
 ~~~
 
-## 1. Prepare ACM prerequisites
-
-ACM is already installed for this demo.
-This step checks the ACM inventory, makes sure ManifestWorkReplicaSet is enabled, and prepares Gateway API for the east-west gateways.
+The add-on will use ACM to distribute discovery resources to the mesh members.
+Enable the hub feature it needs for this:
 
 ~~~bash
-kubectl --context "$HUB_CONTEXT" get managedclusters
-kubectl --context "$HUB_CONTEXT" wait \
-  --for=condition=ManagedClusterConditionAvailable=True \
-  "managedcluster/$CLUSTER_A" \
-  "managedcluster/$CLUSTER_B" \
-  "managedcluster/$CLUSTER_C" \
-  --timeout=5m
-~~~
-
-ManifestWorkReplicaSet lets the add-on distribute resources through ACM.
-Enable it on the hub:
-
-~~~bash
-kubectl --context "$HUB_CONTEXT" patch clustermanager cluster-manager \
+oc --context "$HUB_CONTEXT" patch clustermanager cluster-manager \
   --type=merge \
   -p '{"spec":{"workConfiguration":{"featureGates":[{"feature":"ManifestWorkReplicaSet","mode":"Enable"}]}}}'
 ~~~
 
-Gateway API provides the resource used by the east-west gateway.
-OpenShift may already provide these CRDs; the local Sail demo installs them here when they are missing.
-For production, use the Gateway API version approved for your OpenShift and OSSM releases.
+Next, prepare the spokes for the gateways that will carry traffic between their networks.
+These gateways use Gateway API resources.
+If your spokes do not already provide Gateway API, install its CRDs:
 
 ~~~bash
 for CONTEXT in "$SPOKE_A_CONTEXT" "$SPOKE_B_CONTEXT" "$SPOKE_C_CONTEXT"; do
-  kubectl --context "$CONTEXT" get crd \
-    gateways.gateway.networking.k8s.io \
-    gatewayclasses.gateway.networking.k8s.io \
-    --ignore-not-found -o name
-done
-
-for CONTEXT in "$SPOKE_A_CONTEXT" "$SPOKE_B_CONTEXT" "$SPOKE_C_CONTEXT"; do
-  if ! kubectl --context "$CONTEXT" get crd \
-    gateways.gateway.networking.k8s.io \
-    gatewayclasses.gateway.networking.k8s.io >/dev/null 2>&1; then
-    kubectl --context "$CONTEXT" apply --server-side \
-      -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.2.1/standard-install.yaml
-  fi
+  oc --context "$CONTEXT" apply --server-side \
+    -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.2.1/standard-install.yaml
 done
 ~~~
 
-The ACM managed-serviceaccount add-on and OLM are prerequisites for this walkthrough.
-They are used behind the scenes by the mesh add-on and should already be healthy.
+### 2. Establish shared trust
+
+The workloads on different clusters need to trust one another.
+Create a shared root certificate on the hub; the add-on will use it to distribute an intermediate CA certificate to each mesh member.
+
+If cert-manager is already installed on the hub, continue with the trust chain below.
+Otherwise, install the Red Hat cert-manager Operator from the `redhat-operators` catalog on the `stable-v1` channel:
 
 ~~~bash
-for CLUSTER in "$CLUSTER_A" "$CLUSTER_B" "$CLUSTER_C"; do
-  kubectl --context "$HUB_CONTEXT" wait --for=condition=Available \
-    managedclusteraddon/managed-serviceaccount -n "$CLUSTER" --timeout=10m
-done
-~~~
-
-## 2. Prepare cert-manager and the demo trust root
-
-If cert-manager is not already installed on the hub, install the Red Hat cert-manager Operator with OLM.
-The stable-v1 channel and redhat-operators catalog are the values used here for the demo.
-
-~~~bash
-kubectl --context "$HUB_CONTEXT" apply \
+oc --context "$HUB_CONTEXT" apply \
   -f hack/demo/cert-manager-operator.yaml
 
-kubectl --context "$HUB_CONTEXT" wait \
-  --for=jsonpath='{.status.phase}'=Succeeded \
-  --selector=operators.coreos.com/openshift-cert-manager-operator.cert-manager-operator \
-  csv \
-  -n cert-manager-operator \
-  --timeout=10m
-
-kubectl --context "$HUB_CONTEXT" wait \
+oc --context "$HUB_CONTEXT" wait \
   --for=condition=Available \
   deployment/cert-manager \
   deployment/cert-manager-cainjector \
@@ -144,19 +153,15 @@ kubectl --context "$HUB_CONTEXT" wait \
   --timeout=5m
 ~~~
 
-If cert-manager was already installed, skip the installation manifest and the CSV wait.
-Run the deployment wait commands to verify the existing installation.
-Do not install the Red Hat and community cert-manager Operators together.
-
-Create the namespace and a simple self-signed trust chain using the [cert-manager sample](../samples/cert-manager-issuer.yaml):
+Create the namespace for the mesh and a self-signed trust chain using the [cert-manager sample](../samples/cert-manager-issuer.yaml):
 
 ~~~bash
-kubectl --context "$HUB_CONTEXT" apply -f hack/demo/mesh-namespace.yaml
-kubectl --context "$HUB_CONTEXT" apply \
+oc --context "$HUB_CONTEXT" apply -f hack/demo/mesh-namespace.yaml
+oc --context "$HUB_CONTEXT" apply \
   -n "$MESH_NAMESPACE" \
   -f samples/cert-manager-issuer.yaml
 
-kubectl --context "$HUB_CONTEXT" wait \
+oc --context "$HUB_CONTEXT" wait \
   --for=condition=Ready \
   issuer/mesh-selfsigned-issuer \
   certificate/mesh-root-ca \
@@ -165,25 +170,15 @@ kubectl --context "$HUB_CONTEXT" wait \
   --timeout=5m
 ~~~
 
-This root is self-signed only to keep the demo self-contained.
-Customers should provide the issuer and trust policy required by their environment.
+> **Note:** The self-signed root keeps this demo self-contained.
+> For production, use the issuer and trust policy required by your organization.
 
-## 3. Install the add-on on the ACM hub
+### 3. Install the add-on on the ACM hub
 
-The controller checks for cert-manager and ManagedServiceAccount CRDs at startup. Complete the preceding steps before installing it; otherwise the Helm readiness wait cannot succeed.
-
-~~~bash
-kubectl --context "$HUB_CONTEXT" get crd \
-  certificates.cert-manager.io \
-  managedserviceaccounts.authentication.open-cluster-management.io \
-  manifestworkreplicasets.work.open-cluster-management.io
-~~~
-
-The add-on is not installed from an ACM or OLM catalog in this demo.
-Install it explicitly from its Helm repository.
+With the trust root in place, install the mesh add-on on the hub using Helm:
 
 ~~~bash
-helm repo add multicluster-mesh-addon \
+helm repo add --force-update multicluster-mesh-addon \
   https://stolostron.github.io/multicluster-mesh-addon
 helm repo update
 helm upgrade --install multicluster-mesh-addon \
@@ -195,547 +190,471 @@ helm upgrade --install multicluster-mesh-addon \
   --timeout 5m
 ~~~
 
-Confirm that the controller is ready:
+### 4. Select the initial mesh members
+
+Use cluster1 and cluster2 for the initial mesh, leaving cluster3 for the scale-out step.
+An ACM Placement selects the members; the operator installation policy will use the same selection.
+
+Label the first two clusters for the demo and give each an Istio network identity.
+Leave cluster3 without the `mesh-demo=enabled` label for now.
+
+> **Note:** If the clusters already have network labels, save those values so you can restore them during cleanup.
 
 ~~~bash
-kubectl --context "$HUB_CONTEXT" wait \
-  --for=condition=Available \
-  deployment/multicluster-mesh-controller \
-  -n multicluster-mesh-system \
-  --timeout=5m
+oc --context "$HUB_CONTEXT" label managedcluster "$CLUSTER_A" \
+  mesh-demo=enabled topology.istio.io/network=network-a --overwrite
+oc --context "$HUB_CONTEXT" label managedcluster "$CLUSTER_B" \
+  mesh-demo=enabled topology.istio.io/network=network-b --overwrite
 ~~~
 
-## 4. Prepare the exclusive ClusterSet
-
-Create the ClusterSet and add the first two spokes.
-The default clusteradm create clusterset behavior creates an exclusive ClusterSet.
+Create `mesh-placement` in the mesh namespace.
+The sample binds the `default` ClusterSet to that namespace and selects clusters labeled `mesh-demo=enabled`:
 
 ~~~bash
-clusteradm --context "$HUB_CONTEXT" create clusterset "$CLUSTER_SET"
-clusteradm --context "$HUB_CONTEXT" clusterset set "$CLUSTER_SET" \
-  --clusters "$CLUSTER_A,$CLUSTER_B"
-~~~
-
-Give the first two clusters stable network identities for the Istio configuration that follows:
-
-~~~bash
-kubectl --context "$HUB_CONTEXT" label managedcluster "$CLUSTER_A" \
-  topology.istio.io/network=network-a --overwrite
-kubectl --context "$HUB_CONTEXT" label managedcluster "$CLUSTER_B" \
-  topology.istio.io/network=network-b --overwrite
-~~~
-
-Bind the ClusterSet to the mesh namespace and create the Placement that the mesh sample references:
-
-~~~bash
-kubectl --context "$HUB_CONTEXT" apply \
+oc --context "$HUB_CONTEXT" apply \
   -n "$MESH_NAMESPACE" \
   -f hack/demo/mesh-placement.yaml
 ~~~
 
-## 5. Install the mesh operator
+### 5. Install the mesh operator
 
-The OSSM operator is a prerequisite. The add-on does not install it.
-OperatorPolicy installs it on the clusters selected by `mesh-operator-placement`.
+Each mesh member needs the OSSM operator to run Istio.
+Apply an OperatorPolicy on the hub to install it on cluster1 and cluster2.
+The policy uses `mesh-placement`, so it will also install the operator when you select cluster3 later.
 
-Install the governance-policy-framework hub add-on when its CRDs are not already present:
-
-~~~bash
-clusteradm --context "$HUB_CONTEXT" install hub-addon --names governance-policy-framework
-~~~
-
-Enable the policy add-ons on the first two spokes and turn on OperatorPolicy:
+Wait for the policy to report `Compliant` for both initial clusters before creating the mesh:
 
 ~~~bash
-clusteradm --context "$HUB_CONTEXT" addon enable \
-  --names governance-policy-framework \
-  --namespace open-cluster-management-agent-addon \
-  --clusters "$CLUSTER_A,$CLUSTER_B"
-clusteradm --context "$HUB_CONTEXT" addon enable \
-  --names config-policy-controller \
-  --namespace open-cluster-management-agent-addon \
-  --clusters "$CLUSTER_A,$CLUSTER_B"
-
-for CLUSTER in "$CLUSTER_A" "$CLUSTER_B"; do
-  kubectl --context "$HUB_CONTEXT" wait --for=condition=Available \
-    managedclusteraddon/governance-policy-framework \
-    managedclusteraddon/config-policy-controller \
-    -n "$CLUSTER" --timeout=10m
-  kubectl --context "$HUB_CONTEXT" annotate managedclusteraddon/config-policy-controller \
-    -n "$CLUSTER" operator-policy-disabled=false --overwrite
-done
-~~~
-
-Create the namespace and Placement used by the OperatorPolicy sample, then apply the OSSM policy.
-Wait until the policy is Compliant before creating the mesh:
-
-~~~bash
-kubectl --context "$HUB_CONTEXT" apply -f hack/demo/operator-policy-namespace.yaml
-kubectl --context "$HUB_CONTEXT" apply \
-  -n "$OPERATOR_POLICY_NAMESPACE" \
-  -f hack/demo/operator-policy-placement.yaml
-kubectl --context "$HUB_CONTEXT" apply \
-  -n "$OPERATOR_POLICY_NAMESPACE" \
+oc --context "$HUB_CONTEXT" apply \
+  -n "$MESH_NAMESPACE" \
   -f samples/operator-policy-ossm.yaml
-kubectl --context "$HUB_CONTEXT" wait \
-  --for=jsonpath='{.status.compliant}'=Compliant \
-  policy/policy-ossm-operator \
-  -n "$OPERATOR_POLICY_NAMESPACE" \
-  --timeout=15m
 for CLUSTER in "$CLUSTER_A" "$CLUSTER_B"; do
-  kubectl --context "$HUB_CONTEXT" wait \
+  oc --context "$HUB_CONTEXT" wait \
     --for="jsonpath={.status.status[?(@.clustername==\"${CLUSTER}\")].compliant}=Compliant" \
-    policy/policy-ossm-operator -n "$OPERATOR_POLICY_NAMESPACE" --timeout=15m
+    policy/policy-ossm-operator -n "$MESH_NAMESPACE" --timeout=15m
 done
+oc --context "$HUB_CONTEXT" get policy/policy-ossm-operator -n "$MESH_NAMESPACE"
 ~~~
 
-## 6. Create the MultiClusterMesh resource
+### 6. Create the mesh
 
-The [OpenShift sample](../samples/openshift.yaml) references the Placement and issuer created above.
-The OSSM operator is already installed by the OperatorPolicy.
+Create a MultiClusterMesh on the hub to begin preparing the two clusters.
+The [OpenShift sample](../samples/openshift.yaml) references the Placement and certificate issuer you created earlier:
 
 ~~~bash
-kubectl --context "$HUB_CONTEXT" apply \
+oc --context "$HUB_CONTEXT" apply \
   -n "$MESH_NAMESPACE" \
   -f samples/openshift.yaml
 
-kubectl --context "$HUB_CONTEXT" get \
+oc --context "$HUB_CONTEXT" get \
   "multiclustermesh/$MESH_NAME" \
   -n "$MESH_NAMESPACE" \
-  -o yaml | yq .status
+  -o yaml
 
-kubectl --context "$HUB_CONTEXT" get \
-  "multiclustermesh/$MESH_NAME" \
-  -n "$MESH_NAMESPACE"
-
-kubectl --context "$HUB_CONTEXT" wait \
+oc --context "$HUB_CONTEXT" wait \
   --for=condition=Ready=True \
   "multiclustermesh/$MESH_NAME" \
   -n "$MESH_NAMESPACE" \
-  --timeout=15m
+  --timeout=5m
 
-kubectl --context "$HUB_CONTEXT" get \
+oc --context "$HUB_CONTEXT" get \
   "multiclustermesh/$MESH_NAME" \
   -n "$MESH_NAMESPACE"
 ~~~
 
-The important result is status.conditions[type=Ready].status=True.
-When trust is configured, Ready means the cacerts ManifestWork is applied and available on every cluster the controller resolved from the Placement.
-It does not mean that an Istio control plane or Bookinfo is running yet.
-It also does not verify endpoint-discovery rollout. Inspect the remote-secret distribution and check `istioctl remote-clusters -i "$CP_NAMESPACE"` after Istio is running; see [readiness limits](api-reference.md#readiness-limits).
+When the mesh reports `Ready=True`, shared trust is in place for the initial members.
+Next, you'll start Istio and verify that the control planes can discover one another.
+See [readiness limits](api-reference.md#readiness-limits) for what this condition covers.
 
-Read the control plane namespace from the mesh. The Istio samples need this value as `CP_NAMESPACE`:
+The add-on creates a control plane namespace on each member cluster.
+Read its name from the mesh status and save it as `CP_NAMESPACE` for the Istio configuration:
 
 ~~~bash
-export CP_NAMESPACE="$(kubectl --context "$HUB_CONTEXT" get \
+export CP_NAMESPACE="$(oc --context "$HUB_CONTEXT" get \
   "multiclustermesh/$MESH_NAME" \
   -n "$MESH_NAMESPACE" \
   -o jsonpath='{.status.controlPlaneNamespace}')"
-test -n "$CP_NAMESPACE" || { echo "Mesh control plane namespace is not available yet" >&2; exit 1; }
 echo "$CP_NAMESPACE"
 ~~~
 
-The add-on also creates trust and endpoint-discovery resources behind the scenes.
-Those resources support the mesh but are not the primary demo object.
+### 7. Start Istio on the first two clusters
 
-## 7. Configure Istio on the initial mesh members
+The clusters now have the trust and discovery resources they need.
+Use the samples to deploy [Istio CNI](../samples/istio/istiocni.yaml), an [Istio control plane](../samples/istio/istio.yaml), and an [east-west gateway](../samples/istio/eastwest-gateway.yaml) on each cluster.
+Both control planes use `openshift-mesh` as their mesh name and trust domain, and the namespace saved in `CP_NAMESPACE`.
+Give each control plane its own cluster name and network identity as shown below.
 
-The add-on does not create Istio resources.
-Apply the Istio configuration on each spoke as the customer would, directly or through GitOps.
+#### 7.1. Start Istio on cluster1
 
-The [Istio CNI](../samples/istio/istiocni.yaml), [Istio control plane](../samples/istio/istio.yaml), and [east-west Gateway](../samples/istio/eastwest-gateway.yaml) samples use MESH_NAME, CLUSTER_NAME, NETWORK, and CP_NAMESPACE.
-MESH_NAME is already `openshift-mesh`, which matches the sample and is the trust domain.
-
-### 7.1. Configure Istio on cluster1
+Configure the first control plane for cluster1 on network-a:
 
 ~~~bash
 export CLUSTER_NAME="$CLUSTER_A"
 export NETWORK=network-a
-kubectl --context "$SPOKE_A_CONTEXT" apply -f hack/demo/istiocni-namespace.yaml
-kubectl --context "$SPOKE_A_CONTEXT" apply -f samples/istio/istiocni.yaml
+oc --context "$SPOKE_A_CONTEXT" apply -f hack/demo/istiocni-namespace.yaml
+oc --context "$SPOKE_A_CONTEXT" apply -f samples/istio/istiocni.yaml
 envsubst < samples/istio/istio.yaml | \
-  kubectl --context "$SPOKE_A_CONTEXT" apply -f -
-kubectl --context "$SPOKE_A_CONTEXT" wait --for=create \
-  deployment/istiod -n "$CP_NAMESPACE" --timeout=15m
-kubectl --context "$SPOKE_A_CONTEXT" wait \
-  --for=condition=Available \
-  deployment/istiod \
-  -n "$CP_NAMESPACE" --timeout=15m
+  oc --context "$SPOKE_A_CONTEXT" apply -f -
 envsubst < samples/istio/eastwest-gateway.yaml | \
-  kubectl --context "$SPOKE_A_CONTEXT" apply -f -
+  oc --context "$SPOKE_A_CONTEXT" apply -f -
 ~~~
 
-### 7.2. Configure Istio on cluster2
+#### 7.2. Start Istio on cluster2
+
+Repeat the setup on cluster2, using its own cluster name and network-b:
 
 ~~~bash
 export CLUSTER_NAME="$CLUSTER_B"
 export NETWORK=network-b
-kubectl --context "$SPOKE_B_CONTEXT" apply -f hack/demo/istiocni-namespace.yaml
-kubectl --context "$SPOKE_B_CONTEXT" apply -f samples/istio/istiocni.yaml
+oc --context "$SPOKE_B_CONTEXT" apply -f hack/demo/istiocni-namespace.yaml
+oc --context "$SPOKE_B_CONTEXT" apply -f samples/istio/istiocni.yaml
 envsubst < samples/istio/istio.yaml | \
-  kubectl --context "$SPOKE_B_CONTEXT" apply -f -
-kubectl --context "$SPOKE_B_CONTEXT" wait --for=create \
-  deployment/istiod -n "$CP_NAMESPACE" --timeout=15m
-kubectl --context "$SPOKE_B_CONTEXT" wait \
-  --for=condition=Available \
-  deployment/istiod \
-  -n "$CP_NAMESPACE" --timeout=15m
+  oc --context "$SPOKE_B_CONTEXT" apply -f -
 envsubst < samples/istio/eastwest-gateway.yaml | \
-  kubectl --context "$SPOKE_B_CONTEXT" apply -f -
+  oc --context "$SPOKE_B_CONTEXT" apply -f -
 ~~~
 
-### 7.3. Verify mesh connectivity
+#### 7.3. Verify mesh connectivity
 
-Wait for each east-west gateway Service to receive a LoadBalancer address. The Gateway is programmed after the service receives an address:
+Wait for both control planes to become available and for their east-west gateways to receive LoadBalancer addresses:
 
 ~~~bash
-kubectl --context "$SPOKE_A_CONTEXT" wait \
-  --for=create \
-  service/eastwestgateway-istio -n "$CP_NAMESPACE" --timeout=10m
-kubectl --context "$SPOKE_A_CONTEXT" wait \
-  --for=jsonpath='{.status.loadBalancer.ingress}' \
-  service/eastwestgateway-istio \
-  -n "$CP_NAMESPACE" \
-  --timeout=10m
-
-kubectl --context "$SPOKE_B_CONTEXT" wait \
-  --for=create \
-  service/eastwestgateway-istio -n "$CP_NAMESPACE" --timeout=10m
-kubectl --context "$SPOKE_B_CONTEXT" wait \
-  --for=jsonpath='{.status.loadBalancer.ingress}' \
-  service/eastwestgateway-istio \
-  -n "$CP_NAMESPACE" \
-  --timeout=10m
+for CONTEXT in "$SPOKE_A_CONTEXT" "$SPOKE_B_CONTEXT"; do
+  oc --context "$CONTEXT" wait --for=condition=Available \
+    deployment/istiod -n "$CP_NAMESPACE" --timeout=5m
+  oc --context "$CONTEXT" wait \
+    --for=jsonpath='{.status.loadBalancer.ingress}' \
+    service/eastwestgateway-istio -n "$CP_NAMESPACE" --timeout=5m
+done
 ~~~
 
-Verify that both Istio control planes have connected to their peers through the add-on's trust and endpoint-discovery setup. Gateway readiness alone does not establish that discovery has completed:
+With the control planes running, use `istioctl` to see whether each cluster has connected to its peer:
 
 ~~~bash
 istioctl remote-clusters --context "$SPOKE_A_CONTEXT" -i "$CP_NAMESPACE"
 istioctl remote-clusters --context "$SPOKE_B_CONTEXT" -i "$CP_NAMESPACE"
 ~~~
 
-## 8. Deploy Bookinfo and show cross-cluster traffic
+Each cluster should list the other as a connected peer before you deploy the application.
 
-Deploy one Bookinfo reviews version on each cluster. Keep the same service names so Istio treats the reviews workloads as one multi-cluster service.
+### 8. Send application traffic across the mesh
 
-### 8.1. Deploy Bookinfo v1 on cluster1
+Use Bookinfo's reviews service to see requests cross the mesh.
+Deploy reviews v1 on cluster1 and reviews v2 on cluster2, using the same Service name on both clusters.
+A client can then call one address and receive responses from either cluster.
 
-Set ISTIO_VERSION to the Istio version supported by the OSSM version installed by your catalog.
-The repository's demo default is Istio 1.30.4; check that it matches your installed operator and istioctl version before using it.
-The Bookinfo manifest uses the matching Istio minor-release branch.
+#### 8.1. Deploy reviews v1 and ratings on cluster1
+
+The examples use Istio 1.30.4 and fetch Bookinfo from the matching release branch.
+Set `ISTIO_VERSION` to the version supported by your OSSM installation, and use a matching `istioctl` version.
+Start with reviews v1 and the ratings service on cluster1.
+The other reviews versions will call this ratings service to retrieve star ratings.
+Create the reviews and ratings Services and ServiceAccounts on each cluster so the calls can cross the mesh.
 
 ~~~bash
 export ISTIO_VERSION=1.30.4
 export BOOKINFO_REF="release-${ISTIO_VERSION%.*}"
+export BOOKINFO_MANIFEST="https://raw.githubusercontent.com/openshift-service-mesh/istio/$BOOKINFO_REF/samples/bookinfo/platform/kube/bookinfo.yaml"
 
-kubectl --context "$SPOKE_A_CONTEXT" apply \
+oc --context "$SPOKE_A_CONTEXT" apply \
   -f hack/demo/bookinfo-namespace.yaml
 
-kubectl --context "$SPOKE_A_CONTEXT" apply \
+oc --context "$SPOKE_A_CONTEXT" apply \
   -n bookinfo \
-  -f "https://raw.githubusercontent.com/openshift-service-mesh/istio/$BOOKINFO_REF/samples/bookinfo/platform/kube/bookinfo.yaml"
+  -f "$BOOKINFO_MANIFEST" \
+  -l 'service in (reviews,ratings)'
+oc --context "$SPOKE_A_CONTEXT" apply \
+  -n bookinfo \
+  -f "$BOOKINFO_MANIFEST" \
+  -l 'account in (reviews,ratings)'
+oc --context "$SPOKE_A_CONTEXT" apply \
+  -n bookinfo \
+  -f "$BOOKINFO_MANIFEST" \
+  -l 'app in (ratings,reviews),version=v1'
 
-kubectl --context "$SPOKE_A_CONTEXT" set env \
+oc --context "$SPOKE_A_CONTEXT" set env \
   deployment/reviews-v1 CLUSTER_NAME="$CLUSTER_A" -n bookinfo
-kubectl --context "$SPOKE_A_CONTEXT" scale \
-  deployment/reviews-v2 deployment/reviews-v3 \
-  --replicas=0 -n bookinfo
-kubectl --context "$SPOKE_A_CONTEXT" wait \
+oc --context "$SPOKE_A_CONTEXT" wait \
   --for=condition=Available \
-  deployment/productpage-v1 deployment/details-v1 \
   deployment/reviews-v1 deployment/ratings-v1 \
-  -n bookinfo --timeout=15m
-kubectl --context "$SPOKE_A_CONTEXT" get deployment \
-  -n bookinfo
+  -n bookinfo --timeout=5m
 ~~~
 
-### 8.2. Deploy Bookinfo v2 on cluster2
+#### 8.2. Deploy reviews v2 on cluster2
+
+Deploy reviews v2 on cluster2, using the same Service names as cluster1.
+Set `CLUSTER_NAME` so its responses identify which cluster served the request:
 
 ~~~bash
-kubectl --context "$SPOKE_B_CONTEXT" apply \
+oc --context "$SPOKE_B_CONTEXT" apply \
   -f hack/demo/bookinfo-namespace.yaml
-kubectl --context "$SPOKE_B_CONTEXT" apply \
+oc --context "$SPOKE_B_CONTEXT" apply \
   -n bookinfo \
-  -f "https://raw.githubusercontent.com/openshift-service-mesh/istio/$BOOKINFO_REF/samples/bookinfo/platform/kube/bookinfo.yaml"
-kubectl --context "$SPOKE_B_CONTEXT" set env \
+  -f "$BOOKINFO_MANIFEST" \
+  -l 'service in (reviews,ratings)'
+oc --context "$SPOKE_B_CONTEXT" apply \
+  -n bookinfo \
+  -f "$BOOKINFO_MANIFEST" \
+  -l 'account in (reviews,ratings)'
+oc --context "$SPOKE_B_CONTEXT" apply \
+  -n bookinfo \
+  -f "$BOOKINFO_MANIFEST" \
+  -l 'app=reviews,version=v2'
+oc --context "$SPOKE_B_CONTEXT" set env \
   deployment/reviews-v2 CLUSTER_NAME="$CLUSTER_B" -n bookinfo
-kubectl --context "$SPOKE_B_CONTEXT" scale \
-  deployment/productpage-v1 deployment/details-v1 \
-  deployment/reviews-v1 deployment/reviews-v3 \
-  --replicas=0 -n bookinfo
-kubectl --context "$SPOKE_B_CONTEXT" wait \
+oc --context "$SPOKE_B_CONTEXT" wait \
   --for=condition=Available \
-  deployment/reviews-v2 deployment/ratings-v1 \
-  -n bookinfo --timeout=15m
-kubectl --context "$SPOKE_B_CONTEXT" get deployment \
-  -n bookinfo
+  deployment/reviews-v2 \
+  -n bookinfo --timeout=5m
 ~~~
 
-### 8.3. Generate and verify cross-cluster traffic
+#### 8.3. See which clusters answer
 
-Create the same [curl client used by the cross-cluster e2e test](../test/e2e/testdata/curl.yaml) in the injected Bookinfo namespace. It gives us a simple way to call the shared reviews service without hiding the request in application code:
+Deploy a [curl client](../test/e2e/testdata/curl.yaml) in the Bookinfo namespace on cluster2.
+Its requests will go through the mesh, just like requests from an application:
 
 ~~~bash
-kubectl --context "$SPOKE_A_CONTEXT" apply \
+oc --context "$SPOKE_B_CONTEXT" apply \
   -n bookinfo \
   -f test/e2e/testdata/curl.yaml
-kubectl --context "$SPOKE_A_CONTEXT" wait \
+oc --context "$SPOKE_B_CONTEXT" wait \
   --for=condition=Available deployment/curl \
-  -n bookinfo --timeout=15m
+  -n bookinfo --timeout=5m
 ~~~
 
-Call the reviews service repeatedly from that client on cluster1:
+Call the reviews service a few times from that client on cluster2:
 
 ~~~bash
-for i in {1..12}; do
-  kubectl --context "$SPOKE_A_CONTEXT" exec deployment/curl \
+declare -A counts=()
+for i in {1..8}; do
+  response="$(oc --context "$SPOKE_B_CONTEXT" exec deployment/curl \
     -n bookinfo -c curl -- curl -sS http://reviews:9080/reviews/0 |
-    yq -r '.podname + " " + .clustername'
+    yq -r '.podname + " " + .clustername')"
+  echo "$response"
+  cluster=${response##* }
+  counts[$cluster]=$((${counts[$cluster]:-0} + 1))
 done
+printf '\nResponses by cluster:\n'
+for cluster in "${!counts[@]}"; do
+  printf '  %s  %s\n' "$cluster" "${counts[$cluster]}"
+done | sort
 ~~~
 
-Expected output includes reviews-v1 from cluster1 and reviews-v2 from cluster2.
-The pod and cluster values make the cross-cluster request visible without exposing the add-on's implementation resources.
+Look for reviews-v1 responses from cluster1 and reviews-v2 responses from cluster2.
+Each line identifies the serving pod and cluster; the summary counts the responses from each cluster.
+The counts can vary between runs.
 
-For a browser view, port-forward the product page from a second terminal:
+### 9. Add a third cluster to the mesh
+
+Now expand the mesh while keeping the client and Service address unchanged.
+Select cluster3, let the policy and add-on prepare it, then deploy Istio and reviews v3 there.
+
+#### 9.1. Select cluster3
+
+Add the selection label and network identity to cluster3:
 
 ~~~bash
-kubectl --context "$SPOKE_A_CONTEXT" port-forward \
-  -n bookinfo \
-  svc/productpage 9080:9080
+oc --context "$HUB_CONTEXT" label managedcluster "$CLUSTER_C" \
+  mesh-demo=enabled topology.istio.io/network=network-c --overwrite
 ~~~
 
-Open http://localhost:9080/productpage.
-The application is the story used for the rest of the demo.
-
-## 9. Scale the mesh out to a third cluster
-
-### 9.1. Add cluster3 to the mesh
-
-Label the third cluster before adding it to the exclusive ClusterSet.
-This label becomes the Istio network identity for the new control plane.
+The Placement now selects cluster3 for both the mesh and the operator installation policy.
+View the mesh status as the new member joins:
 
 ~~~bash
-kubectl --context "$HUB_CONTEXT" label managedcluster "$CLUSTER_C" \
-  topology.istio.io/network=network-c --overwrite
-clusteradm --context "$HUB_CONTEXT" clusterset set "$CLUSTER_SET" \
-  --clusters "$CLUSTER_A,$CLUSTER_B,$CLUSTER_C"
+oc --context "$HUB_CONTEXT" get \
+  "multiclustermesh/$MESH_NAME" \
+  -n "$MESH_NAMESPACE" \
+  -o yaml
 ~~~
 
-Enable the policy add-ons on cluster3 so the existing OperatorPolicy can install OSSM there:
+Wait for cluster3 to report `TrustDistributed=True` before starting Istio there:
 
 ~~~bash
-clusteradm --context "$HUB_CONTEXT" addon enable \
-  --names governance-policy-framework \
-  --namespace open-cluster-management-agent-addon \
-  --clusters "$CLUSTER_C"
-clusteradm --context "$HUB_CONTEXT" addon enable \
-  --names config-policy-controller \
-  --namespace open-cluster-management-agent-addon \
-  --clusters "$CLUSTER_C"
-kubectl --context "$HUB_CONTEXT" wait --for=condition=Available \
-  managedclusteraddon/governance-policy-framework \
-  managedclusteraddon/config-policy-controller \
-  -n "$CLUSTER_C" --timeout=10m
-kubectl --context "$HUB_CONTEXT" annotate managedclusteraddon/config-policy-controller \
-  -n "$CLUSTER_C" operator-policy-disabled=false --overwrite
-~~~
-
-Wait until cluster3's own entry is `Compliant`. The policy's aggregate `status.compliant` can still be `Compliant` from the first two clusters, so a wait on that field can return before the operator is installed on the new member.
-The root policy lists each cluster under `status.status`:
-
-~~~bash
-kubectl --context "$HUB_CONTEXT" wait \
-  --for="jsonpath={.status.status[?(@.clustername==\"${CLUSTER_C}\")].compliant}=Compliant" \
-  policy/policy-ossm-operator \
-  -n "$OPERATOR_POLICY_NAMESPACE" \
-  --timeout=15m
-~~~
-
-Wait for cluster3's trust distribution. Mesh `Ready=True` can likewise still describe the previous membership until the controller updates it.
-`TrustDistributed=True` on that cluster means its cacerts ManifestWork is applied and available:
-
-~~~bash
-kubectl --context "$HUB_CONTEXT" wait \
+oc --context "$HUB_CONTEXT" wait \
   --for="jsonpath={.status.clusterStatus[?(@.clusterName==\"${CLUSTER_C}\")].conditions[?(@.type==\"TrustDistributed\")].status}=True" \
   "multiclustermesh/$MESH_NAME" \
   -n "$MESH_NAMESPACE" \
+  --timeout=5m
+~~~
+
+Then wait for the installation policy to report `Compliant` for cluster3:
+
+~~~bash
+oc --context "$HUB_CONTEXT" wait \
+  --for="jsonpath={.status.status[?(@.clustername==\"${CLUSTER_C}\")].compliant}=Compliant" \
+  policy/policy-ossm-operator \
+  -n "$MESH_NAMESPACE" \
   --timeout=15m
-kubectl --context "$HUB_CONTEXT" get \
+oc --context "$HUB_CONTEXT" get \
   "multiclustermesh/$MESH_NAME" \
   -n "$MESH_NAMESPACE"
 ~~~
 
-The OperatorPolicy has installed the OSSM operator on the new member, and cluster3's cacerts ManifestWork is applied.
-The customer still needs to install and configure Istio there.
+Cluster3 now has the operator and shared trust it needs.
+Next, start its Istio control plane.
 
-### 9.2. Configure Istio on cluster3
+#### 9.2. Start Istio on cluster3
 
-Configure Istio on cluster3:
+Use the same Istio setup as the first two clusters:
 
 ~~~bash
 export CLUSTER_NAME="$CLUSTER_C"
 export NETWORK=network-c
-kubectl --context "$SPOKE_C_CONTEXT" apply -f hack/demo/istiocni-namespace.yaml
-kubectl --context "$SPOKE_C_CONTEXT" apply -f samples/istio/istiocni.yaml
+oc --context "$SPOKE_C_CONTEXT" apply -f hack/demo/istiocni-namespace.yaml
+oc --context "$SPOKE_C_CONTEXT" apply -f samples/istio/istiocni.yaml
 envsubst < samples/istio/istio.yaml | \
-  kubectl --context "$SPOKE_C_CONTEXT" apply -f -
-kubectl --context "$SPOKE_C_CONTEXT" wait --for=create \
-  deployment/istiod -n "$CP_NAMESPACE" --timeout=15m
-kubectl --context "$SPOKE_C_CONTEXT" wait \
-  --for=condition=Available deployment/istiod \
-  -n "$CP_NAMESPACE" --timeout=15m
+  oc --context "$SPOKE_C_CONTEXT" apply -f -
 envsubst < samples/istio/eastwest-gateway.yaml | \
-  kubectl --context "$SPOKE_C_CONTEXT" apply -f -
-kubectl --context "$SPOKE_C_CONTEXT" wait \
-  --for=create service/eastwestgateway-istio -n "$CP_NAMESPACE" --timeout=15m
-kubectl --context "$SPOKE_C_CONTEXT" wait \
+  oc --context "$SPOKE_C_CONTEXT" apply -f -
+oc --context "$SPOKE_C_CONTEXT" wait \
+  --for=condition=Available deployment/istiod \
+  -n "$CP_NAMESPACE" --timeout=5m
+oc --context "$SPOKE_C_CONTEXT" wait \
   --for=jsonpath='{.status.loadBalancer.ingress}' \
   service/eastwestgateway-istio \
-  -n "$CP_NAMESPACE" --timeout=15m
+  -n "$CP_NAMESPACE" --timeout=5m
 ~~~
 
-Verify that all three control planes can see each other:
+Check that cluster3 can see the rest of the mesh:
 
 ~~~bash
-istioctl remote-clusters --context "$SPOKE_A_CONTEXT" -i "$CP_NAMESPACE"
-istioctl remote-clusters --context "$SPOKE_B_CONTEXT" -i "$CP_NAMESPACE"
 istioctl remote-clusters --context "$SPOKE_C_CONTEXT" -i "$CP_NAMESPACE"
 ~~~
 
-### 9.3. Deploy Bookinfo v3 and verify traffic
+#### 9.3. Deploy reviews v3 and see all three clusters answer
 
-Deploy Bookinfo v3 on cluster3. Keep the same service names so the three reviews versions form one multi-cluster service:
+Deploy reviews v3 on cluster3 with the same Service names.
+All three versions will now be reachable through the existing reviews address:
 
 ~~~bash
-kubectl --context "$SPOKE_C_CONTEXT" apply \
+oc --context "$SPOKE_C_CONTEXT" apply \
   -f hack/demo/bookinfo-namespace.yaml
-kubectl --context "$SPOKE_C_CONTEXT" apply \
+oc --context "$SPOKE_C_CONTEXT" apply \
   -n bookinfo \
-  -f "https://raw.githubusercontent.com/openshift-service-mesh/istio/$BOOKINFO_REF/samples/bookinfo/platform/kube/bookinfo.yaml"
-kubectl --context "$SPOKE_C_CONTEXT" set env \
+  -f "$BOOKINFO_MANIFEST" \
+  -l 'service in (reviews,ratings)'
+oc --context "$SPOKE_C_CONTEXT" apply \
+  -n bookinfo \
+  -f "$BOOKINFO_MANIFEST" \
+  -l 'account in (reviews,ratings)'
+oc --context "$SPOKE_C_CONTEXT" apply \
+  -n bookinfo \
+  -f "$BOOKINFO_MANIFEST" \
+  -l 'app=reviews,version=v3'
+oc --context "$SPOKE_C_CONTEXT" set env \
   deployment/reviews-v3 CLUSTER_NAME="$CLUSTER_C" -n bookinfo
-kubectl --context "$SPOKE_C_CONTEXT" scale \
-  deployment/productpage-v1 deployment/details-v1 \
-  deployment/reviews-v1 deployment/reviews-v2 \
-  --replicas=0 -n bookinfo
-kubectl --context "$SPOKE_C_CONTEXT" wait \
-  --for=condition=Available \
-  deployment/reviews-v3 deployment/ratings-v1 \
-  -n bookinfo --timeout=15m
-kubectl --context "$SPOKE_C_CONTEXT" get deployment \
-  -n bookinfo
+oc --context "$SPOKE_C_CONTEXT" wait \
+  --for=condition=Available deployment/reviews-v3 \
+  -n bookinfo --timeout=5m
 ~~~
 
-Call the reviews service again from the client on cluster1:
+Call the reviews service a few more times from the client on cluster2:
 
 ~~~bash
+declare -A counts=()
 for i in {1..12}; do
-  kubectl --context "$SPOKE_A_CONTEXT" exec deployment/curl \
+  response="$(oc --context "$SPOKE_B_CONTEXT" exec deployment/curl \
     -n bookinfo -c curl -- curl -sS http://reviews:9080/reviews/0 |
-    yq -r '.podname + " " + .clustername'
+    yq -r '.podname + " " + .clustername')"
+  echo "$response"
+  cluster=${response##* }
+  counts[$cluster]=$((${counts[$cluster]:-0} + 1))
 done
+printf '\nResponses by cluster:\n'
+for cluster in "${!counts[@]}"; do
+  printf '  %s  %s\n' "$cluster" "${counts[$cluster]}"
+done | sort
 ~~~
 
-Expected output now includes reviews-v1, reviews-v2, and reviews-v3, showing traffic across all three mesh members.
+Look for reviews-v3 responses from cluster3 alongside the responses from cluster1 and cluster2.
+The new responses show that cluster3 is serving requests through the same reviews address, with no changes to the client.
 
-To see the Bookinfo productpage in a browser, expose it through an OpenShift Route:
+### 10. Explore the mesh in the console
 
-~~~bash
-kubectl --context "$SPOKE_A_CONTEXT" create route edge productpage \
-  --service=productpage --port=9080 -n bookinfo
-kubectl --context "$SPOKE_A_CONTEXT" get route productpage \
-  -n bookinfo -o jsonpath='https://{.spec.host}/productpage{"\n"}'
-~~~
-
-Open the printed URL and refresh a few times.
-Reviews with no stars come from v1, black stars from v2, and red stars from v3.
-The version that appears changes because Istio load-balances the reviews service across all three clusters.
-
-## 10. Open the Fleet Service Mesh console plugin
-
-The OSSM Console plugin is a separate final step on the ACM hub.
-Install the Kiali Operator from OperatorHub, or create the equivalent subscription explicitly:
+Finish by exploring the three-cluster mesh in the OSSM Console.
+Install the Kiali Operator on the hub, then use it to create the console plugin:
 
 ~~~bash
-kubectl --context "$HUB_CONTEXT" apply \
+oc --context "$HUB_CONTEXT" apply \
   -f hack/demo/kiali-ossm-subscription.yaml
 
-kubectl --context "$HUB_CONTEXT" wait \
-  --for=jsonpath='{.status.phase}'=Succeeded \
-  --selector=operators.coreos.com/kiali-ossm.openshift-operators \
-  csv \
-  -n openshift-operators \
-  --timeout=10m
-kubectl --context "$HUB_CONTEXT" wait \
+oc --context "$HUB_CONTEXT" wait \
   --for=condition=Available \
   deployment/kiali-operator \
   -n openshift-operators \
-  --timeout=5m
+  --timeout=10m
 ~~~
 
 Create the OSSMConsole resource with Fleet Service Mesh enabled:
 
 ~~~bash
-kubectl --context "$HUB_CONTEXT" apply \
+oc --context "$HUB_CONTEXT" apply \
   -f hack/demo/ossm-console.yaml
 
-kubectl --context "$HUB_CONTEXT" wait \
-  --for=create \
-  consoleplugin/ossmconsole \
-  --timeout=10m
-kubectl --context "$HUB_CONTEXT" get ossmconsole -A
-kubectl --context "$HUB_CONTEXT" get consoleplugin ossmconsole
+oc --context "$HUB_CONTEXT" get ossmconsole -A
+oc --context "$HUB_CONTEXT" get consoleplugin ossmconsole
 ~~~
 
-Refresh the OpenShift Console on the ACM hub and navigate to the Fleet Service Mesh perspective:
-
-1. Click the perspective switcher (top-left) and select **Fleet Service Mesh**.
-2. Open the **Meshes** page and inspect the mesh if the installed plugin supports this Placement-based MultiClusterMesh API.
-3. Use the plugin's supported inventory views for control-plane details. The addon publishes `spec.placementRef`, its derived namespace, and trust conditions; it does not publish ClusterSet or per-cluster operator-installation status.
-4. Verify operator health separately using the OperatorPolicy and spoke operator deployments.
-
-Fleet Service Mesh is a developer preview.
-It is an inventory and status view.
-It does not replace Kiali and it does not create the Istio resources owned by the customer.
-
-The hub console URL can be printed with:
+Print the hub console URL and open it in your browser:
 
 ~~~bash
-kubectl --context "$HUB_CONTEXT" get route console \
+oc --context "$HUB_CONTEXT" get route console \
   -n openshift-console \
   -o jsonpath='https://{.spec.host}{"\n"}'
 ~~~
 
-## Cleanup
+In the OpenShift Console, navigate to the Fleet Service Mesh perspective:
 
-First remove the user-owned, cluster-scoped Istio resources so the operator stops recreating their control-plane components. The sample used `Istio/default` on each spoke:
+1. Click the perspective switcher (top-left) and select **Fleet Service Mesh**.
+2. Open the **Meshes** page and select your mesh to explore its members and control plane details.
+
+> **Note:** Fleet Service Mesh is a developer preview, so the available views depend on the installed plugin version and its support for the MultiClusterMesh API.
+
+Use the OperatorPolicy to inspect operator installation status.
+
+### Clean up
+
+When you're finished, remove the Istio resources first so the operator stops recreating the control planes:
 
 ~~~bash
 for CONTEXT in "$SPOKE_A_CONTEXT" "$SPOKE_B_CONTEXT" "$SPOKE_C_CONTEXT"; do
-  kubectl --context "$CONTEXT" delete istio.sailoperator.io default --ignore-not-found
+  oc --context "$CONTEXT" delete istio.sailoperator.io default
 done
 ~~~
 
-Deleting the MultiClusterMesh requests asynchronous cleanup of each spoke's mesh namespace, cacerts, discovery resources, and istio-reader RBAC. The finalizer does not wait for all spoke resources to disappear. Deleting the demo hub namespace also deletes its issuers and retained certificate Secrets:
+Delete the mesh to remove the control plane namespaces and the trust and discovery resources on its members.
+Cleanup on the spokes runs asynchronously, so allow time for those resources to disappear.
+Then delete the demo namespace on the hub, which also removes its policy and certificate resources:
 
 ~~~bash
-kubectl --context "$HUB_CONTEXT" delete \
+oc --context "$HUB_CONTEXT" delete \
   "multiclustermesh/$MESH_NAME" \
   -n "$MESH_NAMESPACE"
-kubectl --context "$HUB_CONTEXT" delete namespace "$MESH_NAMESPACE"
+oc --context "$HUB_CONTEXT" delete namespace "$MESH_NAMESPACE"
 ~~~
 
 Remove the Bookinfo namespace from each spoke:
 
 ~~~bash
 for CONTEXT in "$SPOKE_A_CONTEXT" "$SPOKE_B_CONTEXT" "$SPOKE_C_CONTEXT"; do
-  kubectl --context "$CONTEXT" delete namespace bookinfo --ignore-not-found
+  oc --context "$CONTEXT" delete namespace bookinfo
 done
 ~~~
 
-The separately installed mesh operator, its OperatorPolicy in `$OPERATOR_POLICY_NAMESPACE`, the ClusterSet, and cluster-scoped IstioCNI resources remain. Remove those separately only when they are no longer needed by other meshes.
+Remove the demo selection labels and restore the previous network labels.
+
+> **Note:** The example below assumes the clusters had no network labels before the demo.
+> If the clusters had network labels before the demo, restore those values instead of removing the labels.
+
+~~~bash
+for CLUSTER in "$CLUSTER_A" "$CLUSTER_B" "$CLUSTER_C"; do
+  oc --context "$HUB_CONTEXT" label managedcluster "$CLUSTER" mesh-demo- topology.istio.io/network-
+done
+~~~
+
+> **Note:** The add-on, mesh operator, and shared IstioCNI resources remain installed.
+> Keep them if you plan to run another demo or use them for other meshes.
 
 ## References
 

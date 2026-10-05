@@ -1,11 +1,11 @@
-# Bind mesh-cluster-set to the mesh namespace and select all member clusters.
+# Bind default to the mesh namespace and select labeled demo clusters.
 # Apply in the mesh namespace (for example mesh-system).
 apiVersion: cluster.open-cluster-management.io/v1beta2
 kind: ManagedClusterSetBinding
 metadata:
-  name: mesh-cluster-set
+  name: default
 spec:
-  clusterSet: mesh-cluster-set
+  clusterSet: default
 ---
 apiVersion: cluster.open-cluster-management.io/v1beta1
 kind: Placement
@@ -13,4 +13,9 @@ metadata:
   name: mesh-placement
 spec:
   clusterSets:
-    - mesh-cluster-set
+    - default
+  predicates:
+    - requiredClusterSelector:
+        labelSelector:
+          matchLabels:
+            mesh-demo: enabled

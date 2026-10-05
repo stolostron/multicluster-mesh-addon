@@ -292,7 +292,7 @@ $(CLUSTERADM): | $(BIN_DIR)
 
 DEV_ENV_SCRIPT := $(CURDIR)/hack/dev-env.sh
 DEMO_SCRIPT := $(CURDIR)/hack/demo.sh
-DEMO_DRY_RUN ?= 0
+DEMO_DRY_RUN ?=
 DEMO_KUBECONFIG ?=
 ISTIO_VERSION ?= 1.30.4
 ISTIOCTL_BIN := $(BIN_DIR)/istioctl
@@ -342,7 +342,7 @@ dev-env: dev-env-base ## Provision full dev environment (Kind + OCM + addon + op
 demo-dev-env: ## Provision the local demo environment (Kind + OCM + 3 spokes + addon image)
 	$(MAKE) --no-print-directory \
 		SPOKE_CLUSTERS="cluster1 cluster2 cluster3" \
-		dev-env-base load-addon-image install-metallb
+		dev-env-base load-addon-image install-metallb install-governance-policy-framework
 	$(call log,Demo environment ready. Run 'make demo-sail' to start the local Sail demo.)
 
 .PHONY: demo-dev-clean
@@ -350,7 +350,7 @@ demo-dev-clean: ## Destroy the local 3-spoke demo environment
 	$(MAKE) --no-print-directory SPOKE_CLUSTERS="cluster1 cluster2 cluster3" dev-clean
 
 .PHONY: demo
-demo: $(CLUSTERADM) $(HELM_BIN) $(ISTIOCTL_BIN)
+demo: $(HELM_BIN) $(ISTIOCTL_BIN)
 demo: ## Run the interactive OpenShift ACM and OSSM demo
 	@if [ -z "$(DEMO_KUBECONFIG)" ]; then \
 		echo "ERROR: DEMO_KUBECONFIG is required (hub:spoke1:spoke2:spoke3 kubeconfig paths)"; exit 1; \
@@ -361,7 +361,7 @@ demo: ## Run the interactive OpenShift ACM and OSSM demo
 	@$(DEMO_SCRIPT)
 
 .PHONY: demo-sail
-demo-sail: $(CLUSTERADM) $(HELM_BIN) $(ISTIOCTL_BIN)
+demo-sail: $(HELM_BIN) $(ISTIOCTL_BIN)
 demo-sail: export PLATFORM=kind
 demo-sail: export SPOKE_CLUSTERS=cluster1 cluster2 cluster3
 demo-sail: export DEMO_KUBECONFIG=.kube/hub.config:.kube/cluster1.config:.kube/cluster2.config:.kube/cluster3.config
@@ -412,14 +412,14 @@ create-clusterset: $(CLUSTERADM) join-clusters ## Create the ManagedClusterSet f
 	$(DEV_ENV_SCRIPT) create-clusterset
 
 .PHONY: install-governance-policy-framework
-install-governance-policy-framework: create-clusterset ## Install governance-policy-framework and enable OperatorPolicy
+install-governance-policy-framework: join-clusters ## Install governance-policy-framework and enable OperatorPolicy
 	$(call log,Installing governance-policy-framework)
 	$(DEV_ENV_SCRIPT) install-governance-policy-framework
 
 .PHONY: install-operator
 # Kind-based make targets default PLATFORM to kind so the Sail OperatorPolicy is applied.
 install-operator: export PLATFORM=kind
-install-operator: install-governance-policy-framework install-olm ## Install mesh operator via OperatorPolicy
+install-operator: create-clusterset install-governance-policy-framework install-olm ## Install mesh operator via OperatorPolicy
 	$(call log,Installing mesh operator via OperatorPolicy)
 	$(DEV_ENV_SCRIPT) install-operator
 

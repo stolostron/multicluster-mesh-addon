@@ -28,11 +28,11 @@ make dev-clean
 
 To practice the railroaded Sail version of the customer demo, provision one hub and three managed Kind clusters.
 The demo environment intentionally does not create a ManagedClusterSet.
-It prepares the add-on image and MetalLB, but leaves the controller and Gateway API uninstalled so the demo can show those steps.
+It prepares the add-on image, MetalLB, and the governance policy addons, but leaves the controller and Gateway API uninstalled so the demo can show those steps.
 `make demo-sail` installs the controller from the local chart, using the image loaded into the hub.
-The demo creates the set and adds the first two clusters interactively.
-The third cluster is registered and available, then added to the set during the scale-out portion of the demo.
-The script installs the governance policy addons and mesh operator later in the interactive flow.
+The demo selects clusters from the `default` ManagedClusterSet using the `mesh-demo=enabled` label.
+It labels the first two clusters interactively and adds the third cluster by labeling it during the scale-out portion of the demo.
+The script installs the mesh operator during the interactive flow.
 
 ```bash
 make demo-dev-env
@@ -68,7 +68,7 @@ make demo \
 ```
 
 The demo checks that all four kubeconfig files exist and are readable before it starts.
-The three managed clusters must not already belong to another ManagedClusterSet (the demo creates one interactively).
+The three managed clusters must not already belong to another ManagedClusterSet; the demo selects from the `default` set.
 Use `DEMO_DRY_RUN=1` to print the demo flow without changing the clusters.
 
 To use a different registry or tag:

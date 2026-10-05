@@ -22,7 +22,7 @@ The control plane namespace is auto-derived per mesh and reported in
 
 Install the Sail or OSSM operator on managed clusters before creating a mesh.
 These samples require the governance-policy-framework, config-policy-controller,
-and a Placement named `mesh-operator-placement` in the apply namespace.
+and a Placement named `mesh-placement` in the apply namespace.
 
 | Manifest | Use when |
 |----------|----------|
@@ -32,7 +32,7 @@ and a Placement named `mesh-operator-placement` in the apply namespace.
 Apply on the hub, for example:
 
 ```bash
-kubectl apply -n mesh-operator-policy -f samples/operator-policy-sail.yaml
+kubectl apply -n mesh-system -f samples/operator-policy-sail.yaml
 ```
 
 ## Spoke (Istio)
