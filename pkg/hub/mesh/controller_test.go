@@ -281,6 +281,7 @@ func TestDetermineStatusLastTransitionTime(t *testing.T) {
 			cond := meta.FindStatusCondition(mesh.Status.ClusterStatus[0].Conditions, meshv1alpha1.ConditionOperatorInstalled)
 			if cond == nil {
 				t.Fatal("OperatorInstalled condition not found")
+				return
 			}
 			if cond.Status != tt.expectStatus {
 				t.Errorf("expected status %s, got %s", tt.expectStatus, cond.Status)
@@ -356,6 +357,7 @@ func TestGetClustersFromPlacementNotFound(t *testing.T) {
 	cond := meta.FindStatusCondition(mesh.Status.Conditions, meshv1alpha1.ConditionReady)
 	if cond == nil {
 		t.Fatal("expected Ready condition to be set")
+		return
 	}
 	if cond.Reason != meshv1alpha1.ReasonPlacementNotFound {
 		t.Errorf("expected reason %s, got %s", meshv1alpha1.ReasonPlacementNotFound, cond.Reason)
@@ -393,6 +395,7 @@ func TestGetClustersFromPlacementNoClustersSelected(t *testing.T) {
 	cond := meta.FindStatusCondition(mesh.Status.Conditions, meshv1alpha1.ConditionReady)
 	if cond == nil {
 		t.Fatal("expected Ready condition to be set")
+		return
 	}
 	if cond.Reason != meshv1alpha1.ReasonNoClustersSelected {
 		t.Errorf("expected reason %s, got %s", meshv1alpha1.ReasonNoClustersSelected, cond.Reason)
@@ -496,6 +499,7 @@ func TestGetClustersFromPlacementAllMissing(t *testing.T) {
 	cond := meta.FindStatusCondition(mesh.Status.Conditions, meshv1alpha1.ConditionReady)
 	if cond == nil {
 		t.Fatal("expected Ready condition to be set")
+		return
 	}
 	if cond.Reason != meshv1alpha1.ReasonNoClustersSelected {
 		t.Errorf("expected reason %s, got %s", meshv1alpha1.ReasonNoClustersSelected, cond.Reason)
