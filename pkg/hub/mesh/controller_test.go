@@ -147,7 +147,7 @@ func TestGetClustersFromPlacementReturnsSortedClusters(t *testing.T) {
 
 	r := &Reconciler{Client: c, Scheme: scheme}
 
-	result, found, err := r.getClustersFromPlacement(context.Background(), mesh)
+	result, desiredClusters, found, err := r.getClustersFromPlacement(context.Background(), mesh)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -163,6 +163,15 @@ func TestGetClustersFromPlacementReturnsSortedClusters(t *testing.T) {
 	for i, name := range expected {
 		if result[i].Name != name {
 			t.Errorf("expected cluster[%d] = %s, got %s", i, name, result[i].Name)
+		}
+	}
+
+	if len(desiredClusters) != 3 {
+		t.Fatalf("expected 3 desiredClusters, got %d", len(desiredClusters))
+	}
+	for i, name := range expected {
+		if desiredClusters[i] != name {
+			t.Errorf("expected desiredClusters[%d] = %s, got %s", i, name, desiredClusters[i])
 		}
 	}
 }
@@ -317,7 +326,7 @@ func TestDetermineStatusPrunesStaleCluster(t *testing.T) {
 	r := &Reconciler{Client: client, Scheme: scheme}
 	clusters := []clusterv1.ManagedCluster{{ObjectMeta: metav1.ObjectMeta{Name: activeCluster}}}
 
-	r.pruneStaleClusterStatus(mesh, clusters)
+	r.pruneStaleClusterStatus(mesh, []string{activeCluster})
 	if err := r.determineStatus(context.Background(), mesh, clusters); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -343,7 +352,7 @@ func TestGetClustersFromPlacementNotFound(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(scheme).Build()
 	r := &Reconciler{Client: c, Scheme: scheme}
 
-	result, found, err := r.getClustersFromPlacement(context.Background(), mesh)
+	result, desiredClusters, found, err := r.getClustersFromPlacement(context.Background(), mesh)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -352,6 +361,9 @@ func TestGetClustersFromPlacementNotFound(t *testing.T) {
 	}
 	if len(result) != 0 {
 		t.Fatalf("expected 0 clusters, got %d", len(result))
+	}
+	if desiredClusters != nil {
+		t.Fatalf("expected nil desiredClusters, got %v", desiredClusters)
 	}
 
 	cond := meta.FindStatusCondition(mesh.Status.Conditions, meshv1alpha1.ConditionReady)
@@ -381,7 +393,7 @@ func TestGetClustersFromPlacementNoClustersSelected(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(placement).Build()
 	r := &Reconciler{Client: c, Scheme: scheme}
 
-	result, found, err := r.getClustersFromPlacement(context.Background(), mesh)
+	result, desiredClusters, found, err := r.getClustersFromPlacement(context.Background(), mesh)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -390,6 +402,9 @@ func TestGetClustersFromPlacementNoClustersSelected(t *testing.T) {
 	}
 	if len(result) != 0 {
 		t.Fatalf("expected 0 clusters, got %d", len(result))
+	}
+	if desiredClusters != nil {
+		t.Fatalf("expected nil desiredClusters, got %v", desiredClusters)
 	}
 
 	cond := meta.FindStatusCondition(mesh.Status.Conditions, meshv1alpha1.ConditionReady)
@@ -438,7 +453,7 @@ func TestGetClustersFromPlacementSkipsMissingCluster(t *testing.T) {
 
 	r := &Reconciler{Client: c, Scheme: scheme}
 
-	result, found, err := r.getClustersFromPlacement(context.Background(), mesh)
+	result, desiredClusters, found, err := r.getClustersFromPlacement(context.Background(), mesh)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -450,6 +465,19 @@ func TestGetClustersFromPlacementSkipsMissingCluster(t *testing.T) {
 	}
 	if result[0].Name != "cluster-exists" {
 		t.Errorf("expected cluster-exists, got %s", result[0].Name)
+	}
+
+	// desiredClusters includes ALL PlacementDecision entries, even the missing
+	// cluster. This prevents cleanup functions from prematurely deleting
+	// resources for clusters whose ManagedCluster is temporarily unavailable.
+	if len(desiredClusters) != 2 {
+		t.Fatalf("expected 2 desiredClusters, got %d: %v", len(desiredClusters), desiredClusters)
+	}
+	expectedNames := []string{"cluster-exists", "cluster-missing"}
+	for i, name := range expectedNames {
+		if desiredClusters[i] != name {
+			t.Errorf("expected desiredClusters[%d] = %s, got %s", i, name, desiredClusters[i])
+		}
 	}
 }
 
@@ -485,7 +513,7 @@ func TestGetClustersFromPlacementAllMissing(t *testing.T) {
 
 	r := &Reconciler{Client: c, Scheme: scheme}
 
-	result, found, err := r.getClustersFromPlacement(context.Background(), mesh)
+	result, desiredClusters, found, err := r.getClustersFromPlacement(context.Background(), mesh)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -494,6 +522,18 @@ func TestGetClustersFromPlacementAllMissing(t *testing.T) {
 	}
 	if len(result) != 0 {
 		t.Fatalf("expected 0 clusters, got %d", len(result))
+	}
+
+	// desiredClusters includes the PlacementDecision entries even though all
+	// ManagedClusters are gone, preventing premature cleanup.
+	if len(desiredClusters) != 2 {
+		t.Fatalf("expected 2 desiredClusters, got %d: %v", len(desiredClusters), desiredClusters)
+	}
+	expectedNames := []string{"gone-cluster-1", "gone-cluster-2"}
+	for i, name := range expectedNames {
+		if desiredClusters[i] != name {
+			t.Errorf("expected desiredClusters[%d] = %s, got %s", i, name, desiredClusters[i])
+		}
 	}
 
 	cond := meta.FindStatusCondition(mesh.Status.Conditions, meshv1alpha1.ConditionReady)
@@ -965,13 +1005,8 @@ func TestPruneStaleClusterStatus(t *testing.T) {
 				Status: meshv1alpha1.MultiClusterMeshStatus{ClusterStatus: status},
 			}
 
-			clusters := make([]clusterv1.ManagedCluster, len(tc.active))
-			for i, name := range tc.active {
-				clusters[i] = clusterv1.ManagedCluster{ObjectMeta: metav1.ObjectMeta{Name: name}}
-			}
-
 			r := &Reconciler{}
-			r.pruneStaleClusterStatus(mesh, clusters)
+			r.pruneStaleClusterStatus(mesh, tc.active)
 
 			if len(mesh.Status.ClusterStatus) != len(tc.expected) {
 				t.Fatalf("expected %d cluster statuses, got %d", len(tc.expected), len(mesh.Status.ClusterStatus))

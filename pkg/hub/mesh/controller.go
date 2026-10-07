@@ -222,7 +222,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 
 	var reconcileErr error
 
-	clusters, placementFound, err := r.getClustersFromPlacement(ctx, mesh)
+	clusters, desiredClusters, placementFound, err := r.getClustersFromPlacement(ctx, mesh)
 	if errors.Is(err, errDecisionsPending) {
 		return reconcile.Result{RequeueAfter: 2 * time.Second}, nil
 	} else if err != nil {
@@ -231,7 +231,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		// Placement doesn't exist — don't call doReconcile because cleanup
 		// functions would tear down all infrastructure. The Placement might
 		// be created later or the reference might be fixed.
-		r.pruneStaleClusterStatus(mesh, clusters)
+		r.pruneStaleClusterStatus(mesh, desiredClusters)
 	} else {
 		var conflict bool
 		if conflict, reconcileErr = r.validate(ctx, mesh, clusters); reconcileErr != nil {
@@ -243,14 +243,14 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 			// clusters, removing all mesh-owned ManifestWorks,
 			// certificates, ManagedServiceAccounts, and operator
 			// ManifestWorks (when no other mesh still needs them).
-			reconcileErr = r.doReconcile(ctx, mesh, nil)
+			reconcileErr = r.doReconcile(ctx, mesh, nil, nil)
 			r.pruneStaleClusterStatus(mesh, nil)
 		} else {
-			reconcileErr = r.doReconcile(ctx, mesh, clusters)
+			reconcileErr = r.doReconcile(ctx, mesh, clusters, desiredClusters)
 
 			if reconcileErr == nil {
 				klog.Infof("Successfully reconciled MultiClusterMesh %s/%s", mesh.Namespace, mesh.Name)
-				r.pruneStaleClusterStatus(mesh, clusters)
+				r.pruneStaleClusterStatus(mesh, desiredClusters)
 				if len(clusters) > 0 {
 					reconcileErr = r.determineStatus(ctx, mesh, clusters)
 				}
@@ -370,7 +370,14 @@ func isOlderMesh(a, b *meshv1alpha1.MultiClusterMesh) bool {
 			key.For(a).String() < key.For(b).String())
 }
 
-func (r *Reconciler) doReconcile(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, clusters []clusterv1.ManagedCluster) error {
+// doReconcile creates resources for resolved clusters and cleans up resources
+// for clusters no longer in desiredClusters. The clusters slice contains fully
+// resolved ManagedCluster objects (needed for creation — labels, spec, etc.).
+// desiredClusters contains all cluster names from PlacementDecisions (the
+// source of truth for membership). Cleanup functions use desiredClusters so
+// that resources are preserved for clusters whose ManagedCluster is
+// temporarily unavailable but still listed in the PlacementDecision.
+func (r *Reconciler) doReconcile(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, clusters []clusterv1.ManagedCluster, desiredClusters []string) error {
 	for _, cluster := range clusters {
 		klog.V(4).Infof("Reconciling cluster %s", cluster.Name)
 
@@ -411,7 +418,7 @@ func (r *Reconciler) doReconcile(ctx context.Context, mesh *meshv1alpha1.MultiCl
 			return fmt.Errorf("failed to cleanup Certificates: %w", err)
 		}
 	} else {
-		if err := r.deleteCertificatesForRemovedClusters(ctx, mesh, clusters); err != nil {
+		if err := r.deleteCertificatesForRemovedClusters(ctx, mesh, desiredClusters); err != nil {
 			return fmt.Errorf("failed to cleanup Certificates: %w", err)
 		}
 	}
@@ -427,15 +434,15 @@ func (r *Reconciler) doReconcile(ctx context.Context, mesh *meshv1alpha1.MultiCl
 		return err
 	}
 
-	if err := r.cleanupOperatorManifestWorksForRemovedClusters(ctx, mesh, clusters, previousClusters); err != nil {
+	if err := r.cleanupOperatorManifestWorksForRemovedClusters(ctx, mesh, desiredClusters, previousClusters); err != nil {
 		return fmt.Errorf("failed to cleanup operator ManifestWorks: %w", err)
 	}
 
-	if err := r.cleanupMeshOwnedManifestWorks(ctx, mesh, clusters); err != nil {
+	if err := r.cleanupMeshOwnedManifestWorks(ctx, mesh, desiredClusters); err != nil {
 		return fmt.Errorf("failed to cleanup mesh-owned ManifestWorks: %w", err)
 	}
 
-	if err := r.cleanupManagedServiceAccounts(ctx, mesh, clusters); err != nil {
+	if err := r.cleanupManagedServiceAccounts(ctx, mesh, desiredClusters); err != nil {
 		return fmt.Errorf("failed to cleanup ManagedServiceAccounts: %w", err)
 	}
 
@@ -574,8 +581,8 @@ func (r *Reconciler) handleDeletion(ctx context.Context, mesh *meshv1alpha1.Mult
 // cleanupOperatorManifestWorksForRemovedClusters deletes operator ManifestWorks on clusters
 // that this mesh no longer targets, if no other active mesh still needs them.
 // previousClusters must be collected before cleanupMeshOwnedManifestWorks runs.
-func (r *Reconciler) cleanupOperatorManifestWorksForRemovedClusters(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, clusters []clusterv1.ManagedCluster, previousClusters []string) error {
-	clusterNames := clusterNameSet(clusters)
+func (r *Reconciler) cleanupOperatorManifestWorksForRemovedClusters(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, desiredClusters []string, previousClusters []string) error {
+	clusterNames := clusterNameSet(desiredClusters)
 
 	for _, clusterName := range previousClusters {
 		if clusterNames[clusterName] {
@@ -770,9 +777,9 @@ func (r *Reconciler) deleteAllCertificates(ctx context.Context, mesh *meshv1alph
 	return nil
 }
 
-// deleteCertificatesForRemovedClusters deletes Certificates for clusters no longer selected by Placement.
-func (r *Reconciler) deleteCertificatesForRemovedClusters(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, clusters []clusterv1.ManagedCluster) error {
-	clusterNames := clusterNameSet(clusters)
+// deleteCertificatesForRemovedClusters deletes Certificates for clusters no longer in the PlacementDecision.
+func (r *Reconciler) deleteCertificatesForRemovedClusters(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, desiredClusters []string) error {
+	clusterNames := clusterNameSet(desiredClusters)
 
 	certList := &certmanagerv1.CertificateList{}
 	if err := r.List(ctx, certList,
@@ -797,8 +804,8 @@ func (r *Reconciler) deleteCertificatesForRemovedClusters(ctx context.Context, m
 	return nil
 }
 
-func (r *Reconciler) cleanupMeshOwnedManifestWorks(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, clusters []clusterv1.ManagedCluster) error {
-	clusterNames := clusterNameSet(clusters)
+func (r *Reconciler) cleanupMeshOwnedManifestWorks(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, desiredClusters []string) error {
+	clusterNames := clusterNameSet(desiredClusters)
 
 	workList := &workv1.ManifestWorkList{}
 	if err := r.List(ctx, workList,
@@ -821,8 +828,8 @@ func (r *Reconciler) cleanupMeshOwnedManifestWorks(ctx context.Context, mesh *me
 	return nil
 }
 
-func (r *Reconciler) pruneStaleClusterStatus(mesh *meshv1alpha1.MultiClusterMesh, clusters []clusterv1.ManagedCluster) {
-	activeClusterNames := clusterNameSet(clusters)
+func (r *Reconciler) pruneStaleClusterStatus(mesh *meshv1alpha1.MultiClusterMesh, desiredClusters []string) {
+	activeClusterNames := clusterNameSet(desiredClusters)
 	mesh.Status.ClusterStatus = slices.DeleteFunc(mesh.Status.ClusterStatus, func(cs meshv1alpha1.ClusterMeshStatus) bool {
 		return !activeClusterNames[cs.ClusterName]
 	})
@@ -869,10 +876,10 @@ func getManifestWorkFeedback(work *workv1.ManifestWork) *string {
 	return nil
 }
 
-func clusterNameSet(clusters []clusterv1.ManagedCluster) map[string]bool {
-	set := make(map[string]bool, len(clusters))
-	for _, c := range clusters {
-		set[c.Name] = true
+func clusterNameSet(names []string) map[string]bool {
+	set := make(map[string]bool, len(names))
+	for _, name := range names {
+		set[name] = true
 	}
 	return set
 }
@@ -1156,17 +1163,25 @@ func meshOwnedLabels(mesh *meshv1alpha1.MultiClusterMesh, clusterName string) ma
 }
 
 // getClustersFromPlacement reads PlacementDecisions to determine the selected clusters.
-// Returns (clusters, placementFound, error). Sets appropriate status conditions when
-// the Placement is not found or selects no clusters.
-func (r *Reconciler) getClustersFromPlacement(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh) ([]clusterv1.ManagedCluster, bool, error) {
+// Returns (clusters, desiredClusters, placementFound, error).
+//
+// clusters contains the resolved ManagedCluster objects (used for creation).
+// desiredClusters contains all cluster names from PlacementDecisions (used for
+// cleanup). These differ when a ManagedCluster is being deleted: the Placement
+// controller still lists it in the PlacementDecision, but the ManagedCluster
+// object is gone. Cleanup functions use desiredClusters to avoid prematurely
+// deleting resources for clusters that are still in the PlacementDecision —
+// the Placement controller will remove them shortly, triggering a clean
+// reconciliation via the PlacementDecision watch.
+func (r *Reconciler) getClustersFromPlacement(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh) ([]clusterv1.ManagedCluster, []string, bool, error) {
 	placement := &clusterv1beta1.Placement{}
 	if err := r.Get(ctx, key.Of(mesh.Spec.PlacementRef.Name, mesh.Namespace), placement); err != nil {
 		if apierrors.IsNotFound(err) {
 			mesh.SetReadyCondition(metav1.ConditionFalse, meshv1alpha1.ReasonPlacementNotFound,
 				"Placement %s not found in namespace %s", mesh.Spec.PlacementRef.Name, mesh.Namespace)
-			return nil, false, nil
+			return nil, nil, false, nil
 		}
-		return nil, false, fmt.Errorf("failed to get Placement %s: %w", mesh.Spec.PlacementRef.Name, err)
+		return nil, nil, false, fmt.Errorf("failed to get Placement %s: %w", mesh.Spec.PlacementRef.Name, err)
 	}
 
 	pdList := &clusterv1beta1.PlacementDecisionList{}
@@ -1174,7 +1189,7 @@ func (r *Reconciler) getClustersFromPlacement(ctx context.Context, mesh *meshv1a
 		client.InNamespace(mesh.Namespace),
 		client.MatchingLabels{PlacementLabel: mesh.Spec.PlacementRef.Name},
 	); err != nil {
-		return nil, false, fmt.Errorf("failed to list PlacementDecisions for Placement %s: %w", mesh.Spec.PlacementRef.Name, err)
+		return nil, nil, false, fmt.Errorf("failed to list PlacementDecisions for Placement %s: %w", mesh.Spec.PlacementRef.Name, err)
 	}
 
 	var clusterNames []string
@@ -1192,17 +1207,22 @@ func (r *Reconciler) getClustersFromPlacement(ctx context.Context, mesh *meshv1a
 	if int32(len(clusterNames)) != placement.Status.NumberOfSelectedClusters {
 		klog.Infof("PlacementDecision entries (%d) do not match Placement %s/%s NumberOfSelectedClusters (%d), requeueing",
 			len(clusterNames), placement.Namespace, placement.Name, placement.Status.NumberOfSelectedClusters)
-		return nil, true, errDecisionsPending
+		return nil, nil, true, errDecisionsPending
 	}
 
 	if len(clusterNames) == 0 {
 		mesh.SetReadyCondition(metav1.ConditionFalse, meshv1alpha1.ReasonNoClustersSelected,
 			"Placement %s has not selected any clusters", placement.Name)
-		return nil, true, nil
+		return nil, nil, true, nil
 	}
 
 	slices.Sort(clusterNames)
 
+	// The Placement controller only adds a cluster to the PlacementDecision
+	// after the ManagedCluster exists on the hub. A NotFound here means the
+	// cluster is being deleted; the Placement controller will update the
+	// PlacementDecision shortly, which triggers a correct reconciliation
+	// via the PlacementDecision watch.
 	clusters := make([]clusterv1.ManagedCluster, 0, len(clusterNames))
 	for _, name := range clusterNames {
 		cluster := &clusterv1.ManagedCluster{}
@@ -1211,7 +1231,7 @@ func (r *Reconciler) getClustersFromPlacement(ctx context.Context, mesh *meshv1a
 				klog.V(4).Infof("Cluster %s from PlacementDecision not found, skipping", name)
 				continue
 			}
-			return nil, false, fmt.Errorf("failed to get ManagedCluster %s: %w", name, err)
+			return nil, nil, false, fmt.Errorf("failed to get ManagedCluster %s: %w", name, err)
 		}
 		clusters = append(clusters, *cluster)
 	}
@@ -1219,8 +1239,8 @@ func (r *Reconciler) getClustersFromPlacement(ctx context.Context, mesh *meshv1a
 	if len(clusters) == 0 {
 		mesh.SetReadyCondition(metav1.ConditionFalse, meshv1alpha1.ReasonNoClustersSelected,
 			"Placement %s has decisions but none of the selected ManagedClusters exist", placement.Name)
-		return nil, true, nil
+		return nil, clusterNames, true, nil
 	}
 
-	return clusters, true, nil
+	return clusters, clusterNames, true, nil
 }

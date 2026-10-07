@@ -381,8 +381,18 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 				expectNoClusterStatus(meshName, testNs, clusterName)
 			})
 
-			It("should cleanup ManifestWork when the cluster is deleted", func() {
+			It("should defer ManifestWork cleanup until PlacementDecision is updated after cluster deletion", func() {
 				util.DeleteResource(ctx, k8sClient, &clusterv1.ManagedCluster{}, clusterName, "")
+
+				By("verifying ManifestWorks are preserved while PlacementDecision still lists the cluster")
+				Consistently(func() []workv1.ManifestWork {
+					workList := &workv1.ManifestWorkList{}
+					Expect(k8sClient.List(ctx, workList)).To(Succeed())
+					return workList.Items
+				}).ShouldNot(BeEmpty())
+
+				By("simulating Placement controller removing the cluster from PlacementDecision")
+				util.UpdatePlacementDecision(ctx, k8sClient, testPlacement, testNs)
 				expectAllManifestWorksDeleted()
 				expectNoClusterStatus(meshName, testNs, clusterName)
 			})
@@ -899,8 +909,17 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 						meshcontroller.EndpointDiscoveryName(mesh), clusterName)
 				})
 
-				It("should cleanup ManagedServiceAccount when cluster is deleted", func() {
+				It("should cleanup ManagedServiceAccount when cluster is removed from PlacementDecision", func() {
 					util.DeleteResource(ctx, k8sClient, &clusterv1.ManagedCluster{}, clusterName, "")
+
+					By("verifying ManagedServiceAccount is preserved while PlacementDecision still lists the cluster")
+					Consistently(func() error {
+						msa := &msav1beta1.ManagedServiceAccount{}
+						return k8sClient.Get(ctx, key.Of(meshcontroller.EndpointDiscoveryName(mesh), clusterName), msa)
+					}).Should(Succeed())
+
+					By("simulating Placement controller removing the cluster from PlacementDecision")
+					util.UpdatePlacementDecision(ctx, k8sClient, testPlacement, testNs)
 					util.ExpectResourceDeleted(ctx, k8sClient, &msav1beta1.ManagedServiceAccount{},
 						meshcontroller.EndpointDiscoveryName(mesh), clusterName)
 				})
