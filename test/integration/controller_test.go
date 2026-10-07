@@ -909,7 +909,7 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 						meshcontroller.EndpointDiscoveryName(mesh), clusterName)
 				})
 
-				It("should cleanup ManagedServiceAccount when cluster is removed from PlacementDecision", func() {
+				It("should defer ManagedServiceAccount cleanup until PlacementDecision is updated after cluster deletion", func() {
 					util.DeleteResource(ctx, k8sClient, &clusterv1.ManagedCluster{}, clusterName, "")
 
 					By("verifying ManagedServiceAccount is preserved while PlacementDecision still lists the cluster")
