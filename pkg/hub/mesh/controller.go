@@ -30,6 +30,7 @@ import (
 	clusterv1beta1 "open-cluster-management.io/api/cluster/v1beta1"
 	clusterv1beta2 "open-cluster-management.io/api/cluster/v1beta2"
 	workv1 "open-cluster-management.io/api/work/v1"
+	workv1alpha1 "open-cluster-management.io/api/work/v1alpha1"
 	"open-cluster-management.io/sdk-go/pkg/apis/work/v1/applier"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
@@ -148,13 +149,13 @@ func RegisterController(mgr manager.Manager) error {
 			builder.WithPredicates(predicate.GenerationChangedPredicate{}),
 		).
 		Watches(&corev1.Secret{},
-			handler.EnqueueRequestsFromMapFunc(reconciler.mapSecretToMesh),
+			handler.EnqueueRequestsFromMapFunc(reconciler.mapObjectToMesh),
 			builder.WithPredicates(predicate.NewPredicateFuncs(func(obj client.Object) bool {
 				return obj.GetLabels()[MeshNameLabel] != "" && obj.GetLabels()[MeshNamespaceLabel] != ""
 			})),
 		).
 		Watches(&msav1beta1.ManagedServiceAccount{},
-			handler.EnqueueRequestsFromMapFunc(reconciler.mapMsaToMesh),
+			handler.EnqueueRequestsFromMapFunc(reconciler.mapObjectToMesh),
 			builder.WithPredicates(predicate.NewPredicateFuncs(func(obj client.Object) bool {
 				return obj.GetLabels()[MeshNameLabel] != "" && obj.GetLabels()[MeshNamespaceLabel] != ""
 			})),
@@ -162,6 +163,13 @@ func RegisterController(mgr manager.Manager) error {
 		Watches(
 			&workv1.ManifestWork{},
 			handler.EnqueueRequestsFromMapFunc(reconciler.findMeshesForManifestWork),
+			builder.WithPredicates(predicate.NewPredicateFuncs(func(obj client.Object) bool {
+				return obj.GetLabels()[ManagedByLabel] == ManagedByValue
+			})),
+		).
+		Watches(
+			&workv1alpha1.ManifestWorkReplicaSet{},
+			handler.EnqueueRequestsFromMapFunc(reconciler.mapObjectToMesh),
 			builder.WithPredicates(predicate.NewPredicateFuncs(func(obj client.Object) bool {
 				return obj.GetLabels()[ManagedByLabel] == ManagedByValue
 			})),
@@ -805,28 +813,16 @@ func (r *Reconciler) buildOperatorManifestWork(mesh *meshv1alpha1.MultiClusterMe
 	}
 }
 
-// mapSecretToMesh maps a Secret to the MultiClusterMesh that owns it
-func (r *Reconciler) mapSecretToMesh(_ context.Context, obj client.Object) []reconcile.Request {
-	secret, ok := obj.(*corev1.Secret)
-	if !ok {
-		return nil
-	}
-
-	meshName := secret.Labels[MeshNameLabel]
-	meshNamespace := secret.Labels[MeshNamespaceLabel]
-
-	klog.V(4).Infof("Secret %s/%s triggered reconcile for mesh %s/%s",
-		secret.Namespace, secret.Name, meshNamespace, meshName)
-
-	return []reconcile.Request{{NamespacedName: key.Of(meshName, meshNamespace)}}
-}
-
-func (r *Reconciler) mapMsaToMesh(_ context.Context, obj client.Object) []reconcile.Request {
+func (r *Reconciler) mapObjectToMesh(_ context.Context, obj client.Object) []reconcile.Request {
 	meshName := obj.GetLabels()[MeshNameLabel]
 	meshNamespace := obj.GetLabels()[MeshNamespaceLabel]
+	kind := "Object"
+	if gvks, _, err := r.Scheme.ObjectKinds(obj); err == nil && len(gvks) > 0 {
+		kind = gvks[0].Kind
+	}
 
-	klog.V(4).Infof("ManagedServiceAccount %s/%s triggered reconcile for mesh %s/%s",
-		obj.GetNamespace(), obj.GetName(), meshNamespace, meshName)
+	klog.V(4).Infof("%s %s/%s triggered reconcile for mesh %s/%s",
+		kind, obj.GetNamespace(), obj.GetName(), meshNamespace, meshName)
 
 	return []reconcile.Request{{NamespacedName: key.Of(meshName, meshNamespace)}}
 }
