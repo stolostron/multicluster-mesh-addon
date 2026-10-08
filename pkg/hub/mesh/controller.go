@@ -28,7 +28,6 @@ import (
 	workinformers "open-cluster-management.io/api/client/work/informers/externalversions"
 	clusterv1 "open-cluster-management.io/api/cluster/v1"
 	clusterv1beta1 "open-cluster-management.io/api/cluster/v1beta1"
-	clusterv1beta2 "open-cluster-management.io/api/cluster/v1beta2"
 	workv1 "open-cluster-management.io/api/work/v1"
 	"open-cluster-management.io/sdk-go/pkg/apis/work/v1/applier"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -61,11 +60,18 @@ const (
 	MeshNameLabel      = "mesh.open-cluster-management.io/mesh-name"
 	MeshNamespaceLabel = "mesh.open-cluster-management.io/mesh-namespace"
 
-	ClusterSetLabel   = "cluster.open-cluster-management.io/clusterset"
+	PlacementLabel    = "cluster.open-cluster-management.io/placement"
 	IstioNetworkLabel = "topology.istio.io/network"
 
 	Day = 24 * time.Hour
 )
+
+// errDecisionsPending means the PlacementDecision entries don't yet match
+// Placement.Status.NumberOfSelectedClusters. ACM's Placement controller writes
+// PlacementDecision objects one at a time, so during cluster redistribution a
+// cluster can temporarily be missing from all decisions (see ACM-27799). The
+// reconciler requeues without making changes until the counts converge.
+var errDecisionsPending = errors.New("PlacementDecision entries do not match Placement status")
 
 // Reconciler reconciles MultiClusterMesh resources
 type Reconciler struct {
@@ -102,8 +108,11 @@ func RegisterController(mgr manager.Manager) error {
 		return err
 	}
 
-	if err := mgr.GetFieldIndexer().IndexField(context.Background(), &meshv1alpha1.MultiClusterMesh{}, "spec.clusterSet", func(obj client.Object) []string {
-		return []string{obj.(*meshv1alpha1.MultiClusterMesh).Spec.ClusterSet}
+	// Controller-runtime prefixes namespaced index keys with the object's namespace.
+	// A mesh team-a/mesh-a that references mesh-placement is stored as team-a/mesh-placement.
+	// The same Placement name in team-b is stored as team-b/mesh-placement.
+	if err := mgr.GetFieldIndexer().IndexField(context.Background(), &meshv1alpha1.MultiClusterMesh{}, "spec.placementRef.name", func(obj client.Object) []string {
+		return []string{obj.(*meshv1alpha1.MultiClusterMesh).Spec.PlacementRef.Name}
 	}); err != nil {
 		return fmt.Errorf("failed to create field index: %w", err)
 	}
@@ -143,9 +152,12 @@ func RegisterController(mgr manager.Manager) error {
 			handler.EnqueueRequestsFromMapFunc(reconciler.findMeshesForCluster),
 		).
 		Watches(
-			&clusterv1beta2.ManagedClusterSet{},
-			handler.EnqueueRequestsFromMapFunc(reconciler.findMeshesForClusterSet),
-			builder.WithPredicates(predicate.GenerationChangedPredicate{}),
+			&clusterv1beta1.PlacementDecision{},
+			handler.EnqueueRequestsFromMapFunc(reconciler.findMeshesForPlacementDecision),
+		).
+		Watches(
+			&clusterv1beta1.Placement{},
+			handler.EnqueueRequestsFromMapFunc(reconciler.findMeshesForPlacement),
 		).
 		Watches(&corev1.Secret{},
 			handler.EnqueueRequestsFromMapFunc(reconciler.mapSecretToMesh),
@@ -173,10 +185,8 @@ func RegisterController(mgr manager.Manager) error {
 //+kubebuilder:rbac:groups=mesh.open-cluster-management.io,resources=multiclustermeshes/status,verbs=get;update;patch
 //+kubebuilder:rbac:groups=mesh.open-cluster-management.io,resources=multiclustermeshes/finalizers,verbs=update
 //+kubebuilder:rbac:groups=cluster.open-cluster-management.io,resources=managedclusters,verbs=get;list;watch
-//+kubebuilder:rbac:groups=cluster.open-cluster-management.io,resources=managedclustersets,verbs=get;list;watch
-//+kubebuilder:rbac:groups=cluster.open-cluster-management.io,resources=managedclustersetbindings,verbs=get;list;watch;create;delete
-//+kubebuilder:rbac:groups=cluster.open-cluster-management.io,resources=managedclustersets/bind,verbs=create
-//+kubebuilder:rbac:groups=cluster.open-cluster-management.io,resources=placements,verbs=get;list;watch;create;update
+//+kubebuilder:rbac:groups=cluster.open-cluster-management.io,resources=placements,verbs=get;list;watch
+//+kubebuilder:rbac:groups=cluster.open-cluster-management.io,resources=placementdecisions,verbs=get;list;watch
 //+kubebuilder:rbac:groups=work.open-cluster-management.io,resources=manifestworks,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=work.open-cluster-management.io,resources=manifestworkreplicasets,verbs=get;list;watch;create;update
 //+kubebuilder:rbac:groups=cert-manager.io,resources=certificates,verbs=get;list;watch;create;update;patch;delete
@@ -211,25 +221,45 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	oldStatus := mesh.Status.DeepCopy()
 
 	var reconcileErr error
-	var conflict bool
-	if conflict, reconcileErr = r.validate(ctx, mesh); reconcileErr != nil {
-		mesh.SetReadyCondition(metav1.ConditionFalse, meshv1alpha1.ReasonReconcileError, "%v", reconcileErr)
-	} else if !conflict {
-		clusters, err := r.getClustersFromSet(ctx, mesh.Spec.ClusterSet)
-		if err != nil {
-			reconcileErr = fmt.Errorf("failed to get clusters from set %s: %w", mesh.Spec.ClusterSet, err)
-		} else {
-			reconcileErr = r.doReconcile(ctx, mesh, clusters)
-		}
 
-		if reconcileErr == nil {
-			klog.Infof("Successfully reconciled MultiClusterMesh %s/%s", mesh.Namespace, mesh.Name)
-			reconcileErr = r.determineStatus(ctx, mesh, clusters)
-		}
-
-		if reconcileErr != nil {
-			klog.Errorf("Encountered an error while reconciling MultiClusterMesh %s/%s: %v", mesh.Namespace, mesh.Name, reconcileErr)
+	clusters, desiredClusters, placementFound, err := r.getClustersFromPlacement(ctx, mesh)
+	if errors.Is(err, errDecisionsPending) {
+		return reconcile.Result{RequeueAfter: 2 * time.Second}, nil
+	} else if err != nil {
+		reconcileErr = err
+	} else if !placementFound {
+		// Placement doesn't exist — don't call doReconcile because cleanup
+		// functions would tear down all infrastructure. The Placement might
+		// be created later or the reference might be fixed.
+		r.pruneStaleClusterStatus(mesh, desiredClusters)
+	} else {
+		var conflict bool
+		if conflict, reconcileErr = r.validate(ctx, mesh, clusters); reconcileErr != nil {
 			mesh.SetReadyCondition(metav1.ConditionFalse, meshv1alpha1.ReasonReconcileError, "%v", reconcileErr)
+		} else if conflict {
+			// Mesh lost the conflict — clean up all its resources.
+			// validate already set the conflict condition. Pass nil
+			// clusters so doReconcile treats this as targeting zero
+			// clusters, removing all mesh-owned ManifestWorks,
+			// certificates, ManagedServiceAccounts, and operator
+			// ManifestWorks (when no other mesh still needs them).
+			reconcileErr = r.doReconcile(ctx, mesh, nil, nil)
+			r.pruneStaleClusterStatus(mesh, nil)
+		} else {
+			reconcileErr = r.doReconcile(ctx, mesh, clusters, desiredClusters)
+
+			if reconcileErr == nil {
+				klog.Infof("Successfully reconciled MultiClusterMesh %s/%s", mesh.Namespace, mesh.Name)
+				r.pruneStaleClusterStatus(mesh, desiredClusters)
+				if len(clusters) > 0 {
+					reconcileErr = r.determineStatus(ctx, mesh, clusters)
+				}
+			}
+
+			if reconcileErr != nil {
+				klog.Errorf("Encountered an error while reconciling MultiClusterMesh %s/%s: %v", mesh.Namespace, mesh.Name, reconcileErr)
+				mesh.SetReadyCondition(metav1.ConditionFalse, meshv1alpha1.ReasonReconcileError, "%v", reconcileErr)
+			}
 		}
 	}
 
@@ -251,7 +281,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 
 // validate checks for conflicts that prevent reconciliation.
 // Sets a condition on the mesh and returns true if a conflict is found.
-func (r *Reconciler) validate(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh) (conflict bool, err error) {
+func (r *Reconciler) validate(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, clusters []clusterv1.ManagedCluster) (conflict bool, err error) {
 	// CEL cross-field rule on the spec struct exceeds the estimated cost budget,
 	// so this is validated here instead of via kubebuilder markers.
 	if mesh.GetControlPlaneNamespace() == mesh.Spec.Operator.Namespace {
@@ -260,31 +290,77 @@ func (r *Reconciler) validate(ctx context.Context, mesh *meshv1alpha1.MultiClust
 		return true, nil
 	}
 
-	if err = r.forEachMeshInClusterSet(ctx, mesh.Spec.ClusterSet, func(other *meshv1alpha1.MultiClusterMesh) {
-		if other.UID == mesh.UID || conflict {
-			return
+	for _, cluster := range clusters {
+		peers, err := r.findOlderPeerMeshes(ctx, mesh, cluster.Name)
+		if err != nil {
+			return false, fmt.Errorf("failed to check for conflicts on cluster %s: %w", cluster.Name, err)
 		}
-		if isOlderMesh(mesh, other) {
-			return
+
+		for _, peer := range peers {
+			if mesh.GetControlPlaneNamespace() == peer.GetControlPlaneNamespace() {
+				mesh.SetReadyCondition(metav1.ConditionFalse, meshv1alpha1.ReasonNamespaceConflict,
+					"controlPlane.namespace %q conflicts with older mesh %s/%s on cluster %s",
+					mesh.GetControlPlaneNamespace(), peer.Namespace, peer.Name, cluster.Name)
+				return true, nil
+			}
+			if mesh.Spec.Operator != peer.Spec.Operator {
+				mesh.SetReadyCondition(metav1.ConditionFalse, meshv1alpha1.ReasonOperatorConfigConflict,
+					"operator config conflicts with older mesh %s/%s on cluster %s",
+					peer.Namespace, peer.Name, cluster.Name)
+				return true, nil
+			}
 		}
-		if mesh.GetControlPlaneNamespace() == other.GetControlPlaneNamespace() {
-			mesh.SetReadyCondition(metav1.ConditionFalse, meshv1alpha1.ReasonNamespaceConflict,
-				"controlPlane.namespace %q conflicts with older mesh %s/%s targeting the same ClusterSet %s",
-				mesh.GetControlPlaneNamespace(), other.Namespace, other.Name, mesh.Spec.ClusterSet)
-			conflict = true
-			return
-		}
-		if mesh.Spec.Operator != other.Spec.Operator {
-			mesh.SetReadyCondition(metav1.ConditionFalse, meshv1alpha1.ReasonOperatorConfigConflict,
-				"operator config conflicts with older mesh %s/%s targeting the same ClusterSet %s",
-				other.Namespace, other.Name, mesh.Spec.ClusterSet)
-			conflict = true
-		}
-	}); err != nil {
-		return false, fmt.Errorf("failed to validate: %w", err)
 	}
 
-	return conflict, nil
+	return false, nil
+}
+
+// findOlderPeerMeshes returns all older, non-deleting meshes that have ManifestWorks
+// on the given cluster. Multiple ManifestWorks from the same mesh are deduplicated.
+func (r *Reconciler) findOlderPeerMeshes(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, clusterName string) ([]*meshv1alpha1.MultiClusterMesh, error) {
+	workList := &workv1.ManifestWorkList{}
+	if err := r.List(ctx, workList,
+		client.InNamespace(clusterName),
+		client.MatchingLabels{ManagedByLabel: ManagedByValue},
+	); err != nil {
+		return nil, fmt.Errorf("failed to list ManifestWorks in namespace %s: %w", clusterName, err)
+	}
+
+	seen := map[string]bool{}
+	var peers []*meshv1alpha1.MultiClusterMesh
+	for _, work := range workList.Items {
+		otherName := work.Labels[MeshNameLabel]
+		otherNamespace := work.Labels[MeshNamespaceLabel]
+		if otherName == "" || otherNamespace == "" {
+			continue
+		}
+		if otherName == mesh.Name && otherNamespace == mesh.Namespace {
+			continue
+		}
+		meshKey := otherNamespace + "/" + otherName
+		if seen[meshKey] {
+			continue
+		}
+		seen[meshKey] = true
+
+		other := &meshv1alpha1.MultiClusterMesh{}
+		if err := r.Get(ctx, key.Of(otherName, otherNamespace), other); err != nil {
+			if apierrors.IsNotFound(err) {
+				continue
+			}
+			return nil, fmt.Errorf("failed to get mesh %s/%s: %w", otherNamespace, otherName, err)
+		}
+		if !other.DeletionTimestamp.IsZero() {
+			continue
+		}
+		if isOlderMesh(mesh, other) {
+			continue
+		}
+
+		peers = append(peers, other)
+	}
+
+	return peers, nil
 }
 
 // isOlderMesh returns true if a is older than b, using namespace/name as tiebreaker for equal timestamps.
@@ -294,7 +370,14 @@ func isOlderMesh(a, b *meshv1alpha1.MultiClusterMesh) bool {
 			key.For(a).String() < key.For(b).String())
 }
 
-func (r *Reconciler) doReconcile(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, clusters []clusterv1.ManagedCluster) error {
+// doReconcile creates resources for resolved clusters and cleans up resources
+// for clusters no longer in desiredClusters. The clusters slice contains fully
+// resolved ManagedCluster objects (needed for creation — labels, spec, etc.).
+// desiredClusters contains all cluster names from PlacementDecisions (the
+// source of truth for membership). Cleanup functions use desiredClusters so
+// that resources are preserved for clusters whose ManagedCluster is
+// temporarily unavailable but still listed in the PlacementDecision.
+func (r *Reconciler) doReconcile(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, clusters []clusterv1.ManagedCluster, desiredClusters []string) error {
 	for _, cluster := range clusters {
 		klog.V(4).Infof("Reconciling cluster %s", cluster.Name)
 
@@ -335,35 +418,32 @@ func (r *Reconciler) doReconcile(ctx context.Context, mesh *meshv1alpha1.MultiCl
 			return fmt.Errorf("failed to cleanup Certificates: %w", err)
 		}
 	} else {
-		if err := r.deleteCertificatesForRemovedClusters(ctx, mesh, clusters); err != nil {
+		if err := r.deleteCertificatesForRemovedClusters(ctx, mesh, desiredClusters); err != nil {
 			return fmt.Errorf("failed to cleanup Certificates: %w", err)
 		}
 	}
 
-	if err := r.cleanupMeshOwnedManifestWorks(ctx, mesh, clusters); err != nil {
+	// Discover which clusters previously had mesh-owned ManifestWorks, then
+	// delete operator ManifestWorks BEFORE mesh-owned ones. This ordering
+	// matters for retries: if operator cleanup fails, mesh-owned MWs are
+	// still present so the next attempt can rediscover the cluster list.
+	// Reversing the order would lose the cluster list on retry because
+	// getClusterNamespacesFromManifestWorks relies on mesh-owned MWs.
+	previousClusters, err := r.getClusterNamespacesFromManifestWorks(ctx, mesh)
+	if err != nil {
+		return err
+	}
+
+	if err := r.cleanupOperatorManifestWorksForRemovedClusters(ctx, mesh, desiredClusters, previousClusters); err != nil {
+		return fmt.Errorf("failed to cleanup operator ManifestWorks: %w", err)
+	}
+
+	if err := r.cleanupMeshOwnedManifestWorks(ctx, mesh, desiredClusters); err != nil {
 		return fmt.Errorf("failed to cleanup mesh-owned ManifestWorks: %w", err)
 	}
 
-	if err := r.cleanupManifestWorks(ctx, mesh.Spec.ClusterSet); err != nil {
-		return fmt.Errorf("failed to cleanup ManifestWorks: %w", err)
-	}
-
-	if err := r.cleanupManagedServiceAccounts(ctx, mesh, clusters); err != nil {
+	if err := r.cleanupManagedServiceAccounts(ctx, mesh, desiredClusters); err != nil {
 		return fmt.Errorf("failed to cleanup ManagedServiceAccounts: %w", err)
-	}
-
-	clusterSetExists, err := r.clusterSetExists(ctx, mesh.Spec.ClusterSet)
-	if err != nil {
-		return fmt.Errorf("failed to check ManagedClusterSet %s: %w", mesh.Spec.ClusterSet, err)
-	}
-
-	if clusterSetExists {
-		if err := r.ensureManagedClusterSetBinding(ctx, mesh); err != nil {
-			return fmt.Errorf("failed to ensure ManagedClusterSetBinding for mesh %s binding %s: %w", mesh.Name, mesh.Spec.ClusterSet, err)
-		}
-		if err := r.ensurePlacement(ctx, mesh); err != nil {
-			return fmt.Errorf("failed to ensure Placement for mesh %s/%s: %w", mesh.Namespace, mesh.Name, err)
-		}
 	}
 
 	if err := r.ensureRemoteSecretDistribution(ctx, mesh, clusters); err != nil {
@@ -373,63 +453,88 @@ func (r *Reconciler) doReconcile(ctx context.Context, mesh *meshv1alpha1.MultiCl
 	return nil
 }
 
-// forEachMeshInClusterSet lists all non-deleting meshes targeting the given ClusterSet and calls fn for each.
-func (r *Reconciler) forEachMeshInClusterSet(ctx context.Context, clusterSet string, fn func(*meshv1alpha1.MultiClusterMesh)) error {
-	meshList := &meshv1alpha1.MultiClusterMeshList{}
-	if err := r.List(ctx, meshList, client.MatchingFields{"spec.clusterSet": clusterSet}); err != nil {
-		return fmt.Errorf("failed to list meshes for ClusterSet %s: %w", clusterSet, err)
-	}
-
-	for i := range meshList.Items {
-		if meshList.Items[i].DeletionTimestamp.IsZero() {
-			fn(&meshList.Items[i])
-		}
-	}
-
-	return nil
+// findMeshesForPlacement returns reconcile requests for all meshes referencing the given Placement.
+func (r *Reconciler) findMeshesForPlacement(ctx context.Context, obj client.Object) []reconcile.Request {
+	placement := obj.(*clusterv1beta1.Placement)
+	return r.reconcileRequestsForPlacement(ctx, placement.Name, placement.Namespace)
 }
 
-func (r *Reconciler) reconcileRequestsForClusterSet(ctx context.Context, clusterSet string) []reconcile.Request {
-	var requests []reconcile.Request
-	if err := r.forEachMeshInClusterSet(ctx, clusterSet, func(mesh *meshv1alpha1.MultiClusterMesh) {
-		requests = append(requests, reconcile.Request{NamespacedName: key.For(mesh)})
-	}); err != nil {
-		klog.Errorf("Error when trying to reconcile meshes for ClusterSet %s: %v", clusterSet, err)
+// findMeshesForPlacementDecision returns reconcile requests for all meshes whose Placement
+// owns the given PlacementDecision (cluster membership changed).
+func (r *Reconciler) findMeshesForPlacementDecision(ctx context.Context, obj client.Object) []reconcile.Request {
+	pd := obj.(*clusterv1beta1.PlacementDecision)
+	placementName := pd.Labels[PlacementLabel]
+	if placementName == "" {
+		return nil
 	}
+
+	klog.V(4).Infof("PlacementDecision %s/%s changed, reconciling meshes using Placement %s", pd.Namespace, pd.Name, placementName)
+	return r.reconcileRequestsForPlacement(ctx, placementName, pd.Namespace)
+}
+
+// findMeshesForCluster returns reconcile requests for meshes that have ManifestWorks on the cluster.
+func (r *Reconciler) findMeshesForCluster(ctx context.Context, obj client.Object) []reconcile.Request {
+	cluster := obj.(*clusterv1.ManagedCluster)
+
+	workList := &workv1.ManifestWorkList{}
+	if err := r.List(ctx, workList,
+		client.InNamespace(cluster.Name),
+		client.MatchingLabels{ManagedByLabel: ManagedByValue},
+	); err != nil {
+		klog.Errorf("Failed to list ManifestWorks for cluster %s: %v", cluster.Name, err)
+		return nil
+	}
+
+	seen := make(map[string]bool)
+	var requests []reconcile.Request
+	for _, work := range workList.Items {
+		meshName := work.Labels[MeshNameLabel]
+		meshNamespace := work.Labels[MeshNamespaceLabel]
+		if meshName == "" || meshNamespace == "" {
+			continue
+		}
+		reqKey := meshNamespace + "/" + meshName
+		if seen[reqKey] {
+			continue
+		}
+		seen[reqKey] = true
+		klog.V(4).Infof("ManagedCluster %s changed, reconciling mesh %s/%s", cluster.Name, meshNamespace, meshName)
+		requests = append(requests, reconcile.Request{NamespacedName: key.Of(meshName, meshNamespace)})
+	}
+
 	return requests
 }
 
-// findMeshesForCluster returns a list of all meshes to reconcile following a cluster change
-func (r *Reconciler) findMeshesForCluster(ctx context.Context, obj client.Object) []reconcile.Request {
-	cluster := obj.(*clusterv1.ManagedCluster)
-	clusterSetName := cluster.Labels[ClusterSetLabel]
-	if clusterSetName == "" {
-		klog.V(4).Infof("Cluster %s has no clusterset label, skipping", cluster.Name)
-		return nil
-	}
-
-	klog.V(4).Infof("ManagedCluster %s changed, reconciling meshes using ClusterSet %s", cluster.Name, clusterSetName)
-	return r.reconcileRequestsForClusterSet(ctx, clusterSetName)
-}
-
-// findMeshesForClusterSet returns a list of all meshes to reconcile following a ClusterSet change
-func (r *Reconciler) findMeshesForClusterSet(ctx context.Context, obj client.Object) []reconcile.Request {
-	clusterSet := obj.(*clusterv1beta2.ManagedClusterSet)
-	klog.V(4).Infof("ManagedClusterSet %s changed, reconciling meshes using it", clusterSet.Name)
-	return r.reconcileRequestsForClusterSet(ctx, clusterSet.Name)
-}
-
-// findMeshesForManifestWork returns a list of all meshes to reconcile following a ManifestWork change
+// findMeshesForManifestWork returns reconcile requests for meshes affected by a ManifestWork change.
+// For mesh-owned ManifestWorks (with mesh labels), returns the owning mesh directly.
+// For shared ManifestWorks (operator MW), finds meshes via other ManifestWorks in the same namespace.
 func (r *Reconciler) findMeshesForManifestWork(ctx context.Context, obj client.Object) []reconcile.Request {
-	cluster := &clusterv1.ManagedCluster{}
-	if err := r.Get(ctx, key.Of(obj.GetNamespace()), cluster); err != nil {
-		if !apierrors.IsNotFound(err) {
-			klog.Errorf("Failed to get ManagedCluster %s for ManifestWork %s: %v", obj.GetNamespace(), obj.GetName(), err)
-		}
+	labels := obj.GetLabels()
+	meshName := labels[MeshNameLabel]
+	meshNamespace := labels[MeshNamespaceLabel]
+	if meshName != "" && meshNamespace != "" {
+		klog.V(4).Infof("ManifestWork %s/%s changed, reconciling mesh %s/%s", obj.GetNamespace(), obj.GetName(), meshNamespace, meshName)
+		return []reconcile.Request{{NamespacedName: key.Of(meshName, meshNamespace)}}
+	}
+
+	return r.findMeshesForCluster(ctx, &clusterv1.ManagedCluster{ObjectMeta: metav1.ObjectMeta{Name: obj.GetNamespace()}})
+}
+
+func (r *Reconciler) reconcileRequestsForPlacement(ctx context.Context, placementName, namespace string) []reconcile.Request {
+	meshList := &meshv1alpha1.MultiClusterMeshList{}
+	if err := r.List(ctx, meshList,
+		client.InNamespace(namespace),
+		client.MatchingFields{"spec.placementRef.name": placementName},
+	); err != nil {
+		klog.Errorf("Failed to list meshes for Placement %s/%s: %v", namespace, placementName, err)
 		return nil
 	}
 
-	return r.findMeshesForCluster(ctx, cluster)
+	var requests []reconcile.Request
+	for i := range meshList.Items {
+		requests = append(requests, reconcile.Request{NamespacedName: key.For(&meshList.Items[i])})
+	}
+	return requests
 }
 
 // handleDeletion handles cleanup when the MultiClusterMesh is being deleted
@@ -441,25 +546,28 @@ func (r *Reconciler) handleDeletion(ctx context.Context, mesh *meshv1alpha1.Mult
 
 	klog.Infof("Handling deletion for MultiClusterMesh %s/%s", mesh.Namespace, mesh.Name)
 
-	if err := r.cleanupMeshOwnedManifestWorks(ctx, mesh, nil); err != nil {
-		return fmt.Errorf("failed to cleanup mesh-owned ManifestWorks: %w", err)
+	// Collect cluster namespaces from mesh-owned ManifestWorks before deleting
+	// them, because PlacementDecisions may already be gone during deletion.
+	// Delete operator ManifestWorks first — see doReconcile comment for why.
+	clusterNamespaces, err := r.getClusterNamespacesFromManifestWorks(ctx, mesh)
+	if err != nil {
+		return err
 	}
 
-	if err := r.cleanupManifestWorks(ctx, mesh.Spec.ClusterSet); err != nil {
-		return fmt.Errorf("failed to cleanup ManifestWorks: %w", err)
+	if err := r.cleanupOperatorManifestWorksForClusters(ctx, clusterNamespaces, mesh); err != nil {
+		return fmt.Errorf("failed to cleanup operator ManifestWorks: %w", err)
+	}
+
+	if err := r.cleanupMeshOwnedManifestWorks(ctx, mesh, nil); err != nil {
+		return fmt.Errorf("failed to cleanup mesh-owned ManifestWorks: %w", err)
 	}
 
 	if err := r.deleteAllManagedServiceAccounts(ctx, mesh); err != nil {
 		return fmt.Errorf("failed to cleanup ManagedServiceAccount resources: %w", err)
 	}
 
-	if err := r.cleanupManagedClusterSetBinding(ctx, mesh); err != nil {
-		return fmt.Errorf("failed to cleanup ManagedClusterSetBinding: %w", err)
-	}
-
-	// Trigger reconciliation for other meshes targeting the same cluster set.
-	// If this fails, we don't want to block the mesh deletion. The other meshes will eventually reconcile.
-	r.triggerReconcileForNotReadyMeshes(ctx, mesh)
+	// Trigger reconciliation for not-ready meshes that may have been blocked by this mesh.
+	r.triggerReconcileForConflictedMeshes(ctx, mesh, clusterNamespaces)
 
 	klog.Infof("Removing finalizer from MultiClusterMesh %s/%s", mesh.Namespace, mesh.Name)
 	controllerutil.RemoveFinalizer(mesh, FinalizerName)
@@ -470,30 +578,183 @@ func (r *Reconciler) handleDeletion(ctx context.Context, mesh *meshv1alpha1.Mult
 	return nil
 }
 
-// cleanupManifestWorks deletes ManifestWorks on clusters that no mesh in the given ClusterSet needs anymore.
-func (r *Reconciler) cleanupManifestWorks(ctx context.Context, clusterSet string) error {
-	neededClusters, err := r.getMeshEnabledClusters(ctx, clusterSet)
-	if err != nil {
-		return fmt.Errorf("failed to determine needed clusters: %w", err)
-	}
+// cleanupOperatorManifestWorksForRemovedClusters deletes operator ManifestWorks on clusters
+// that this mesh no longer targets, if no other active mesh still needs them.
+// previousClusters must be collected before cleanupMeshOwnedManifestWorks runs.
+func (r *Reconciler) cleanupOperatorManifestWorksForRemovedClusters(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, desiredClusters []string, previousClusters []string) error {
+	clusterNames := clusterNameSet(desiredClusters)
 
-	workList := &workv1.ManifestWorkList{}
-	if err := r.List(ctx, workList, client.MatchingLabels{ManagedByLabel: ManagedByValue, ClusterSetLabel: clusterSet}); err != nil {
-		return fmt.Errorf("failed to list ManifestWorks for ClusterSet %s: %w", clusterSet, err)
-	}
-
-	for _, work := range workList.Items {
-		if neededClusters[work.Namespace] {
+	for _, clusterName := range previousClusters {
+		if clusterNames[clusterName] {
 			continue
 		}
-
-		klog.Infof("Deleting ManifestWork %s/%s (no mesh targets this cluster)", work.Namespace, work.Name)
-		if err := r.workApplier.Delete(ctx, work.Namespace, work.Name); err != nil {
-			return fmt.Errorf("failed to delete ManifestWork %s/%s: %w", work.Namespace, work.Name, err)
+		if err := r.deleteOperatorManifestWorkIfUnused(ctx, clusterName, mesh); err != nil {
+			return err
 		}
 	}
 
 	return nil
+}
+
+// cleanupOperatorManifestWorksForClusters deletes operator ManifestWorks on clusters
+// if no other mesh still needs them. Used during mesh deletion.
+func (r *Reconciler) cleanupOperatorManifestWorksForClusters(ctx context.Context, clusterNamespaces []string, mesh *meshv1alpha1.MultiClusterMesh) error {
+	for _, clusterName := range clusterNamespaces {
+		if err := r.deleteOperatorManifestWorkIfUnused(ctx, clusterName, mesh); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// deleteOperatorManifestWorkIfUnused deletes the operator ManifestWork on a cluster
+// if no other non-deleting mesh still has ManifestWorks on that cluster.
+// The excludeMesh parameter identifies the mesh being reconciled/deleted, whose
+// ManifestWorks should be ignored (they are being or have been cleaned up).
+func (r *Reconciler) deleteOperatorManifestWorkIfUnused(ctx context.Context, clusterName string, excludeMesh *meshv1alpha1.MultiClusterMesh) error {
+	workList := &workv1.ManifestWorkList{}
+	if err := r.List(ctx, workList,
+		client.InNamespace(clusterName),
+		client.MatchingLabels{ManagedByLabel: ManagedByValue},
+	); err != nil {
+		return fmt.Errorf("failed to list ManifestWorks in namespace %s: %w", clusterName, err)
+	}
+
+	for _, work := range workList.Items {
+		if work.Name == OperatorManifestWorkName {
+			continue
+		}
+		meshName := work.Labels[MeshNameLabel]
+		meshNamespace := work.Labels[MeshNamespaceLabel]
+		if meshName == "" || meshNamespace == "" {
+			continue
+		}
+		if excludeMesh != nil && meshName == excludeMesh.Name && meshNamespace == excludeMesh.Namespace {
+			continue
+		}
+		other := &meshv1alpha1.MultiClusterMesh{}
+		if err := r.Get(ctx, key.Of(meshName, meshNamespace), other); err != nil {
+			if apierrors.IsNotFound(err) {
+				continue
+			}
+			return fmt.Errorf("failed to get mesh %s/%s: %w", meshNamespace, meshName, err)
+		}
+		if other.DeletionTimestamp.IsZero() {
+			klog.V(4).Infof("Operator ManifestWork on %s still needed by mesh %s/%s", clusterName, meshNamespace, meshName)
+			return nil
+		}
+	}
+
+	klog.Infof("Deleting operator ManifestWork %s/%s (no mesh targets this cluster)", clusterName, OperatorManifestWorkName)
+	if err := r.workApplier.Delete(ctx, clusterName, OperatorManifestWorkName); err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil
+		}
+		return fmt.Errorf("failed to delete operator ManifestWork %s/%s: %w", clusterName, OperatorManifestWorkName, err)
+	}
+
+	return nil
+}
+
+// getClusterNamespacesFromManifestWorks collects unique cluster namespaces from
+// mesh-owned ManifestWorks. Used during deletion when PlacementDecisions may be gone.
+func (r *Reconciler) getClusterNamespacesFromManifestWorks(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh) ([]string, error) {
+	workList := &workv1.ManifestWorkList{}
+	if err := r.List(ctx, workList,
+		client.MatchingLabels{MeshNameLabel: mesh.Name, MeshNamespaceLabel: mesh.Namespace},
+	); err != nil {
+		return nil, fmt.Errorf("failed to list ManifestWorks for mesh %s/%s: %w", mesh.Namespace, mesh.Name, err)
+	}
+
+	seen := make(map[string]bool)
+	var clusters []string
+	for _, work := range workList.Items {
+		if !seen[work.Namespace] {
+			seen[work.Namespace] = true
+			clusters = append(clusters, work.Namespace)
+		}
+	}
+	return clusters, nil
+}
+
+// triggerReconcileForConflictedMeshes triggers reconciliation for not-ready meshes
+// on the clusters this mesh was using. This is a two-step cascade:
+// 1. ManifestWork-based: find peer meshes from ManifestWorks on the same clusters
+// 2. Fallback: trigger all not-ready meshes (catches meshes rejected before creating ManifestWorks)
+func (r *Reconciler) triggerReconcileForConflictedMeshes(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, clusterNamespaces []string) {
+	triggered := make(map[string]bool)
+
+	for _, clusterName := range clusterNamespaces {
+		workList := &workv1.ManifestWorkList{}
+		if err := r.List(ctx, workList,
+			client.InNamespace(clusterName),
+			client.MatchingLabels{ManagedByLabel: ManagedByValue},
+		); err != nil {
+			klog.Errorf("Failed to list ManifestWorks for cluster %s: %v", clusterName, err)
+			continue
+		}
+		for _, work := range workList.Items {
+			meshName := work.Labels[MeshNameLabel]
+			meshNamespace := work.Labels[MeshNamespaceLabel]
+			if meshName == "" || meshNamespace == "" {
+				continue
+			}
+			meshKey := meshNamespace + "/" + meshName
+			if triggered[meshKey] {
+				continue
+			}
+			r.triggerReconcileIfNotReady(ctx, meshName, meshNamespace)
+			triggered[meshKey] = true
+		}
+	}
+
+	// Fallback: trigger meshes blocked by a conflict with this mesh but that
+	// never created ManifestWorks (so the MW-based lookup above can't find them).
+	// Only OperatorConfigConflict and NamespaceConflict are conflict conditions;
+	// other not-ready reasons (InstallationPending, PlacementNotFound, etc.)
+	// are unrelated to this mesh's deletion.
+	meshList := &meshv1alpha1.MultiClusterMeshList{}
+	if err := r.List(ctx, meshList); err != nil {
+		klog.Errorf("Failed to list meshes: %v", err)
+		return
+	}
+	for i := range meshList.Items {
+		other := &meshList.Items[i]
+		if other.UID == mesh.UID || !other.DeletionTimestamp.IsZero() {
+			continue
+		}
+		meshKey := other.Namespace + "/" + other.Name
+		if triggered[meshKey] {
+			continue
+		}
+		cond := meta.FindStatusCondition(other.Status.Conditions, meshv1alpha1.ConditionReady)
+		if cond == nil || cond.Status == metav1.ConditionTrue {
+			continue
+		}
+		if cond.Reason != meshv1alpha1.ReasonOperatorConfigConflict && cond.Reason != meshv1alpha1.ReasonNamespaceConflict {
+			continue
+		}
+		r.triggerReconcile(ctx, other)
+		triggered[meshKey] = true
+	}
+}
+
+func (r *Reconciler) triggerReconcileIfNotReady(ctx context.Context, name, namespace string) {
+	other := &meshv1alpha1.MultiClusterMesh{}
+	if err := r.Get(ctx, key.Of(name, namespace), other); err != nil {
+		return
+	}
+	if other.DeletionTimestamp.IsZero() && !meta.IsStatusConditionTrue(other.Status.Conditions, meshv1alpha1.ConditionReady) {
+		r.triggerReconcile(ctx, other)
+	}
+}
+
+func (r *Reconciler) triggerReconcile(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh) {
+	patch := client.MergeFrom(mesh.DeepCopy())
+	metav1.SetMetaDataAnnotation(&mesh.ObjectMeta, "mesh.open-cluster-management.io/reconcile-trigger", time.Now().Format(time.RFC3339Nano))
+	if err := r.Patch(ctx, mesh, patch); err != nil {
+		klog.Errorf("Failed to trigger reconcile for mesh %s/%s: %v", mesh.Namespace, mesh.Name, err)
+	}
 }
 
 // deleteAllCertificates deletes all mesh-owned Certificates (e.g. when the issuer is removed).
@@ -516,9 +777,9 @@ func (r *Reconciler) deleteAllCertificates(ctx context.Context, mesh *meshv1alph
 	return nil
 }
 
-// deleteCertificatesForRemovedClusters deletes Certificates for clusters no longer in the ClusterSet.
-func (r *Reconciler) deleteCertificatesForRemovedClusters(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, clusters []clusterv1.ManagedCluster) error {
-	clusterNames := clusterNameSet(clusters)
+// deleteCertificatesForRemovedClusters deletes Certificates for clusters no longer in the PlacementDecision.
+func (r *Reconciler) deleteCertificatesForRemovedClusters(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, desiredClusters []string) error {
+	clusterNames := clusterNameSet(desiredClusters)
 
 	certList := &certmanagerv1.CertificateList{}
 	if err := r.List(ctx, certList,
@@ -534,7 +795,7 @@ func (r *Reconciler) deleteCertificatesForRemovedClusters(ctx context.Context, m
 			continue
 		}
 
-		klog.Infof("Deleting Certificate %s/%s (cluster %s no longer in ClusterSet %s)", cert.Namespace, cert.Name, clusterName, mesh.Spec.ClusterSet)
+		klog.Infof("Deleting Certificate %s/%s (cluster %s no longer selected by Placement)", cert.Namespace, cert.Name, clusterName)
 		if err := client.IgnoreNotFound(r.Delete(ctx, &cert)); err != nil {
 			return fmt.Errorf("failed to delete Certificate %s/%s: %w", cert.Namespace, cert.Name, err)
 		}
@@ -543,8 +804,8 @@ func (r *Reconciler) deleteCertificatesForRemovedClusters(ctx context.Context, m
 	return nil
 }
 
-func (r *Reconciler) cleanupMeshOwnedManifestWorks(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, clusters []clusterv1.ManagedCluster) error {
-	clusterNames := clusterNameSet(clusters)
+func (r *Reconciler) cleanupMeshOwnedManifestWorks(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, desiredClusters []string) error {
+	clusterNames := clusterNameSet(desiredClusters)
 
 	workList := &workv1.ManifestWorkList{}
 	if err := r.List(ctx, workList,
@@ -567,33 +828,17 @@ func (r *Reconciler) cleanupMeshOwnedManifestWorks(ctx context.Context, mesh *me
 	return nil
 }
 
-// triggerReconcileForNotReadyMeshes triggers reconciliation for not-ready meshes targeting the same ClusterSet.
-func (r *Reconciler) triggerReconcileForNotReadyMeshes(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh) {
-	if err := r.forEachMeshInClusterSet(ctx, mesh.Spec.ClusterSet, func(other *meshv1alpha1.MultiClusterMesh) {
-		if other.UID == mesh.UID {
-			return
-		}
-		if meta.IsStatusConditionTrue(other.Status.Conditions, meshv1alpha1.ConditionReady) {
-			return
-		}
-
-		patch := client.MergeFrom(other.DeepCopy())
-		metav1.SetMetaDataAnnotation(&other.ObjectMeta, "mesh.open-cluster-management.io/reconcile-trigger", time.Now().Format(time.RFC3339Nano))
-		if err := r.Patch(ctx, other, patch); err != nil {
-			klog.Errorf("Failed to trigger reconcile for peer mesh %s/%s: %v", other.Namespace, other.Name, err)
-		}
-	}); err != nil {
-		klog.Errorf("Failed to list peer meshes for ClusterSet %s: %v", mesh.Spec.ClusterSet, err)
-	}
+func (r *Reconciler) pruneStaleClusterStatus(mesh *meshv1alpha1.MultiClusterMesh, desiredClusters []string) {
+	activeClusterNames := clusterNameSet(desiredClusters)
+	mesh.Status.ClusterStatus = slices.DeleteFunc(mesh.Status.ClusterStatus, func(cs meshv1alpha1.ClusterMeshStatus) bool {
+		return !activeClusterNames[cs.ClusterName]
+	})
 }
 
 func (r *Reconciler) determineStatus(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, clusters []clusterv1.ManagedCluster) error {
 	allReady := len(clusters) > 0
 
-	activeClusterNames := make(map[string]bool, len(clusters))
 	for _, cluster := range clusters {
-		activeClusterNames[cluster.Name] = true
-
 		operatorWork := &workv1.ManifestWork{}
 		if err := r.Get(ctx, key.Of(OperatorManifestWorkName, cluster.Name), operatorWork); err != nil {
 			return fmt.Errorf("failed to get operator ManifestWork for cluster %s: %w", cluster.Name, err)
@@ -608,10 +853,6 @@ func (r *Reconciler) determineStatus(ctx context.Context, mesh *meshv1alpha1.Mul
 				meshv1alpha1.ReasonInstallationPending, "Operator installation is pending")
 		}
 	}
-
-	mesh.Status.ClusterStatus = slices.DeleteFunc(mesh.Status.ClusterStatus, func(cs meshv1alpha1.ClusterMeshStatus) bool {
-		return !activeClusterNames[cs.ClusterName]
-	})
 
 	if allReady {
 		mesh.SetReadyCondition(metav1.ConditionTrue,
@@ -635,69 +876,12 @@ func getManifestWorkFeedback(work *workv1.ManifestWork) *string {
 	return nil
 }
 
-// getMeshEnabledClusters returns all clusters in the given ClusterSet if any non-deleting mesh targets it, or an empty set otherwise.
-func (r *Reconciler) getMeshEnabledClusters(ctx context.Context, clusterSet string) (map[string]bool, error) {
-	needed := make(map[string]bool)
-
-	hasActiveMesh := false
-	if err := r.forEachMeshInClusterSet(ctx, clusterSet, func(_ *meshv1alpha1.MultiClusterMesh) {
-		hasActiveMesh = true
-	}); err != nil {
-		return nil, err
-	}
-
-	if !hasActiveMesh {
-		return needed, nil
-	}
-
-	clusters, err := r.getClustersFromSet(ctx, clusterSet)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get clusters from set %s: %w", clusterSet, err)
-	}
-
-	return clusterNameSet(clusters), nil
-}
-
-func clusterNameSet(clusters []clusterv1.ManagedCluster) map[string]bool {
-	set := make(map[string]bool, len(clusters))
-	for _, c := range clusters {
-		set[c.Name] = true
+func clusterNameSet(names []string) map[string]bool {
+	set := make(map[string]bool, len(names))
+	for _, name := range names {
+		set[name] = true
 	}
 	return set
-}
-
-func (r *Reconciler) getClustersFromSet(ctx context.Context, clusterSetName string) ([]clusterv1.ManagedCluster, error) {
-	clusterSet := &clusterv1beta2.ManagedClusterSet{}
-	if err := r.Get(ctx, key.Of(clusterSetName), clusterSet); err != nil {
-		if apierrors.IsNotFound(err) {
-			klog.V(4).Infof("ManagedClusterSet %s not found", clusterSetName)
-			return []clusterv1.ManagedCluster{}, nil
-		}
-		return nil, fmt.Errorf("failed to get ManagedClusterSet %s: %w", clusterSetName, err)
-	}
-
-	// Only support ExclusiveClusterSetLabel selector type (legacy/default mode)
-	selectorType := clusterSet.Spec.ClusterSelector.SelectorType
-	if len(selectorType) > 0 && selectorType != clusterv1beta2.ExclusiveClusterSetLabel {
-		return nil, fmt.Errorf("unsupported ManagedClusterSet selector type %q, only %q is supported",
-			selectorType, clusterv1beta2.ExclusiveClusterSetLabel)
-	}
-
-	clusterList := &clusterv1.ManagedClusterList{}
-	labelSelector := client.MatchingLabels{
-		ClusterSetLabel: clusterSetName,
-	}
-
-	if err := r.List(ctx, clusterList, labelSelector); err != nil {
-		return nil, fmt.Errorf("failed to list clusters in set %s: %w", clusterSetName, err)
-	}
-
-	// Sort the clusters to guarantee a deterministic order in all operations that need them
-	slices.SortFunc(clusterList.Items, func(a, b clusterv1.ManagedCluster) int {
-		return strings.Compare(a.Name, b.Name)
-	})
-
-	return clusterList.Items, nil
 }
 
 func (r *Reconciler) buildOperatorManifestWork(mesh *meshv1alpha1.MultiClusterMesh, cluster *clusterv1.ManagedCluster) *workv1.ManifestWork {
@@ -775,8 +959,7 @@ func (r *Reconciler) buildOperatorManifestWork(mesh *meshv1alpha1.MultiClusterMe
 			Name:      OperatorManifestWorkName,
 			Namespace: cluster.Name,
 			Labels: map[string]string{
-				ManagedByLabel:  ManagedByValue,
-				ClusterSetLabel: mesh.Spec.ClusterSet,
+				ManagedByLabel: ManagedByValue,
 			},
 		},
 		Spec: workv1.ManifestWorkSpec{
@@ -973,89 +1156,91 @@ func buildMeshOwnedManifestWork(mesh *meshv1alpha1.MultiClusterMesh, clusterName
 func meshOwnedLabels(mesh *meshv1alpha1.MultiClusterMesh, clusterName string) map[string]string {
 	return map[string]string{
 		ManagedByLabel:     ManagedByValue,
-		ClusterSetLabel:    mesh.Spec.ClusterSet,
 		MeshNameLabel:      mesh.Name,
 		MeshNamespaceLabel: mesh.Namespace,
 		ClusterNameLabel:   clusterName,
 	}
 }
 
-func (r *Reconciler) clusterSetExists(ctx context.Context, clusterSet string) (bool, error) {
-	if err := r.Get(ctx, key.Of(clusterSet), &clusterv1beta2.ManagedClusterSet{}); err != nil {
+// getClustersFromPlacement reads PlacementDecisions to determine the selected clusters.
+// Returns (clusters, desiredClusters, placementFound, error).
+//
+// clusters contains the resolved ManagedCluster objects (used for creation).
+// desiredClusters contains all cluster names from PlacementDecisions (used for
+// cleanup). These differ when a ManagedCluster is being deleted: the Placement
+// controller still lists it in the PlacementDecision, but the ManagedCluster
+// object is gone. Cleanup functions use desiredClusters to avoid prematurely
+// deleting resources for clusters that are still in the PlacementDecision —
+// the Placement controller will remove them shortly, triggering a clean
+// reconciliation via the PlacementDecision watch.
+func (r *Reconciler) getClustersFromPlacement(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh) ([]clusterv1.ManagedCluster, []string, bool, error) {
+	placement := &clusterv1beta1.Placement{}
+	if err := r.Get(ctx, key.Of(mesh.Spec.PlacementRef.Name, mesh.Namespace), placement); err != nil {
 		if apierrors.IsNotFound(err) {
-			return false, nil
+			mesh.SetReadyCondition(metav1.ConditionFalse, meshv1alpha1.ReasonPlacementNotFound,
+				"Placement %s not found in namespace %s", mesh.Spec.PlacementRef.Name, mesh.Namespace)
+			return nil, nil, false, nil
 		}
-		return false, fmt.Errorf("failed to get ManagedClusterSet: %w", err)
-	}
-	return true, nil
-}
-
-// ensureManagedClusterSetBinding creates a ManagedClusterSetBinding. It binds the mesh's ClusterSet in the mesh namespace
-func (r *Reconciler) ensureManagedClusterSetBinding(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh) error {
-	clusterSetBinding := &clusterv1beta2.ManagedClusterSetBinding{}
-	err := r.Get(ctx, key.Of(mesh.Spec.ClusterSet, mesh.Namespace), clusterSetBinding)
-	if err == nil {
-		return nil
-	}
-	if !apierrors.IsNotFound(err) {
-		return fmt.Errorf("failed to get ManagedClusterSetBinding: %w", err)
+		return nil, nil, false, fmt.Errorf("failed to get Placement %s: %w", mesh.Spec.PlacementRef.Name, err)
 	}
 
-	clusterSetBinding = &clusterv1beta2.ManagedClusterSetBinding{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      mesh.Spec.ClusterSet,
-			Namespace: mesh.Namespace,
-			Labels: map[string]string{
-				ManagedByLabel: ManagedByValue,
-			},
-		},
-		Spec: clusterv1beta2.ManagedClusterSetBindingSpec{
-			ClusterSet: mesh.Spec.ClusterSet,
-		},
+	pdList := &clusterv1beta1.PlacementDecisionList{}
+	if err := r.List(ctx, pdList,
+		client.InNamespace(mesh.Namespace),
+		client.MatchingLabels{PlacementLabel: mesh.Spec.PlacementRef.Name},
+	); err != nil {
+		return nil, nil, false, fmt.Errorf("failed to list PlacementDecisions for Placement %s: %w", mesh.Spec.PlacementRef.Name, err)
 	}
-	return r.Create(ctx, clusterSetBinding)
-}
 
-// cleanupManagedClusterSetBinding deletes ManagedClusterSetBinding when no other mesh in the namespace targets the same ClusterSet
-func (r *Reconciler) cleanupManagedClusterSetBinding(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh) error {
-	meshList := &meshv1alpha1.MultiClusterMeshList{}
-	if err := r.List(ctx, meshList, client.InNamespace(mesh.Namespace), client.MatchingFields{"spec.clusterSet": mesh.Spec.ClusterSet}); err != nil {
-		return fmt.Errorf("failed to list meshes for ClusterSet %s in namespace %s: %w", mesh.Spec.ClusterSet, mesh.Namespace, err)
-	}
-	for i := range meshList.Items {
-		other := &meshList.Items[i]
-		if other.UID != mesh.UID && other.DeletionTimestamp.IsZero() {
-			klog.V(4).Infof("ManagedClusterSetBinding %s/%s still needed by mesh %s/%s", mesh.Namespace, mesh.Spec.ClusterSet, other.Namespace, other.Name)
-			return nil
+	var clusterNames []string
+	for _, pd := range pdList.Items {
+		for _, decision := range pd.Status.Decisions {
+			clusterNames = append(clusterNames, decision.ClusterName)
 		}
 	}
-	binding := &clusterv1beta2.ManagedClusterSetBinding{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      mesh.Spec.ClusterSet,
-			Namespace: mesh.Namespace,
-		},
-	}
-	klog.Infof("Deleting ManagedClusterSetBinding %s/%s", mesh.Namespace, mesh.Spec.ClusterSet)
-	return client.IgnoreNotFound(r.Delete(ctx, binding))
-}
 
-// ensurePlacement creates a Placement referencing the mesh's ClusterSet
-func (r *Reconciler) ensurePlacement(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh) error {
-	placement := &clusterv1beta1.Placement{
-		ObjectMeta: metav1.ObjectMeta{Name: mesh.Name, Namespace: mesh.Namespace},
+	// The Placement controller updates NumberOfSelectedClusters atomically on
+	// the Placement before writing PlacementDecision objects one at a time.
+	// A mismatch means decisions are still being redistributed — proceeding
+	// would cause spurious deletion of ManifestWorks for clusters that are
+	// between PlacementDecisions.
+	if int32(len(clusterNames)) != placement.Status.NumberOfSelectedClusters {
+		klog.Infof("PlacementDecision entries (%d) do not match Placement %s/%s NumberOfSelectedClusters (%d), requeueing",
+			len(clusterNames), placement.Namespace, placement.Name, placement.Status.NumberOfSelectedClusters)
+		return nil, nil, true, errDecisionsPending
 	}
-	_, err := controllerutil.CreateOrUpdate(ctx, r.Client, placement, func() error {
-		if placement.Labels == nil {
-			placement.Labels = make(map[string]string)
+
+	if len(clusterNames) == 0 {
+		mesh.SetReadyCondition(metav1.ConditionFalse, meshv1alpha1.ReasonNoClustersSelected,
+			"Placement %s has not selected any clusters", placement.Name)
+		return nil, nil, true, nil
+	}
+
+	slices.Sort(clusterNames)
+
+	// The Placement controller only adds a cluster to the PlacementDecision
+	// after the ManagedCluster exists on the hub. A NotFound here means the
+	// cluster is being deleted; the Placement controller will update the
+	// PlacementDecision shortly, which triggers a correct reconciliation
+	// via the PlacementDecision watch.
+	clusters := make([]clusterv1.ManagedCluster, 0, len(clusterNames))
+	for _, name := range clusterNames {
+		cluster := &clusterv1.ManagedCluster{}
+		if err := r.Get(ctx, key.Of(name), cluster); err != nil {
+			if apierrors.IsNotFound(err) {
+				klog.V(4).Infof("Cluster %s from PlacementDecision not found, skipping", name)
+				continue
+			}
+			return nil, nil, false, fmt.Errorf("failed to get ManagedCluster %s: %w", name, err)
 		}
-		placement.Labels[ManagedByLabel] = ManagedByValue
-		placement.Labels[MeshNameLabel] = mesh.Name
-		placement.Labels[MeshNamespaceLabel] = mesh.Namespace
-		placement.Spec.ClusterSets = []string{mesh.Spec.ClusterSet}
-		return controllerutil.SetControllerReference(mesh, placement, r.Scheme)
-	})
-	if err != nil {
-		return fmt.Errorf("failed to ensure placement %s: %w", placement.Name, err)
+		clusters = append(clusters, *cluster)
 	}
-	return nil
+
+	if len(clusters) == 0 {
+		mesh.SetReadyCondition(metav1.ConditionFalse, meshv1alpha1.ReasonNoClustersSelected,
+			"Placement %s has decisions but none of the selected ManagedClusters exist", placement.Name)
+		return nil, clusterNames, true, nil
+	}
+
+	return clusters, clusterNames, true, nil
 }

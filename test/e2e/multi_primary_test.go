@@ -39,10 +39,11 @@ func init() {
 
 var _ = Describe("Multi-primary data plane", Ordered, Serial, func() {
 	const (
-		meshName    = "multi-primary-mesh"
-		clusterSet  = "mesh-cluster-set"
-		cpNamespace = "istio-system"
-		sampleNS    = "sample"
+		meshName      = "multi-primary-mesh"
+		clusterSet    = "mesh-cluster-set"
+		placementName = "mp-mesh-placement"
+		cpNamespace   = "istio-system"
+		sampleNS      = "sample"
 	)
 
 	var (
@@ -58,6 +59,12 @@ var _ = Describe("Multi-primary data plane", Ordered, Serial, func() {
 		meshNS = util.UniqueName("mp-test-ns")
 		util.CreateNamespace(ctx, hubClient, meshNS)
 
+		Step("Binding ManagedClusterSet %s to namespace %s", clusterSet, meshNS)
+		util.CreateManagedClusterSetBinding(ctx, hubClient, clusterSet, meshNS)
+
+		Step("Creating Placement %s in namespace %s", placementName, meshNS)
+		util.CreatePlacementForClusterSet(ctx, hubClient, placementName, meshNS, clusterSet)
+
 		Step("Setting up cert-manager trust chain in %s", meshNS)
 		hubClient.ApplyFile(ctx, filepath.Join(samplesDir, "cert-manager-issuer.yaml"), nil, meshNS)
 
@@ -70,7 +77,7 @@ var _ = Describe("Multi-primary data plane", Ordered, Serial, func() {
 		}
 
 		Step("Creating MultiClusterMesh CR")
-		mesh = util.CreateMultiClusterMesh(ctx, hubClient, meshName, meshNS, clusterSet,
+		mesh = util.CreateMultiClusterMesh(ctx, hubClient, meshName, meshNS, placementName,
 			meshv1alpha1.MultiClusterMeshSpec{
 				Operator: meshv1alpha1.OperatorConfig{
 					Name:            testOperatorName,

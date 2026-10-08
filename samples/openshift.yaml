@@ -3,9 +3,10 @@ kind: MultiClusterMesh
 metadata:
   name: openshift-mesh
 spec:
-  # Reference to the ManagedClusterSet that defines which clusters participate in the mesh
-  # NOTE: Update this to match your ManagedClusterSet name
-  clusterSet: mesh-cluster-set
+  # Reference to the Placement that defines which clusters participate in the mesh
+  # NOTE: Update this to match your Placement name
+  placementRef:
+    name: mesh-placement
 
   # Control plane configuration
   controlPlane:

@@ -25,6 +25,7 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 	addonv1beta1 "open-cluster-management.io/api/addon/v1beta1"
 	clusterv1 "open-cluster-management.io/api/cluster/v1"
+	clusterv1beta1 "open-cluster-management.io/api/cluster/v1beta1"
 	clusterv1beta2 "open-cluster-management.io/api/cluster/v1beta2"
 	workv1 "open-cluster-management.io/api/work/v1"
 	msav1beta1 "open-cluster-management.io/managed-serviceaccount/apis/authentication/v1beta1"
@@ -62,6 +63,7 @@ var _ = BeforeSuite(func(ctx context.Context) {
 	util.MustAddToScheme(
 		meshv1alpha1.Install,
 		clusterv1.Install,
+		clusterv1beta1.Install,
 		clusterv1beta2.Install,
 		workv1.Install,
 		operatorsv1.AddToScheme,

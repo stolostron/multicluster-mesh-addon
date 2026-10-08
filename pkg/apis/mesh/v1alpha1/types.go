@@ -15,7 +15,7 @@ import (
 // +kubebuilder:validation:XValidation:rule="size(self.metadata.name) <= 63",message="metadata.name must not exceed 63 characters"
 // +kubebuilder:printcolumn:name="Ready",type="string",JSONPath=`.status.conditions[?(@.type=="Ready")].status`
 // +kubebuilder:printcolumn:name="Reason",type="string",JSONPath=`.status.conditions[?(@.type=="Ready")].reason`
-// +kubebuilder:printcolumn:name="ClusterSet",type="string",JSONPath=`.spec.clusterSet`
+// +kubebuilder:printcolumn:name="Placement",type="string",JSONPath=`.spec.placementRef.name`
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=`.metadata.creationTimestamp`
 // +kubebuilder:printcolumn:name="Message",type="string",priority=1,JSONPath=`.status.conditions[?(@.type=="Ready")].message`
 
@@ -77,11 +77,11 @@ func (m *MultiClusterMesh) getOrCreateClusterStatus(clusterName string) *Cluster
 
 // MultiClusterMeshSpec defines the desired state of a multi-cluster mesh
 type MultiClusterMeshSpec struct {
-	// ClusterSet references the ACM ManagedClusterSet that defines cluster membership
+	// PlacementRef references a Placement resource in the same namespace
+	// that determines which clusters are members of this mesh.
+	// The controller reads PlacementDecisions to resolve cluster membership.
 	// +required
-	// +kubebuilder:validation:MinLength=1
-	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="spec.clusterSet is immutable"
-	ClusterSet string `json:"clusterSet"`
+	PlacementRef PlacementReference `json:"placementRef"`
 
 	// ControlPlane defines the target configuration for the mesh control plane
 	// +optional
@@ -94,6 +94,14 @@ type MultiClusterMeshSpec struct {
 	// Security defines the trust and discovery configuration
 	// +optional
 	Security SecurityConfig `json:"security,omitempty"`
+}
+
+// PlacementReference references a Placement in the same namespace as the mesh.
+type PlacementReference struct {
+	// Name of the Placement resource
+	// +required
+	// +kubebuilder:validation:MinLength=1
+	Name string `json:"name"`
 }
 
 // ControlPlaneConfig defines where the mesh control plane will be installed
@@ -227,6 +235,12 @@ const (
 
 	// ReasonNamespaceConflict indicates a conflict with an older mesh's control plane namespace
 	ReasonNamespaceConflict = "NamespaceConflict"
+
+	// ReasonPlacementNotFound indicates the referenced Placement does not exist
+	ReasonPlacementNotFound = "PlacementNotFound"
+
+	// ReasonNoClustersSelected indicates the Placement selected zero clusters
+	ReasonNoClustersSelected = "NoClustersSelected"
 )
 
 // MultiClusterMeshStatus defines the observed state of MultiClusterMesh

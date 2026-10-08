@@ -11,7 +11,7 @@
 - [Scope](#scope)
 - [Supported Topologies](#supported-topologies)
 - [Custom Resource](#custom-resource)
-- [Cluster Selection and Multi-Tenancy](#cluster-selection-and-multi-tenancy)
+- [Cluster Selection](#cluster-selection)
 - [Operator Lifecycle](#operator-lifecycle)
 - [Trust Distribution](#trust-distribution)
 - [Endpoint Discovery](#endpoint-discovery)
@@ -148,7 +148,7 @@ The resource name (`metadata.name`) is limited to 63 characters because it is us
 
 | Field | Required | Description |
 |-------|----------|-------------|
-| `spec.clusterSet` | Yes | Name of the [ManagedClusterSet] defining cluster membership (immutable after creation) |
+| `spec.placementRef.name` | Yes | Name of the [Placement] defining cluster membership. Must be in the same namespace as the mesh. |
 | `spec.controlPlane.namespace` | No | Namespace where Istio is installed on each cluster (default: `istio-system`) |
 | `spec.operator.name` | No | OLM package name (default: `servicemeshoperator3`) |
 | `spec.operator.namespace` | No | Namespace where the operator is installed (default: `multicluster-mesh-operator`) |
@@ -170,7 +170,8 @@ metadata:
   name: prod-mesh
   namespace: mesh-team-a
 spec:
-  clusterSet: finance-prod
+  placementRef:
+    name: mesh-placement
   controlPlane:
     namespace: istio-system
   operator:
@@ -188,13 +189,13 @@ spec:
       tokenValidity: "168h"
 ```
 
-## Cluster Selection and Multi-Tenancy
+## Cluster Selection
 
-The add-on uses OCM [ManagedClusterSet] with `ExclusiveClusterSetLabel` as the unit of mesh membership. A cluster can only belong to one ClusterSet at a time.
+The add-on uses OCM [Placement] for cluster selection. The user creates a `Placement` resource in the same namespace as the `MultiClusterMesh`, and the mesh references it via `spec.placementRef.name`. The controller reads the resulting [PlacementDecision] resources (labeled with `cluster.open-cluster-management.io/placement={name}`) to determine which clusters to target.
 
-The `spec.clusterSet` field is immutable after creation. With exclusive ClusterSets, changing the reference means an entirely different set of clusters. All plumbing is cluster-specific, so nothing carries over, making migration equivalent to deleting and recreating the mesh. Users who need a different ClusterSet should delete the mesh CR and create a new one.
+This design gives the user full control over cluster selection using Placement's rich scheduling capabilities: label selectors, cluster sets, tolerations, priority-based scheduling, spread policies, etc. The add-on is agnostic to how clusters are selected - it simply reads the decisions.
 
-`MultiClusterMesh` is namespace-scoped, enabling tenant isolation on the hub. Each mesh operates independently - its certificates, discovery tokens, and operator configuration are scoped to its namespace. Multiple meshes can target the same ClusterSet, provided they use different control plane namespaces. For example, Mesh A targets ClusterSet X with namespace `istio-system-a`, while Mesh B targets the same ClusterSet X with namespace `istio-system-b`. Each mesh gets its own trust domain, certificates, and discovery tokens. If two meshes target the same control plane namespace on the same ClusterSet, the older resource (by creation timestamp) wins and the newer one is rejected.
+`MultiClusterMesh` is namespace-scoped, enabling tenant isolation on the hub. Each mesh operates independently - its certificates, discovery tokens, and operator configuration are scoped to its namespace. Multiple meshes can target overlapping clusters, provided they use different control plane namespaces. For example, Mesh A and Mesh B can both target cluster-1, as long as they use different control plane namespaces (e.g., `istio-system-a` and `istio-system-b`). Each mesh gets its own trust domain, certificates, and discovery tokens. If two meshes target the same control plane namespace on the same cluster, the older resource (by creation timestamp) wins and the newer one is rejected.
 
 The add-on defaults to OSSM (OpenShift Service Mesh) operator configuration. All `spec.operator` fields can be overridden to use a different operator (e.g., upstream Sail on non-OCP clusters).
 
@@ -202,7 +203,7 @@ Plumbing resources (ManifestWorks, ManagedServiceAccounts, Certificates) must us
 
 ## Operator Lifecycle
 
-The service mesh operator is a cluster-scoped singleton - only one instance can run per cluster. The operator is therefore a **shared resource** across meshes, not owned by any individual mesh. Multiple meshes targeting the same cluster share the operator installation. Cleanup is scoped to the ClusterSet: when a cluster is no longer needed by any mesh in its ClusterSet, the operator ManifestWork is removed. If the cluster moves to a different ClusterSet with a mesh, the new mesh bootstraps a fresh operator installation with its own configuration.
+The service mesh operator is a cluster-scoped singleton - only one instance can run per cluster. The operator is therefore a **shared resource** across meshes, not owned by any individual mesh. Multiple meshes targeting the same cluster share the operator installation. Cleanup checks all meshes: when a cluster is no longer needed by any mesh, the operator ManifestWork is removed.
 
 The add-on follows a **Do No Harm** strategy: it never forcibly uninstalls or downgrades an existing operator. If the operator is already present with a compatible configuration, the add-on adopts it. If there's a conflict (e.g., different channel), the add-on reports an error and halts reconciliation for that cluster.
 
@@ -257,14 +258,14 @@ For multi-primary mesh topologies, each control plane needs API access to its pe
 1. Creates a `ManagedServiceAccount` per cluster per mesh, yielding short-lived tokens and a `ServiceAccount` on the clusters.
 2. Grants each `ServiceAccount` on each cluster an istio-reader `ClusterRole` and `ClusterRoleBinding` (per-mesh, cleaned up with the mesh) so it has the read permissions Istio's remote endpoint discovery needs
 3. Constructs kubeconfig-style remote secrets from these tokens
-4. Distributes remote secrets to all peer clusters in the mesh
+4. Distributes remote secrets to all peer clusters in the mesh via [ManifestWorkReplicaSet], using the same Placement referenced by the mesh
 5. Token rotation is handled automatically by the OCM platform
 6. When a cluster is removed from the mesh, its MSA is deleted and its remote secrets are removed from all peers
 
 ## Lifecycle Events
 
-- **Scale Up**: When a new cluster joins the ClusterSet, the controller automatically provisions the mesh plumbing for it: installs the operator, mints an intermediate CA, and distributes discovery tokens to all peers. This is the same process as the initial mesh bootstrap, applied incrementally to the new cluster.
-- **Scale Down**: When a cluster is removed from a set, the controller immediately revokes its access by removing the remote secrets from all peer clusters and cleaning up the local CA bundles.
+- **Scale Up**: When a new cluster is selected by the Placement, the controller automatically provisions the mesh plumbing for it: installs the operator, mints an intermediate CA, and distributes discovery tokens to all peers. This is the same process as the initial mesh bootstrap, applied incrementally to the new cluster.
+- **Scale Down**: When a cluster is removed from the Placement (PlacementDecision changes), the controller immediately revokes its access by removing the remote secrets from all peer clusters and cleaning up the local CA bundles. If no other mesh still needs the operator on that cluster, its operator ManifestWork is also removed.
 
 ## Phased Approach
 
@@ -277,6 +278,7 @@ The user is responsible for:
 - Enabling Istio CNI on OpenShift clusters
 - Configuring `discoverySelectors` in multi-tenant environments to prevent cross-mesh service visibility
 - Labeling application namespaces to match discovery selector configuration
+- Creating and managing Placement resources for cluster selection
 
 ArgoCD with ApplicationSets is the recommended approach for managing Istio configuration across clusters.
 
@@ -287,12 +289,14 @@ Potential additions include observability stack management and full addon framew
 <!-- Reference links -->
 [cert-manager]: https://cert-manager.io/
 [ClusterManagementAddOn]: https://open-cluster-management.io/docs/concepts/addon/#clustermanagementaddon
-[ManagedClusterSet]: https://open-cluster-management.io/docs/concepts/cluster-inventory/managedclusterset/
 [ManagedClusterView]: https://github.com/stolostron/cluster-lifecycle-api
 [ManagedServiceAccount]: https://open-cluster-management.io/docs/getting-started/integration/managed-serviceaccount/
 [ManifestWork]: https://open-cluster-management.io/docs/concepts/work-distribution/manifestwork/
+[ManifestWorkReplicaSet]: https://open-cluster-management.io/docs/concepts/work-distribution/manifestworkreplicaset/
 [Multi-Primary Multi-Network]: https://istio.io/latest/docs/setup/install/multicluster/multi-primary_multi-network/
 [OCM]: https://open-cluster-management.io/
 [OSSM]: https://docs.openshift.com/service-mesh/
+[Placement]: https://open-cluster-management.io/docs/concepts/cluster-inventory/placement/
+[PlacementDecision]: https://open-cluster-management.io/docs/concepts/cluster-inventory/placement/#placementdecisions
 [Plug-in CA]: https://istio.io/latest/docs/tasks/security/cert-management/plugin-ca-cert/
 [Sail]: https://github.com/istio-ecosystem/sail-operator
