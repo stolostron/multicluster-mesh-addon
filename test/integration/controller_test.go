@@ -93,73 +93,6 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 	})
 
 	Context("Basic reconciliation", func() {
-		When("two clusters exist", func() {
-			var cluster2Name string
-
-			BeforeEach(func() {
-				cluster2Name = util.UniqueName("cluster")
-
-				util.CreateManagedCluster(ctx, k8sClient, clusterName, testClusterSet)
-				util.CreateManagedCluster(ctx, k8sClient, cluster2Name, testClusterSet)
-				util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet)
-			})
-
-			It("should create ManifestWorks for each cluster", func() {
-				cpNsWork1, _ := expectControlPlaneNamespaceManifestWork(clusterName, "istio-system")
-				cpNsWork2, _ := expectControlPlaneNamespaceManifestWork(cluster2Name, "istio-system")
-
-				expectMeshOwnedLabels(cpNsWork1.Labels, meshName, testNs, clusterName)
-				expectMeshOwnedLabels(cpNsWork2.Labels, meshName, testNs, cluster2Name)
-
-				work1 := expectOperatorManifestWork(clusterName)
-				work2 := expectOperatorManifestWork(cluster2Name)
-
-				Expect(work1.Labels[meshcontroller.ManagedByLabel]).To(Equal(meshcontroller.ManagedByValue))
-				Expect(work2.Labels[meshcontroller.ManagedByLabel]).To(Equal(meshcontroller.ManagedByValue))
-
-				expectOLMClusterRole(work1, 0)
-				expectOLMClusterRole(work2, 0)
-
-				expectMeshNotReady(meshName, testNs)
-				expectClusterOperatorConditionReason(meshName, testNs, clusterName, meshv1alpha1.ReasonInstallationPending)
-				expectClusterOperatorConditionReason(meshName, testNs, cluster2Name, meshv1alpha1.ReasonInstallationPending)
-			})
-
-			It("should include feedback rules for the Operator Subscription status", func() {
-				for _, cluster := range []string{clusterName, cluster2Name} {
-					work := expectOperatorManifestWork(cluster)
-
-					Expect(work.Spec.ManifestConfigs).To(HaveLen(1))
-					Expect(work.Spec.ManifestConfigs[0].ResourceIdentifier.Resource).To(Equal("subscriptions"))
-					Expect(work.Spec.ManifestConfigs[0].FeedbackRules).To(HaveLen(1))
-					Expect(work.Spec.ManifestConfigs[0].FeedbackRules[0].Type).To(Equal(workv1.JSONPathsType))
-					Expect(work.Spec.ManifestConfigs[0].FeedbackRules[0].JsonPaths[0].Path).To(Equal(".status.installedCSV"))
-				}
-			})
-
-			It("should become ready after all clusters confirm operator installation", func() {
-				expectMeshNotReady(meshName, testNs)
-
-				By("setting feedback on one cluster, mesh should stay not-ready")
-				util.SetManifestWorkFeedback(ctx, k8sClient,
-					meshcontroller.OperatorManifestWorkName, clusterName,
-					meshcontroller.FeedbackInstalledCSV, "sailoperator.v1.0.0")
-
-				expectClusterOperatorConditionReason(meshName, testNs, clusterName, meshv1alpha1.ReasonOperatorInstalled)
-				expectClusterOperatorConditionReason(meshName, testNs, cluster2Name, meshv1alpha1.ReasonInstallationPending)
-				expectMeshNotReady(meshName, testNs)
-
-				By("setting feedback on all clusters, mesh should become ready")
-				util.SetManifestWorkFeedback(ctx, k8sClient,
-					meshcontroller.OperatorManifestWorkName, cluster2Name,
-					meshcontroller.FeedbackInstalledCSV, "servicemeshoperator3.v3.0.0")
-
-				expectClusterOperatorConditionReason(meshName, testNs, clusterName, meshv1alpha1.ReasonOperatorInstalled)
-				expectClusterOperatorConditionReason(meshName, testNs, cluster2Name, meshv1alpha1.ReasonOperatorInstalled)
-				expectMeshReady(meshName, testNs)
-			})
-		})
-
 		It("should use custom operator configuration when specified", func() {
 			customConfig := meshv1alpha1.OperatorConfig{
 				Name:                "sailoperator",
@@ -202,7 +135,7 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 				util.CreateManagedClusterSet(ctx, k8sClient, otherClusterSet)
 				expectOperatorManifestWork(clusterName)
 				expectMeshNotReady(meshName, testNs)
-				expectClusterOperatorConditionReason(meshName, testNs, clusterName, meshv1alpha1.ReasonInstallationPending)
+				expectClusterOperatorCondition(meshName, testNs, clusterName, meshv1alpha1.ReasonInstallationPending)
 			})
 		})
 
@@ -226,7 +159,7 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 				util.CreateManagedCluster(ctx, k8sClient, clusterName, testClusterSet)
 				expectOperatorManifestWork(clusterName)
 				expectMeshNotReady(meshName, testNs)
-				expectClusterOperatorConditionReason(meshName, testNs, clusterName, meshv1alpha1.ReasonInstallationPending)
+				expectClusterOperatorCondition(meshName, testNs, clusterName, meshv1alpha1.ReasonInstallationPending)
 			})
 		})
 
@@ -238,6 +171,12 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 		Context("Control plane namespace", func() {
 			BeforeEach(func() {
 				util.CreateManagedCluster(ctx, k8sClient, clusterName, testClusterSet)
+			})
+
+			It("should create ManifestWork with mesh-owned labels", func() {
+				util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet)
+				cpNsWork, _ := expectControlPlaneNamespaceManifestWork(clusterName, "istio-system")
+				expectMeshOwnedLabels(cpNsWork.Labels, meshName, testNs, clusterName)
 			})
 
 			It("should use custom control plane namespace when specified", func() {
@@ -283,6 +222,29 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 				util.CreateManagedCluster(ctx, k8sClient, clusterName, testClusterSet)
 				util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet)
 				work = expectOperatorManifestWork(clusterName)
+			})
+
+			It("should create operator ManifestWork labeled as addon-managed", func() {
+				Expect(work.Labels[meshcontroller.ManagedByLabel]).To(Equal(meshcontroller.ManagedByValue))
+			})
+
+			It("should report the OperatorInstalled condition is InstallationPending", func() {
+				expectClusterOperatorCondition(meshName, testNs, clusterName, meshv1alpha1.ReasonInstallationPending)
+			})
+
+			It("should include feedback rules for the Operator Subscription status", func() {
+				Expect(work.Spec.ManifestConfigs).To(HaveLen(1))
+				Expect(work.Spec.ManifestConfigs[0].ResourceIdentifier.Resource).To(Equal("subscriptions"))
+				Expect(work.Spec.ManifestConfigs[0].FeedbackRules).To(HaveLen(1))
+				Expect(work.Spec.ManifestConfigs[0].FeedbackRules[0].Type).To(Equal(workv1.JSONPathsType))
+				Expect(work.Spec.ManifestConfigs[0].FeedbackRules[0].JsonPaths[0].Path).To(Equal(".status.installedCSV"))
+			})
+
+			It("should report the OperatorInstalled condition is Installed when operator confirms installation", func() {
+				util.SetOperatorInstalled(ctx, k8sClient, work)
+
+				expectClusterOperatorCondition(meshName, testNs, clusterName, meshv1alpha1.ReasonOperatorInstalled)
+				expectMeshReady(meshName, testNs)
 			})
 
 			It("should not update operator ManifestWork when operator config hasn't changed", func() {
@@ -427,6 +389,34 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 		})
 	})
 
+	Context("Mesh Ready status", func() {
+		var cluster2Name string
+
+		BeforeEach(func() {
+			cluster2Name = util.UniqueName("cluster")
+
+			util.CreateManagedCluster(ctx, k8sClient, clusterName, testClusterSet)
+			util.CreateManagedCluster(ctx, k8sClient, cluster2Name, testClusterSet)
+			util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testClusterSet)
+		})
+
+		It("should report not ready when none of the clusters has operator installed", func() {
+			expectClusterOperatorCondition(meshName, testNs, clusterName, meshv1alpha1.ReasonInstallationPending)
+			expectClusterOperatorCondition(meshName, testNs, cluster2Name, meshv1alpha1.ReasonInstallationPending)
+			expectMeshNotReady(meshName, testNs)
+		})
+
+		It("should become ready only after all clusters confirm operator installation", func() {
+			By("setting feedback on one cluster, mesh should stay not-ready")
+			simulateOperatorInstalled(meshName, testNs, clusterName)
+			expectMeshNotReady(meshName, testNs)
+
+			By("setting feedback on all clusters, mesh should become ready")
+			simulateOperatorInstalled(meshName, testNs, cluster2Name)
+			expectMeshReady(meshName, testNs)
+		})
+	})
+
 	Context("Validation", func() {
 		var otherMesh string
 
@@ -514,7 +504,7 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 			})
 
 			expectMeshNotReady(otherMesh, testNs)
-			expectClusterOperatorConditionReason(otherMesh, testNs, clusterName, meshv1alpha1.ReasonInstallationPending)
+			expectClusterOperatorCondition(otherMesh, testNs, clusterName, meshv1alpha1.ReasonInstallationPending)
 		})
 
 		When("a newer mesh has a conflicting operator config", func() {
@@ -533,7 +523,7 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 				expectMeshConditionReason(otherMesh, testNs, meshv1alpha1.ConditionReady, meshv1alpha1.ReasonOperatorConfigConflict)
 
 				util.DeleteResource(ctx, k8sClient, &meshv1alpha1.MultiClusterMesh{}, meshName, testNs)
-				expectClusterOperatorConditionReason(otherMesh, testNs, clusterName, meshv1alpha1.ReasonInstallationPending)
+				expectClusterOperatorCondition(otherMesh, testNs, clusterName, meshv1alpha1.ReasonInstallationPending)
 			})
 		})
 
@@ -559,7 +549,7 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 				expectMeshConditionReason(otherMesh, testNs, meshv1alpha1.ConditionReady, meshv1alpha1.ReasonNamespaceConflict)
 
 				util.DeleteResource(ctx, k8sClient, &meshv1alpha1.MultiClusterMesh{}, meshName, testNs)
-				expectClusterOperatorConditionReason(otherMesh, testNs, clusterName, meshv1alpha1.ReasonInstallationPending)
+				expectClusterOperatorCondition(otherMesh, testNs, clusterName, meshv1alpha1.ReasonInstallationPending)
 			})
 		})
 	})
@@ -1192,6 +1182,12 @@ func expectMeshOwnedLabels(labels map[string]string, meshName, meshNamespace, cl
 	Expect(labels[meshcontroller.ClusterNameLabel]).To(Equal(clusterName))
 }
 
+func simulateOperatorInstalled(meshName, testNs, clusterName string) {
+	work := expectOperatorManifestWork(clusterName)
+	util.SetOperatorInstalled(ctx, k8sClient, work)
+	expectClusterOperatorCondition(meshName, testNs, clusterName, meshv1alpha1.ReasonOperatorInstalled)
+}
+
 // expectAllManifestWorksDeleted makes sure ManifestWorks are deleted and none remain
 func expectAllManifestWorksDeleted() {
 	Eventually(func() []workv1.ManifestWork {
@@ -1489,27 +1485,30 @@ func findCondition(g Gomega, conditions []metav1.Condition, conditionType string
 	return c
 }
 
-func expectMeshNotReady(meshName, namespace string) {
+func expectMeshReadyStatus(meshName, namespace string, expected metav1.ConditionStatus) {
 	Eventually(func(g Gomega) {
 		mesh := &meshv1alpha1.MultiClusterMesh{}
 		g.Expect(k8sClient.Get(ctx, key.Of(meshName, namespace), mesh)).To(Succeed())
 		c := findCondition(g, mesh.Status.Conditions, meshv1alpha1.ConditionReady)
-		g.Expect(c.Status).To(Equal(metav1.ConditionFalse))
+		g.Expect(c.Status).To(Equal(expected))
 		g.Expect(c.ObservedGeneration).To(Equal(mesh.Generation))
 	}).Should(Succeed())
+}
+
+func expectMeshNotReady(meshName, namespace string) {
+	expectMeshReadyStatus(meshName, namespace, metav1.ConditionFalse)
 }
 
 func expectMeshReady(meshName, namespace string) {
-	Eventually(func(g Gomega) {
-		mesh := &meshv1alpha1.MultiClusterMesh{}
-		g.Expect(k8sClient.Get(ctx, key.Of(meshName, namespace), mesh)).To(Succeed())
-		c := findCondition(g, mesh.Status.Conditions, meshv1alpha1.ConditionReady)
-		g.Expect(c.Status).To(Equal(metav1.ConditionTrue))
-		g.Expect(c.ObservedGeneration).To(Equal(mesh.Generation))
-	}).Should(Succeed())
+	expectMeshReadyStatus(meshName, namespace, metav1.ConditionTrue)
 }
 
-func expectClusterOperatorConditionReason(meshName, namespace, clusterName, reason string) {
+func expectClusterOperatorCondition(meshName, namespace, clusterName, reason string) {
+	status := metav1.ConditionFalse
+	if reason == meshv1alpha1.ReasonOperatorInstalled {
+		status = metav1.ConditionTrue
+	}
+
 	Eventually(func(g Gomega) {
 		mesh := &meshv1alpha1.MultiClusterMesh{}
 		g.Expect(k8sClient.Get(ctx, key.Of(meshName, namespace), mesh)).To(Succeed())
@@ -1517,6 +1516,7 @@ func expectClusterOperatorConditionReason(meshName, namespace, clusterName, reas
 			if cs.ClusterName == clusterName {
 				c := findCondition(g, cs.Conditions, meshv1alpha1.ConditionOperatorInstalled)
 				g.Expect(c.Reason).To(Equal(reason))
+				g.Expect(c.Status).To(Equal(status))
 				g.Expect(c.ObservedGeneration).To(Equal(mesh.Generation))
 				return
 			}
