@@ -29,19 +29,25 @@ API group: `mesh.open-cluster-management.io/v1alpha1`
 
 ### Status Conditions
 
+The mesh-level `Ready` condition requires all per-cluster conditions to be True before transitioning to True.
+Optional conditions are only factored into `Ready` when their corresponding feature is configured.
+
 | Condition | Scope | Meaning |
 |-----------|-------|---------|
-| `Ready` | Mesh | All clusters have confirmed operator installation |
+| `Ready` | Mesh | All clusters are ready |
 | `OperatorInstalled` | Per-cluster | The service mesh operator CSV is installed on this cluster |
+| `TrustDistributed` | Per-cluster | Trust material has been distributed to this cluster (only when `spec.security.trust` is configured) |
 
 **Reason values** (appear in a condition's `.reason`):
 
 | Reason | Scope | Description |
 |--------|-------|-------------|
 | `AllClustersReady` | Mesh | All clusters are ready |
-| `ClustersNotReady` | Mesh | One or more clusters have not confirmed operator installation |
+| `ClustersNotReady` | Mesh | One or more clusters are not ready |
 | `ReconcileError` | Mesh | An error occurred during reconciliation |
 | `OperatorConfigConflict` | Mesh | Operator config conflicts with an older mesh on the same ClusterSet |
 | `NamespaceConflict` | Mesh | Control plane namespace conflicts with an older mesh or equals the operator namespace |
 | `InstallationPending` | Per-cluster | Operator installation has been requested but not yet confirmed |
 | `Installed` | Per-cluster | Operator is installed |
+| `DistributionPending` | Per-cluster | Trust distribution is in progress |
+| `Distributed` | Per-cluster | Trust has been distributed to the cluster |

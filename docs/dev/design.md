@@ -250,6 +250,17 @@ All clusters in a mesh share the same trust domain, so workloads can authenticat
 
 Certificate rotation is handled automatically by cert-manager. Updated certificates are propagated to clusters when they change.
 
+### Trust Status
+
+When trust is configured (`spec.security.trust`), the controller reports a per-cluster `TrustDistributed` condition that tracks the progress of trust distribution:
+
+| Status | Reason | When |
+|---|---|---|
+| False | `DistributionPending` | Trust has not yet been distributed to the cluster |
+| True | `Distributed` | Trust has been distributed to the cluster |
+
+When trust is not configured, the `TrustDistributed` condition is omitted entirely.
+
 ## Endpoint Discovery
 
 For multi-primary mesh topologies, each control plane needs API access to its peers. The add-on automates this using [ManagedServiceAccount]:
