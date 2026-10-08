@@ -147,6 +147,14 @@ var _ = Describe("MultiClusterMesh lifecycle", Ordered, func() {
 			Expect(meta.IsStatusConditionTrue(cs.Conditions, meshv1alpha1.ConditionOperatorInstalled)).To(BeTrue(),
 				"expected OperatorInstalled=True for %s", cluster)
 
+			Step("Verifying TrustDistributed condition for %s", cluster)
+			Expect(meta.IsStatusConditionTrue(cs.Conditions, meshv1alpha1.ConditionTrustDistributed)).To(BeTrue(),
+				"expected TrustDistributed=True for %s", cluster)
+
+			Step("Verifying DiscoveryConfigured condition for %s", cluster)
+			Expect(meta.IsStatusConditionTrue(cs.Conditions, meshv1alpha1.ConditionDiscoveryConfigured)).To(BeTrue(),
+				"expected DiscoveryConfigured=True for %s", cluster)
+
 			Step("Verifying control plane namespace exists on %s", cluster)
 			cpns := &corev1.Namespace{}
 			Eventually(func(g Gomega) {

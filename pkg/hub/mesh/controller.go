@@ -30,6 +30,7 @@ import (
 	clusterv1beta1 "open-cluster-management.io/api/cluster/v1beta1"
 	clusterv1beta2 "open-cluster-management.io/api/cluster/v1beta2"
 	workv1 "open-cluster-management.io/api/work/v1"
+	workv1alpha1 "open-cluster-management.io/api/work/v1alpha1"
 	"open-cluster-management.io/sdk-go/pkg/apis/work/v1/applier"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
@@ -320,7 +321,7 @@ func (r *Reconciler) doReconcile(ctx context.Context, mesh *meshv1alpha1.MultiCl
 		}
 		klog.V(4).Infof("Applied istio-reader ManifestWork %s/%s", readerWork.Namespace, readerWork.Name)
 
-		if mesh.Spec.Security.Trust.CertManager.IssuerRef.Name != "" {
+		if mesh.HasTrustConfigured() {
 			if err := r.ensureCertificateForCluster(ctx, mesh, &cluster); err != nil {
 				return fmt.Errorf("failed to ensure certificate for cluster %s: %w", cluster.Name, err)
 			}
@@ -330,7 +331,7 @@ func (r *Reconciler) doReconcile(ctx context.Context, mesh *meshv1alpha1.MultiCl
 		}
 	}
 
-	if mesh.Spec.Security.Trust.CertManager.IssuerRef.Name == "" {
+	if !mesh.HasTrustConfigured() {
 		if err := r.deleteAllCertificates(ctx, mesh); err != nil {
 			return fmt.Errorf("failed to cleanup Certificates: %w", err)
 		}
@@ -590,6 +591,11 @@ func (r *Reconciler) triggerReconcileForNotReadyMeshes(ctx context.Context, mesh
 func (r *Reconciler) determineStatus(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, clusters []clusterv1.ManagedCluster) error {
 	allReady := len(clusters) > 0
 
+	mwrset := &workv1alpha1.ManifestWorkReplicaSet{}
+	if err := r.Get(ctx, key.Of(mesh.Name, mesh.Namespace), mwrset); client.IgnoreNotFound(err) != nil {
+		return fmt.Errorf("failed to get ManifestWorkReplicaSet %s/%s: %w", mesh.Namespace, mesh.Name, err)
+	}
+
 	activeClusterNames := make(map[string]bool, len(clusters))
 	for _, cluster := range clusters {
 		activeClusterNames[cluster.Name] = true
@@ -607,6 +613,18 @@ func (r *Reconciler) determineStatus(ctx context.Context, mesh *meshv1alpha1.Mul
 			mesh.SetClusterCondition(cluster.Name, meshv1alpha1.ConditionOperatorInstalled, metav1.ConditionFalse,
 				meshv1alpha1.ReasonInstallationPending, "Operator installation is pending")
 		}
+
+		if ready, err := r.updateTrustStatusCondition(ctx, mesh, cluster.Name); err != nil {
+			return err
+		} else if !ready {
+			allReady = false
+		}
+
+		if ready, err := r.updateDiscoveryStatusCondition(ctx, mesh, &cluster, mwrset); err != nil {
+			return err
+		} else if !ready {
+			allReady = false
+		}
 	}
 
 	mesh.Status.ClusterStatus = slices.DeleteFunc(mesh.Status.ClusterStatus, func(cs meshv1alpha1.ClusterMeshStatus) bool {
@@ -622,6 +640,26 @@ func (r *Reconciler) determineStatus(ctx context.Context, mesh *meshv1alpha1.Mul
 	}
 
 	return nil
+}
+
+func (r *Reconciler) updateTrustStatusCondition(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, clusterName string) (ready bool, err error) {
+	if !mesh.HasTrustConfigured() {
+		mesh.RemoveClusterCondition(clusterName, meshv1alpha1.ConditionTrustDistributed)
+		return true, nil
+	}
+
+	cacertsWork := &workv1.ManifestWork{}
+	if err := r.Get(ctx, key.Of(CacertsManifestWorkName(mesh), clusterName), cacertsWork); client.IgnoreNotFound(err) != nil {
+		return false, fmt.Errorf("failed to get cacerts ManifestWork for cluster %s: %w", clusterName, err)
+	} else if meta.IsStatusConditionTrue(cacertsWork.Status.Conditions, workv1.WorkApplied) {
+		mesh.SetClusterCondition(clusterName, meshv1alpha1.ConditionTrustDistributed, metav1.ConditionTrue,
+			meshv1alpha1.ReasonDistributed, "Trust distributed")
+		return true, nil
+	}
+
+	mesh.SetClusterCondition(clusterName, meshv1alpha1.ConditionTrustDistributed, metav1.ConditionFalse,
+		meshv1alpha1.ReasonDistributionPending, "Trust distribution is pending")
+	return false, nil
 }
 
 func getManifestWorkFeedback(work *workv1.ManifestWork) *string {
