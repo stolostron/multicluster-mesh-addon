@@ -47,6 +47,8 @@ When multiple meshes target the same ClusterSet, the addon validates their confi
 - The control plane namespace must differ from the operator namespace.
   The mesh gets a `NamespaceConflict` condition if they match.
 
+For a step-by-step guide with sample YAMLs, see the [Multi-Tenancy Guide](multi-tenancy.md).
+
 <!-- Reference links -->
 [cert-manager]: https://cert-manager.io/
 [ManagedServiceAccount]: https://open-cluster-management.io/docs/getting-started/integration/managed-serviceaccount/
