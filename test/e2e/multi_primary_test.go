@@ -42,14 +42,14 @@ var _ = Describe("Multi-primary data plane", Ordered, Serial, func() {
 		meshName      = "multi-primary-mesh"
 		clusterSet    = "mesh-cluster-set"
 		placementName = "mp-mesh-placement"
-		cpNamespace   = "istio-system"
 		sampleNS      = "sample"
 	)
 
 	var (
-		mesh     *meshv1alpha1.MultiClusterMesh
-		meshNS   string
-		networks = map[string]string{
+		mesh        *meshv1alpha1.MultiClusterMesh
+		meshNS      string
+		cpNamespace string
+		networks    = map[string]string{
 			"cluster1": "network1",
 			"cluster2": "network2",
 		}
@@ -79,12 +79,6 @@ var _ = Describe("Multi-primary data plane", Ordered, Serial, func() {
 		Step("Creating MultiClusterMesh CR")
 		mesh = util.CreateMultiClusterMesh(ctx, hubClient, meshName, meshNS, placementName,
 			meshv1alpha1.MultiClusterMeshSpec{
-				Operator: meshv1alpha1.OperatorConfig{
-					Name:            testOperatorName,
-					Namespace:       testOperatorNamespace,
-					Source:          testCatalogSource,
-					SourceNamespace: testCatalogNamespace,
-				},
 				Security: meshv1alpha1.SecurityConfig{
 					Trust: meshv1alpha1.TrustConfig{
 						CertManager: meshv1alpha1.CertManagerConfig{
@@ -93,18 +87,22 @@ var _ = Describe("Multi-primary data plane", Ordered, Serial, func() {
 					},
 				},
 			})
+		cpNamespace = mesh.GetControlPlaneNamespace()
 
 		Step("Waiting for the mesh to become ready")
 		Eventually(func(g Gomega) {
 			g.Expect(hubClient.Get(ctx, key.For(mesh), mesh)).To(Succeed())
 			g.Expect(meta.IsStatusConditionTrue(mesh.Status.Conditions, meshv1alpha1.ConditionReady)).To(BeTrue())
+			g.Expect(mesh.Status.ControlPlaneNamespace).To(Equal(cpNamespace))
 		}).Should(Succeed())
 
-		Step("Verifying control plane namespace exists with network labels")
+		Step("Verifying control plane namespace exists with mesh identity labels")
 		for _, spokeClient := range spokeClients {
 			ns := &corev1.Namespace{}
 			Expect(spokeClient.Get(ctx, key.Of(cpNamespace), ns)).To(Succeed())
-			Expect(ns.Labels).To(HaveKey("topology.istio.io/network"))
+			Expect(ns.Labels).To(HaveKey(meshcontroller.IstioNetworkLabel))
+			Expect(ns.Labels[meshcontroller.MeshNameLabel]).To(Equal(mesh.Name))
+			Expect(ns.Labels[meshcontroller.MeshNamespaceLabel]).To(Equal(mesh.Namespace))
 		}
 	}, NodeTimeout(5*time.Minute))
 
