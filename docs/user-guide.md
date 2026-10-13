@@ -13,7 +13,7 @@ For production, use your own configurations (e.g., your organization's CA instea
 
 - An OCM hub cluster with managed clusters registered
 - [cert-manager] installed on the hub cluster (mints per-cluster intermediate CAs for mTLS trust)
-- [OLM] installed on managed clusters (installs the service mesh operator)
+- [governance-policy-framework][gpf] installed on the hub cluster (installs the service mesh operator via OperatorPolicy)
 - [`ManifestWorkReplicaSet`][mwrs] feature gate enabled on the hub's `ClusterManager`
 
 ## Step 1: Install the Addon
@@ -51,7 +51,7 @@ kubectl label managedcluster cluster2 topology.istio.io/network=network-b
 ```
 
 The addon applies this value as `topology.istio.io/network` on the control plane namespace on the managed cluster.
-Your Istio CR and east-west gateway must use the same value (see [Step 7](#step-7-configure-istio)).
+Your Istio CR and east-west gateway must use the same value (see [Step 8](#step-8-configure-istio)).
 
 ## Step 3: Create a Trust Chain
 
@@ -148,28 +148,37 @@ Verify the Placement selected your clusters:
 kubectl get placementdecision -n mesh-system -l cluster.open-cluster-management.io/placement=mesh-placement
 ```
 
-## Step 5: Create a MultiClusterMesh
+## Step 5: Install the Service Mesh Operator
 
-The CRD defaults target OSSM on OpenShift (`servicemeshoperator3` from `redhat-operators`).
-For vanilla Kubernetes clusters, override `spec.operator` fields to use Sail.
-See [samples/basic.yaml](../samples/basic.yaml) for a Sail example and [samples/openshift.yaml](../samples/openshift.yaml) for OSSM.
+The service mesh operator must be installed on managed clusters before creating a mesh.
+The recommended approach uses [OperatorPolicy] from the governance-policy-framework, which distributes the operator to managed clusters using the same Placement-based targeting.
+
+Kubernetes (Sail):
+
+```bash
+kubectl apply -n mesh-system -f samples/operator-policy-sail.yaml
+```
 
 OpenShift (OSSM):
 
 ```bash
-kubectl apply -n mesh-system -f samples/openshift.yaml
+kubectl apply -n mesh-system -f samples/operator-policy-ossm.yaml
 ```
 
-Kubernetes (Sail):
+Update the `PlacementBinding` in the sample to reference your Placement name.
+
+## Step 6: Create a MultiClusterMesh
+
+See [samples/basic.yaml](../samples/basic.yaml) for a minimal example and [samples/complete.yaml](../samples/complete.yaml) for a fully annotated example.
 
 ```bash
 kubectl apply -n mesh-system -f samples/basic.yaml
 ```
 
 Update `spec.placementRef.name` to match your Placement name.
-See the [API reference](api-reference.md) for all available fields, or [samples/complete.yaml](../samples/complete.yaml) for a fully annotated example.
+See the [API reference](api-reference.md) for all available fields.
 
-## Step 6: Verify the Setup
+## Step 7: Verify the Setup
 
 Check mesh status:
 
@@ -177,15 +186,15 @@ Check mesh status:
 kubectl get multiclustermesh -n mesh-system -o yaml
 ```
 
-When all operators are installed, the mesh shows `Ready=True`.
-That means operator installation succeeded, not that cross-cluster traffic works yet.
+When trust distribution is complete on all clusters, the mesh shows `Ready=True`.
+The auto-derived control plane namespace is reported in `status.controlPlaneNamespace`.
 See the [API reference](api-reference.md#status-conditions) for all reported conditions.
 
 If something isn't working, see the [troubleshooting guide](troubleshooting.md).
 
-## Step 7: Configure Istio
+## Step 8: Configure Istio
 
-The addon installs the operator, distributes trust, and handles endpoint discovery (remote secrets), but you configure the mesh control plane on each cluster yourself.
+The addon creates the control plane namespace, distributes trust, and handles endpoint discovery (remote secrets), but you configure the mesh control plane on each cluster yourself.
 Both OSSM 3.x and upstream Sail use the `sailoperator.io` API group.
 See the [Sail operator multicluster docs][sail-multicluster] for the full procedure.
 
@@ -226,9 +235,9 @@ Once the mesh is running, you can use [Fleet Service Mesh][fleet-mesh] for multi
 Fleet Service Mesh is an OpenShift console plugin and requires an OpenShift cluster with ACM (Advanced Cluster Management).
 See the [Fleet Service Mesh Dev Preview Guide][fleet-mesh] for setup instructions.
 
-## Step 8: Cleanup
+## Step 9: Cleanup
 
-Deleting the `MultiClusterMesh` CR removes all addon-managed resources: operator ManifestWorks (if no other mesh needs the operator on that cluster), CA certificate secrets, ManagedServiceAccounts, istio-reader RBAC, and remote secrets.
+Deleting the `MultiClusterMesh` CR removes all addon-managed resources: control plane namespace ManifestWorks, CA certificate secrets, ManagedServiceAccounts, istio-reader RBAC, and remote secrets.
 
 > **Warning:** Deleting a mesh also deletes the control plane namespace on each spoke cluster, including any Istio resources you deployed there.
 > Back up your Istio configuration before deleting.
@@ -242,12 +251,13 @@ kubectl delete multiclustermesh -n mesh-system <mesh-name>
 [clusteradm]: https://open-cluster-management.io/docs/getting-started/installation/start-the-control-plane/
 [Gateway API]: https://gateway-api.sigs.k8s.io/
 [fleet-mesh]: https://github.com/kiali/openshift-servicemesh-plugin/blob/main/docs/fleet-mesh/DEV-PREVIEW-GUIDE.md
+[gpf]: https://open-cluster-management.io/docs/governance/policy/policy-framework/
 [kind]: https://kind.sigs.k8s.io/
 [mwrs]: https://open-cluster-management.io/docs/concepts/work-distribution/manifestworkreplicaset/
 [clusterset]: https://open-cluster-management.io/docs/concepts/cluster-inventory/managedclusterset/
 [ManagedClusterSet]: https://open-cluster-management.io/docs/concepts/cluster-inventory/managedclusterset/
+[OperatorPolicy]: https://open-cluster-management.io/docs/governance/policy/policy-operator/
 [Placement]: https://open-cluster-management.io/docs/concepts/cluster-inventory/placement/
 [ocm-concepts]: https://open-cluster-management.io/docs/concepts/
-[OLM]: https://olm.operatorframework.io/
 [Plug-in CA]: https://istio.io/latest/docs/tasks/security/cert-management/plugin-ca-cert/
 [sail-multicluster]: https://github.com/istio-ecosystem/sail-operator/blob/main/docs/deployment-models/multicluster.adoc#multi-primary---multi-network

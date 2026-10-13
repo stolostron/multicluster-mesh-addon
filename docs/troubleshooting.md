@@ -19,7 +19,7 @@ kubectl get placementdecision -n <mesh-namespace> -l cluster.open-cluster-manage
 
 ## Inspecting Addon Resources
 
-ManifestWorks created by the addon (operator, cacerts, control plane namespace, istio-reader RBAC):
+ManifestWorks created by the addon (cacerts, control plane namespace, istio-reader RBAC):
 
 ```bash
 kubectl get manifestwork -A -l app.kubernetes.io/managed-by=multicluster-mesh-addon
@@ -72,20 +72,28 @@ If the Placement doesn't exist, the mesh reports `PlacementNotFound`.
 If no clusters are selected, the mesh reports `NoClustersSelected`.
 Verify the Placement's predicates match your clusters and that clusters are registered with the hub.
 
-### Operator not installing on a spoke cluster
+### Mesh shows ClustersNotReady
 
-Check the ManifestWork status (on the hub):
+When trust is configured (cert-manager issuer is set), the mesh waits for the cacerts ManifestWork to be `Applied` and `Available` on every managed cluster before becoming `Ready`.
+
+Check the per-cluster `TrustDistributed` condition in the mesh status:
 
 ```bash
-kubectl get manifestwork -n <cluster-name> multicluster-mesh-operator -o yaml
+kubectl get multiclustermesh -n <mesh-namespace> <mesh-name> -o jsonpath='{.status.clusterStatus}' | jq .
 ```
 
-Look at `.status.conditions` for errors.
-Common causes:
-- OLM not installed on the managed cluster.
-- Subscription misconfiguration: wrong package name, channel, CatalogSource, or source namespace
-  (e.g., `redhat-operators` only exists on OpenShift; for [kind]/vanilla K8s, override `spec.operator` fields).
-- OCM issues: work agent not running, cluster not accepted, or cluster unreachable.
+If a cluster shows `CacertsPending`, check:
+
+1. **Certificate created and ready?**
+   ```bash
+   kubectl get certificate -n <mesh-namespace> -l mesh.open-cluster-management.io/cluster-name=<cluster-name>
+   ```
+2. **Cacerts ManifestWork exists?**
+   ```bash
+   kubectl get manifestwork -n <cluster-name> -l mesh.open-cluster-management.io/mesh-name=<mesh-name>
+   ```
+3. **ManifestWork applied on the spoke?** Check `.status.conditions` on the ManifestWork for `Applied` and `Available`.
+4. **Work agent running on the managed cluster?** The OCM work agent must be running to apply ManifestWorks.
 
 ### No cacerts secret on spoke clusters
 
@@ -130,23 +138,6 @@ Common causes:
    to be a member of the bound ClusterSet.
 3. **Predicate mismatch** - the Placement's label selector doesn't match any clusters.
 
-### Mesh shows OperatorConfigConflict
-
-Two meshes targeting the same cluster have different `spec.operator` settings.
-The oldest mesh (by creation timestamp) takes precedence.
-
-Options:
-1. Update `spec.operator` on the newer mesh to match.
-2. Delete one of the conflicting meshes.
-
-### Mesh shows NamespaceConflict
-
-Either:
-- Two meshes targeting the same cluster use the same `spec.controlPlane.namespace` (the oldest mesh takes precedence).
-- The mesh's `spec.controlPlane.namespace` equals its `spec.operator.namespace`.
-
-Use a different control plane or operator namespace to resolve.
-
 ### No remote secrets on spoke clusters
 
 The addon creates ManagedServiceAccounts to obtain tokens, grants istio-reader RBAC via ManifestWork, and distributes remote secrets to peer clusters via ManifestWorkReplicaSet.
@@ -182,8 +173,10 @@ The Istio CR's `global.network` and the east-west gateway's `topology.istio.io/n
 Check what the addon set on the control plane namespace (run on the spoke cluster):
 
 ```bash
-kubectl get namespace istio-system -o jsonpath='{.metadata.labels.topology\.istio\.io/network}'
+kubectl get namespace <cp-namespace> -o jsonpath='{.metadata.labels.topology\.istio\.io/network}'
 ```
+
+The control plane namespace name is reported in `status.controlPlaneNamespace` on the mesh CR.
 
 Check what the ManagedCluster has on the hub (if set, the addon uses this instead of the cluster name):
 

@@ -1,7 +1,6 @@
 # Design
 
 > This document describes the **target design**, not the current implementation.
-> Some sections (ManagedClusterView-based detection) are not yet implemented.
 > See the [Phased Approach](#phased-approach) section for implementation status.
 
 ## Table of Contents
@@ -20,13 +19,14 @@
 
 ## Overview
 
-The OCM Service Mesh Add-on automates multi-cluster Istio service mesh setup via [OCM]. It manages the `MultiClusterMesh` custom resource on the hub cluster to orchestrate three concerns across managed clusters:
+The OCM Service Mesh Add-on automates multi-cluster Istio service mesh setup via [OCM]. It manages the `MultiClusterMesh` custom resource on the hub cluster to orchestrate two concerns across managed clusters:
 
-1. **Operator Lifecycle** - Installing and managing the service mesh operator ([OSSM]/[Sail])
-2. **Trust Distribution** - Establishing mTLS trust via [cert-manager]
-3. **Endpoint Discovery** - Exchanging discovery credentials via [ManagedServiceAccount]
+1. **Trust Distribution** - Establishing mTLS trust via [cert-manager]
+2. **Endpoint Discovery** - Exchanging discovery credentials via [ManagedServiceAccount]
 
-Without this add-on, multi-cluster mesh setup is a manual process involving certificate management, O(N^2) secret exchanges, and per-cluster operator configuration.
+The service mesh operator (Sail or OSSM) is a prerequisite that the user installs separately, for example via [OperatorPolicy] from the governance-policy-framework.
+
+Without this add-on, multi-cluster mesh setup is a manual process involving certificate management and O(N^2) secret exchanges.
 
 ## Architecture
 
@@ -51,8 +51,8 @@ flowchart TD
         msa -.->|"token synced
         back by OCM"| tokensecret(["Secret
         (MSA token, per cluster)"])
-        addon --> mw_operator(["ManifestWork
-        (operator)"])
+        addon --> mw_cpns(["ManifestWork
+        (control plane namespace)"])
         addon --> mw_reader(["ManifestWork
         (istio-reader RBAC, per mesh)"])
         casecret --> mw_cacerts(["ManifestWork
@@ -62,8 +62,8 @@ flowchart TD
     end
 
     subgraph Managed Cluster
-        agent[Work Agent - OCM] --> subscription(["Subscription
-        (sail / OSSM operator)"])
+        agent[Work Agent - OCM] --> cpns(["Namespace
+        (control plane)"])
         agent --> cacerts(["Secret
         (cacerts)"])
         agent --> reader_rbac(["ClusterRole + ClusterRoleBinding
@@ -72,7 +72,7 @@ flowchart TD
         (remote secret, per peer)"])
     end
 
-    mw_operator --> agent
+    mw_cpns --> agent
     mw_reader --> agent
     mw_cacerts --> agent
     mw_remote --> agent
@@ -100,7 +100,7 @@ flowchart TD
 
     %% OCM managed (orange)
     classDef ocm fill:#ffedd5,stroke:#f97316,color:#7c2d12
-    class agent,msa,mw_operator,mw_reader,mw_cacerts,mw_remote ocm
+    class agent,msa,mw_cpns,mw_reader,mw_cacerts,mw_remote ocm
 
 ```
 
@@ -109,20 +109,21 @@ flowchart TD
 
 ### What the add-on does (Plumbing)
 
-- Installs the service mesh operator (OSSM by default) on managed clusters via OLM
+- Creates the control plane namespace on managed clusters (auto-derived, unique per mesh)
 - Distributes intermediate CA certificates for mTLS trust
 - Exchanges discovery tokens between peer clusters
 - Handles lifecycle events (cluster add/remove, mesh creation/deletion)
 
 ### What the add-on does not do (Configuration)
 
+- Does not install the service mesh operator (the user installs it via [OperatorPolicy] or equivalent)
 - Does not create or manage Istio custom resources (the user or GitOps owns this)
 - Does not patch existing Istio CRs on spoke clusters (this would conflict with ArgoCD/GitOps reconciliation)
 - Does not enforce control plane version consistency across clusters
 - Does not deploy monitoring, observability, or application workloads
 - Does not create AuthorizationPolicies or other application-level security config
 - Does not integrate with ACM addon lifecycle (enable/disable via `ManagedClusterAddOn` and such)
-- Does not adopt pre-existing mesh deployments (brownfield). Note: the add-on *does* adopt pre-existing operator installations (see [Collision Handling](#collision-handling)). This non-goal refers specifically to adopting an existing mesh configuration and trust root.
+- Does not adopt pre-existing mesh deployments (brownfield)
 
 ## Supported Topologies
 
@@ -149,17 +150,10 @@ The resource name (`metadata.name`) is limited to 63 characters because it is us
 | Field | Required | Description |
 |-------|----------|-------------|
 | `spec.placementRef.name` | Yes | Name of the [Placement] defining cluster membership. Must be in the same namespace as the mesh. |
-| `spec.controlPlane.namespace` | No | Namespace where Istio is installed on each cluster (default: `istio-system`) |
-| `spec.operator.name` | No | OLM package name (default: `servicemeshoperator3`) |
-| `spec.operator.namespace` | No | Namespace where the operator is installed (default: `multicluster-mesh-operator`) |
-| `spec.operator.channel` | No | OLM subscription channel (default: `stable`) |
-| `spec.operator.source` | No | CatalogSource name (default: `redhat-operators`) |
-| `spec.operator.sourceNamespace` | No | CatalogSource namespace (default: `openshift-marketplace`) |
-| `spec.operator.startingCSV` | No | Pin to a specific operator version |
-| `spec.operator.installPlanApproval` | No | `Automatic` or `Manual` (default: `Automatic`) |
 | `spec.security.trust.certManager.issuerRef.name` | No | cert-manager Issuer name for Root CA |
 | `spec.security.trust.certManager.issuerRef.kind` | No | Kind of the cert-manager issuer (`Issuer` or `ClusterIssuer`, default: `Issuer`) |
 | `spec.security.discovery.tokenValidity` | No | ManagedServiceAccount token lifetime (default: `360h`, minimum value: `10m`) |
+| `status.controlPlaneNamespace` | (status) | Auto-derived control plane namespace (see [Control Plane Namespace](#control-plane-namespace)) |
 
 ### Example
 
@@ -172,13 +166,6 @@ metadata:
 spec:
   placementRef:
     name: mesh-placement
-  controlPlane:
-    namespace: istio-system
-  operator:
-    name: servicemeshoperator3
-    channel: "stable"
-    source: redhat-operators
-    sourceNamespace: openshift-marketplace
   security:
     trust:
       certManager:
@@ -195,39 +182,44 @@ The add-on uses OCM [Placement] for cluster selection. The user creates a `Place
 
 This design gives the user full control over cluster selection using Placement's rich scheduling capabilities: label selectors, cluster sets, tolerations, priority-based scheduling, spread policies, etc. The add-on is agnostic to how clusters are selected - it simply reads the decisions.
 
-`MultiClusterMesh` is namespace-scoped, enabling tenant isolation on the hub. Each mesh operates independently - its certificates, discovery tokens, and operator configuration are scoped to its namespace. Multiple meshes can target overlapping clusters, provided they use different control plane namespaces. For example, Mesh A and Mesh B can both target cluster-1, as long as they use different control plane namespaces (e.g., `istio-system-a` and `istio-system-b`). Each mesh gets its own trust domain, certificates, and discovery tokens. If two meshes target the same control plane namespace on the same cluster, the older resource (by creation timestamp) wins and the newer one is rejected.
+`MultiClusterMesh` is namespace-scoped, enabling tenant isolation on the hub. Each mesh operates independently - its certificates, discovery tokens, and control plane namespace are scoped to its identity. Multiple meshes can target overlapping clusters because each mesh gets a unique auto-derived control plane namespace (see [Control Plane Namespace](#control-plane-namespace)), its own trust domain, certificates, and discovery tokens.
 
-The add-on defaults to OSSM (OpenShift Service Mesh) operator configuration. All `spec.operator` fields can be overridden to use a different operator (e.g., upstream Sail on non-OCP clusters).
-
-Plumbing resources (ManifestWorks, ManagedServiceAccounts, Certificates) must use a deterministic naming strategy scoped to the owning mesh, so that multiple meshes on the same cluster don't collide. The operator ManifestWork is an exception - it is shared across meshes since the operator is a cluster-wide singleton.
+Plumbing resources (ManifestWorks, ManagedServiceAccounts, Certificates) use a deterministic naming strategy scoped to the owning mesh, so that multiple meshes on the same cluster don't collide.
 
 ## Operator Lifecycle
 
-The service mesh operator is a cluster-scoped singleton - only one instance can run per cluster. The operator is therefore a **shared resource** across meshes, not owned by any individual mesh. Multiple meshes targeting the same cluster share the operator installation. Cleanup checks all meshes: when a cluster is no longer needed by any mesh, the operator ManifestWork is removed.
+The service mesh operator (Sail or OSSM) is a **prerequisite** that the user installs before creating a `MultiClusterMesh`. The add-on does not manage operator installation.
 
-The add-on follows a **Do No Harm** strategy: it never forcibly uninstalls or downgrades an existing operator. If the operator is already present with a compatible configuration, the add-on adopts it. If there's a conflict (e.g., different channel), the add-on reports an error and halts reconciliation for that cluster.
+The recommended approach is to use [OperatorPolicy] from the OCM governance-policy-framework. This gives the user full control over operator versions, upgrade channels, and approval modes, while ACM handles distribution to managed clusters via the same Placement-based targeting.
 
-### Installation Workflow
+See [samples/operator-policy-sail.yaml](../../samples/operator-policy-sail.yaml) and [samples/operator-policy-ossm.yaml](../../samples/operator-policy-ossm.yaml) for ready-to-use examples.
 
-1. **Pre-existing operator detection**: The controller creates a [ManagedClusterView] to check if a Sail/OSSM Subscription already exists on the managed cluster. This is necessary because ManifestWork claims ownership of any resource it applies, and deleting the ManifestWork would remove a pre-existing Subscription, potentially disrupting other components that depend on it (e.g., OpenShift Gateway API).
-2. **Adoption (operator already present)**: If a compatible Subscription is found, the add-on skips ManifestWork creation. If the configuration is incompatible, the add-on reports a conflict.
-3. **Installation (operator missing)**: If no Subscription is found, the controller creates a [ManifestWork] containing the OLM objects (Namespace, OperatorGroup, Subscription). The operator is installed in a dedicated namespace (`multicluster-mesh-operator` by default) so that removing the mesh cleanly removes all operator resources including the CSV.
+### Why externalized
 
-### Collision Handling
+The operator is a cluster-scoped singleton shared across meshes. Managing it inside the add-on introduced complex collision detection (between meshes and with pre-existing operator installations) and tightly coupled the add-on to OLM internals. Externalizing it to OperatorPolicy:
 
-The controller handles two types of collisions:
-
-1. **Hub-side (between meshes)**: If two `MultiClusterMesh` resources target the same cluster but request different operator configurations (e.g., different channels or catalog sources), the oldest mesh (by creation timestamp) takes precedence. Newer meshes with conflicting configs are halted with a `OperatorConfigConflict` status.
-2. **Spoke-side (pre-existing operator)**: If the ManagedClusterView detects an existing Subscription not created by the add-on, the controller compares the installed configuration against the mesh's `spec.operator`. If compatible, the operator is adopted. If incompatible, the controller halts and reports a `OperatorConfigConflict`.
-
-In both cases, the add-on will never forcibly uninstall, downgrade, or overwrite an existing operator. The user must resolve conflicts manually.
-
-The add-on does not validate OpenShift version compatibility with the requested operator channel. It delegates this to OLM - if a cluster's OCP version is incompatible with the requested operator version, the OLM installation will stall, preventing the cluster from joining the mesh with an unsupported control plane.
+- Eliminates inter-mesh operator conflict detection
+- Gives the user explicit control over operator versions and upgrade policies
+- Leverages ACM's policy engine for compliance reporting and remediation
+- Decouples the add-on from OLM, making it work with any operator installation method
 
 ## Control Plane Namespace
 
-The controller creates the control plane namespace (default: `istio-system`) on each managed cluster via ManifestWork.
-The namespace is labeled with the cluster's network identity for istiod (see [Network Partitioning](#network-partitioning)).
+The control plane namespace is auto-derived from the mesh identity using a deterministic formula:
+
+```
+istio-system-{meshName (truncated to 39 chars)}-{SHA-256(meshNamespace/meshName)[:10]}
+```
+
+This guarantees:
+- The result is always at most 63 characters (Kubernetes namespace name limit)
+- Each mesh gets a unique namespace, even if meshes share the same name across different hub namespaces
+- No user configuration needed and no possibility of namespace conflicts between meshes
+
+The derived namespace is reported in `status.controlPlaneNamespace` after the first reconciliation.
+
+The controller creates the namespace on each managed cluster via ManifestWork.
+The namespace is labeled with `topology.istio.io/network` (the cluster's network identity for istiod, see [Network Partitioning](#network-partitioning)) and with `mesh.open-cluster-management.io/mesh-name` and `mesh.open-cluster-management.io/mesh-namespace` for identification.
 
 The namespace ManifestWork is owned by the mesh, not shared across meshes.
 Deleting the mesh deletes the namespace and everything in it on the spoke, including any Istio control plane resources the user deployed there.
@@ -251,6 +243,10 @@ All clusters in a mesh share the same trust domain, so workloads can authenticat
 
 Certificate rotation is handled automatically by cert-manager. Updated certificates are propagated to clusters when they change.
 
+### Readiness
+
+When trust is configured, the mesh does not become `Ready` until the cacerts ManifestWork is confirmed `Applied` and `Available` on every managed cluster. This prevents istiod from starting before the intermediate CA is in place (which would cause it to fall back to a self-signed CA, breaking cross-cluster mTLS). Each cluster reports a per-cluster `TrustDistributed` condition with reason `CacertsApplied` or `CacertsPending`.
+
 ## Endpoint Discovery
 
 For multi-primary mesh topologies, each control plane needs API access to its peers. The add-on automates this using [ManagedServiceAccount]:
@@ -264,15 +260,16 @@ For multi-primary mesh topologies, each control plane needs API access to its pe
 
 ## Lifecycle Events
 
-- **Scale Up**: When a new cluster is selected by the Placement, the controller automatically provisions the mesh plumbing for it: installs the operator, mints an intermediate CA, and distributes discovery tokens to all peers. This is the same process as the initial mesh bootstrap, applied incrementally to the new cluster.
-- **Scale Down**: When a cluster is removed from the Placement (PlacementDecision changes), the controller immediately revokes its access by removing the remote secrets from all peer clusters and cleaning up the local CA bundles. If no other mesh still needs the operator on that cluster, its operator ManifestWork is also removed.
+- **Scale Up**: When a new cluster is selected by the Placement, the controller automatically provisions the mesh plumbing for it: creates the control plane namespace, mints an intermediate CA, and distributes discovery tokens to all peers. This is the same process as the initial mesh bootstrap, applied incrementally to the new cluster.
+- **Scale Down**: When a cluster is removed from the Placement (PlacementDecision changes), the controller immediately revokes its access by removing the remote secrets from all peer clusters and cleaning up the local CA bundles and control plane namespace ManifestWorks.
 
 ## Phased Approach
 
-**Phase 1 (MVP)**: "Lean" approach - the add-on handles plumbing (operator, certificates, discovery).
+**Phase 1 (MVP)**: "Lean" approach - the add-on handles plumbing (certificates, discovery, namespace creation).
 
 The user is responsible for:
 
+- Installing the service mesh operator on managed clusters (via [OperatorPolicy] or equivalent)
 - Creating and managing Istio custom resources on each spoke cluster (directly or via GitOps)
 - Setting `values.global.network` in the Istio CR to match the cluster's network identity (cluster name by default, or the value of `topology.istio.io/network` on the ManagedCluster if set). See [Network Partitioning](#network-partitioning).
 - Enabling Istio CNI on OpenShift clusters
@@ -289,14 +286,12 @@ Potential additions include observability stack management and full addon framew
 <!-- Reference links -->
 [cert-manager]: https://cert-manager.io/
 [ClusterManagementAddOn]: https://open-cluster-management.io/docs/concepts/addon/#clustermanagementaddon
-[ManagedClusterView]: https://github.com/stolostron/cluster-lifecycle-api
 [ManagedServiceAccount]: https://open-cluster-management.io/docs/getting-started/integration/managed-serviceaccount/
 [ManifestWork]: https://open-cluster-management.io/docs/concepts/work-distribution/manifestwork/
 [ManifestWorkReplicaSet]: https://open-cluster-management.io/docs/concepts/work-distribution/manifestworkreplicaset/
 [Multi-Primary Multi-Network]: https://istio.io/latest/docs/setup/install/multicluster/multi-primary_multi-network/
 [OCM]: https://open-cluster-management.io/
-[OSSM]: https://docs.openshift.com/service-mesh/
+[OperatorPolicy]: https://open-cluster-management.io/docs/governance/policy/policy-operator/
 [Placement]: https://open-cluster-management.io/docs/concepts/cluster-inventory/placement/
 [PlacementDecision]: https://open-cluster-management.io/docs/concepts/cluster-inventory/placement/#placementdecisions
 [Plug-in CA]: https://istio.io/latest/docs/tasks/security/cert-management/plugin-ca-cert/
-[Sail]: https://github.com/istio-ecosystem/sail-operator
