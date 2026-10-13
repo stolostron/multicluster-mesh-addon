@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	certmanagerv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -18,6 +19,7 @@ import (
 	msav1beta1 "open-cluster-management.io/managed-serviceaccount/apis/authentication/v1beta1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	meshv1alpha1 "github.com/stolostron/multicluster-mesh-addon/pkg/apis/mesh/v1alpha1"
 )
@@ -177,53 +179,187 @@ func TestGetClustersFromPlacementReturnsSortedClusters(t *testing.T) {
 
 func TestDetermineStatus(t *testing.T) {
 	tests := []struct {
-		name         string
-		clusters     []clusterv1.ManagedCluster
-		expectReady  bool
-		expectReason string
+		name               string
+		mesh               *meshv1alpha1.MultiClusterMesh
+		clusters           []clusterv1.ManagedCluster
+		works              []workv1.ManifestWork
+		expectReadyStatus  metav1.ConditionStatus
+		expectReason       string
+		expectRequeue      bool
+		expectClusterTrust map[string]metav1.ConditionStatus
 	}{
 		{
-			name: "sets Ready when clusters exist",
+			name: "sets Ready when trust is not configured",
+			mesh: &meshv1alpha1.MultiClusterMesh{
+				ObjectMeta: metav1.ObjectMeta{Name: "test-mesh", Namespace: "default", Generation: 1},
+			},
 			clusters: []clusterv1.ManagedCluster{
 				{ObjectMeta: metav1.ObjectMeta{Name: "cluster-a"}},
 			},
-			expectReady:  true,
-			expectReason: meshv1alpha1.ReasonAllClustersReady,
+			expectReadyStatus: metav1.ConditionTrue,
+			expectReason:      meshv1alpha1.ReasonAllClustersReady,
 		},
 		{
-			name:         "does not set Ready when no clusters",
-			clusters:     nil,
-			expectReady:  false,
-			expectReason: "",
+			name: "does not set Ready when no clusters",
+			mesh: &meshv1alpha1.MultiClusterMesh{
+				ObjectMeta: metav1.ObjectMeta{Name: "test-mesh", Namespace: "default", Generation: 1},
+			},
+			clusters: nil,
+		},
+		{
+			name:     "sets Ready when all clusters have trust distributed",
+			mesh:     trustConfiguredMesh("test-mesh", "default"),
+			clusters: []clusterv1.ManagedCluster{{ObjectMeta: metav1.ObjectMeta{Name: "cluster-a"}}},
+			works: []workv1.ManifestWork{
+				cacertsWorkWithConditions("test-mesh", "default", "cluster-a", true, true),
+			},
+			expectReadyStatus:  metav1.ConditionTrue,
+			expectReason:       meshv1alpha1.ReasonAllClustersReady,
+			expectClusterTrust: map[string]metav1.ConditionStatus{"cluster-a": metav1.ConditionTrue},
+		},
+		{
+			name:               "requeues when cacerts ManifestWork is not found",
+			mesh:               trustConfiguredMesh("test-mesh", "default"),
+			clusters:           []clusterv1.ManagedCluster{{ObjectMeta: metav1.ObjectMeta{Name: "cluster-a"}}},
+			expectReadyStatus:  metav1.ConditionFalse,
+			expectReason:       meshv1alpha1.ReasonClustersNotReady,
+			expectRequeue:      true,
+			expectClusterTrust: map[string]metav1.ConditionStatus{"cluster-a": metav1.ConditionFalse},
+		},
+		{
+			name:     "requeues when cacerts ManifestWork is not yet applied",
+			mesh:     trustConfiguredMesh("test-mesh", "default"),
+			clusters: []clusterv1.ManagedCluster{{ObjectMeta: metav1.ObjectMeta{Name: "cluster-a"}}},
+			works: []workv1.ManifestWork{
+				cacertsWorkWithConditions("test-mesh", "default", "cluster-a", false, false),
+			},
+			expectReadyStatus:  metav1.ConditionFalse,
+			expectReason:       meshv1alpha1.ReasonClustersNotReady,
+			expectRequeue:      true,
+			expectClusterTrust: map[string]metav1.ConditionStatus{"cluster-a": metav1.ConditionFalse},
+		},
+		{
+			name:     "requeues when one of two clusters has trust pending",
+			mesh:     trustConfiguredMesh("test-mesh", "default"),
+			clusters: []clusterv1.ManagedCluster{{ObjectMeta: metav1.ObjectMeta{Name: "cluster-a"}}, {ObjectMeta: metav1.ObjectMeta{Name: "cluster-b"}}},
+			works: []workv1.ManifestWork{
+				cacertsWorkWithConditions("test-mesh", "default", "cluster-a", true, true),
+			},
+			expectReadyStatus: metav1.ConditionFalse,
+			expectReason:      meshv1alpha1.ReasonClustersNotReady,
+			expectRequeue:     true,
+			expectClusterTrust: map[string]metav1.ConditionStatus{
+				"cluster-a": metav1.ConditionTrue,
+				"cluster-b": metav1.ConditionFalse,
+			},
 		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			mesh := &meshv1alpha1.MultiClusterMesh{
-				ObjectMeta: metav1.ObjectMeta{Name: "test-mesh", Namespace: "default", Generation: 1},
+			scheme := newTestScheme()
+			objs := make([]runtime.Object, len(tc.works))
+			for i := range tc.works {
+				objs[i] = &tc.works[i]
 			}
-			r := &Reconciler{}
-			r.determineStatus(mesh, tc.clusters)
+			c := fake.NewClientBuilder().WithScheme(scheme).WithRuntimeObjects(objs...).Build()
+			r := &Reconciler{Client: c, Scheme: scheme}
 
-			cond := meta.FindStatusCondition(mesh.Status.Conditions, meshv1alpha1.ConditionReady)
-			if !tc.expectReady {
+			result, err := r.determineStatus(context.Background(), tc.mesh, tc.clusters)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			cond := meta.FindStatusCondition(tc.mesh.Status.Conditions, meshv1alpha1.ConditionReady)
+			if tc.expectReadyStatus == "" {
 				if cond != nil {
 					t.Errorf("expected no Ready condition, got %v", cond)
 				}
-				return
+			} else {
+				if cond == nil {
+					t.Fatal("expected Ready condition to be set")
+				}
+				if cond.Status != tc.expectReadyStatus {
+					t.Errorf("expected Ready=%s, got %s", tc.expectReadyStatus, cond.Status)
+				}
+				if cond.Reason != tc.expectReason {
+					t.Errorf("expected reason %s, got %s", tc.expectReason, cond.Reason)
+				}
 			}
-			if cond == nil {
-				t.Fatal("expected Ready condition to be set")
+
+			if tc.expectRequeue {
+				if result.RequeueAfter != 5*time.Second {
+					t.Errorf("expected RequeueAfter=5s, got %v", result.RequeueAfter)
+				}
+			} else {
+				if result != (reconcile.Result{}) {
+					t.Errorf("expected empty result, got %v", result)
+				}
 			}
-			if cond.Status != metav1.ConditionTrue {
-				t.Errorf("expected Ready=True, got %s", cond.Status)
-			}
-			if cond.Reason != tc.expectReason {
-				t.Errorf("expected reason %s, got %s", tc.expectReason, cond.Reason)
+
+			for clusterName, expectStatus := range tc.expectClusterTrust {
+				var found bool
+				for _, cs := range tc.mesh.Status.ClusterStatus {
+					if cs.ClusterName != clusterName {
+						continue
+					}
+					found = true
+					trustCond := meta.FindStatusCondition(cs.Conditions, meshv1alpha1.ConditionTrustDistributed)
+					if trustCond == nil {
+						t.Errorf("expected TrustDistributed condition for cluster %s", clusterName)
+					} else if trustCond.Status != expectStatus {
+						t.Errorf("expected TrustDistributed=%s for cluster %s, got %s", expectStatus, clusterName, trustCond.Status)
+					}
+				}
+				if !found {
+					t.Errorf("expected cluster status for %s, not found", clusterName)
+				}
 			}
 		})
 	}
+}
+
+func trustConfiguredMesh(name, namespace string) *meshv1alpha1.MultiClusterMesh {
+	return &meshv1alpha1.MultiClusterMesh{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace, Generation: 1},
+		Spec: meshv1alpha1.MultiClusterMeshSpec{
+			Security: meshv1alpha1.SecurityConfig{
+				Trust: meshv1alpha1.TrustConfig{
+					CertManager: meshv1alpha1.CertManagerConfig{
+						IssuerRef: meshv1alpha1.IssuerReference{Name: "test-issuer"},
+					},
+				},
+			},
+		},
+	}
+}
+
+func cacertsWorkWithConditions(meshName, meshNamespace, clusterName string, applied, available bool) workv1.ManifestWork {
+	mesh := &meshv1alpha1.MultiClusterMesh{
+		ObjectMeta: metav1.ObjectMeta{Name: meshName, Namespace: meshNamespace},
+	}
+	work := workv1.ManifestWork{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      CacertsManifestWorkName(mesh),
+			Namespace: clusterName,
+			Labels:    meshOwnedLabels(mesh, clusterName),
+		},
+	}
+	if applied {
+		meta.SetStatusCondition(&work.Status.Conditions, metav1.Condition{
+			Type:   workv1.WorkApplied,
+			Status: metav1.ConditionTrue,
+			Reason: "Applied",
+		})
+	}
+	if available {
+		meta.SetStatusCondition(&work.Status.Conditions, metav1.Condition{
+			Type:   workv1.WorkAvailable,
+			Status: metav1.ConditionTrue,
+			Reason: "Available",
+		})
+	}
+	return work
 }
 
 func TestGetClustersFromPlacementNotFound(t *testing.T) {

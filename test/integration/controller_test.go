@@ -437,6 +437,24 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 				}).ShouldNot(Equal(originalUID))
 			})
 
+			It("should not become ready until cacerts ManifestWork is applied", func() {
+				util.CreateCacertsSecret(ctx, k8sClient, mesh, clusterName)
+				work := expectCacertsManifestWork(mesh, clusterName)
+
+				By("verifying mesh is not ready while cacerts ManifestWork has no conditions")
+				expectMeshConditionReason(meshName, testNs, meshv1alpha1.ConditionReady, meshv1alpha1.ReasonClustersNotReady)
+				expectClusterCondition(meshName, testNs, clusterName,
+					meshv1alpha1.ConditionTrustDistributed, metav1.ConditionFalse, meshv1alpha1.ReasonCacertsPending)
+
+				By("simulating work agent setting Applied and Available conditions")
+				setManifestWorkApplied(work)
+
+				By("verifying mesh becomes ready with per-cluster TrustDistributed condition")
+				expectMeshReady(meshName, testNs)
+				expectClusterCondition(meshName, testNs, clusterName,
+					meshv1alpha1.ConditionTrustDistributed, metav1.ConditionTrue, meshv1alpha1.ReasonCacertsApplied)
+			})
+
 			It("should create ManifestWork when cacerts secret is created", func() {
 				util.CreateCacertsSecret(ctx, k8sClient, mesh, clusterName)
 
@@ -1187,5 +1205,40 @@ func expectMeshConditionReason(meshName, namespace, conditionType, reason string
 		c := findCondition(g, mesh.Status.Conditions, conditionType)
 		g.Expect(c.Reason).To(Equal(reason))
 		g.Expect(c.ObservedGeneration).To(Equal(mesh.Generation))
+	}).Should(Succeed())
+}
+
+func expectClusterCondition(meshName, namespace, clusterName, conditionType string, status metav1.ConditionStatus, reason string) {
+	Eventually(func(g Gomega) {
+		mesh := &meshv1alpha1.MultiClusterMesh{}
+		g.Expect(k8sClient.Get(ctx, key.Of(meshName, namespace), mesh)).To(Succeed())
+		for _, cs := range mesh.Status.ClusterStatus {
+			if cs.ClusterName == clusterName {
+				c := findCondition(g, cs.Conditions, conditionType)
+				g.Expect(c.Status).To(Equal(status))
+				g.Expect(c.Reason).To(Equal(reason))
+				return
+			}
+		}
+		g.Expect(false).To(BeTrue(), "cluster status for %s not found", clusterName)
+	}).Should(Succeed())
+}
+
+func setManifestWorkApplied(work *workv1.ManifestWork) {
+	Eventually(func() error {
+		if err := k8sClient.Get(ctx, key.For(work), work); err != nil {
+			return err
+		}
+		meta.SetStatusCondition(&work.Status.Conditions, metav1.Condition{
+			Type:   workv1.WorkApplied,
+			Status: metav1.ConditionTrue,
+			Reason: "Applied",
+		})
+		meta.SetStatusCondition(&work.Status.Conditions, metav1.Condition{
+			Type:   workv1.WorkAvailable,
+			Status: metav1.ConditionTrue,
+			Reason: "Available",
+		})
+		return k8sClient.Status().Update(ctx, work)
 	}).Should(Succeed())
 }

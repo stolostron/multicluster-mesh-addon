@@ -169,6 +169,19 @@ const (
 
 	// ReasonNoClustersSelected indicates the Placement selected zero clusters
 	ReasonNoClustersSelected = "NoClustersSelected"
+
+	// ReasonClustersNotReady indicates not all clusters have trust distributed
+	ReasonClustersNotReady = "ClustersNotReady"
+
+	// ConditionTrustDistributed indicates whether cacerts have been
+	// distributed to this cluster (per-cluster condition)
+	ConditionTrustDistributed = "TrustDistributed"
+
+	// ReasonCacertsApplied indicates cacerts are distributed and available on the cluster
+	ReasonCacertsApplied = "CacertsApplied"
+
+	// ReasonCacertsPending indicates cacerts have not yet been distributed to the cluster
+	ReasonCacertsPending = "CacertsPending"
 )
 
 // MultiClusterMeshStatus defines the observed state of MultiClusterMesh

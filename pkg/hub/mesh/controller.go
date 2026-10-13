@@ -215,6 +215,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	oldStatus := mesh.Status.DeepCopy()
 
 	var reconcileErr error
+	var result reconcile.Result
 
 	clusters, desiredClusters, placementFound, err := r.getClustersFromPlacement(ctx, mesh)
 	if errors.Is(err, errDecisionsPending) {
@@ -232,7 +233,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		if reconcileErr == nil {
 			klog.Infof("Successfully reconciled MultiClusterMesh %s/%s", mesh.Namespace, mesh.Name)
 			r.pruneStaleClusterStatus(mesh, desiredClusters)
-			r.determineStatus(mesh, clusters)
+			result, reconcileErr = r.determineStatus(ctx, mesh, clusters)
 		}
 
 		if reconcileErr != nil {
@@ -256,7 +257,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		})
 	}
 
-	return reconcile.Result{}, errors.Join(reconcileErr, statusErr)
+	return result, errors.Join(reconcileErr, statusErr)
 }
 
 // doReconcile creates resources for resolved clusters and cleans up resources
@@ -507,11 +508,53 @@ func (r *Reconciler) pruneStaleClusterStatus(mesh *meshv1alpha1.MultiClusterMesh
 	})
 }
 
-func (r *Reconciler) determineStatus(mesh *meshv1alpha1.MultiClusterMesh, clusters []clusterv1.ManagedCluster) {
-	if len(clusters) > 0 {
+func (r *Reconciler) determineStatus(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, clusters []clusterv1.ManagedCluster) (reconcile.Result, error) {
+	if len(clusters) == 0 {
+		return reconcile.Result{}, nil
+	}
+
+	allReady := true
+
+	if mesh.Spec.Security.Trust.CertManager.IssuerRef.Name != "" {
+		for _, cluster := range clusters {
+			cacertsWork := &workv1.ManifestWork{}
+			err := r.Get(ctx, key.Of(CacertsManifestWorkName(mesh), cluster.Name), cacertsWork)
+			if err != nil {
+				if apierrors.IsNotFound(err) {
+					allReady = false
+					mesh.SetClusterCondition(cluster.Name, meshv1alpha1.ConditionTrustDistributed,
+						metav1.ConditionFalse, meshv1alpha1.ReasonCacertsPending,
+						"Waiting for cacerts secret to be created by cert-manager")
+					continue
+				}
+				return reconcile.Result{}, fmt.Errorf("failed to get cacerts ManifestWork for cluster %s: %w", cluster.Name, err)
+			}
+
+			applied := meta.IsStatusConditionTrue(cacertsWork.Status.Conditions, workv1.WorkApplied)
+			available := meta.IsStatusConditionTrue(cacertsWork.Status.Conditions, workv1.WorkAvailable)
+
+			if applied && available {
+				mesh.SetClusterCondition(cluster.Name, meshv1alpha1.ConditionTrustDistributed,
+					metav1.ConditionTrue, meshv1alpha1.ReasonCacertsApplied,
+					"Cacerts distributed and available")
+			} else {
+				allReady = false
+				mesh.SetClusterCondition(cluster.Name, meshv1alpha1.ConditionTrustDistributed,
+					metav1.ConditionFalse, meshv1alpha1.ReasonCacertsPending,
+					"Waiting for cacerts ManifestWork to be applied on cluster")
+			}
+		}
+	}
+
+	if allReady {
 		mesh.SetReadyCondition(metav1.ConditionTrue,
 			meshv1alpha1.ReasonAllClustersReady, "All clusters are ready")
+		return reconcile.Result{}, nil
 	}
+
+	mesh.SetReadyCondition(metav1.ConditionFalse,
+		meshv1alpha1.ReasonClustersNotReady, "Not all clusters have trust distributed")
+	return reconcile.Result{RequeueAfter: 5 * time.Second}, nil
 }
 
 func clusterNameSet(names []string) map[string]bool {
