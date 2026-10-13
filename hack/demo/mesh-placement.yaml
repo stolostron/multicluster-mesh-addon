@@ -1,0 +1,16 @@
+# Bind mesh-cluster-set to the mesh namespace and select all member clusters.
+# Apply in the mesh namespace (for example mesh-system).
+apiVersion: cluster.open-cluster-management.io/v1beta2
+kind: ManagedClusterSetBinding
+metadata:
+  name: mesh-cluster-set
+spec:
+  clusterSet: mesh-cluster-set
+---
+apiVersion: cluster.open-cluster-management.io/v1beta1
+kind: Placement
+metadata:
+  name: mesh-placement
+spec:
+  clusterSets:
+    - mesh-cluster-set

@@ -39,8 +39,8 @@ kubectl apply -n mesh-operator-policy -f samples/operator-policy-sail.yaml
 
 | Manifest | Purpose |
 |----------|---------|
-| [istio/istio.yaml](istio/istio.yaml) | Istio control plane (`MESH_NAME`, `CLUSTER_NAME`, `NETWORK`) |
-| [istio/eastwest-gateway.yaml](istio/eastwest-gateway.yaml) | East-west Gateway API gateway |
+| [istio/istio.yaml](istio/istio.yaml) | Istio control plane (`MESH_NAME`, `CLUSTER_NAME`, `NETWORK`, `CP_NAMESPACE`) |
+| [istio/eastwest-gateway.yaml](istio/eastwest-gateway.yaml) | East-west Gateway API gateway (`NETWORK`, `CP_NAMESPACE`) |
 | [istio/istiocni.yaml](istio/istiocni.yaml) | IstioCNI (required on OpenShift and ambient) |
 
 Apply spoke samples on each managed cluster.
