@@ -5,7 +5,8 @@
 # Usage: hack/dev-env.sh <action> [args...]
 # Actions: check-host, create-cluster <name>, install-olm <name>, install-cert-manager,
 #          install-managed-serviceaccount, init-ocm, join-clusters, create-clusterset,
-#          setup-mesh, setup-test-issuer
+#          install-governance-policy-framework, install-operator, setup-mesh,
+#          setup-test-issuer
 
 set -euo pipefail
 
@@ -320,6 +321,155 @@ install_managed_serviceaccount() {
     on "${HUB}" kubectl get managedclusteraddon -A
 }
 
+OPERATOR_POLICY_NAMESPACE="mesh-operator-policy"
+OPERATOR_PLACEMENT_NAME="mesh-operator-placement"
+CLUSTER_SET_NAME="mesh-cluster-set"
+
+install_governance_policy_framework() {
+    require_clusters "${HUB}" "${SPOKE_CLUSTERS[@]}"
+
+    if on "${HUB}" kubectl get deployment governance-policy-addon-controller -n open-cluster-management &>/dev/null; then
+        log "governance-policy-framework hub addon already installed"
+    else
+        log "Installing governance-policy-framework hub addon..."
+        on "${HUB}" "${CLUSTERADM}" install hub-addon --names governance-policy-framework
+    fi
+
+    log "Waiting for governance-policy-addon-controller to be ready..."
+    on "${HUB}" kubectl wait --for=condition=Available \
+        deployment/governance-policy-addon-controller \
+        -n open-cluster-management --timeout=10m
+
+    local clusters
+    clusters="$(join_by_comma "${SPOKE_CLUSTERS[@]}")"
+
+    log "Enabling governance-policy-framework on spokes: ${clusters}"
+    on "${HUB}" "${CLUSTERADM}" addon enable \
+        --names governance-policy-framework \
+        --namespace open-cluster-management-agent-addon \
+        --clusters "${clusters}"
+
+    log "Enabling config-policy-controller on spokes: ${clusters}"
+    on "${HUB}" "${CLUSTERADM}" addon enable \
+        --names config-policy-controller \
+        --namespace open-cluster-management-agent-addon \
+        --clusters "${clusters}"
+
+    for cluster in "${SPOKE_CLUSTERS[@]}"; do
+        log "Waiting for governance-policy-framework addon on ${cluster}..."
+        on "${HUB}" kubectl wait managedclusteraddon/governance-policy-framework \
+            -n "${cluster}" --for=condition=Available --timeout=10m
+
+        log "Waiting for config-policy-controller addon on ${cluster}..."
+        on "${HUB}" kubectl wait managedclusteraddon/config-policy-controller \
+            -n "${cluster}" --for=condition=Available --timeout=10m
+
+        log "Enabling OperatorPolicy on ${cluster}..."
+        on "${HUB}" kubectl annotate managedclusteraddon/config-policy-controller \
+            -n "${cluster}" operator-policy-disabled=false --overwrite
+
+        # Annotation restarts the addon pod; wait until Available again.
+        on "${HUB}" kubectl wait managedclusteraddon/config-policy-controller \
+            -n "${cluster}" --for=condition=Available --timeout=10m
+    done
+
+    log "governance-policy-framework and OperatorPolicy ready on all spokes"
+    on "${HUB}" kubectl get managedclusteraddon -A
+}
+
+wait_for_policy_compliant() {
+    local name="${1}"
+    local namespace="${2}"
+    local timeout_seconds="${3:-600}"
+    local deadline=$((SECONDS + timeout_seconds))
+    local state=""
+
+    log "Waiting for Policy ${namespace}/${name} to become Compliant (timeout ${timeout_seconds}s)..."
+    while (( SECONDS < deadline )); do
+        state="$(on "${HUB}" kubectl get policy "${name}" -n "${namespace}" \
+            -o jsonpath='{.status.compliant}' 2>/dev/null || true)"
+        if [[ "${state}" == "Compliant" ]]; then
+            log "Policy ${namespace}/${name} is Compliant"
+            return 0
+        fi
+        sleep 5
+    done
+
+    on "${HUB}" kubectl get policy "${name}" -n "${namespace}" -o yaml || true
+    err "Timed out waiting for Policy ${namespace}/${name} to become Compliant (last status: ${state:-unknown})"
+}
+
+install_operator() {
+    require_clusters "${HUB}" "${SPOKE_CLUSTERS[@]}"
+
+    # hack/dev-env.sh provisions Kind clusters; default to Sail. PLATFORM=openshift
+    # selects the OSSM sample when testing against OpenShift catalogs.
+    local platform="${PLATFORM:-kind}"
+    local sample policy_name
+    case "${platform}" in
+        kind)
+            sample="${SCRIPT_DIR}/samples/operator-policy-sail.yaml"
+            policy_name="policy-sail-operator"
+            ;;
+        openshift)
+            sample="${SCRIPT_DIR}/samples/operator-policy-ossm.yaml"
+            policy_name="policy-ossm-operator"
+            ;;
+        *)
+            err "PLATFORM must be 'kind' or 'openshift', got '${platform}'"
+            ;;
+    esac
+    [[ -f "${sample}" ]] || err "OperatorPolicy sample not found: ${sample}"
+
+    if on "${HUB}" kubectl get namespace "${OPERATOR_POLICY_NAMESPACE}" &>/dev/null; then
+        log "Namespace ${OPERATOR_POLICY_NAMESPACE} already exists"
+    else
+        log "Creating namespace ${OPERATOR_POLICY_NAMESPACE}"
+        on "${HUB}" kubectl create namespace "${OPERATOR_POLICY_NAMESPACE}"
+    fi
+
+    log "Binding ManagedClusterSet ${CLUSTER_SET_NAME} to ${OPERATOR_POLICY_NAMESPACE}"
+    cat <<EOF | on "${HUB}" kubectl apply -f -
+apiVersion: cluster.open-cluster-management.io/v1beta2
+kind: ManagedClusterSetBinding
+metadata:
+  name: ${CLUSTER_SET_NAME}
+  namespace: ${OPERATOR_POLICY_NAMESPACE}
+spec:
+  clusterSet: ${CLUSTER_SET_NAME}
+EOF
+
+    log "Creating Placement ${OPERATOR_PLACEMENT_NAME} for operator install"
+    cat <<EOF | on "${HUB}" kubectl apply -f -
+apiVersion: cluster.open-cluster-management.io/v1beta1
+kind: Placement
+metadata:
+  name: ${OPERATOR_PLACEMENT_NAME}
+  namespace: ${OPERATOR_POLICY_NAMESPACE}
+spec:
+  clusterSets:
+    - ${CLUSTER_SET_NAME}
+EOF
+
+    if on "${HUB}" kubectl get policy "${policy_name}" -n "${OPERATOR_POLICY_NAMESPACE}" &>/dev/null; then
+        local state
+        state="$(on "${HUB}" kubectl get policy "${policy_name}" -n "${OPERATOR_POLICY_NAMESPACE}" \
+            -o jsonpath='{.status.compliant}' 2>/dev/null || true)"
+        if [[ "${state}" == "Compliant" ]]; then
+            log "Policy ${policy_name} already Compliant, skipping apply"
+            return
+        fi
+    fi
+
+    log "Applying OperatorPolicy sample for platform=${platform}: ${sample}"
+    on "${HUB}" kubectl apply -n "${OPERATOR_POLICY_NAMESPACE}" -f "${sample}"
+
+    wait_for_policy_compliant "${policy_name}" "${OPERATOR_POLICY_NAMESPACE}" 900
+
+    log "Mesh operator installed via OperatorPolicy (${policy_name})"
+    on "${HUB}" kubectl get policy -n "${OPERATOR_POLICY_NAMESPACE}"
+}
+
 install_metallb() {
     local cluster="${1}"
     local metallb_version="${METALLB_VERSION}"
@@ -428,18 +578,20 @@ setup_mesh() {
 
 ACTION="${1:-}"
 case "${ACTION}" in
-    check-host)                      check_host ;;
-    create-cluster)                  create_cluster "${2}" ;;
-    install-olm)                     install_olm "${2}" ;;
-    install-cert-manager)            install_cert_manager ;;
-    install-managed-serviceaccount)  install_managed_serviceaccount ;;
-    init-ocm)                        init_ocm ;;
-    join-clusters)                   join_clusters ;;
-    create-clusterset)               create_clusterset ;;
-    setup-mesh)                      setup_mesh ;;
-    install-metallb)                 install_metallb "${2}" ;;
-    install-gateway-api)             install_gateway_api "${2}" ;;
-    setup-test-issuer)               setup_test_issuer ;;
+    check-host)                            check_host ;;
+    create-cluster)                        create_cluster "${2}" ;;
+    install-olm)                           install_olm "${2}" ;;
+    install-cert-manager)                  install_cert_manager ;;
+    install-managed-serviceaccount)        install_managed_serviceaccount ;;
+    init-ocm)                              init_ocm ;;
+    join-clusters)                         join_clusters ;;
+    create-clusterset)                     create_clusterset ;;
+    install-governance-policy-framework)   install_governance_policy_framework ;;
+    install-operator)                      install_operator ;;
+    setup-mesh)                            setup_mesh ;;
+    install-metallb)                       install_metallb "${2}" ;;
+    install-gateway-api)                   install_gateway_api "${2}" ;;
+    setup-test-issuer)                     setup_test_issuer ;;
     *)
-        err "Unknown action: '${ACTION}'. Valid: check-host, create-cluster, install-olm, install-cert-manager, install-managed-serviceaccount, init-ocm, join-clusters, create-clusterset, setup-mesh, install-metallb, install-gateway-api, setup-test-issuer" ;;
+        err "Unknown action: '${ACTION}'. Valid: check-host, create-cluster, install-olm, install-cert-manager, install-managed-serviceaccount, init-ocm, join-clusters, create-clusterset, install-governance-policy-framework, install-operator, setup-mesh, install-metallb, install-gateway-api, setup-test-issuer" ;;
 esac

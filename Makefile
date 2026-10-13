@@ -303,6 +303,7 @@ export METALLB_VERSION GATEWAY_API_VERSION
 export KIND CLUSTERADM HELM ISTIOCTL CONTAINER_ENGINE
 export SPOKE_CLUSTERS
 export DEMO_DRY_RUN DEMO_KUBECONFIG ISTIO_VERSION
+export PLATFORM
 
 # PARALLEL controls concurrent job count for dev-env/dev-clean (default: half of CPU cores).
 # Set PARALLEL=1 or PARALLEL=0 to run sequentially.
@@ -332,8 +333,9 @@ dev-env-base:
 	$(MAKE) --no-print-directory -j$(PARALLEL) --output-sync=line install-olm install-cert-manager setup-test-issuer install-managed-serviceaccount
 
 .PHONY: dev-env
-dev-env: dev-env-base ## Provision full dev environment (Kind + OCM + addon)
+dev-env: dev-env-base ## Provision full dev environment (Kind + OCM + addon + operator)
 	$(MAKE) --no-print-directory deploy-addon create-clusterset
+	$(MAKE) --no-print-directory PLATFORM=kind install-governance-policy-framework install-operator
 	$(call log,Dev environment ready. Use KUBECONFIG=$(HUB_KUBECONFIG) to interact with the hub.)
 
 .PHONY: demo-dev-env
@@ -406,6 +408,18 @@ join-clusters: $(CLUSTERADM) init-ocm $(addprefix create-,$(SPOKE_CLUSTERS)) ## 
 create-clusterset: $(CLUSTERADM) join-clusters ## Create the ManagedClusterSet for the configured clusters
 	$(call log,Creating ManagedClusterSet: mesh-cluster-set)
 	$(DEV_ENV_SCRIPT) create-clusterset
+
+.PHONY: install-governance-policy-framework
+install-governance-policy-framework: create-clusterset ## Install governance-policy-framework and enable OperatorPolicy
+	$(call log,Installing governance-policy-framework)
+	$(DEV_ENV_SCRIPT) install-governance-policy-framework
+
+.PHONY: install-operator
+# Kind-based make targets default PLATFORM to kind so the Sail OperatorPolicy is applied.
+install-operator: export PLATFORM=kind
+install-operator: install-governance-policy-framework install-olm ## Install mesh operator via OperatorPolicy
+	$(call log,Installing mesh operator via OperatorPolicy)
+	$(DEV_ENV_SCRIPT) install-operator
 
 .PHONY: install-managed-serviceaccount
 install-managed-serviceaccount: $(HELM_BIN) join-clusters ## Install managed-serviceaccount addon to the hub cluster
