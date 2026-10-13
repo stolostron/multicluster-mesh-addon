@@ -5,7 +5,6 @@ import (
 	"errors"
 	"strings"
 	"testing"
-	"time"
 
 	certmanagerv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -176,166 +175,54 @@ func TestGetClustersFromPlacementReturnsSortedClusters(t *testing.T) {
 	}
 }
 
-func TestIsOlderMesh(t *testing.T) {
-	now := metav1.Now()
-	later := metav1.NewTime(now.Add(time.Second))
-
+func TestDetermineStatus(t *testing.T) {
 	tests := []struct {
-		name     string
-		a, b     *meshv1alpha1.MultiClusterMesh
-		expected bool
+		name         string
+		clusters     []clusterv1.ManagedCluster
+		expectReady  bool
+		expectReason string
 	}{
 		{
-			name:     "a is older by timestamp",
-			a:        meshWith("ns", "mesh-a", now),
-			b:        meshWith("ns", "mesh-b", later),
-			expected: true,
+			name: "sets Ready when clusters exist",
+			clusters: []clusterv1.ManagedCluster{
+				{ObjectMeta: metav1.ObjectMeta{Name: "cluster-a"}},
+			},
+			expectReady:  true,
+			expectReason: meshv1alpha1.ReasonAllClustersReady,
 		},
 		{
-			name:     "b is older by timestamp",
-			a:        meshWith("ns", "mesh-a", later),
-			b:        meshWith("ns", "mesh-b", now),
-			expected: false,
-		},
-		{
-			name:     "same timestamp, a sorts first by name",
-			a:        meshWith("ns", "mesh-a", now),
-			b:        meshWith("ns", "mesh-b", now),
-			expected: true,
-		},
-		{
-			name:     "same timestamp, b sorts first by name",
-			a:        meshWith("ns", "mesh-b", now),
-			b:        meshWith("ns", "mesh-a", now),
-			expected: false,
-		},
-		{
-			name:     "same timestamp, a sorts first by namespace",
-			a:        meshWith("aaa", "mesh", now),
-			b:        meshWith("zzz", "mesh", now),
-			expected: true,
-		},
-		{
-			name:     "same timestamp and key",
-			a:        meshWith("ns", "mesh", now),
-			b:        meshWith("ns", "mesh", now),
-			expected: false,
+			name:         "does not set Ready when no clusters",
+			clusters:     nil,
+			expectReady:  false,
+			expectReason: "",
 		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := isOlderMesh(tc.a, tc.b); got != tc.expected {
-				t.Errorf("isOlderMesh() = %v, want %v", got, tc.expected)
-			}
-		})
-	}
-}
-
-func TestDetermineStatusLastTransitionTime(t *testing.T) {
-	tests := []struct {
-		name              string
-		initialStatus     metav1.ConditionStatus
-		initialReason     string
-		withCSV           bool
-		expectStatus      metav1.ConditionStatus
-		expectTimeChanged bool
-	}{
-		{"preserves when unchanged (True->True)", metav1.ConditionTrue, meshv1alpha1.ReasonOperatorInstalled, true, metav1.ConditionTrue, false},
-		{"updates on install (False->True)", metav1.ConditionFalse, meshv1alpha1.ReasonInstallationPending, true, metav1.ConditionTrue, true},
-		{"preserves when still pending (False->False)", metav1.ConditionFalse, meshv1alpha1.ReasonInstallationPending, false, metav1.ConditionFalse, false},
-		{"updates on CSV removal (True->False)", metav1.ConditionTrue, meshv1alpha1.ReasonOperatorInstalled, false, metav1.ConditionFalse, true},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			scheme := newTestScheme()
-			clusterName := "cluster-a"
-			hourAgo := metav1.NewTime(time.Now().Add(-time.Hour))
-
 			mesh := &meshv1alpha1.MultiClusterMesh{
 				ObjectMeta: metav1.ObjectMeta{Name: "test-mesh", Namespace: "default", Generation: 1},
-				Status: meshv1alpha1.MultiClusterMeshStatus{
-					ClusterStatus: []meshv1alpha1.ClusterMeshStatus{{
-						ClusterName: clusterName,
-						Conditions: []metav1.Condition{{
-							Type:               meshv1alpha1.ConditionOperatorInstalled,
-							Status:             tt.initialStatus,
-							Reason:             tt.initialReason,
-							LastTransitionTime: hourAgo,
-						}},
-					}},
-				},
 			}
+			r := &Reconciler{}
+			r.determineStatus(mesh, tc.clusters)
 
-			var mw *workv1.ManifestWork
-			if tt.withCSV {
-				mw = operatorManifestWorkWithInstalledCSV(clusterName)
-			} else {
-				mw = operatorManifestWork(clusterName)
-			}
-
-			c := fake.NewClientBuilder().
-				WithScheme(scheme).
-				WithObjects(mw).
-				WithStatusSubresource(&workv1.ManifestWork{}).
-				Build()
-
-			r := &Reconciler{Client: c, Scheme: scheme}
-			clusters := []clusterv1.ManagedCluster{{ObjectMeta: metav1.ObjectMeta{Name: clusterName}}}
-
-			if err := r.determineStatus(context.Background(), mesh, clusters); err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-
-			cond := meta.FindStatusCondition(mesh.Status.ClusterStatus[0].Conditions, meshv1alpha1.ConditionOperatorInstalled)
-			if cond == nil {
-				t.Fatal("OperatorInstalled condition not found")
+			cond := meta.FindStatusCondition(mesh.Status.Conditions, meshv1alpha1.ConditionReady)
+			if !tc.expectReady {
+				if cond != nil {
+					t.Errorf("expected no Ready condition, got %v", cond)
+				}
 				return
 			}
-			if cond.Status != tt.expectStatus {
-				t.Errorf("expected status %s, got %s", tt.expectStatus, cond.Status)
+			if cond == nil {
+				t.Fatal("expected Ready condition to be set")
 			}
-			timeChanged := !cond.LastTransitionTime.Equal(&hourAgo)
-			if timeChanged != tt.expectTimeChanged {
-				t.Errorf("LastTransitionTime changed=%v, want changed=%v", timeChanged, tt.expectTimeChanged)
+			if cond.Status != metav1.ConditionTrue {
+				t.Errorf("expected Ready=True, got %s", cond.Status)
+			}
+			if cond.Reason != tc.expectReason {
+				t.Errorf("expected reason %s, got %s", tc.expectReason, cond.Reason)
 			}
 		})
-	}
-}
-
-func TestDetermineStatusPrunesStaleCluster(t *testing.T) {
-	scheme := newTestScheme()
-	activeCluster := "cluster-a"
-
-	mesh := &meshv1alpha1.MultiClusterMesh{
-		ObjectMeta: metav1.ObjectMeta{Name: "test-mesh", Namespace: "default", Generation: 1},
-		Status: meshv1alpha1.MultiClusterMeshStatus{
-			ClusterStatus: []meshv1alpha1.ClusterMeshStatus{
-				{ClusterName: activeCluster},
-				{ClusterName: "removed-cluster"},
-			},
-		},
-	}
-
-	client := fake.NewClientBuilder().
-		WithScheme(scheme).
-		WithObjects(operatorManifestWorkWithInstalledCSV(activeCluster)).
-		WithStatusSubresource(&workv1.ManifestWork{}).
-		Build()
-
-	r := &Reconciler{Client: client, Scheme: scheme}
-	clusters := []clusterv1.ManagedCluster{{ObjectMeta: metav1.ObjectMeta{Name: activeCluster}}}
-
-	r.pruneStaleClusterStatus(mesh, []string{activeCluster})
-	if err := r.determineStatus(context.Background(), mesh, clusters); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if len(mesh.Status.ClusterStatus) != 1 {
-		t.Fatalf("expected 1 cluster status, got %d", len(mesh.Status.ClusterStatus))
-	}
-	if mesh.Status.ClusterStatus[0].ClusterName != activeCluster {
-		t.Errorf("expected cluster %s, got %s", activeCluster, mesh.Status.ClusterStatus[0].ClusterName)
 	}
 }
 
@@ -568,7 +455,7 @@ func TestFindMeshesForCluster(t *testing.T) {
 			name: "skips ManifestWorks without mesh labels",
 			works: []workv1.ManifestWork{{
 				ObjectMeta: metav1.ObjectMeta{
-					Name: OperatorManifestWorkName, Namespace: "cluster-a",
+					Name: "unlabeled-work", Namespace: "cluster-a",
 					Labels: map[string]string{ManagedByLabel: ManagedByValue},
 				},
 			}},
@@ -628,10 +515,9 @@ func TestFindMeshesForManifestWork(t *testing.T) {
 	scheme := newTestScheme()
 
 	tests := []struct {
-		name      string
-		work      *workv1.ManifestWork
-		peerWorks []workv1.ManifestWork
-		expected  []types.NamespacedName
+		name     string
+		work     *workv1.ManifestWork
+		expected []types.NamespacedName
 	}{
 		{
 			name: "mesh-owned ManifestWork returns owning mesh directly",
@@ -648,23 +534,10 @@ func TestFindMeshesForManifestWork(t *testing.T) {
 			expected: []types.NamespacedName{{Name: "my-mesh", Namespace: "my-ns"}},
 		},
 		{
-			name: "operator ManifestWork falls back to cluster-based lookup",
+			name: "ManifestWork without mesh labels returns empty",
 			work: &workv1.ManifestWork{
 				ObjectMeta: metav1.ObjectMeta{
-					Name: OperatorManifestWorkName, Namespace: "cluster-a",
-					Labels: map[string]string{ManagedByLabel: ManagedByValue},
-				},
-			},
-			peerWorks: []workv1.ManifestWork{
-				meshOwnedWork("cluster-a", "peer-work", "mesh-x", "ns-x"),
-			},
-			expected: []types.NamespacedName{{Name: "mesh-x", Namespace: "ns-x"}},
-		},
-		{
-			name: "operator ManifestWork with no peers returns empty",
-			work: &workv1.ManifestWork{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: OperatorManifestWorkName, Namespace: "cluster-a",
+					Name: "unlabeled-work", Namespace: "cluster-a",
 					Labels: map[string]string{ManagedByLabel: ManagedByValue},
 				},
 			},
@@ -674,11 +547,7 @@ func TestFindMeshesForManifestWork(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			objs := []runtime.Object{tc.work}
-			for i := range tc.peerWorks {
-				objs = append(objs, &tc.peerWorks[i])
-			}
-			c := fake.NewClientBuilder().WithScheme(scheme).WithRuntimeObjects(objs...).Build()
+			c := fake.NewClientBuilder().WithScheme(scheme).WithRuntimeObjects(tc.work).Build()
 			r := &Reconciler{Client: c, Scheme: scheme}
 
 			requests := r.findMeshesForManifestWork(context.Background(), tc.work)
@@ -754,214 +623,6 @@ func TestFindMeshesForPlacementDecision(t *testing.T) {
 	}
 }
 
-func TestFindOlderPeerMeshes(t *testing.T) {
-	scheme := newTestScheme()
-	now := metav1.Now()
-	earlier := metav1.NewTime(now.Add(-time.Minute))
-
-	currentMesh := &meshv1alpha1.MultiClusterMesh{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: "current-mesh", Namespace: "default",
-			CreationTimestamp: now,
-		},
-	}
-
-	tests := []struct {
-		name        string
-		works       []workv1.ManifestWork
-		otherMeshes []*meshv1alpha1.MultiClusterMesh
-		expectPeers []string
-	}{
-		{
-			name:        "no ManifestWorks on cluster",
-			works:       nil,
-			expectPeers: nil,
-		},
-		{
-			name: "only operator ManifestWork (no mesh labels)",
-			works: []workv1.ManifestWork{{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: OperatorManifestWorkName, Namespace: "cluster-a",
-					Labels: map[string]string{ManagedByLabel: ManagedByValue},
-				},
-			}},
-			expectPeers: nil,
-		},
-		{
-			name: "own ManifestWork is skipped",
-			works: []workv1.ManifestWork{
-				meshOwnedWork("cluster-a", "work-1", "current-mesh", "default"),
-			},
-			expectPeers: nil,
-		},
-		{
-			name: "older mesh on same cluster is returned",
-			works: []workv1.ManifestWork{
-				meshOwnedWork("cluster-a", "work-1", "older-mesh", "default"),
-			},
-			otherMeshes: []*meshv1alpha1.MultiClusterMesh{{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "older-mesh", Namespace: "default",
-					CreationTimestamp: earlier,
-				},
-			}},
-			expectPeers: []string{"older-mesh"},
-		},
-		{
-			name: "newer mesh on same cluster is not returned",
-			works: []workv1.ManifestWork{
-				meshOwnedWork("cluster-a", "work-1", "newer-mesh", "default"),
-			},
-			otherMeshes: []*meshv1alpha1.MultiClusterMesh{{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "newer-mesh", Namespace: "default",
-					CreationTimestamp: metav1.NewTime(now.Add(time.Minute)),
-				},
-			}},
-			expectPeers: nil,
-		},
-		{
-			name: "deleting mesh is not returned",
-			works: []workv1.ManifestWork{
-				meshOwnedWork("cluster-a", "work-1", "deleting-mesh", "default"),
-			},
-			otherMeshes: []*meshv1alpha1.MultiClusterMesh{{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "deleting-mesh", Namespace: "default",
-					CreationTimestamp: earlier,
-					DeletionTimestamp: &now,
-					Finalizers:        []string{"test"},
-				},
-			}},
-			expectPeers: nil,
-		},
-		{
-			name: "returns all older peers not just the first",
-			works: []workv1.ManifestWork{
-				meshOwnedWork("cluster-a", "work-1", "mesh-a", "default"),
-				meshOwnedWork("cluster-a", "work-2", "mesh-b", "default"),
-			},
-			otherMeshes: []*meshv1alpha1.MultiClusterMesh{
-				{ObjectMeta: metav1.ObjectMeta{Name: "mesh-a", Namespace: "default", CreationTimestamp: earlier}},
-				{ObjectMeta: metav1.ObjectMeta{Name: "mesh-b", Namespace: "default", CreationTimestamp: earlier}},
-			},
-			expectPeers: []string{"mesh-a", "mesh-b"},
-		},
-		{
-			name: "deduplicates multiple ManifestWorks from same mesh",
-			works: []workv1.ManifestWork{
-				meshOwnedWork("cluster-a", "work-1", "mesh-a", "default"),
-				meshOwnedWork("cluster-a", "work-2", "mesh-a", "default"),
-			},
-			otherMeshes: []*meshv1alpha1.MultiClusterMesh{
-				{ObjectMeta: metav1.ObjectMeta{Name: "mesh-a", Namespace: "default", CreationTimestamp: earlier}},
-			},
-			expectPeers: []string{"mesh-a"},
-		},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			objs := make([]runtime.Object, 0)
-			for i := range tc.works {
-				objs = append(objs, &tc.works[i])
-			}
-			for _, m := range tc.otherMeshes {
-				objs = append(objs, m)
-			}
-			c := fake.NewClientBuilder().WithScheme(scheme).WithRuntimeObjects(objs...).Build()
-			r := &Reconciler{Client: c, Scheme: scheme}
-
-			result, err := r.findOlderPeerMeshes(context.Background(), currentMesh, "cluster-a")
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-
-			if len(result) != len(tc.expectPeers) {
-				names := make([]string, len(result))
-				for i, p := range result {
-					names[i] = p.Name
-				}
-				t.Fatalf("expected %d peers %v, got %d: %v", len(tc.expectPeers), tc.expectPeers, len(result), names)
-			}
-			resultNames := map[string]bool{}
-			for _, p := range result {
-				resultNames[p.Name] = true
-			}
-			for _, exp := range tc.expectPeers {
-				if !resultNames[exp] {
-					t.Errorf("expected peer %s not found in result", exp)
-				}
-			}
-		})
-	}
-}
-
-func TestGetClusterNamespacesFromManifestWorks(t *testing.T) {
-	scheme := newTestScheme()
-
-	tests := []struct {
-		name     string
-		works    []workv1.ManifestWork
-		expected []string
-	}{
-		{
-			name: "collects unique cluster namespaces",
-			works: []workv1.ManifestWork{
-				meshOwnedWork("cluster-a", "work-1", "my-mesh", "default"),
-				meshOwnedWork("cluster-b", "work-2", "my-mesh", "default"),
-				meshOwnedWork("cluster-a", "work-3", "my-mesh", "default"),
-			},
-			expected: []string{"cluster-a", "cluster-b"},
-		},
-		{
-			name: "ignores ManifestWorks from other meshes",
-			works: []workv1.ManifestWork{
-				meshOwnedWork("cluster-a", "work-1", "my-mesh", "default"),
-				meshOwnedWork("cluster-b", "work-2", "other-mesh", "other-ns"),
-			},
-			expected: []string{"cluster-a"},
-		},
-		{
-			name:     "returns nil for no ManifestWorks",
-			works:    nil,
-			expected: nil,
-		},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			objs := make([]runtime.Object, len(tc.works))
-			for i := range tc.works {
-				objs[i] = &tc.works[i]
-			}
-			c := fake.NewClientBuilder().WithScheme(scheme).WithRuntimeObjects(objs...).Build()
-			r := &Reconciler{Client: c, Scheme: scheme}
-
-			mesh := &meshv1alpha1.MultiClusterMesh{
-				ObjectMeta: metav1.ObjectMeta{Name: "my-mesh", Namespace: "default"},
-			}
-			result, err := r.getClusterNamespacesFromManifestWorks(context.Background(), mesh)
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-
-			if len(result) != len(tc.expected) {
-				t.Fatalf("expected %d namespaces, got %d: %v", len(tc.expected), len(result), result)
-			}
-			resultSet := make(map[string]bool)
-			for _, ns := range result {
-				resultSet[ns] = true
-			}
-			for _, exp := range tc.expected {
-				if !resultSet[exp] {
-					t.Errorf("expected namespace %s not found in result %v", exp, result)
-				}
-			}
-		})
-	}
-}
-
 func TestPruneStaleClusterStatus(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -1020,44 +681,6 @@ func TestPruneStaleClusterStatus(t *testing.T) {
 	}
 }
 
-func TestBuildOperatorManifestWorkLabels(t *testing.T) {
-	mesh := &meshv1alpha1.MultiClusterMesh{
-		ObjectMeta: metav1.ObjectMeta{Name: "my-mesh", Namespace: "my-ns"},
-	}
-	cluster := &clusterv1.ManagedCluster{
-		ObjectMeta: metav1.ObjectMeta{Name: "cluster-a"},
-	}
-
-	r := &Reconciler{}
-	work := r.buildOperatorManifestWork(mesh, cluster)
-
-	if work.Labels[ManagedByLabel] != ManagedByValue {
-		t.Errorf("expected %s=%s, got %s", ManagedByLabel, ManagedByValue, work.Labels[ManagedByLabel])
-	}
-	if _, ok := work.Labels[MeshNameLabel]; ok {
-		t.Error("operator ManifestWork should not have MeshNameLabel (shared infrastructure)")
-	}
-	if _, ok := work.Labels[MeshNamespaceLabel]; ok {
-		t.Error("operator ManifestWork should not have MeshNamespaceLabel (shared infrastructure)")
-	}
-	if work.Namespace != "cluster-a" {
-		t.Errorf("expected namespace cluster-a, got %s", work.Namespace)
-	}
-	if work.Name != OperatorManifestWorkName {
-		t.Errorf("expected name %s, got %s", OperatorManifestWorkName, work.Name)
-	}
-}
-
-func meshWith(namespace, name string, ts metav1.Time) *meshv1alpha1.MultiClusterMesh {
-	return &meshv1alpha1.MultiClusterMesh{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:              name,
-			Namespace:         namespace,
-			CreationTimestamp: ts,
-		},
-	}
-}
-
 func newTestScheme() *runtime.Scheme {
 	scheme := runtime.NewScheme()
 	_ = clusterv1.Install(scheme)
@@ -1065,17 +688,6 @@ func newTestScheme() *runtime.Scheme {
 	_ = meshv1alpha1.Install(scheme)
 	_ = workv1.Install(scheme)
 	return scheme
-}
-
-const testInstalledCSV = "istio-operator.v1.0.0"
-
-func operatorManifestWork(clusterName string) *workv1.ManifestWork {
-	return &workv1.ManifestWork{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      OperatorManifestWorkName,
-			Namespace: clusterName,
-		},
-	}
 }
 
 func meshOwnedWork(namespace, name, meshName, meshNamespace string) workv1.ManifestWork {
@@ -1104,27 +716,5 @@ func placementDecision(placementName, namespace string, clusterNames ...string) 
 			Labels:    map[string]string{PlacementLabel: placementName},
 		},
 		Status: clusterv1beta1.PlacementDecisionStatus{Decisions: decisions},
-	}
-}
-
-func operatorManifestWorkWithInstalledCSV(clusterName string) *workv1.ManifestWork {
-	csv := testInstalledCSV
-	return &workv1.ManifestWork{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      OperatorManifestWorkName,
-			Namespace: clusterName,
-		},
-		Status: workv1.ManifestWorkStatus{
-			ResourceStatus: workv1.ManifestResourceStatus{
-				Manifests: []workv1.ManifestCondition{{
-					StatusFeedbacks: workv1.StatusFeedbackResult{
-						Values: []workv1.FeedbackValue{{
-							Name:  FeedbackInstalledCSV,
-							Value: workv1.FieldValue{String: &csv},
-						}},
-					},
-				}},
-			},
-		},
 	}
 }
