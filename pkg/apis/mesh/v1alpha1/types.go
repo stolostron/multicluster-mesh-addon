@@ -1,7 +1,10 @@
 package v1alpha1
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"strings"
 
 	operatorsv1alpha1 "github.com/operator-framework/api/pkg/operators/v1alpha1"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -33,12 +36,20 @@ func (m *MultiClusterMesh) GetTrustDomain() string {
 	return m.Name
 }
 
-// GetControlPlaneNamespace returns the control plane namespace, defaulting to "istio-system".
+// GetControlPlaneNamespace returns the auto-derived control plane namespace.
+// The namespace is deterministic and unique per mesh:
+// istio-system-{meshName (truncated to 39 chars)}-{first 10 chars of SHA-256("meshNamespace/meshName")}
+// This guarantees the result is always <= 63 chars and collision-free.
 func (m *MultiClusterMesh) GetControlPlaneNamespace() string {
-	if m.Spec.ControlPlane.Namespace == "" {
-		return "istio-system"
+	hash := sha256.Sum256([]byte(m.Namespace + "/" + m.Name))
+	hashPrefix := hex.EncodeToString(hash[:])[:10]
+
+	meshNamePart := m.Name
+	if len(meshNamePart) > 39 {
+		meshNamePart = strings.TrimRight(meshNamePart[:39], "-")
 	}
-	return m.Spec.ControlPlane.Namespace
+
+	return fmt.Sprintf("istio-system-%s-%s", meshNamePart, hashPrefix)
 }
 
 // SetReadyCondition sets the mesh-level Ready condition.
@@ -245,6 +256,11 @@ const (
 
 // MultiClusterMeshStatus defines the observed state of MultiClusterMesh
 type MultiClusterMeshStatus struct {
+	// ControlPlaneNamespace is the auto-derived namespace used for the
+	// Istio control plane on each spoke cluster.
+	// +optional
+	ControlPlaneNamespace string `json:"controlPlaneNamespace,omitempty"`
+
 	// Conditions represent the latest available observations of the mesh state
 	// +listType=map
 	// +listMapKey=type
