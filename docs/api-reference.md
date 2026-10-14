@@ -13,7 +13,7 @@ API group: `mesh.open-cluster-management.io/v1alpha1`
 
 | Field | Required | Default | Description |
 |-------|----------|---------|-------------|
-| `metadata.name` | Yes | | Mesh name. Must be at most 63 characters (used in certificate subject fields and Kubernetes labels). |
+| `metadata.name` | Yes | | Mesh name. Must be a DNS label: lowercase alphanumeric characters or `-`, starting and ending with an alphanumeric character, at most 63 characters. The name is embedded in the control plane namespace (which cannot contain dots) and is used as the SPIFFE trust domain. |
 | `spec.placementRef.name` | Yes | | Name of the [Placement] defining cluster membership. The Placement must be in the same namespace as the mesh. |
 | `spec.security.trust.certManager.issuerRef.name` | No | | cert-manager Issuer name for Root CA |
 | `spec.security.trust.certManager.issuerRef.kind` | No | `Issuer` | `Issuer` or `ClusterIssuer` |

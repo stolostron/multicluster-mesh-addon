@@ -338,6 +338,14 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 			})
 		})
 
+		When("metadata.name contains a dot", func() {
+			It("should reject creation", func() {
+				expectInvalidCreateMeshFailure("prod.mesh", testNs,
+					meshv1alpha1.MultiClusterMeshSpec{PlacementRef: meshv1alpha1.PlacementReference{Name: testPlacement}},
+					"metadata.name must be a valid DNS label")
+			})
+		})
+
 		When("spec.placementRef.name is empty", func() {
 			It("should reject creation", func() {
 				expectInvalidCreateMeshFailure(meshName+"-empty", testNs,

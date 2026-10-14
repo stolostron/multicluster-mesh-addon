@@ -143,7 +143,10 @@ kubectl label managedcluster cluster2 topology.istio.io/network=network-b
 ## Custom Resource
 
 `MultiClusterMesh` is a namespaced resource. The namespace provides tenant isolation on the hub.
-The resource name (`metadata.name`) is limited to 63 characters because it is used in X.509 certificate subject fields and Kubernetes label values.
+The resource name (`metadata.name`) must be a DNS label: lowercase alphanumeric characters or `-`, starting and ending with an alphanumeric character, and at most 63 characters.
+Custom resource names are otherwise DNS subdomains, which allow dots, but this name is embedded in the control plane namespace.
+Kubernetes namespace names are DNS labels and cannot contain dots, so a name such as `prod.mesh` would be accepted by the hub and then fail when the spoke creates the namespace.
+The mesh name is also the SPIFFE trust domain, so the trust domain is limited to a DNS label as well.
 
 ### Key Fields
 
@@ -213,6 +216,7 @@ istio-system-{meshName (truncated to 39 chars)}-{SHA-256(meshNamespace/meshName)
 
 This guarantees:
 - The result is always at most 63 characters (Kubernetes namespace name limit)
+- The result is a DNS label, because the mesh name is restricted to a DNS label before it is embedded
 - Each mesh gets a unique namespace, even if meshes share the same name across different hub namespaces
 - No user configuration needed and no possibility of namespace conflicts between meshes
 
@@ -237,6 +241,7 @@ The add-on implements Istio's [Plug-in CA] pattern:
 4. The root CA private key never leaves the hub
 
 The trust domain is derived from the mesh name (one trust domain per mesh, not per cluster).
+Because the mesh name must be a DNS label, the trust domain cannot contain dots. A value such as `cluster.local` is not a valid mesh name.
 The controller encodes the trust domain in the certificate's subject organization and SPIFFE URI, with the CN set to `Istio CA`.
 The user must configure the matching `trustDomain` in their Istio CR.
 All clusters in a mesh share the same trust domain, so workloads can authenticate across clusters without additional configuration.

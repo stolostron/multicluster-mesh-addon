@@ -15,6 +15,7 @@ import (
 // +kubebuilder:resource:scope=Namespaced
 // +kubebuilder:subresource:status
 // +kubebuilder:validation:XValidation:rule="size(self.metadata.name) <= 63",message="metadata.name must not exceed 63 characters"
+// +kubebuilder:validation:XValidation:rule="self.metadata.name.matches('^[a-z0-9]([-a-z0-9]*[a-z0-9])?$')",message="metadata.name must be a valid DNS label (lowercase alphanumeric characters or '-', starting and ending with an alphanumeric character)"
 // +kubebuilder:printcolumn:name="Ready",type="string",JSONPath=`.status.conditions[?(@.type=="Ready")].status`
 // +kubebuilder:printcolumn:name="Reason",type="string",JSONPath=`.status.conditions[?(@.type=="Ready")].reason`
 // +kubebuilder:printcolumn:name="Placement",type="string",JSONPath=`.spec.placementRef.name`
@@ -38,6 +39,7 @@ func (m *MultiClusterMesh) GetTrustDomain() string {
 // GetControlPlaneNamespace returns the auto-derived control plane namespace.
 // The namespace is deterministic and unique per mesh:
 // istio-system-{meshName (truncated to 39 chars)}-{first 10 chars of SHA-256("meshNamespace/meshName")}
+// metadata.name must be a DNS label so this result is a valid namespace name.
 // This guarantees the result is always <= 63 chars and collision-free.
 func (m *MultiClusterMesh) GetControlPlaneNamespace() string {
 	hash := sha256.Sum256([]byte(m.Namespace + "/" + m.Name))
