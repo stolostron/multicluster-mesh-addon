@@ -28,7 +28,7 @@ kubectl get manifestwork -A -l app.kubernetes.io/managed-by=multicluster-mesh-ad
 Resources owned by a specific mesh:
 
 ```bash
-kubectl get manifestwork -A -l mesh.open-cluster-management.io/mesh-name=<mesh-name>
+kubectl get manifestwork -A -l 'mesh.open-cluster-management.io/mesh-name=<mesh-name>,mesh.open-cluster-management.io/mesh-namespace=<mesh-namespace>'
 ```
 
 Certificates and secrets:
@@ -41,7 +41,7 @@ kubectl get secret -n <mesh-namespace> -l mesh.open-cluster-management.io/mesh-n
 ManagedServiceAccounts (endpoint discovery credentials):
 
 ```bash
-kubectl get managedserviceaccount -A -l mesh.open-cluster-management.io/mesh-name=<mesh-name>
+kubectl get managedserviceaccount -A -l 'mesh.open-cluster-management.io/mesh-name=<mesh-name>,mesh.open-cluster-management.io/mesh-namespace=<mesh-namespace>'
 ```
 
 ManifestWorkReplicaSet (remote secret distribution):
@@ -58,6 +58,16 @@ kubectl logs -n multicluster-mesh-system deploy/multicluster-mesh-controller -f
 
 ## Common Issues
 
+### Controller does not start
+
+The controller requires the Certificate and ManagedServiceAccount CRDs on the hub even when no mesh uses cert-manager trust. Missing ones produce `prerequisite CRDs not installed on the hub` in the controller logs. Install the prerequisite controllers and CRDs before deploying the addon:
+
+```bash
+kubectl get crd certificates.cert-manager.io managedserviceaccounts.authentication.open-cluster-management.io
+```
+
+OCM's Placement, PlacementDecision, ManifestWork, and ManifestWorkReplicaSet APIs must also be available. Enable the ManifestWorkReplicaSet feature on the ClusterManager and ensure the ManagedServiceAccount addon is available on each selected spoke.
+
 ### Nothing happens after creating a mesh
 
 The addon reads cluster membership from PlacementDecision resources.
@@ -68,9 +78,8 @@ kubectl get placement -n <mesh-namespace> <placement-name>
 kubectl get placementdecision -n <mesh-namespace> -l cluster.open-cluster-management.io/placement=<placement-name>
 ```
 
-If the Placement doesn't exist, the mesh reports `PlacementNotFound`.
-If no clusters are selected, the mesh reports `NoClustersSelected`.
-Verify the Placement's predicates match your clusters and that clusters are registered with the hub.
+If the Placement doesn't exist, the mesh reports `PlacementNotFound` and leaves existing plumbing in place.
+If the Placement exists and has selected zero clusters, the mesh reports `NoClustersSelected` and removes that plumbing. The same reason is also set when PlacementDecisions still name clusters but every corresponding ManagedCluster object is missing; namespace ManifestWorks and ManagedServiceAccounts for those names stay. See [Mesh shows NoClustersSelected](#mesh-shows-noclustersselected).
 
 ### Mesh shows ClustersNotReady
 
@@ -86,14 +95,18 @@ If a cluster shows `CacertsPending`, check:
 
 1. **Certificate created and ready?**
    ```bash
-   kubectl get certificate -n <mesh-namespace> -l mesh.open-cluster-management.io/cluster-name=<cluster-name>
+   kubectl get certificate -n <mesh-namespace> -l 'mesh.open-cluster-management.io/mesh-name=<mesh-name>,mesh.open-cluster-management.io/cluster-name=<cluster-name>'
    ```
 2. **Cacerts ManifestWork exists?**
    ```bash
-   kubectl get manifestwork -n <cluster-name> -l mesh.open-cluster-management.io/mesh-name=<mesh-name>
+   kubectl get manifestwork -n <cluster-name> -l 'mesh.open-cluster-management.io/mesh-name=<mesh-name>,mesh.open-cluster-management.io/mesh-namespace=<mesh-namespace>'
    ```
 3. **ManifestWork applied on the spoke?** Check `.status.conditions` on the ManifestWork for `Applied` and `Available`.
 4. **Work agent running on the managed cluster?** The OCM work agent must be running to apply ManifestWorks.
+
+### Mesh is Ready but discovery or Istio is not working
+
+Ready does not check operator installation, Istio health, discovery-token availability, remote-secret rollout, or cluster reachability. Without an issuer, it does not wait for any spoke work to be applied. Selected names whose ManagedCluster objects are missing are excluded from readiness checks when other clusters still resolve.
 
 ### No cacerts secret on spoke clusters
 
@@ -122,12 +135,19 @@ Common causes:
 ### Mesh shows PlacementNotFound
 
 The Placement referenced by `spec.placementRef.name` does not exist in the mesh's namespace.
+Existing control plane namespaces, Certificates, cacerts, ManagedServiceAccounts, and remote secrets are left in place.
+`status.clusterStatus` is cleared until the Placement exists again.
 Create the Placement or fix the reference.
 
 ### Mesh shows NoClustersSelected
 
-The Placement exists but has not selected any clusters.
-Common causes:
+The Placement exists. This reason has two causes. Read the condition message to tell them apart.
+
+The Placement selected zero clusters. `status.numberOfSelectedClusters` is 0 and the PlacementDecisions agree. The condition message is `Placement <name> has not selected any clusters`. Reconciliation requests cleanup of all mesh plumbing, including namespace ManifestWorks, istio-reader RBAC, intermediate CA Certificates, cacerts works, and ManagedServiceAccounts. The ReplicaSet remains with an empty manifest list; OCM removes its remote-secret resources asynchronously. The MultiClusterMesh remains. The same cleanup can occur before a new or recreated Placement has produced its first scheduling result.
+
+PlacementDecisions still name clusters, but every corresponding ManagedCluster object is gone. The condition message is `Placement <name> has decisions but none of the selected ManagedClusters exist`. Those names stay in desired membership, preserving their ManifestWorks and ManagedServiceAccounts, plus their Certificates while an issuer remains configured. The remote-secret template omits unresolved clusters. Cleanup runs after the Placement controller removes their names from decisions.
+
+Common causes of an empty selection:
 
 1. **Missing ManagedClusterSetBinding** - Placements only select from ClusterSets bound to the namespace.
    Check that a `ManagedClusterSetBinding` exists in the mesh namespace:
@@ -146,7 +166,7 @@ Check each step:
 
 ```bash
 # ManagedServiceAccount created?
-kubectl get managedserviceaccount -A -l mesh.open-cluster-management.io/mesh-name=<mesh-name>
+kubectl get managedserviceaccount -A -l 'mesh.open-cluster-management.io/mesh-name=<mesh-name>,mesh.open-cluster-management.io/mesh-namespace=<mesh-namespace>'
 
 # Token secret synced back?
 kubectl get managedserviceaccount -n <cluster-name> -o jsonpath='{.items[*].status.tokenSecretRef}'

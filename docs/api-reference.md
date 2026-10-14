@@ -23,16 +23,16 @@ API group: `mesh.open-cluster-management.io/v1alpha1`
 
 | Field | Description |
 |-------|-------------|
-| `status.controlPlaneNamespace` | Auto-derived control plane namespace: `istio-system-{meshName}-{SHA-256 prefix}` |
+| `status.controlPlaneNamespace` | Auto-derived control plane namespace: `istio-system-{mesh name truncated to 39 characters}-{first 10 hex characters of SHA-256(namespace/name)}` |
 | `status.conditions` | Mesh-level conditions (see below) |
-| `status.clusterStatus` | Per-cluster conditions (see below) |
+| `status.clusterStatus` | Per-cluster conditions. Entries are created when trust is checked; this is not a complete inventory of Placement membership. |
 
 ### Status Conditions
 
 | Condition | Scope | Meaning |
 |-----------|-------|---------|
-| `Ready` | Mesh | All clusters have trust distributed (or no trust is configured) |
-| `TrustDistributed` | Per-cluster | The cacerts ManifestWork has been applied and is available on this cluster |
+| `Ready` | Mesh | After successful reconciliation, `True` when every resolved cluster's cacerts ManifestWork reports `Applied=True` and `Available=True`. |
+| `TrustDistributed` | Per-cluster | The controller's last observation of the cacerts ManifestWork's `Applied` and `Available` conditions. Updated only while an issuer is configured. |
 
 **Reason values** (appear in a condition's `.reason`):
 
@@ -40,11 +40,19 @@ API group: `mesh.open-cluster-management.io/v1alpha1`
 |--------|-------|-------------|
 | `AllClustersReady` | Mesh | All clusters are ready |
 | `ClustersNotReady` | Mesh | One or more clusters do not yet have trust distributed |
-| `PlacementNotFound` | Mesh | The referenced Placement does not exist |
-| `NoClustersSelected` | Mesh | The Placement has not selected any clusters |
+| `PlacementNotFound` | Mesh | The referenced Placement does not exist. Existing mesh plumbing is left in place. |
+| `NoClustersSelected` | Mesh | The Placement exists. If it selected zero clusters, mesh plumbing is removed. If its decisions still name clusters but every corresponding ManagedCluster object is missing, namespace ManifestWorks and ManagedServiceAccounts for those names are kept. |
 | `ReconcileError` | Mesh | An error occurred during reconciliation |
 | `CacertsApplied` | Per-cluster | Cacerts are distributed and available on the cluster |
 | `CacertsPending` | Per-cluster | Cacerts have not yet been distributed to the cluster |
 
+### Readiness Limits
+
+`Ready` does not verify the service mesh operator, Istio control planes, discovery-token availability, remote-secret rollout, or cross-cluster connectivity. Check those separately before using the mesh.
+
+The current controller checks only resolved ManagedCluster objects and accepts true ManifestWork conditions without comparing their `observedGeneration` with the work's generation. A partially missing selection or an updated cacerts payload can therefore leave `Ready=True` before all desired work is current.
+
+Clearing the issuer name deletes Certificates but retains cacerts ManifestWorks on still-selected clusters and does not clear earlier `TrustDistributed` conditions. Certificate Secret retention depends on cert-manager configuration. See [lifecycle behavior](dev/design.md#lifecycle-events) and [troubleshooting](troubleshooting.md).
+
 <!-- Reference links -->
-[Placement]: https://open-cluster-management.io/docs/concepts/cluster-inventory/placement/
+[Placement]: https://open-cluster-management.io/docs/concepts/content-placement/placement/

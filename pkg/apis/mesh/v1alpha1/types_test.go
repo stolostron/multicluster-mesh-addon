@@ -108,7 +108,7 @@ func TestGetControlPlaneNamespaceLongName(t *testing.T) {
 	}
 }
 
-func TestGetControlPlaneNamespaceTrailingHyphenTrimmed(t *testing.T) {
+func TestGetControlPlaneNamespaceKeepsHyphenAtTruncation(t *testing.T) {
 	// 39th character is a hyphen: "abcdefghijklmnopqrstuvwxyz-0123456789-" + more
 	name := "abcdefghijklmnopqrstuvwxyz-0123456789--extra"
 	if len(name) <= 39 {
@@ -123,7 +123,13 @@ func TestGetControlPlaneNamespaceTrailingHyphenTrimmed(t *testing.T) {
 	}
 	ns := mesh.GetControlPlaneNamespace()
 
-	// The truncated name should not have a trailing hyphen before the hash separator
+	want := "istio-system-" + name[:39] + "-" + expectedHash("ns", name)
+	if ns != want {
+		t.Errorf("GetControlPlaneNamespace() = %q, want %q", ns, want)
+	}
+	if len(ns) > 63 {
+		t.Errorf("namespace %q exceeds 63 chars (len=%d)", ns, len(ns))
+	}
 	dnsLabel := regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?$`)
 	if !dnsLabel.MatchString(ns) {
 		t.Errorf("namespace %q is not a valid DNS label", ns)

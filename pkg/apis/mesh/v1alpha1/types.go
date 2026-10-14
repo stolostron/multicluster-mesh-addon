@@ -4,7 +4,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
-	"strings"
 
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -47,7 +46,7 @@ func (m *MultiClusterMesh) GetControlPlaneNamespace() string {
 
 	meshNamePart := m.Name
 	if len(meshNamePart) > 39 {
-		meshNamePart = strings.TrimRight(meshNamePart[:39], "-")
+		meshNamePart = meshNamePart[:39]
 	}
 
 	return fmt.Sprintf("istio-system-%s-%s", meshNamePart, hashPrefix)

@@ -44,4 +44,4 @@ kubectl apply -n mesh-operator-policy -f samples/operator-policy-sail.yaml
 | [istio/istiocni.yaml](istio/istiocni.yaml) | IstioCNI (required on OpenShift and ambient) |
 
 Apply spoke samples on each managed cluster.
-See the [User Guide](../docs/user-guide.md#step-7-configure-istio) for the full procedure.
+See the [User Guide](../docs/user-guide.md#step-8-configure-istio) for the full procedure.

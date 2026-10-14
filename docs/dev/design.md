@@ -12,6 +12,7 @@
 - [Custom Resource](#custom-resource)
 - [Cluster Selection](#cluster-selection)
 - [Operator Lifecycle](#operator-lifecycle)
+- [Control Plane Namespace](#control-plane-namespace)
 - [Trust Distribution](#trust-distribution)
 - [Endpoint Discovery](#endpoint-discovery)
 - [Lifecycle Events](#lifecycle-events)
@@ -57,8 +58,11 @@ flowchart TD
         (istio-reader RBAC, per mesh)"])
         casecret --> mw_cacerts(["ManifestWork
         (cacerts)"])
-        tokensecret --> mw_remote(["ManifestWork
-        (remote secret, per peer)"])
+        addon --> mwrs(["ManifestWorkReplicaSet
+        (per mesh)"])
+        tokensecret --> mwrs
+        mwrs --> mw_remote(["ManifestWork
+        (all remote secrets, per target cluster)"])
     end
 
     subgraph Managed Cluster
@@ -92,7 +96,7 @@ flowchart TD
 
     %% Mesh Add-on managed (blue)
     classDef addon fill:#dbeafe,stroke:#3b82f6,color:#1e3a5f
-    class addon,mesh addon
+    class addon,mesh,mwrs addon
 
     %% cert-manager managed (green)
     classDef certmgr fill:#d1fae5,stroke:#10b981,color:#064e3b
@@ -145,7 +149,6 @@ kubectl label managedcluster cluster2 topology.istio.io/network=network-b
 `MultiClusterMesh` is a namespaced resource. The namespace provides tenant isolation on the hub.
 The resource name (`metadata.name`) must be a DNS label: lowercase alphanumeric characters or `-`, starting and ending with an alphanumeric character, and at most 63 characters.
 Custom resource names are otherwise DNS subdomains, which allow dots, but this name is embedded in the control plane namespace.
-Kubernetes namespace names are DNS labels and cannot contain dots, so a name such as `prod.mesh` would be accepted by the hub and then fail when the spoke creates the namespace.
 The mesh name is also the SPIFFE trust domain, so the trust domain is limited to a DNS label as well.
 
 ### Key Fields
@@ -185,9 +188,15 @@ The add-on uses OCM [Placement] for cluster selection. The user creates a `Place
 
 This design gives the user full control over cluster selection using Placement's rich scheduling capabilities: label selectors, cluster sets, tolerations, priority-based scheduling, spread policies, etc. The add-on is agnostic to how clusters are selected - it simply reads the decisions.
 
-`MultiClusterMesh` is namespace-scoped, enabling tenant isolation on the hub. Each mesh operates independently - its certificates, discovery tokens, and control plane namespace are scoped to its identity. Multiple meshes can target overlapping clusters because each mesh gets a unique auto-derived control plane namespace (see [Control Plane Namespace](#control-plane-namespace)), its own trust domain, certificates, and discovery tokens.
+Multiple meshes can target overlapping clusters. Their certificates, discovery tokens, RBAC, and control plane namespaces are scoped to their hub namespace/name identity. Trust domains are derived only from the mesh name, so meshes with the same name in different hub namespaces share a trust-domain string. Separate resource identities alone do not provide workload trust or service-discovery isolation; users configure issuers and Istio discovery selectors accordingly.
 
 Plumbing resources (ManifestWorks, ManagedServiceAccounts, Certificates) use a deterministic naming strategy scoped to the owning mesh, so that multiple meshes on the same cluster don't collide.
+
+The controller lists decisions by Placement-name label in the mesh namespace and sorts their cluster names. It compares the raw entry count with `Placement.status.numberOfSelectedClusters`; a mismatch requeues after 2 seconds without creating, updating, or deleting mesh resources. 
+
+Selected names and resolved ManagedCluster objects are tracked separately. Resource creation and remote-secret content use resolved objects. Cleanup and status pruning use the selected names, preserving resources for a missing ManagedCluster until its name leaves the decisions. Readiness uses the resolved objects, so a partially missing selection is not currently reflected as an unready member.
+
+Placement and PlacementDecision events enqueue meshes using a namespace-scoped field index on `spec.placementRef.name`. ManagedCluster events find affected meshes from their labeled ManifestWorks. The addon also watches mesh-labeled Secrets and ManagedServiceAccounts, addon-managed ManifestWorks, and generation changes to owned Certificates. It does not watch ManifestWorkReplicaSets directly.
 
 ## Operator Lifecycle
 
@@ -211,14 +220,17 @@ The operator is a cluster-scoped singleton shared across meshes. Managing it ins
 The control plane namespace is auto-derived from the mesh identity using a deterministic formula:
 
 ```
-istio-system-{meshName (truncated to 39 chars)}-{SHA-256(meshNamespace/meshName)[:10]}
+istio-system-{meshName truncated to 39 characters}-{SHA-256(meshNamespace/meshName)[:10]}
 ```
 
-This guarantees:
+The mesh name is cut at 39 characters so the full namespace stays within 63 characters.
+
+The formula provides:
+
 - The result is always at most 63 characters (Kubernetes namespace name limit)
-- The result is a DNS label, because the mesh name is restricted to a DNS label before it is embedded
-- Each mesh gets a unique namespace, even if meshes share the same name across different hub namespaces
-- No user configuration needed and no possibility of namespace conflicts between meshes
+- The result is a DNS label
+- The hash includes both the hub namespace and name, so same-name meshes in different namespaces normally receive different spoke namespaces
+- No user-configurable control plane namespace
 
 The derived namespace is reported in `status.controlPlaneNamespace` after the first reconciliation.
 
@@ -248,6 +260,8 @@ All clusters in a mesh share the same trust domain, so workloads can authenticat
 
 Certificate rotation is handled automatically by cert-manager. Updated certificates are propagated to clusters when they change.
 
+Deleting a Certificate does not explicitly delete its hub Secret. cert-manager retains that Secret by default; installations using `--enable-certificate-owner-ref` can garbage-collect it with the Certificate. Reselecting a cluster can reuse valid retained material and does not guarantee a fresh intermediate CA. See [cert-manager Secret cleanup][cert-secret-cleanup].
+
 ### Readiness
 
 When trust is configured, the mesh does not become `Ready` until the cacerts ManifestWork is confirmed `Applied` and `Available` on every managed cluster. This prevents istiod from starting before the intermediate CA is in place (which would cause it to fall back to a self-signed CA, breaking cross-cluster mTLS). Each cluster reports a per-cluster `TrustDistributed` condition with reason `CacertsApplied` or `CacertsPending`.
@@ -265,8 +279,12 @@ For multi-primary mesh topologies, each control plane needs API access to its pe
 
 ## Lifecycle Events
 
-- **Scale Up**: When a new cluster is selected by the Placement, the controller automatically provisions the mesh plumbing for it: creates the control plane namespace, mints an intermediate CA, and distributes discovery tokens to all peers. This is the same process as the initial mesh bootstrap, applied incrementally to the new cluster.
-- **Scale Down**: When a cluster is removed from the Placement (PlacementDecision changes), the controller immediately revokes its access by removing the remote secrets from all peer clusters and cleaning up the local CA bundles and control plane namespace ManifestWorks.
+- **Scale Up**: When a new cluster is selected by the Placement, the controller provisions the mesh plumbing for it: the control plane namespace, an intermediate CA Certificate when an issuer is set, istio-reader RBAC, a ManagedServiceAccount, and remote secrets for the current members. This is the same process as the initial mesh bootstrap, applied to the new cluster.
+- **Scale Down**: When a cluster leaves the decisions and the raw decision-entry count matches `status.numberOfSelectedClusters`, reconciliation requests deletion of its mesh ManifestWorks, intermediate CA Certificate, and ManagedServiceAccount, and rebuilds the ReplicaSet without its remote secret. OCM applies those changes asynchronously.
+- **Empty selection**: When the Placement exists and `status.numberOfSelectedClusters` agrees with the PlacementDecisions that zero clusters are selected, the same cleanup runs for every cluster. Control plane namespaces, intermediate CA Certificates, cacerts, ManagedServiceAccounts, and remote secrets are deleted. A transient mismatch between the decision list and `status.numberOfSelectedClusters` does not trigger this cleanup.
+- **Missing Placement**: If the referenced Placement does not exist, the controller reports `PlacementNotFound` and does not run cleanup. Existing plumbing stays until the Placement is created or the reference is fixed. `status.clusterStatus` is cleared while the Placement is missing.
+- **Missing ManagedClusters**: Resources for names still present in decisions are retained, including their Certificates when trust remains configured. If all selected objects are missing, the mesh reports `NoClustersSelected`; this does not mean its desired membership is empty.
+- **Mesh deletion**: The finalizer requests deletion of labeled ManifestWorks and ManagedServiceAccounts and is removed after those API calls succeed. It does not wait for remote cleanup. Garbage collection removes owned Certificates and the ReplicaSet, and OCM removes the ReplicaSet's remote-secret works. User-created Placements, bindings, issuers, operators, and cluster-scoped Istio resources remain outside addon ownership.
 
 ## Phased Approach
 
@@ -290,13 +308,14 @@ Potential additions include observability stack management and full addon framew
 
 <!-- Reference links -->
 [cert-manager]: https://cert-manager.io/
+[cert-secret-cleanup]: https://cert-manager.io/docs/usage/certificate/#cleaning-up-secrets-when-certificates-are-deleted
 [ClusterManagementAddOn]: https://open-cluster-management.io/docs/concepts/addon/#clustermanagementaddon
 [ManagedServiceAccount]: https://open-cluster-management.io/docs/getting-started/integration/managed-serviceaccount/
 [ManifestWork]: https://open-cluster-management.io/docs/concepts/work-distribution/manifestwork/
 [ManifestWorkReplicaSet]: https://open-cluster-management.io/docs/concepts/work-distribution/manifestworkreplicaset/
 [Multi-Primary Multi-Network]: https://istio.io/latest/docs/setup/install/multicluster/multi-primary_multi-network/
 [OCM]: https://open-cluster-management.io/
-[OperatorPolicy]: https://open-cluster-management.io/docs/governance/policy/policy-operator/
-[Placement]: https://open-cluster-management.io/docs/concepts/cluster-inventory/placement/
-[PlacementDecision]: https://open-cluster-management.io/docs/concepts/cluster-inventory/placement/#placementdecisions
+[OperatorPolicy]: https://open-cluster-management.io/docs/getting-started/integration/policy-controllers/operator-policy/
+[Placement]: https://open-cluster-management.io/docs/concepts/content-placement/placement/
+[PlacementDecision]: https://open-cluster-management.io/docs/concepts/content-placement/placement/#placementdecisions
 [Plug-in CA]: https://istio.io/latest/docs/tasks/security/cert-management/plugin-ca-cert/
