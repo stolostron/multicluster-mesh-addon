@@ -387,11 +387,11 @@ run_kubectl hub label managedcluster "${SPOKE_CLUSTERS[1]}" topology.istio.io/ne
 demo_wait
 
 demo_title "Step 5: Creating the MultiClusterMesh"
-demo_comment "Create the MultiClusterMesh resource on the hub. The add-on watches this resource and bootstraps OSSM on the selected clusters."
+demo_comment "Create the MultiClusterMesh resource on the hub. The add-on watches this resource and prepares trust and discovery on the selected clusters."
 run_kubectl_apply hub "${MESH_SAMPLE}" -n "${MESH_NAMESPACE}"
 demo_comment "Let's check in on the mesh while the selected clusters are being prepared."
 demo_run "${KUBECTL} --kubeconfig ${KUBECONFIGS[hub]} get multiclustermesh/${MESH_NAME} -n ${MESH_NAMESPACE} -o yaml | yq -C .status | bat"
-demo_comment "Wait for the add-on to report the mesh ready. This covers OSSM operator bootstrapping; Istio is still customer-managed."
+demo_comment "Wait for hub-side reconciliation to complete. OSSM and Istio remain customer-managed."
 run_kubectl hub wait --for=condition=Ready=True "multiclustermesh/${MESH_NAME}" \
     -n "${MESH_NAMESPACE}" --timeout="${DEMO_TIMEOUT}"
 run_kubectl hub get "multiclustermesh/${MESH_NAME}" -n "${MESH_NAMESPACE}"

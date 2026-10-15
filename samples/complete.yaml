@@ -13,30 +13,6 @@ spec:
     # Namespace where Istio will be installed on each cluster
     namespace: istio-system
 
-  # Operator installation configuration (overrides the OSSM kubebuilder defaults)
-  operator:
-    # OLM package name
-    name: sailoperator
-
-    # Namespace where the operator will be installed
-    # This namespace may be deleted when the mesh is removed
-    namespace: multicluster-mesh-operator
-
-    # OLM subscription channel
-    channel: stable
-
-    # CatalogSource name
-    source: operatorhubio-catalog
-
-    # CatalogSource namespace
-    sourceNamespace: olm
-
-    # Specific operator version (optional, pins to a specific CSV)
-    # startingCSV: sail-operator.v1.23.0
-
-    # Install plan approval strategy
-    installPlanApproval: Automatic
-
   # Security configuration for trust and discovery
   security:
     # mTLS trust configuration using cert-manager

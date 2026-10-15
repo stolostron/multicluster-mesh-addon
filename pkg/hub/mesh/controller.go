@@ -12,10 +12,7 @@ import (
 	certmanagerv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
 	certmanagerapply "github.com/cert-manager/cert-manager/pkg/client/applyconfigurations/certmanager/v1"
 	cmmetaapply "github.com/cert-manager/cert-manager/pkg/client/applyconfigurations/meta/v1"
-	operatorsv1 "github.com/operator-framework/api/pkg/operators/v1"
-	operatorsv1alpha1 "github.com/operator-framework/api/pkg/operators/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
-	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -45,10 +42,7 @@ import (
 )
 
 const (
-	OperatorManifestWorkName   = "multicluster-mesh-operator"
 	ManifestWorkNameCPNSPrefix = "multicluster-mesh-cp-ns-"
-
-	FeedbackInstalledCSV = "installedCSV"
 
 	CacertsSecretName = "cacerts"
 
@@ -241,8 +235,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 			// validate already set the conflict condition. Pass nil
 			// clusters so doReconcile treats this as targeting zero
 			// clusters, removing all mesh-owned ManifestWorks,
-			// certificates, ManagedServiceAccounts, and operator
-			// ManifestWorks (when no other mesh still needs them).
+			// certificates, and ManagedServiceAccounts.
 			reconcileErr = r.doReconcile(ctx, mesh, nil, nil)
 			r.pruneStaleClusterStatus(mesh, nil)
 		} else {
@@ -282,14 +275,6 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 // validate checks for conflicts that prevent reconciliation.
 // Sets a condition on the mesh and returns true if a conflict is found.
 func (r *Reconciler) validate(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, clusters []clusterv1.ManagedCluster) (conflict bool, err error) {
-	// CEL cross-field rule on the spec struct exceeds the estimated cost budget,
-	// so this is validated here instead of via kubebuilder markers.
-	if mesh.GetControlPlaneNamespace() == mesh.Spec.Operator.Namespace {
-		mesh.SetReadyCondition(metav1.ConditionFalse, meshv1alpha1.ReasonNamespaceConflict,
-			"controlPlane.namespace %q must not equal operator.namespace", mesh.GetControlPlaneNamespace())
-		return true, nil
-	}
-
 	for _, cluster := range clusters {
 		peers, err := r.findOlderPeerMeshes(ctx, mesh, cluster.Name)
 		if err != nil {
@@ -301,12 +286,6 @@ func (r *Reconciler) validate(ctx context.Context, mesh *meshv1alpha1.MultiClust
 				mesh.SetReadyCondition(metav1.ConditionFalse, meshv1alpha1.ReasonNamespaceConflict,
 					"controlPlane.namespace %q conflicts with older mesh %s/%s on cluster %s",
 					mesh.GetControlPlaneNamespace(), peer.Namespace, peer.Name, cluster.Name)
-				return true, nil
-			}
-			if mesh.Spec.Operator != peer.Spec.Operator {
-				mesh.SetReadyCondition(metav1.ConditionFalse, meshv1alpha1.ReasonOperatorConfigConflict,
-					"operator config conflicts with older mesh %s/%s on cluster %s",
-					peer.Namespace, peer.Name, cluster.Name)
 				return true, nil
 			}
 		}
@@ -387,12 +366,6 @@ func (r *Reconciler) doReconcile(ctx context.Context, mesh *meshv1alpha1.MultiCl
 		}
 		klog.V(4).Infof("Applied control plane namespace ManifestWork %s/%s", cpNsWork.Namespace, cpNsWork.Name)
 
-		work, err := r.workApplier.Apply(ctx, r.buildOperatorManifestWork(mesh, &cluster))
-		if err != nil {
-			return fmt.Errorf("failed to apply operator ManifestWork on cluster %s: %w", cluster.Name, err)
-		}
-		klog.V(4).Infof("Applied operator ManifestWork %s/%s", work.Namespace, work.Name)
-
 		if err := r.ensureManagedServiceAccount(ctx, mesh, &cluster); err != nil {
 			return fmt.Errorf("failed to ensure ManagedServiceAccount for cluster %s: %w", cluster.Name, err)
 		}
@@ -421,21 +394,6 @@ func (r *Reconciler) doReconcile(ctx context.Context, mesh *meshv1alpha1.MultiCl
 		if err := r.deleteCertificatesForRemovedClusters(ctx, mesh, desiredClusters); err != nil {
 			return fmt.Errorf("failed to cleanup Certificates: %w", err)
 		}
-	}
-
-	// Discover which clusters previously had mesh-owned ManifestWorks, then
-	// delete operator ManifestWorks BEFORE mesh-owned ones. This ordering
-	// matters for retries: if operator cleanup fails, mesh-owned MWs are
-	// still present so the next attempt can rediscover the cluster list.
-	// Reversing the order would lose the cluster list on retry because
-	// getClusterNamespacesFromManifestWorks relies on mesh-owned MWs.
-	previousClusters, err := r.getClusterNamespacesFromManifestWorks(ctx, mesh)
-	if err != nil {
-		return err
-	}
-
-	if err := r.cleanupOperatorManifestWorksForRemovedClusters(ctx, mesh, desiredClusters, previousClusters); err != nil {
-		return fmt.Errorf("failed to cleanup operator ManifestWorks: %w", err)
 	}
 
 	if err := r.cleanupMeshOwnedManifestWorks(ctx, mesh, desiredClusters); err != nil {
@@ -506,8 +464,6 @@ func (r *Reconciler) findMeshesForCluster(ctx context.Context, obj client.Object
 }
 
 // findMeshesForManifestWork returns reconcile requests for meshes affected by a ManifestWork change.
-// For mesh-owned ManifestWorks (with mesh labels), returns the owning mesh directly.
-// For shared ManifestWorks (operator MW), finds meshes via other ManifestWorks in the same namespace.
 func (r *Reconciler) findMeshesForManifestWork(ctx context.Context, obj client.Object) []reconcile.Request {
 	labels := obj.GetLabels()
 	meshName := labels[MeshNameLabel]
@@ -517,7 +473,7 @@ func (r *Reconciler) findMeshesForManifestWork(ctx context.Context, obj client.O
 		return []reconcile.Request{{NamespacedName: key.Of(meshName, meshNamespace)}}
 	}
 
-	return r.findMeshesForCluster(ctx, &clusterv1.ManagedCluster{ObjectMeta: metav1.ObjectMeta{Name: obj.GetNamespace()}})
+	return nil
 }
 
 func (r *Reconciler) reconcileRequestsForPlacement(ctx context.Context, placementName, namespace string) []reconcile.Request {
@@ -548,14 +504,9 @@ func (r *Reconciler) handleDeletion(ctx context.Context, mesh *meshv1alpha1.Mult
 
 	// Collect cluster namespaces from mesh-owned ManifestWorks before deleting
 	// them, because PlacementDecisions may already be gone during deletion.
-	// Delete operator ManifestWorks first — see doReconcile comment for why.
 	clusterNamespaces, err := r.getClusterNamespacesFromManifestWorks(ctx, mesh)
 	if err != nil {
 		return err
-	}
-
-	if err := r.cleanupOperatorManifestWorksForClusters(ctx, clusterNamespaces, mesh); err != nil {
-		return fmt.Errorf("failed to cleanup operator ManifestWorks: %w", err)
 	}
 
 	if err := r.cleanupMeshOwnedManifestWorks(ctx, mesh, nil); err != nil {
@@ -573,84 +524,6 @@ func (r *Reconciler) handleDeletion(ctx context.Context, mesh *meshv1alpha1.Mult
 	controllerutil.RemoveFinalizer(mesh, FinalizerName)
 	if err := r.Update(ctx, mesh); err != nil {
 		return fmt.Errorf("failed to remove finalizer: %w", err)
-	}
-
-	return nil
-}
-
-// cleanupOperatorManifestWorksForRemovedClusters deletes operator ManifestWorks on clusters
-// that this mesh no longer targets, if no other active mesh still needs them.
-// previousClusters must be collected before cleanupMeshOwnedManifestWorks runs.
-func (r *Reconciler) cleanupOperatorManifestWorksForRemovedClusters(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, desiredClusters []string, previousClusters []string) error {
-	clusterNames := clusterNameSet(desiredClusters)
-
-	for _, clusterName := range previousClusters {
-		if clusterNames[clusterName] {
-			continue
-		}
-		if err := r.deleteOperatorManifestWorkIfUnused(ctx, clusterName, mesh); err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
-// cleanupOperatorManifestWorksForClusters deletes operator ManifestWorks on clusters
-// if no other mesh still needs them. Used during mesh deletion.
-func (r *Reconciler) cleanupOperatorManifestWorksForClusters(ctx context.Context, clusterNamespaces []string, mesh *meshv1alpha1.MultiClusterMesh) error {
-	for _, clusterName := range clusterNamespaces {
-		if err := r.deleteOperatorManifestWorkIfUnused(ctx, clusterName, mesh); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// deleteOperatorManifestWorkIfUnused deletes the operator ManifestWork on a cluster
-// if no other non-deleting mesh still has ManifestWorks on that cluster.
-// The excludeMesh parameter identifies the mesh being reconciled/deleted, whose
-// ManifestWorks should be ignored (they are being or have been cleaned up).
-func (r *Reconciler) deleteOperatorManifestWorkIfUnused(ctx context.Context, clusterName string, excludeMesh *meshv1alpha1.MultiClusterMesh) error {
-	workList := &workv1.ManifestWorkList{}
-	if err := r.List(ctx, workList,
-		client.InNamespace(clusterName),
-		client.MatchingLabels{ManagedByLabel: ManagedByValue},
-	); err != nil {
-		return fmt.Errorf("failed to list ManifestWorks in namespace %s: %w", clusterName, err)
-	}
-
-	for _, work := range workList.Items {
-		if work.Name == OperatorManifestWorkName {
-			continue
-		}
-		meshName := work.Labels[MeshNameLabel]
-		meshNamespace := work.Labels[MeshNamespaceLabel]
-		if meshName == "" || meshNamespace == "" {
-			continue
-		}
-		if excludeMesh != nil && meshName == excludeMesh.Name && meshNamespace == excludeMesh.Namespace {
-			continue
-		}
-		other := &meshv1alpha1.MultiClusterMesh{}
-		if err := r.Get(ctx, key.Of(meshName, meshNamespace), other); err != nil {
-			if apierrors.IsNotFound(err) {
-				continue
-			}
-			return fmt.Errorf("failed to get mesh %s/%s: %w", meshNamespace, meshName, err)
-		}
-		if other.DeletionTimestamp.IsZero() {
-			klog.V(4).Infof("Operator ManifestWork on %s still needed by mesh %s/%s", clusterName, meshNamespace, meshName)
-			return nil
-		}
-	}
-
-	klog.Infof("Deleting operator ManifestWork %s/%s (no mesh targets this cluster)", clusterName, OperatorManifestWorkName)
-	if err := r.workApplier.Delete(ctx, clusterName, OperatorManifestWorkName); err != nil {
-		if apierrors.IsNotFound(err) {
-			return nil
-		}
-		return fmt.Errorf("failed to delete operator ManifestWork %s/%s: %w", clusterName, OperatorManifestWorkName, err)
 	}
 
 	return nil
@@ -710,8 +583,8 @@ func (r *Reconciler) triggerReconcileForConflictedMeshes(ctx context.Context, me
 
 	// Fallback: trigger meshes blocked by a conflict with this mesh but that
 	// never created ManifestWorks (so the MW-based lookup above can't find them).
-	// Only OperatorConfigConflict and NamespaceConflict are conflict conditions;
-	// other not-ready reasons (InstallationPending, PlacementNotFound, etc.)
+	// Only NamespaceConflict is a conflict condition;
+	// other not-ready reasons (PlacementNotFound, NoClustersSelected, etc.)
 	// are unrelated to this mesh's deletion.
 	meshList := &meshv1alpha1.MultiClusterMeshList{}
 	if err := r.List(ctx, meshList); err != nil {
@@ -731,7 +604,7 @@ func (r *Reconciler) triggerReconcileForConflictedMeshes(ctx context.Context, me
 		if cond == nil || cond.Status == metav1.ConditionTrue {
 			continue
 		}
-		if cond.Reason != meshv1alpha1.ReasonOperatorConfigConflict && cond.Reason != meshv1alpha1.ReasonNamespaceConflict {
+		if cond.Reason != meshv1alpha1.ReasonNamespaceConflict {
 			continue
 		}
 		r.triggerReconcile(ctx, other)
@@ -838,22 +711,6 @@ func (r *Reconciler) pruneStaleClusterStatus(mesh *meshv1alpha1.MultiClusterMesh
 func (r *Reconciler) determineStatus(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, clusters []clusterv1.ManagedCluster) error {
 	allReady := len(clusters) > 0
 
-	for _, cluster := range clusters {
-		operatorWork := &workv1.ManifestWork{}
-		if err := r.Get(ctx, key.Of(OperatorManifestWorkName, cluster.Name), operatorWork); err != nil {
-			return fmt.Errorf("failed to get operator ManifestWork for cluster %s: %w", cluster.Name, err)
-		}
-
-		if installedCSV := getManifestWorkFeedback(operatorWork); installedCSV != nil {
-			mesh.SetClusterCondition(cluster.Name, meshv1alpha1.ConditionOperatorInstalled, metav1.ConditionTrue,
-				meshv1alpha1.ReasonOperatorInstalled, "Operator installed: %s", *installedCSV)
-		} else {
-			allReady = false
-			mesh.SetClusterCondition(cluster.Name, meshv1alpha1.ConditionOperatorInstalled, metav1.ConditionFalse,
-				meshv1alpha1.ReasonInstallationPending, "Operator installation is pending")
-		}
-	}
-
 	if allReady {
 		mesh.SetReadyCondition(metav1.ConditionTrue,
 			meshv1alpha1.ReasonAllClustersReady, "All clusters are ready")
@@ -865,127 +722,12 @@ func (r *Reconciler) determineStatus(ctx context.Context, mesh *meshv1alpha1.Mul
 	return nil
 }
 
-func getManifestWorkFeedback(work *workv1.ManifestWork) *string {
-	for _, manifest := range work.Status.ResourceStatus.Manifests {
-		for _, value := range manifest.StatusFeedbacks.Values {
-			if value.Name == FeedbackInstalledCSV {
-				return value.Value.String
-			}
-		}
-	}
-	return nil
-}
-
 func clusterNameSet(names []string) map[string]bool {
 	set := make(map[string]bool, len(names))
 	for _, name := range names {
 		set[name] = true
 	}
 	return set
-}
-
-func (r *Reconciler) buildOperatorManifestWork(mesh *meshv1alpha1.MultiClusterMesh, cluster *clusterv1.ManagedCluster) *workv1.ManifestWork {
-	config := mesh.Spec.Operator
-	manifests := []workv1.Manifest{
-		{
-			RawExtension: runtime.RawExtension{Object: &rbacv1.ClusterRole{
-				TypeMeta: metav1.TypeMeta{
-					APIVersion: "rbac.authorization.k8s.io/v1",
-					Kind:       "ClusterRole",
-				},
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "klusterlet-work-olm-ossm",
-					Labels: map[string]string{
-						"open-cluster-management.io/aggregate-to-work": "true",
-					},
-				},
-				Rules: []rbacv1.PolicyRule{{
-					APIGroups: []string{"operators.coreos.com"},
-					Resources: []string{"operatorgroups", "subscriptions", "catalogsources", "clusterserviceversions"},
-					Verbs:     []string{"create", "get", "list", "update", "patch", "delete"},
-				}},
-			}},
-		},
-		{
-			RawExtension: runtime.RawExtension{Object: &corev1.Namespace{
-				TypeMeta: metav1.TypeMeta{
-					APIVersion: "v1",
-					Kind:       "Namespace",
-				},
-				ObjectMeta: metav1.ObjectMeta{
-					Name: config.Namespace,
-				},
-			}},
-		},
-		{
-			RawExtension: runtime.RawExtension{Object: &operatorsv1.OperatorGroup{
-				TypeMeta: metav1.TypeMeta{
-					APIVersion: "operators.coreos.com/v1",
-					Kind:       "OperatorGroup",
-				},
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "operator-group",
-					Namespace: config.Namespace,
-				},
-				Spec: operatorsv1.OperatorGroupSpec{
-					// Empty spec = "AllNamespaces" scope
-				},
-			}},
-		},
-		{
-			RawExtension: runtime.RawExtension{Object: &operatorsv1alpha1.Subscription{
-				TypeMeta: metav1.TypeMeta{
-					APIVersion: "operators.coreos.com/v1alpha1",
-					Kind:       "Subscription",
-				},
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      config.Name,
-					Namespace: config.Namespace,
-				},
-				Spec: &operatorsv1alpha1.SubscriptionSpec{
-					Channel:                config.Channel,
-					InstallPlanApproval:    config.InstallPlanApproval,
-					Package:                config.Name,
-					CatalogSource:          config.Source,
-					CatalogSourceNamespace: config.SourceNamespace,
-					StartingCSV:            config.StartingCSV,
-				},
-			}},
-		},
-	}
-
-	return &workv1.ManifestWork{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      OperatorManifestWorkName,
-			Namespace: cluster.Name,
-			Labels: map[string]string{
-				ManagedByLabel: ManagedByValue,
-			},
-		},
-		Spec: workv1.ManifestWorkSpec{
-			Workload: workv1.ManifestsTemplate{
-				Manifests: manifests,
-			},
-			// Report the Subscription's installedCSV field back to the hub via ManifestWork feedback.
-			// OLM sets this field only after the operator's CSV reaches the Succeeded phase,
-			// so a non-empty value confirms the operator is installed.
-			ManifestConfigs: []workv1.ManifestConfigOption{{
-				ResourceIdentifier: workv1.ResourceIdentifier{
-					Group:     "operators.coreos.com",
-					Resource:  "subscriptions",
-					Name:      config.Name,
-					Namespace: config.Namespace,
-				},
-				FeedbackRules: []workv1.FeedbackRule{{
-					Type: workv1.JSONPathsType,
-					JsonPaths: []workv1.JsonPath{{
-						Name: FeedbackInstalledCSV,
-						Path: ".status.installedCSV",
-					}},
-				}},
-			}},
-		},
-	}
 }
 
 // mapSecretToMesh maps a Secret to the MultiClusterMesh that owns it

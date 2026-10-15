@@ -236,60 +236,44 @@ func TestDetermineStatusLastTransitionTime(t *testing.T) {
 	tests := []struct {
 		name              string
 		initialStatus     metav1.ConditionStatus
-		initialReason     string
-		withCSV           bool
+		withClusters      bool
 		expectStatus      metav1.ConditionStatus
 		expectTimeChanged bool
 	}{
-		{"preserves when unchanged (True->True)", metav1.ConditionTrue, meshv1alpha1.ReasonOperatorInstalled, true, metav1.ConditionTrue, false},
-		{"updates on install (False->True)", metav1.ConditionFalse, meshv1alpha1.ReasonInstallationPending, true, metav1.ConditionTrue, true},
-		{"preserves when still pending (False->False)", metav1.ConditionFalse, meshv1alpha1.ReasonInstallationPending, false, metav1.ConditionFalse, false},
-		{"updates on CSV removal (True->False)", metav1.ConditionTrue, meshv1alpha1.ReasonOperatorInstalled, false, metav1.ConditionFalse, true},
+		{"preserves when unchanged (True->True)", metav1.ConditionTrue, true, metav1.ConditionTrue, false},
+		{"updates when a cluster joins", metav1.ConditionFalse, true, metav1.ConditionTrue, true},
+		{"preserves when empty", metav1.ConditionFalse, false, metav1.ConditionFalse, false},
+		{"updates when the last cluster leaves", metav1.ConditionTrue, false, metav1.ConditionFalse, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			scheme := newTestScheme()
-			clusterName := "cluster-a"
 			hourAgo := metav1.NewTime(time.Now().Add(-time.Hour))
 
 			mesh := &meshv1alpha1.MultiClusterMesh{
 				ObjectMeta: metav1.ObjectMeta{Name: "test-mesh", Namespace: "default", Generation: 1},
 				Status: meshv1alpha1.MultiClusterMeshStatus{
-					ClusterStatus: []meshv1alpha1.ClusterMeshStatus{{
-						ClusterName: clusterName,
-						Conditions: []metav1.Condition{{
-							Type:               meshv1alpha1.ConditionOperatorInstalled,
-							Status:             tt.initialStatus,
-							Reason:             tt.initialReason,
-							LastTransitionTime: hourAgo,
-						}},
+					Conditions: []metav1.Condition{{
+						Type:               meshv1alpha1.ConditionReady,
+						Status:             tt.initialStatus,
+						Reason:             meshv1alpha1.ReasonClustersNotReady,
+						LastTransitionTime: hourAgo,
 					}},
 				},
 			}
 
-			var mw *workv1.ManifestWork
-			if tt.withCSV {
-				mw = operatorManifestWorkWithInstalledCSV(clusterName)
-			} else {
-				mw = operatorManifestWork(clusterName)
+			var clusters []clusterv1.ManagedCluster
+			if tt.withClusters {
+				clusters = []clusterv1.ManagedCluster{{ObjectMeta: metav1.ObjectMeta{Name: "cluster-a"}}}
 			}
 
-			c := fake.NewClientBuilder().
-				WithScheme(scheme).
-				WithObjects(mw).
-				WithStatusSubresource(&workv1.ManifestWork{}).
-				Build()
-
-			r := &Reconciler{Client: c, Scheme: scheme}
-			clusters := []clusterv1.ManagedCluster{{ObjectMeta: metav1.ObjectMeta{Name: clusterName}}}
-
+			r := &Reconciler{}
 			if err := r.determineStatus(context.Background(), mesh, clusters); err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
 
-			cond := meta.FindStatusCondition(mesh.Status.ClusterStatus[0].Conditions, meshv1alpha1.ConditionOperatorInstalled)
+			cond := meta.FindStatusCondition(mesh.Status.Conditions, meshv1alpha1.ConditionReady)
 			if cond == nil {
-				t.Fatal("OperatorInstalled condition not found")
+				t.Fatal("Ready condition not found")
 				return
 			}
 			if cond.Status != tt.expectStatus {
@@ -304,7 +288,6 @@ func TestDetermineStatusLastTransitionTime(t *testing.T) {
 }
 
 func TestDetermineStatusPrunesStaleCluster(t *testing.T) {
-	scheme := newTestScheme()
 	activeCluster := "cluster-a"
 
 	mesh := &meshv1alpha1.MultiClusterMesh{
@@ -317,13 +300,7 @@ func TestDetermineStatusPrunesStaleCluster(t *testing.T) {
 		},
 	}
 
-	client := fake.NewClientBuilder().
-		WithScheme(scheme).
-		WithObjects(operatorManifestWorkWithInstalledCSV(activeCluster)).
-		WithStatusSubresource(&workv1.ManifestWork{}).
-		Build()
-
-	r := &Reconciler{Client: client, Scheme: scheme}
+	r := &Reconciler{}
 	clusters := []clusterv1.ManagedCluster{{ObjectMeta: metav1.ObjectMeta{Name: activeCluster}}}
 
 	r.pruneStaleClusterStatus(mesh, []string{activeCluster})
@@ -568,7 +545,7 @@ func TestFindMeshesForCluster(t *testing.T) {
 			name: "skips ManifestWorks without mesh labels",
 			works: []workv1.ManifestWork{{
 				ObjectMeta: metav1.ObjectMeta{
-					Name: OperatorManifestWorkName, Namespace: "cluster-a",
+					Name: "unlabeled-work", Namespace: "cluster-a",
 					Labels: map[string]string{ManagedByLabel: ManagedByValue},
 				},
 			}},
@@ -648,23 +625,23 @@ func TestFindMeshesForManifestWork(t *testing.T) {
 			expected: []types.NamespacedName{{Name: "my-mesh", Namespace: "my-ns"}},
 		},
 		{
-			name: "operator ManifestWork falls back to cluster-based lookup",
+			name: "ManifestWork without mesh labels ignores peers",
 			work: &workv1.ManifestWork{
 				ObjectMeta: metav1.ObjectMeta{
-					Name: OperatorManifestWorkName, Namespace: "cluster-a",
+					Name: "unlabeled-work", Namespace: "cluster-a",
 					Labels: map[string]string{ManagedByLabel: ManagedByValue},
 				},
 			},
 			peerWorks: []workv1.ManifestWork{
 				meshOwnedWork("cluster-a", "peer-work", "mesh-x", "ns-x"),
 			},
-			expected: []types.NamespacedName{{Name: "mesh-x", Namespace: "ns-x"}},
+			expected: nil,
 		},
 		{
-			name: "operator ManifestWork with no peers returns empty",
+			name: "ManifestWork without mesh labels returns empty",
 			work: &workv1.ManifestWork{
 				ObjectMeta: metav1.ObjectMeta{
-					Name: OperatorManifestWorkName, Namespace: "cluster-a",
+					Name: "unlabeled-work", Namespace: "cluster-a",
 					Labels: map[string]string{ManagedByLabel: ManagedByValue},
 				},
 			},
@@ -778,10 +755,10 @@ func TestFindOlderPeerMeshes(t *testing.T) {
 			expectPeers: nil,
 		},
 		{
-			name: "only operator ManifestWork (no mesh labels)",
+			name: "ManifestWork without mesh labels",
 			works: []workv1.ManifestWork{{
 				ObjectMeta: metav1.ObjectMeta{
-					Name: OperatorManifestWorkName, Namespace: "cluster-a",
+					Name: "unlabeled-work", Namespace: "cluster-a",
 					Labels: map[string]string{ManagedByLabel: ManagedByValue},
 				},
 			}},
@@ -1020,34 +997,6 @@ func TestPruneStaleClusterStatus(t *testing.T) {
 	}
 }
 
-func TestBuildOperatorManifestWorkLabels(t *testing.T) {
-	mesh := &meshv1alpha1.MultiClusterMesh{
-		ObjectMeta: metav1.ObjectMeta{Name: "my-mesh", Namespace: "my-ns"},
-	}
-	cluster := &clusterv1.ManagedCluster{
-		ObjectMeta: metav1.ObjectMeta{Name: "cluster-a"},
-	}
-
-	r := &Reconciler{}
-	work := r.buildOperatorManifestWork(mesh, cluster)
-
-	if work.Labels[ManagedByLabel] != ManagedByValue {
-		t.Errorf("expected %s=%s, got %s", ManagedByLabel, ManagedByValue, work.Labels[ManagedByLabel])
-	}
-	if _, ok := work.Labels[MeshNameLabel]; ok {
-		t.Error("operator ManifestWork should not have MeshNameLabel (shared infrastructure)")
-	}
-	if _, ok := work.Labels[MeshNamespaceLabel]; ok {
-		t.Error("operator ManifestWork should not have MeshNamespaceLabel (shared infrastructure)")
-	}
-	if work.Namespace != "cluster-a" {
-		t.Errorf("expected namespace cluster-a, got %s", work.Namespace)
-	}
-	if work.Name != OperatorManifestWorkName {
-		t.Errorf("expected name %s, got %s", OperatorManifestWorkName, work.Name)
-	}
-}
-
 func meshWith(namespace, name string, ts metav1.Time) *meshv1alpha1.MultiClusterMesh {
 	return &meshv1alpha1.MultiClusterMesh{
 		ObjectMeta: metav1.ObjectMeta{
@@ -1065,17 +1014,6 @@ func newTestScheme() *runtime.Scheme {
 	_ = meshv1alpha1.Install(scheme)
 	_ = workv1.Install(scheme)
 	return scheme
-}
-
-const testInstalledCSV = "istio-operator.v1.0.0"
-
-func operatorManifestWork(clusterName string) *workv1.ManifestWork {
-	return &workv1.ManifestWork{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      OperatorManifestWorkName,
-			Namespace: clusterName,
-		},
-	}
 }
 
 func meshOwnedWork(namespace, name, meshName, meshNamespace string) workv1.ManifestWork {
@@ -1104,27 +1042,5 @@ func placementDecision(placementName, namespace string, clusterNames ...string) 
 			Labels:    map[string]string{PlacementLabel: placementName},
 		},
 		Status: clusterv1beta1.PlacementDecisionStatus{Decisions: decisions},
-	}
-}
-
-func operatorManifestWorkWithInstalledCSV(clusterName string) *workv1.ManifestWork {
-	csv := testInstalledCSV
-	return &workv1.ManifestWork{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      OperatorManifestWorkName,
-			Namespace: clusterName,
-		},
-		Status: workv1.ManifestWorkStatus{
-			ResourceStatus: workv1.ManifestResourceStatus{
-				Manifests: []workv1.ManifestCondition{{
-					StatusFeedbacks: workv1.StatusFeedbackResult{
-						Values: []workv1.FeedbackValue{{
-							Name:  FeedbackInstalledCSV,
-							Value: workv1.FieldValue{String: &csv},
-						}},
-					},
-				}},
-			},
-		},
 	}
 }

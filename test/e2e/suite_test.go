@@ -17,8 +17,6 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	operatorsv1 "github.com/operator-framework/api/pkg/operators/v1"
-	operatorsv1alpha1 "github.com/operator-framework/api/pkg/operators/v1alpha1"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/kubernetes/scheme"
@@ -44,11 +42,6 @@ var (
 
 	hubClient    *util.E2EClient
 	spokeClients map[string]*util.E2EClient
-
-	testOperatorName      string
-	testOperatorNamespace string
-	testCatalogSource     string
-	testCatalogNamespace  string
 )
 
 func TestE2E(t *testing.T) {
@@ -66,8 +59,6 @@ var _ = BeforeSuite(func(ctx context.Context) {
 		clusterv1beta1.Install,
 		clusterv1beta2.Install,
 		workv1.Install,
-		operatorsv1.AddToScheme,
-		operatorsv1alpha1.AddToScheme,
 		msav1beta1.AddToScheme,
 		addonv1beta1.Install,
 	)
@@ -84,9 +75,6 @@ var _ = BeforeSuite(func(ctx context.Context) {
 	} {
 		spokeClients[name] = util.NewE2EClient(clientFrom(kc), kc)
 	}
-
-	Step("Detecting platform (kind vs OCP)")
-	detectPlatform()
 
 	Step("Verifying cluster connectivity")
 	verifyConnection(ctx, hubClient, "hub")
@@ -123,26 +111,6 @@ func Step(format string, args ...any) {
 
 func Success(format string, args ...any) {
 	GinkgoWriter.Println("* " + fmt.Sprintf(format, args...))
-}
-
-func detectPlatform() {
-	platform := os.Getenv("PLATFORM")
-	switch platform {
-	case "openshift":
-		testOperatorName = "servicemeshoperator3"
-		testOperatorNamespace = "multicluster-mesh-operator"
-		testCatalogSource = "redhat-operators"
-		testCatalogNamespace = "openshift-marketplace"
-	case "kind":
-		testOperatorName = "sailoperator"
-		testOperatorNamespace = "sail-operator"
-		testCatalogSource = "operatorhubio-catalog"
-		testCatalogNamespace = "olm"
-	default:
-		Fail(fmt.Sprintf("PLATFORM env must be set to 'openshift' or 'kind', got %q", platform))
-	}
-	GinkgoWriter.Printf("Platform %s: operator=%s/%s, catalog=%s/%s\n",
-		platform, testOperatorNamespace, testOperatorName, testCatalogNamespace, testCatalogSource)
 }
 
 func collectArtifacts(ctx context.Context, testName string, hubNamespaces []string, spokeNamespaces []string) {
