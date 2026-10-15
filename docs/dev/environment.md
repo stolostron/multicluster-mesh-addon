@@ -29,6 +29,7 @@ make dev-clean
 To practice the railroaded Sail version of the customer demo, provision one hub and three managed Kind clusters.
 The demo environment intentionally does not create a ManagedClusterSet.
 It prepares the add-on image and MetalLB, but leaves the controller and Gateway API uninstalled so the demo can show those steps.
+`make demo-sail` installs the controller from the local chart, using the image loaded into the hub.
 The demo creates the set and adds the first two clusters interactively.
 The third cluster is registered and available, then added to the set during the scale-out portion of the demo.
 The script installs the governance policy addons and mesh operator later in the interactive flow.

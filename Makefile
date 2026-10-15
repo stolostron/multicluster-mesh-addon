@@ -365,6 +365,8 @@ demo-sail: $(CLUSTERADM) $(HELM_BIN) $(ISTIOCTL_BIN)
 demo-sail: export PLATFORM=kind
 demo-sail: export SPOKE_CLUSTERS=cluster1 cluster2 cluster3
 demo-sail: export DEMO_KUBECONFIG=.kube/hub.config:.kube/cluster1.config:.kube/cluster2.config:.kube/cluster3.config
+demo-sail: export ADDON_IMAGE_REPOSITORY=$(HUB)/$(IMAGE_BASE)
+demo-sail: export ADDON_IMAGE_TAG=$(TAG)
 demo-sail: ## Run the interactive local Sail demo (requires demo-dev-env to be up)
 	@$(DEMO_SCRIPT)
 

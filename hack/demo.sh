@@ -232,7 +232,8 @@ read_control_plane_namespace() {
 }
 
 run_istioctl_remote_clusters() {
-    demo_run "${ISTIOCTL}" remote-clusters --kubeconfig "${KUBECONFIGS[$1]}"
+    [[ -n "${CP_NAMESPACE}" ]] || fail "CP_NAMESPACE is not set; create the MultiClusterMesh first"
+    demo_run "${ISTIOCTL}" remote-clusters --kubeconfig "${KUBECONFIGS[$1]}" -i "${CP_NAMESPACE}"
 }
 
 deploy_bookinfo_version() {
@@ -394,16 +395,29 @@ fi
 demo_wait
 
 demo_title "Step 2: Installing the mesh add-on"
-demo_comment "The add-on is not in an ACM or OLM catalog yet. Install its controller directly from the project's Helm repository."
-demo_comment "Add the add-on's Helm repository."
-run_helm repo add --force-update multicluster-mesh-addon \
-    https://stolostron.github.io/multicluster-mesh-addon
-run_helm repo update
-demo_comment "Install the add-on controller from the Helm chart."
-addon_args=(upgrade --install multicluster-mesh-addon multicluster-mesh-addon/multicluster-mesh-addon \
-    --namespace multicluster-mesh-system --create-namespace --wait --timeout 5m)
 if [[ "${PLATFORM}" == "kind" ]]; then
-    addon_args+=(--set platform=kind --set image.pullPolicy=IfNotPresent)
+    demo_comment "Install the add-on from this branch's chart. demo-dev-env already loaded that controller image into the hub."
+    demo_comment "Apply the MultiClusterMesh CRD first. Helm does not update CRDs for an existing release."
+    run_kubectl hub apply -f chart/crds/mesh.open-cluster-management.io_multiclustermeshes.yaml
+    addon_args=(upgrade --install multicluster-mesh-addon chart \
+        --namespace multicluster-mesh-system --create-namespace --wait --timeout 5m \
+        --reset-values --skip-crds \
+        --set platform=kind --set image.pullPolicy=IfNotPresent)
+    if [[ -n "${ADDON_IMAGE_REPOSITORY:-}" ]]; then
+        addon_args+=(--set "image.repository=${ADDON_IMAGE_REPOSITORY}")
+    fi
+    if [[ -n "${ADDON_IMAGE_TAG:-}" ]]; then
+        addon_args+=(--set "image.tag=${ADDON_IMAGE_TAG}")
+    fi
+else
+    demo_comment "The add-on is not in an ACM or OLM catalog yet. Install its controller directly from the project's Helm repository."
+    demo_comment "Add the add-on's Helm repository."
+    run_helm repo add --force-update multicluster-mesh-addon \
+        https://stolostron.github.io/multicluster-mesh-addon
+    run_helm repo update
+    demo_comment "Install the add-on controller from the Helm chart."
+    addon_args=(upgrade --install multicluster-mesh-addon multicluster-mesh-addon/multicluster-mesh-addon \
+        --namespace multicluster-mesh-system --create-namespace --wait --timeout 5m)
 fi
 run_helm "${addon_args[@]}"
 demo_comment "Wait for the controller that watches MultiClusterMesh resources."

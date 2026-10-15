@@ -322,7 +322,7 @@ kubectl --context "$HUB_CONTEXT" get \
 The important result is status.conditions[type=Ready].status=True.
 When trust is configured, Ready means the cacerts ManifestWork is applied and available on every cluster the controller resolved from the Placement.
 It does not mean that an Istio control plane or Bookinfo is running yet.
-It also does not verify endpoint-discovery rollout. Inspect the remote-secret distribution and check `istioctl remote-clusters` after Istio is running; see [readiness limits](api-reference.md#readiness-limits).
+It also does not verify endpoint-discovery rollout. Inspect the remote-secret distribution and check `istioctl remote-clusters -i "$CP_NAMESPACE"` after Istio is running; see [readiness limits](api-reference.md#readiness-limits).
 
 Read the control plane namespace from the mesh. The Istio samples need this value as `CP_NAMESPACE`:
 
