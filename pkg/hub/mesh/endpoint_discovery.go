@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	_ "embed"
+	"encoding/json"
 	"fmt"
 	"maps"
 
@@ -12,6 +13,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/tools/clientcmd"
@@ -58,6 +60,11 @@ func IstioReaderName(mesh *meshv1alpha1.MultiClusterMesh) string {
 	return fmt.Sprintf("istio-reader-%s.%s", mesh.Namespace, mesh.Name)
 }
 
+// RemoteSecretName returns the name of the Istio remote discovery secret for a cluster.
+func RemoteSecretName(clusterName string) string {
+	return "istio-remote-secret-" + clusterName
+}
+
 // IstioReaderManifestWorkName is the addon-prefixed name of the ManifestWork that delivers the istio-reader RBAC to a spoke.
 func IstioReaderManifestWorkName(mesh *meshv1alpha1.MultiClusterMesh) string {
 	return "multicluster-mesh-" + IstioReaderName(mesh)
@@ -94,9 +101,9 @@ func (r *Reconciler) ensureManagedServiceAccount(ctx context.Context, mesh *mesh
 	return nil
 }
 
-// cleanupManagedServiceAccounts deletes ManagedServiceAccount when the cluster(s) are removed from the given mesh's ClusterSet.
-func (r *Reconciler) cleanupManagedServiceAccounts(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, clusters []clusterv1.ManagedCluster) error {
-	clusterNames := clusterNameSet(clusters)
+// cleanupManagedServiceAccounts deletes ManagedServiceAccounts for clusters no longer in the PlacementDecision.
+func (r *Reconciler) cleanupManagedServiceAccounts(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, desiredClusters []string) error {
+	clusterNames := clusterNameSet(desiredClusters)
 
 	msaList := &msav1beta1.ManagedServiceAccountList{}
 	if err := r.List(ctx, msaList,
@@ -110,7 +117,7 @@ func (r *Reconciler) cleanupManagedServiceAccounts(ctx context.Context, mesh *me
 			continue
 		}
 
-		klog.Infof("Deleting ManagedServiceAccount %s/%s (cluster %s no longer in ClusterSet %s)", msa.Namespace, msa.Name, clusterName, mesh.Spec.ClusterSet)
+		klog.Infof("Deleting ManagedServiceAccount %s/%s (cluster %s no longer selected by Placement)", msa.Namespace, msa.Name, clusterName)
 		if err := client.IgnoreNotFound(r.Delete(ctx, &msa)); err != nil {
 			return fmt.Errorf("failed to delete ManagedServiceAccount %s/%s: %w", msa.Namespace, msa.Name, err)
 		}
@@ -197,7 +204,7 @@ func (r *Reconciler) ensureRemoteSecretDistribution(ctx context.Context, mesh *m
 		mwrset.Labels[ManagedByLabel] = ManagedByValue
 		mwrset.Labels[MeshNameLabel] = mesh.Name
 		mwrset.Labels[MeshNamespaceLabel] = mesh.Namespace
-		mwrset.Spec.PlacementRefs = []workv1alpha1.LocalPlacementReference{{Name: mesh.Name}}
+		mwrset.Spec.PlacementRefs = []workv1alpha1.LocalPlacementReference{{Name: mesh.Spec.PlacementRef.Name}}
 		mwrset.Spec.ManifestWorkTemplate = workv1.ManifestWorkSpec{Workload: workv1.ManifestsTemplate{Manifests: manifests}}
 		return controllerutil.SetControllerReference(mesh, mwrset, r.Scheme)
 	})
@@ -254,7 +261,7 @@ func buildIstioRemoteSecret(tokenSecret *corev1.Secret, clusterName, server, nam
 	return &corev1.Secret{
 		TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "Secret"},
 		ObjectMeta: metav1.ObjectMeta{
-			Name:        "istio-remote-secret-" + clusterName,
+			Name:        RemoteSecretName(clusterName),
 			Namespace:   namespace,
 			Annotations: map[string]string{"networking.istio.io/cluster": clusterName},
 			Labels:      map[string]string{"istio/multiCluster": "true"},
@@ -279,4 +286,39 @@ func buildIstioReaderManifestWork(mesh *meshv1alpha1.MultiClusterMesh, cluster *
 	}}
 
 	return buildMeshOwnedManifestWork(mesh, cluster.Name, IstioReaderManifestWorkName(mesh), cr, crb)
+}
+
+func (r *Reconciler) updateDiscoveryStatusCondition(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, cluster *clusterv1.ManagedCluster, mwrset *workv1alpha1.ManifestWorkReplicaSet) (ready bool, err error) {
+	if len(cluster.Spec.ManagedClusterClientConfigs) == 0 {
+		mesh.SetClusterCondition(cluster.Name, meshv1alpha1.ConditionDiscoveryConfigured, metav1.ConditionFalse,
+			meshv1alpha1.ReasonNoAPIEndpoint, "Cluster has no API endpoint configured")
+		return false, nil
+	}
+
+	rbacWork := &workv1.ManifestWork{}
+	if err := r.Get(ctx, key.Of(IstioReaderManifestWorkName(mesh), cluster.Name), rbacWork); client.IgnoreNotFound(err) != nil {
+		return false, fmt.Errorf("failed to get istio-reader ManifestWork for cluster %s: %w", cluster.Name, err)
+	}
+
+	if !meta.IsStatusConditionTrue(rbacWork.Status.Conditions, workv1.WorkApplied) ||
+		!mwrsContainsClusterSecret(mwrset, cluster.Name) ||
+		!meta.IsStatusConditionTrue(mwrset.Status.Conditions, workv1alpha1.ManifestWorkReplicaSetConditionManifestworkApplied) {
+		mesh.SetClusterCondition(cluster.Name, meshv1alpha1.ConditionDiscoveryConfigured, metav1.ConditionFalse,
+			meshv1alpha1.ReasonConfigurationPending, "Discovery configuration pending")
+		return false, nil
+	}
+
+	mesh.SetClusterCondition(cluster.Name, meshv1alpha1.ConditionDiscoveryConfigured, metav1.ConditionTrue,
+		meshv1alpha1.ReasonConfigured, "Discovery configured")
+	return true, nil
+}
+
+func mwrsContainsClusterSecret(mwrset *workv1alpha1.ManifestWorkReplicaSet, clusterName string) bool {
+	for _, manifest := range mwrset.Spec.ManifestWorkTemplate.Workload.Manifests {
+		secret := &corev1.Secret{}
+		if err := json.Unmarshal(manifest.Raw, secret); err == nil && secret.Name == RemoteSecretName(clusterName) {
+			return true
+		}
+	}
+	return false
 }

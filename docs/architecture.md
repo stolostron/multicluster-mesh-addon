@@ -32,17 +32,25 @@ flowchart TD
 
 For a detailed resource-level diagram, see the [design doc](dev/design.md#architecture).
 
+## Cluster Selection
+
+The addon uses OCM [Placement] for cluster selection.
+The user creates a `Placement` resource in the same namespace as the `MultiClusterMesh`, and the mesh references it via `spec.placementRef.name`.
+The addon reads the resulting `PlacementDecision` resources to determine which clusters to target.
+
+This gives the user full control over cluster selection using Placement's rich predicate and scheduling capabilities (label selectors, cluster sets, tolerations, priority-based scheduling, etc.).
+
 ## Supported Topologies
 
 The addon supports the [Multi-Primary Multi-Network] topology, in which each cluster runs its own control plane.
 
 ## Collision Handling
 
-When multiple meshes target the same ClusterSet, the addon validates their configurations during reconciliation to avoid possible destructive collisions:
+When multiple meshes target overlapping clusters, the addon validates their configurations during reconciliation to avoid possible destructive collisions:
 
-- If two meshes request different operator configs, the oldest mesh (by creation timestamp) takes precedence.
+- If two meshes target the same cluster but request different operator configs, the oldest mesh (by creation timestamp) takes precedence.
   The newer mesh gets an `OperatorConfigConflict` condition.
-- If two meshes use the same control plane namespace, the newer mesh gets a `NamespaceConflict` condition.
+- If two meshes use the same control plane namespace on the same cluster, the newer mesh gets a `NamespaceConflict` condition.
 - Reserved operator namespace prefixes (`openshift-`, `kube-`) and the `default` namespace are rejected by CRD validation.
 - The control plane namespace must differ from the operator namespace.
   The mesh gets a `NamespaceConflict` condition if they match.
@@ -53,4 +61,5 @@ When multiple meshes target the same ClusterSet, the addon validates their confi
 [multi-cluster]: https://istio.io/latest/docs/setup/install/multicluster/
 [Multi-Primary Multi-Network]: https://istio.io/latest/docs/setup/install/multicluster/multi-primary_multi-network/
 [OCM]: https://open-cluster-management.io/
+[Placement]: https://open-cluster-management.io/docs/concepts/cluster-inventory/placement/
 [Plug-in CA]: https://istio.io/latest/docs/tasks/security/cert-management/plugin-ca-cert/
