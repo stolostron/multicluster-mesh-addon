@@ -10,11 +10,11 @@ Mesh status and per-cluster conditions (see [API reference](api-reference.md#sta
 kubectl get multiclustermesh -n <mesh-namespace> -o yaml
 ```
 
-OCM cluster and ClusterSet status:
+OCM cluster status and Placement decisions:
 
 ```bash
 clusteradm get clusters
-clusteradm get clustersets
+kubectl get placementdecision -n <mesh-namespace> -l cluster.open-cluster-management.io/placement=<placement-name>
 ```
 
 ## Inspecting Addon Resources
@@ -60,16 +60,17 @@ kubectl logs -n multicluster-mesh-system deploy/multicluster-mesh-controller -f
 
 ### Nothing happens after creating a mesh
 
-The addon only works with ManagedClusterSets using the `ExclusiveClusterSetLabel` selector (the default type).
-Clusters are assigned to a set by the `cluster.open-cluster-management.io/clusterset` label.
-
-Check that the ClusterSet exists and has clusters assigned:
+The addon reads cluster membership from PlacementDecision resources.
+Check that the referenced Placement exists, has selected clusters, and that PlacementDecisions have been created:
 
 ```bash
-clusteradm get clustersets
+kubectl get placement -n <mesh-namespace> <placement-name>
+kubectl get placementdecision -n <mesh-namespace> -l cluster.open-cluster-management.io/placement=<placement-name>
 ```
 
-If no clusters have the label, the addon has nothing to reconcile.
+If the Placement doesn't exist, the mesh reports `PlacementNotFound`.
+If no clusters are selected, the mesh reports `NoClustersSelected`.
+Verify the Placement's predicates match your clusters and that clusters are registered with the hub.
 
 ### Operator not installing on a spoke cluster
 
@@ -110,9 +111,28 @@ Common causes:
 - The `Issuer` (or `ClusterIssuer`) referenced in `spec.security.trust.certManager.issuerRef` doesn't exist or isn't ready.
 - cert-manager failed to issue the certificate (check cert-manager controller logs for details).
 
+### Mesh shows PlacementNotFound
+
+The Placement referenced by `spec.placementRef.name` does not exist in the mesh's namespace.
+Create the Placement or fix the reference.
+
+### Mesh shows NoClustersSelected
+
+The Placement exists but has not selected any clusters.
+Common causes:
+
+1. **Missing ManagedClusterSetBinding** - Placements only select from ClusterSets bound to the namespace.
+   Check that a `ManagedClusterSetBinding` exists in the mesh namespace:
+   ```bash
+   kubectl get managedclustersetbinding -n <mesh-namespace>
+   ```
+2. **Clusters not in a ClusterSet** - each cluster needs the `cluster.open-cluster-management.io/clusterset` label
+   to be a member of the bound ClusterSet.
+3. **Predicate mismatch** - the Placement's label selector doesn't match any clusters.
+
 ### Mesh shows OperatorConfigConflict
 
-Two meshes targeting the same ClusterSet have different `spec.operator` settings.
+Two meshes targeting the same cluster have different `spec.operator` settings.
 The oldest mesh (by creation timestamp) takes precedence.
 
 Options:
@@ -122,7 +142,7 @@ Options:
 ### Mesh shows NamespaceConflict
 
 Either:
-- Two meshes targeting the same ClusterSet use the same `spec.controlPlane.namespace` (the oldest mesh takes precedence).
+- Two meshes targeting the same cluster use the same `spec.controlPlane.namespace` (the oldest mesh takes precedence).
 - The mesh's `spec.controlPlane.namespace` equals its `spec.operator.namespace`.
 
 Use a different control plane or operator namespace to resolve.

@@ -3,7 +3,6 @@ package v1alpha1
 import (
 	"fmt"
 
-	operatorsv1alpha1 "github.com/operator-framework/api/pkg/operators/v1alpha1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -15,7 +14,7 @@ import (
 // +kubebuilder:validation:XValidation:rule="size(self.metadata.name) <= 63",message="metadata.name must not exceed 63 characters"
 // +kubebuilder:printcolumn:name="Ready",type="string",JSONPath=`.status.conditions[?(@.type=="Ready")].status`
 // +kubebuilder:printcolumn:name="Reason",type="string",JSONPath=`.status.conditions[?(@.type=="Ready")].reason`
-// +kubebuilder:printcolumn:name="ClusterSet",type="string",JSONPath=`.spec.clusterSet`
+// +kubebuilder:printcolumn:name="Placement",type="string",JSONPath=`.spec.placementRef.name`
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=`.metadata.creationTimestamp`
 // +kubebuilder:printcolumn:name="Message",type="string",priority=1,JSONPath=`.status.conditions[?(@.type=="Ready")].message`
 
@@ -77,23 +76,27 @@ func (m *MultiClusterMesh) getOrCreateClusterStatus(clusterName string) *Cluster
 
 // MultiClusterMeshSpec defines the desired state of a multi-cluster mesh
 type MultiClusterMeshSpec struct {
-	// ClusterSet references the ACM ManagedClusterSet that defines cluster membership
+	// PlacementRef references a Placement resource in the same namespace
+	// that determines which clusters are members of this mesh.
+	// The controller reads PlacementDecisions to resolve cluster membership.
 	// +required
-	// +kubebuilder:validation:MinLength=1
-	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="spec.clusterSet is immutable"
-	ClusterSet string `json:"clusterSet"`
+	PlacementRef PlacementReference `json:"placementRef"`
 
 	// ControlPlane defines the target configuration for the mesh control plane
 	// +optional
 	ControlPlane ControlPlaneConfig `json:"controlPlane,omitempty"`
 
-	// Operator defines the service mesh operator installation configuration
-	// +optional
-	Operator OperatorConfig `json:"operator,omitempty"`
-
 	// Security defines the trust and discovery configuration
 	// +optional
 	Security SecurityConfig `json:"security,omitempty"`
+}
+
+// PlacementReference references a Placement in the same namespace as the mesh.
+type PlacementReference struct {
+	// Name of the Placement resource
+	// +required
+	// +kubebuilder:validation:MinLength=1
+	Name string `json:"name"`
 }
 
 // ControlPlaneConfig defines where the mesh control plane will be installed
@@ -105,51 +108,6 @@ type ControlPlaneConfig struct {
 	// +kubebuilder:validation:MaxLength=63
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="spec.controlPlane.namespace is immutable"
 	Namespace string `json:"namespace,omitempty"`
-}
-
-// OperatorConfig defines the service mesh operator installation settings.
-// Defaults target OSSM on OpenShift. Override fields to use a different operator variant (e.g. Sail).
-type OperatorConfig struct {
-	// Name is the OLM package name of the operator
-	// +optional
-	// +kubebuilder:default="servicemeshoperator3"
-	Name string `json:"name,omitempty"`
-
-	// Namespace is the namespace where the operator will be installed.
-	// This namespace may be deleted when the mesh is removed, so avoid
-	// using a namespace that contains other resources.
-	// +optional
-	// +kubebuilder:default="multicluster-mesh-operator"
-	// +kubebuilder:validation:XValidation:rule="!self.startsWith('openshift-')",message="namespace must not use the reserved 'openshift-' prefix"
-	// +kubebuilder:validation:XValidation:rule="!self.startsWith('kube-')",message="namespace must not use the reserved 'kube-' prefix"
-	// +kubebuilder:validation:XValidation:rule="self != 'default'",message="namespace must not be 'default'"
-	Namespace string `json:"namespace,omitempty"`
-
-	// Channel is the OLM subscription channel (e.g., "stable", "1.23")
-	// +optional
-	// +kubebuilder:default="stable"
-	Channel string `json:"channel,omitempty"`
-
-	// Source is the CatalogSource name
-	// +optional
-	// +kubebuilder:default="redhat-operators"
-	Source string `json:"source,omitempty"`
-
-	// SourceNamespace is the namespace of the CatalogSource
-	// +optional
-	// +kubebuilder:default="openshift-marketplace"
-	SourceNamespace string `json:"sourceNamespace,omitempty"`
-
-	// StartingCSV is the specific operator version to install
-	// Useful for testing or pinning to a specific version
-	// +optional
-	StartingCSV string `json:"startingCSV,omitempty"`
-
-	// InstallPlanApproval is the approval strategy (Automatic or Manual)
-	// +optional
-	// +kubebuilder:default="Automatic"
-	// +kubebuilder:validation:Enum=Automatic;Manual
-	InstallPlanApproval operatorsv1alpha1.Approval `json:"installPlanApproval,omitempty"`
 }
 
 // SecurityConfig defines trust and discovery configuration
@@ -201,32 +159,26 @@ type DiscoveryConfig struct {
 }
 
 const (
-	// ConditionReady indicates whether the mesh is fully operational
+	// ConditionReady indicates whether mesh resources have been reconciled
 	ConditionReady = "Ready"
 
-	// ConditionOperatorInstalled indicates whether the operator is installed on a cluster
-	ConditionOperatorInstalled = "OperatorInstalled"
-
-	// ReasonAllClustersReady indicates all clusters have confirmed operator installation
+	// ReasonAllClustersReady indicates mesh resources have been reconciled for all clusters
 	ReasonAllClustersReady = "AllClustersReady"
 
-	// ReasonClustersNotReady indicates that not all clusters have confirmed operator installation
+	// ReasonClustersNotReady indicates that the mesh has no selected clusters
 	ReasonClustersNotReady = "ClustersNotReady"
-
-	// ReasonInstallationPending indicates the operator installation has been requested
-	ReasonInstallationPending = "InstallationPending"
-
-	// ReasonOperatorInstalled indicates the operator CSV has been successfully installed
-	ReasonOperatorInstalled = "Installed"
 
 	// ReasonReconcileError indicates an error occurred during reconciliation
 	ReasonReconcileError = "ReconcileError"
 
-	// ReasonOperatorConfigConflict indicates a conflict with an older mesh's operator config
-	ReasonOperatorConfigConflict = "OperatorConfigConflict"
-
 	// ReasonNamespaceConflict indicates a conflict with an older mesh's control plane namespace
 	ReasonNamespaceConflict = "NamespaceConflict"
+
+	// ReasonPlacementNotFound indicates the referenced Placement does not exist
+	ReasonPlacementNotFound = "PlacementNotFound"
+
+	// ReasonNoClustersSelected indicates the Placement selected zero clusters
+	ReasonNoClustersSelected = "NoClustersSelected"
 )
 
 // MultiClusterMeshStatus defines the observed state of MultiClusterMesh

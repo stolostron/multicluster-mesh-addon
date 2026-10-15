@@ -329,7 +329,7 @@ $(ISTIOCTL_BIN): $(BIN_DIR)
 .PHONY: dev-env-base
 dev-env-base:
 	$(DEV_ENV_SCRIPT) check-host
-	$(MAKE) --no-print-directory -j$(PARALLEL) --output-sync=line install-olm install-cert-manager setup-test-issuer install-managed-serviceaccount
+	$(MAKE) --no-print-directory -j$(PARALLEL) --output-sync=line install-sail install-cert-manager setup-test-issuer install-managed-serviceaccount
 
 .PHONY: dev-env
 dev-env: dev-env-base ## Provision full dev environment (Kind + OCM + addon)
@@ -381,6 +381,14 @@ install-olm: $(addprefix install-olm-,$(SPOKE_CLUSTERS)) ## Install OLM on the c
 $(addprefix install-olm-,$(SPOKE_CLUSTERS)): install-olm-%: create-%
 	$(call log,Installing OLM: $*)
 	$(DEV_ENV_SCRIPT) install-olm $*
+
+.PHONY: install-sail
+install-sail: $(addprefix install-sail-,$(SPOKE_CLUSTERS)) ## Install Sail on the configured managed Kind clusters
+
+.PHONY: $(addprefix install-sail-,$(SPOKE_CLUSTERS))
+$(addprefix install-sail-,$(SPOKE_CLUSTERS)): install-sail-%: install-olm-%
+	$(call log,Installing Sail: $*)
+	$(DEV_ENV_SCRIPT) install-sail $*
 
 .PHONY: install-cert-manager
 install-cert-manager: create-hub ## Install cert-manager on the hub cluster

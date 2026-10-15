@@ -3,26 +3,14 @@ kind: MultiClusterMesh
 metadata:
   name: openshift-mesh
 spec:
-  # Reference to the ManagedClusterSet that defines which clusters participate in the mesh
-  # NOTE: Update this to match your ManagedClusterSet name
-  clusterSet: mesh-cluster-set
+  # Reference to the Placement that defines which clusters participate in the mesh
+  # NOTE: Update this to match your Placement name
+  placementRef:
+    name: mesh-placement
 
   # Control plane configuration
   controlPlane:
     namespace: istio-system
-
-  # OSSM operator configuration (these values match the kubebuilder defaults)
-  operator:
-    # Dedicated namespace for the operator (default: multicluster-mesh-operator)
-    namespace: multicluster-mesh-operator
-
-    # Use Red Hat's operator catalog
-    channel: stable
-    source: redhat-operators
-    sourceNamespace: openshift-marketplace
-
-    # Automatic approval for production environments
-    installPlanApproval: Automatic
 
   # Security configuration
   security:
