@@ -14,7 +14,6 @@ For production, use your own configurations (e.g., your organization's CA instea
 - An OCM hub cluster with managed clusters registered
 - [cert-manager] installed on the hub cluster (mints per-cluster intermediate CAs for mTLS trust)
 - [OLM] installed on managed clusters (installs the service mesh operator)
-- A [ManagedClusterSet] with `ExclusiveClusterSetLabel` selector (the default type, where each cluster belongs to exactly one set).
 - [`ManifestWorkReplicaSet`][mwrs] feature gate enabled on the hub's `ClusterManager`
 
 ## Step 1: Install the Addon
@@ -31,21 +30,14 @@ For more install options, see the [Helm chart docs](../chart/README.md).
 
 ## Step 2: Set Up Clusters
 
-If you don't already have a ManagedClusterSet, create one and assign your clusters using [`clusteradm`][clusteradm]:
+Ensure your clusters are registered as ManagedClusters with the hub:
 
 ```bash
-clusteradm create clusterset mesh-cluster-set
-clusteradm clusterset set mesh-cluster-set --clusters cluster1,cluster2,...
+clusteradm get clusters
 ```
 
 > **Note:** `cluster1` and `cluster2` are example ManagedCluster names.
 > Run `clusteradm get clusters` to list the actual names in your environment.
-
-Verify the clusters are in the set:
-
-```bash
-clusteradm get clustersets
-```
 
 ### Network identity (optional)
 
@@ -59,7 +51,7 @@ kubectl label managedcluster cluster2 topology.istio.io/network=network-b
 ```
 
 The addon applies this value as `topology.istio.io/network` on the control plane namespace on the managed cluster.
-Your Istio CR and east-west gateway must use the same value (see [Step 6](#step-6-configure-istio)).
+Your Istio CR and east-west gateway must use the same value (see [Step 7](#step-7-configure-istio)).
 
 ## Step 3: Create a Trust Chain
 
@@ -80,7 +72,83 @@ This creates a self-signed `Issuer`, a root CA `Certificate`, and a root CA-back
 
 > **Note:** For production, replace the self-signed root with your preferred root CA.
 
-## Step 4: Create a MultiClusterMesh
+## Step 4: Create a Placement
+
+A [Placement] selects which clusters join the mesh.
+Placements only consider clusters from [ManagedClusterSets][clusterset] that are bound to the Placement's namespace, so you need three things in order:
+
+1. **ClusterSet membership** - each cluster must belong to a ClusterSet (via the `cluster.open-cluster-management.io/clusterset` label).
+2. **ManagedClusterSetBinding** - the ClusterSet must be bound to the mesh namespace.
+3. **Placement** - selects from the bound ClusterSets using predicates.
+
+### Create and bind a ClusterSet
+
+Create a dedicated [ManagedClusterSet] for the mesh and assign your clusters to it:
+
+```bash
+kubectl apply -f - <<EOF
+apiVersion: cluster.open-cluster-management.io/v1beta2
+kind: ManagedClusterSet
+metadata:
+  name: mesh-clusters
+EOF
+
+kubectl label managedcluster cluster1 cluster.open-cluster-management.io/clusterset=mesh-clusters
+kubectl label managedcluster cluster2 cluster.open-cluster-management.io/clusterset=mesh-clusters
+```
+
+Then bind the ClusterSet to the mesh namespace (the binding name must match the ClusterSet name):
+
+```bash
+kubectl apply -n mesh-system -f - <<EOF
+apiVersion: cluster.open-cluster-management.io/v1beta2
+kind: ManagedClusterSetBinding
+metadata:
+  name: mesh-clusters
+spec:
+  clusterSet: mesh-clusters
+EOF
+```
+
+> **Tip:** For quick testing on ACM, you can bind the `global` ClusterSet instead - it automatically includes
+> all managed clusters and doesn't require labeling. For production, use a dedicated ClusterSet to limit
+> which clusters the Placement can select.
+
+### Create the Placement
+
+The Placement must be in the same namespace as the `MultiClusterMesh` resource.
+
+```bash
+kubectl apply -n mesh-system -f - <<EOF
+apiVersion: cluster.open-cluster-management.io/v1beta1
+kind: Placement
+metadata:
+  name: mesh-placement
+spec:
+  predicates:
+    - requiredClusterSelector:
+        labelSelector:
+          matchLabels:
+            mesh-role: member
+EOF
+```
+
+Label your clusters to match the Placement's selector:
+
+```bash
+kubectl label managedcluster cluster1 mesh-role=member
+kubectl label managedcluster cluster2 mesh-role=member
+```
+
+> **Note:** To select all the clusters from a specific clusterSet, you can specify spec.clusterSets and remove spec.predicates.
+
+Verify the Placement selected your clusters:
+
+```bash
+kubectl get placementdecision -n mesh-system -l cluster.open-cluster-management.io/placement=mesh-placement
+```
+
+## Step 5: Create a MultiClusterMesh
 
 The CRD defaults target OSSM on OpenShift (`servicemeshoperator3` from `redhat-operators`).
 For vanilla Kubernetes clusters, override `spec.operator` fields to use Sail.
@@ -98,10 +166,10 @@ Kubernetes (Sail):
 kubectl apply -n mesh-system -f samples/basic.yaml
 ```
 
-Update `spec.clusterSet` to match your ManagedClusterSet name.
+Update `spec.placementRef.name` to match your Placement name.
 See the [API reference](api-reference.md) for all available fields, or [samples/complete.yaml](../samples/complete.yaml) for a fully annotated example.
 
-## Step 5: Verify the Setup
+## Step 6: Verify the Setup
 
 Check mesh status:
 
@@ -115,7 +183,7 @@ See the [API reference](api-reference.md#status-conditions) for all reported con
 
 If something isn't working, see the [troubleshooting guide](troubleshooting.md).
 
-## Step 6: Configure Istio
+## Step 7: Configure Istio
 
 The addon installs the operator, distributes trust, and handles endpoint discovery (remote secrets), but you configure the mesh control plane on each cluster yourself.
 Both OSSM 3.x and upstream Sail use the `sailoperator.io` API group.
@@ -158,7 +226,7 @@ Once the mesh is running, you can use [Fleet Service Mesh][fleet-mesh] for multi
 Fleet Service Mesh is an OpenShift console plugin and requires an OpenShift cluster with ACM (Advanced Cluster Management).
 See the [Fleet Service Mesh Dev Preview Guide][fleet-mesh] for setup instructions.
 
-## Step 7: Cleanup
+## Step 8: Cleanup
 
 Deleting the `MultiClusterMesh` CR removes all addon-managed resources: operator ManifestWorks (if no other mesh needs the operator on that cluster), CA certificate secrets, ManagedServiceAccounts, istio-reader RBAC, and remote secrets.
 
@@ -175,8 +243,10 @@ kubectl delete multiclustermesh -n mesh-system <mesh-name>
 [Gateway API]: https://gateway-api.sigs.k8s.io/
 [fleet-mesh]: https://github.com/kiali/openshift-servicemesh-plugin/blob/main/docs/fleet-mesh/DEV-PREVIEW-GUIDE.md
 [kind]: https://kind.sigs.k8s.io/
-[ManagedClusterSet]: https://open-cluster-management.io/docs/concepts/cluster-inventory/managedclusterset/
 [mwrs]: https://open-cluster-management.io/docs/concepts/work-distribution/manifestworkreplicaset/
+[clusterset]: https://open-cluster-management.io/docs/concepts/cluster-inventory/managedclusterset/
+[ManagedClusterSet]: https://open-cluster-management.io/docs/concepts/cluster-inventory/managedclusterset/
+[Placement]: https://open-cluster-management.io/docs/concepts/cluster-inventory/placement/
 [ocm-concepts]: https://open-cluster-management.io/docs/concepts/
 [OLM]: https://olm.operatorframework.io/
 [Plug-in CA]: https://istio.io/latest/docs/tasks/security/cert-management/plugin-ca-cert/

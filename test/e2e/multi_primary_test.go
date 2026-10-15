@@ -39,10 +39,11 @@ func init() {
 
 var _ = Describe("Multi-primary data plane", Ordered, Serial, func() {
 	const (
-		meshName    = "multi-primary-mesh"
-		clusterSet  = "mesh-cluster-set"
-		cpNamespace = "istio-system"
-		sampleNS    = "sample"
+		meshName      = "multi-primary-mesh"
+		clusterSet    = "mesh-cluster-set"
+		placementName = "mp-mesh-placement"
+		cpNamespace   = "istio-system"
+		sampleNS      = "sample"
 	)
 
 	var (
@@ -58,6 +59,12 @@ var _ = Describe("Multi-primary data plane", Ordered, Serial, func() {
 		meshNS = util.UniqueName("mp-test-ns")
 		util.CreateNamespace(ctx, hubClient, meshNS)
 
+		Step("Binding ManagedClusterSet %s to namespace %s", clusterSet, meshNS)
+		util.CreateManagedClusterSetBinding(ctx, hubClient, clusterSet, meshNS)
+
+		Step("Creating Placement %s in namespace %s", placementName, meshNS)
+		util.CreatePlacementForClusterSet(ctx, hubClient, placementName, meshNS, clusterSet)
+
 		Step("Setting up cert-manager trust chain in %s", meshNS)
 		hubClient.ApplyFile(ctx, filepath.Join(samplesDir, "cert-manager-issuer.yaml"), nil, meshNS)
 
@@ -70,14 +77,8 @@ var _ = Describe("Multi-primary data plane", Ordered, Serial, func() {
 		}
 
 		Step("Creating MultiClusterMesh CR")
-		mesh = util.CreateMultiClusterMesh(ctx, hubClient, meshName, meshNS, clusterSet,
+		mesh = util.CreateMultiClusterMesh(ctx, hubClient, meshName, meshNS, placementName,
 			meshv1alpha1.MultiClusterMeshSpec{
-				Operator: meshv1alpha1.OperatorConfig{
-					Name:            testOperatorName,
-					Namespace:       testOperatorNamespace,
-					Source:          testCatalogSource,
-					SourceNamespace: testCatalogNamespace,
-				},
 				Security: meshv1alpha1.SecurityConfig{
 					Trust: meshv1alpha1.TrustConfig{
 						CertManager: meshv1alpha1.CertManagerConfig{
@@ -96,15 +97,29 @@ var _ = Describe("Multi-primary data plane", Ordered, Serial, func() {
 		Step("Verifying control plane namespace exists with network labels")
 		for _, spokeClient := range spokeClients {
 			ns := &corev1.Namespace{}
-			Expect(spokeClient.Get(ctx, key.Of(cpNamespace), ns)).To(Succeed())
-			Expect(ns.Labels).To(HaveKey("topology.istio.io/network"))
+			Eventually(func(g Gomega) {
+				g.Expect(spokeClient.Get(ctx, key.Of(cpNamespace), ns)).To(Succeed())
+				g.Expect(ns.Labels).To(HaveKey("topology.istio.io/network"))
+			}).Should(Succeed())
+		}
+
+		// Istiod falls back to a self-signed CA if it starts before cacerts arrives.
+		Step("Waiting for CA secrets on both clusters before starting Istio")
+		for _, spokeClient := range spokeClients {
+			cacerts := &corev1.Secret{}
+			Eventually(func(g Gomega) {
+				g.Expect(spokeClient.Get(ctx, key.Of(meshcontroller.CacertsSecretName, cpNamespace), cacerts)).To(Succeed())
+				g.Expect(cacerts.Data[corev1.TLSCertKey]).NotTo(BeEmpty())
+				g.Expect(cacerts.Data[corev1.TLSPrivateKeyKey]).NotTo(BeEmpty())
+				g.Expect(cacerts.Data[corev1.ServiceAccountRootCAKey]).NotTo(BeEmpty())
+			}).Should(Succeed())
 		}
 	}, NodeTimeout(5*time.Minute))
 
 	AfterAll(func(ctx SpecContext) {
 		collectArtifacts(ctx, "multi-primary",
 			[]string{meshNS},
-			[]string{cpNamespace, testOperatorNamespace, sampleNS, "istio-cni"},
+			[]string{cpNamespace, sampleNS, "istio-cni"},
 		)
 
 		Step("Cleaning up spoke resources")

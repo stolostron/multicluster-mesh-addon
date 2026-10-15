@@ -14,7 +14,7 @@ API group: `mesh.open-cluster-management.io/v1alpha1`
 | Field | Required | Default | Description |
 |-------|----------|---------|-------------|
 | `metadata.name` | Yes | | Mesh name. Must be at most 63 characters (used in certificate subject fields and Kubernetes labels). |
-| `spec.clusterSet` | Yes | | Name of the ManagedClusterSet defining cluster membership. Must use `ExclusiveClusterSetLabel` selector. Immutable after creation. |
+| `spec.placementRef.name` | Yes | | Name of the [Placement] defining cluster membership. The Placement must be in the same namespace as the mesh. |
 | `spec.controlPlane.namespace` | No | `istio-system` | Namespace where Istio is installed on each cluster. Immutable after creation. Must differ from `spec.operator.namespace`. |
 | `spec.operator.name` | No | `servicemeshoperator3` | OLM package name |
 | `spec.operator.namespace` | No | `multicluster-mesh-operator` | Namespace where the operator is installed. Must not use `openshift-`, `kube-`, or `default`. |
@@ -29,19 +29,30 @@ API group: `mesh.open-cluster-management.io/v1alpha1`
 
 ### Status Conditions
 
+The mesh-level `Ready` condition requires all per-cluster conditions to be True before transitioning to True.
+Optional conditions are only factored into `Ready` when their corresponding feature is configured.
+
 | Condition | Scope | Meaning |
 |-----------|-------|---------|
-| `Ready` | Mesh | All clusters have confirmed operator installation |
+| `Ready` | Mesh | All clusters are ready |
 | `OperatorInstalled` | Per-cluster | The service mesh operator CSV is installed on this cluster |
+| `TrustDistributed` | Per-cluster | Trust material has been distributed to this cluster (only when `spec.security.trust` is configured) |
 
 **Reason values** (appear in a condition's `.reason`):
 
 | Reason | Scope | Description |
 |--------|-------|-------------|
 | `AllClustersReady` | Mesh | All clusters are ready |
-| `ClustersNotReady` | Mesh | One or more clusters have not confirmed operator installation |
+| `ClustersNotReady` | Mesh | One or more clusters are not ready |
+| `PlacementNotFound` | Mesh | The referenced Placement does not exist |
+| `NoClustersSelected` | Mesh | The Placement has not selected any clusters |
 | `ReconcileError` | Mesh | An error occurred during reconciliation |
-| `OperatorConfigConflict` | Mesh | Operator config conflicts with an older mesh on the same ClusterSet |
+| `OperatorConfigConflict` | Mesh | Operator config conflicts with an older mesh targeting the same cluster |
 | `NamespaceConflict` | Mesh | Control plane namespace conflicts with an older mesh or equals the operator namespace |
 | `InstallationPending` | Per-cluster | Operator installation has been requested but not yet confirmed |
 | `Installed` | Per-cluster | Operator is installed |
+| `DistributionPending` | Per-cluster | Trust distribution is in progress |
+| `Distributed` | Per-cluster | Trust has been distributed to the cluster |
+
+<!-- Reference links -->
+[Placement]: https://open-cluster-management.io/docs/concepts/cluster-inventory/placement/

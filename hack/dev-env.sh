@@ -3,7 +3,7 @@
 # This file is invoked by Makefile targets with an action argument.
 #
 # Usage: hack/dev-env.sh <action> [args...]
-# Actions: check-host, create-cluster <name>, install-olm <name>, install-cert-manager,
+# Actions: check-host, create-cluster <name>, install-olm <name>, install-sail <name>, install-cert-manager,
 #          install-managed-serviceaccount, init-ocm, join-clusters, create-clusterset,
 #          setup-mesh, setup-test-issuer
 
@@ -167,6 +167,20 @@ install_olm() {
         -n olm --timeout=10m
 
     log "OLM ${OLM_VERSION} installed on ${cluster}"
+}
+
+install_sail() {
+    local cluster="${1}"
+
+    on "${cluster}" kubectl apply -f "${SCRIPT_DIR}/hack/kind/sail-operator.yaml"
+    on "${cluster}" kubectl wait --for=create csv \
+        --selector=operators.coreos.com/sailoperator.sail-operator \
+        -n sail-operator --timeout=10m
+    on "${cluster}" kubectl wait --for=jsonpath='{.status.phase}'=Succeeded csv \
+        --selector=operators.coreos.com/sailoperator.sail-operator \
+        -n sail-operator --timeout=10m
+
+    log "Sail installed on ${cluster}"
 }
 
 install_cert_manager() {
@@ -431,6 +445,7 @@ case "${ACTION}" in
     check-host)                      check_host ;;
     create-cluster)                  create_cluster "${2}" ;;
     install-olm)                     install_olm "${2}" ;;
+    install-sail)                    install_sail "${2}" ;;
     install-cert-manager)            install_cert_manager ;;
     install-managed-serviceaccount)  install_managed_serviceaccount ;;
     init-ocm)                        init_ocm ;;
@@ -441,5 +456,5 @@ case "${ACTION}" in
     install-gateway-api)             install_gateway_api "${2}" ;;
     setup-test-issuer)               setup_test_issuer ;;
     *)
-        err "Unknown action: '${ACTION}'. Valid: check-host, create-cluster, install-olm, install-cert-manager, install-managed-serviceaccount, init-ocm, join-clusters, create-clusterset, setup-mesh, install-metallb, install-gateway-api, setup-test-issuer" ;;
+        err "Unknown action: '${ACTION}'. Valid: check-host, create-cluster, install-olm, install-sail, install-cert-manager, install-managed-serviceaccount, init-ocm, join-clusters, create-clusterset, setup-mesh, install-metallb, install-gateway-api, setup-test-issuer" ;;
 esac
