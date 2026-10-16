@@ -186,6 +186,7 @@ func TestDetermineStatus(t *testing.T) {
 		expectReadyStatus  metav1.ConditionStatus
 		expectReason       string
 		expectRequeue      bool
+		expectClusters     []string
 		expectClusterTrust map[string]metav1.ConditionStatus
 	}{
 		{
@@ -198,6 +199,7 @@ func TestDetermineStatus(t *testing.T) {
 			},
 			expectReadyStatus: metav1.ConditionTrue,
 			expectReason:      meshv1alpha1.ReasonAllClustersReady,
+			expectClusters:    []string{"cluster-a"},
 		},
 		{
 			name: "does not set Ready when no clusters",
@@ -294,6 +296,21 @@ func TestDetermineStatus(t *testing.T) {
 			} else {
 				if result != (reconcile.Result{}) {
 					t.Errorf("expected empty result, got %v", result)
+				}
+			}
+
+			if tc.expectClusters != nil {
+				if len(tc.mesh.Status.ClusterStatus) != len(tc.expectClusters) {
+					t.Fatalf("expected %d cluster statuses, got %d", len(tc.expectClusters), len(tc.mesh.Status.ClusterStatus))
+				}
+				for i, name := range tc.expectClusters {
+					cs := tc.mesh.Status.ClusterStatus[i]
+					if cs.ClusterName != name {
+						t.Errorf("cluster status[%d] = %s, want %s", i, cs.ClusterName, name)
+					}
+					if meta.FindStatusCondition(cs.Conditions, meshv1alpha1.ConditionTrustDistributed) != nil {
+						t.Errorf("cluster %s has TrustDistributed without an issuer", name)
+					}
 				}
 			}
 

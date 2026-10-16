@@ -587,6 +587,10 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 
 				expectMeshReady(meshName, testNs)
 				expectNoCacertsManifestWork(mesh, clusterName)
+
+				latest := &meshv1alpha1.MultiClusterMesh{}
+				Expect(k8sClient.Get(ctx, key.Of(meshName, testNs), latest)).To(Succeed())
+				Expect(latest.Status.ClusterStatus).To(Equal([]meshv1alpha1.ClusterMeshStatus{{ClusterName: clusterName}}))
 			})
 		})
 	})

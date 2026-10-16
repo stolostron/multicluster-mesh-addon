@@ -514,35 +514,39 @@ func (r *Reconciler) determineStatus(ctx context.Context, mesh *meshv1alpha1.Mul
 	}
 
 	allReady := true
+	trustConfigured := mesh.Spec.Security.Trust.CertManager.IssuerRef.Name != ""
 
-	if mesh.Spec.Security.Trust.CertManager.IssuerRef.Name != "" {
-		for _, cluster := range clusters {
-			cacertsWork := &workv1.ManifestWork{}
-			err := r.Get(ctx, key.Of(CacertsManifestWorkName(mesh), cluster.Name), cacertsWork)
-			if err != nil {
-				if apierrors.IsNotFound(err) {
-					allReady = false
-					mesh.SetClusterCondition(cluster.Name, meshv1alpha1.ConditionTrustDistributed,
-						metav1.ConditionFalse, meshv1alpha1.ReasonCacertsPending,
-						"Waiting for cacerts secret to be created by cert-manager")
-					continue
-				}
-				return reconcile.Result{}, fmt.Errorf("failed to get cacerts ManifestWork for cluster %s: %w", cluster.Name, err)
-			}
+	for _, cluster := range clusters {
+		if !trustConfigured {
+			mesh.EnsureClusterStatus(cluster.Name)
+			continue
+		}
 
-			applied := meta.IsStatusConditionTrue(cacertsWork.Status.Conditions, workv1.WorkApplied)
-			available := meta.IsStatusConditionTrue(cacertsWork.Status.Conditions, workv1.WorkAvailable)
-
-			if applied && available {
-				mesh.SetClusterCondition(cluster.Name, meshv1alpha1.ConditionTrustDistributed,
-					metav1.ConditionTrue, meshv1alpha1.ReasonCacertsApplied,
-					"Cacerts distributed and available")
-			} else {
+		cacertsWork := &workv1.ManifestWork{}
+		err := r.Get(ctx, key.Of(CacertsManifestWorkName(mesh), cluster.Name), cacertsWork)
+		if err != nil {
+			if apierrors.IsNotFound(err) {
 				allReady = false
 				mesh.SetClusterCondition(cluster.Name, meshv1alpha1.ConditionTrustDistributed,
 					metav1.ConditionFalse, meshv1alpha1.ReasonCacertsPending,
-					"Waiting for cacerts ManifestWork to be applied on cluster")
+					"Waiting for cacerts secret to be created by cert-manager")
+				continue
 			}
+			return reconcile.Result{}, fmt.Errorf("failed to get cacerts ManifestWork for cluster %s: %w", cluster.Name, err)
+		}
+
+		applied := meta.IsStatusConditionTrue(cacertsWork.Status.Conditions, workv1.WorkApplied)
+		available := meta.IsStatusConditionTrue(cacertsWork.Status.Conditions, workv1.WorkAvailable)
+
+		if applied && available {
+			mesh.SetClusterCondition(cluster.Name, meshv1alpha1.ConditionTrustDistributed,
+				metav1.ConditionTrue, meshv1alpha1.ReasonCacertsApplied,
+				"Cacerts distributed and available")
+		} else {
+			allReady = false
+			mesh.SetClusterCondition(cluster.Name, meshv1alpha1.ConditionTrustDistributed,
+				metav1.ConditionFalse, meshv1alpha1.ReasonCacertsPending,
+				"Waiting for cacerts ManifestWork to be applied on cluster")
 		}
 	}
 

@@ -264,7 +264,7 @@ Deleting a Certificate does not explicitly delete its hub Secret. cert-manager r
 
 ### Readiness
 
-When trust is configured, the mesh does not become `Ready` until the cacerts ManifestWork is confirmed `Applied` and `Available` on every managed cluster. This prevents istiod from starting before the intermediate CA is in place (which would cause it to fall back to a self-signed CA, breaking cross-cluster mTLS). Each cluster reports a per-cluster `TrustDistributed` condition with reason `CacertsApplied` or `CacertsPending`.
+Each resolved cluster is recorded in `status.clusterStatus`. Existing entries are retained while their names remain selected, even if their ManagedCluster objects are missing. When trust is configured, the mesh does not become `Ready` until the cacerts ManifestWork is confirmed `Applied` and `Available` on every managed cluster. This prevents istiod from starting before the intermediate CA is in place (which would cause it to fall back to a self-signed CA, breaking cross-cluster mTLS). Each cluster then reports a per-cluster `TrustDistributed` condition with reason `CacertsApplied` or `CacertsPending`. Without an issuer, the controller records cluster entries without adding or updating trust conditions. Removing the issuer does not clear an existing `TrustDistributed` condition.
 
 ## Endpoint Discovery
 

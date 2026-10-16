@@ -25,7 +25,7 @@ API group: `mesh.open-cluster-management.io/v1alpha1`
 |-------|-------------|
 | `status.controlPlaneNamespace` | Auto-derived control plane namespace: `istio-system-{mesh name truncated to 39 characters}-{first 10 hex characters of SHA-256(namespace/name)}` |
 | `status.conditions` | Mesh-level conditions (see below) |
-| `status.clusterStatus` | Per-cluster conditions. Entries are created when trust is checked; this is not a complete inventory of Placement membership. |
+| `status.clusterStatus` | Entries are created for resolved clusters, including when no issuer is configured. Existing entries are retained while their names remain selected, even if their ManagedCluster objects are missing. `TrustDistributed` is added or updated only while an issuer is configured; removing the issuer does not clear an existing trust condition. |
 
 ### Status Conditions
 

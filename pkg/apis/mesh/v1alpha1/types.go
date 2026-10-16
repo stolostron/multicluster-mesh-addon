@@ -63,6 +63,11 @@ func (m *MultiClusterMesh) SetReadyCondition(status metav1.ConditionStatus, reas
 	})
 }
 
+// EnsureClusterStatus records a resolved cluster. Trust conditions are optional.
+func (m *MultiClusterMesh) EnsureClusterStatus(clusterName string) {
+	m.getOrCreateClusterStatus(clusterName)
+}
+
 // SetClusterCondition sets a per-cluster condition, creating the cluster status entry if needed.
 func (m *MultiClusterMesh) SetClusterCondition(clusterName string, conditionType string, status metav1.ConditionStatus, reason string, messageFmt string, args ...any) {
 	cs := m.getOrCreateClusterStatus(clusterName)
