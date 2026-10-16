@@ -7,21 +7,41 @@ Example manifests for common configurations.
 | Manifest | Use when |
 |----------|----------|
 | [cert-manager-issuer.yaml](cert-manager-issuer.yaml) | Self-signed trust chain for testing |
-| [openshift.yaml](openshift.yaml) | OpenShift / OSSM (matches CRD defaults) |
-| [basic.yaml](basic.yaml) | kind / vanilla Kubernetes with Sail |
+| [openshift.yaml](openshift.yaml) | OpenShift mesh (after OSSM operator is installed) |
+| [basic.yaml](basic.yaml) | kind / vanilla Kubernetes mesh (after Sail operator is installed) |
 | [complete.yaml](complete.yaml) | Fully annotated field reference |
-| [pinned-version.yaml](pinned-version.yaml) | Pin the operator CSV version |
 
 Apply hub samples on the hub cluster in your mesh namespace (for example `mesh-system`).
-Update `spec.clusterSet` to match your ManagedClusterSet.
+Update `spec.placementRef.name` to match your Placement name.
+
+The control plane namespace is auto-derived per mesh and reported in
+`status.controlPlaneNamespace`. Install the mesh operator before creating a
+`MultiClusterMesh` (see OperatorPolicy samples below).
+
+## Hub (OperatorPolicy)
+
+Install the Sail or OSSM operator on managed clusters before creating a mesh.
+These samples require the governance-policy-framework, config-policy-controller,
+and a Placement named `mesh-operator-placement` in the apply namespace.
+
+| Manifest | Use when |
+|----------|----------|
+| [operator-policy-sail.yaml](operator-policy-sail.yaml) | kind / vanilla Kubernetes (Sail) |
+| [operator-policy-ossm.yaml](operator-policy-ossm.yaml) | OpenShift (OSSM) |
+
+Apply on the hub, for example:
+
+```bash
+kubectl apply -n mesh-operator-policy -f samples/operator-policy-sail.yaml
+```
 
 ## Spoke (Istio)
 
 | Manifest | Purpose |
 |----------|---------|
-| [istio/istio.yaml](istio/istio.yaml) | Istio control plane (`MESH_NAME`, `CLUSTER_NAME`, `NETWORK`) |
-| [istio/eastwest-gateway.yaml](istio/eastwest-gateway.yaml) | East-west Gateway API gateway |
+| [istio/istio.yaml](istio/istio.yaml) | Istio control plane (`MESH_NAME`, `CLUSTER_NAME`, `NETWORK`, `CP_NAMESPACE`) |
+| [istio/eastwest-gateway.yaml](istio/eastwest-gateway.yaml) | East-west Gateway API gateway (`NETWORK`, `CP_NAMESPACE`) |
 | [istio/istiocni.yaml](istio/istiocni.yaml) | IstioCNI (required on OpenShift and ambient) |
 
 Apply spoke samples on each managed cluster.
-See the [User Guide](../docs/user-guide.md#step-6-configure-istio) for the full procedure.
+See the [User Guide](../docs/user-guide.md#step-8-configure-istio) for the full procedure.

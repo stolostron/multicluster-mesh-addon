@@ -17,14 +17,13 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	operatorsv1 "github.com/operator-framework/api/pkg/operators/v1"
-	operatorsv1alpha1 "github.com/operator-framework/api/pkg/operators/v1alpha1"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/tools/clientcmd"
 	addonv1beta1 "open-cluster-management.io/api/addon/v1beta1"
 	clusterv1 "open-cluster-management.io/api/cluster/v1"
+	clusterv1beta1 "open-cluster-management.io/api/cluster/v1beta1"
 	clusterv1beta2 "open-cluster-management.io/api/cluster/v1beta2"
 	workv1 "open-cluster-management.io/api/work/v1"
 	msav1beta1 "open-cluster-management.io/managed-serviceaccount/apis/authentication/v1beta1"
@@ -46,8 +45,6 @@ var (
 
 	testOperatorName      string
 	testOperatorNamespace string
-	testCatalogSource     string
-	testCatalogNamespace  string
 )
 
 func TestE2E(t *testing.T) {
@@ -62,10 +59,9 @@ var _ = BeforeSuite(func(ctx context.Context) {
 	util.MustAddToScheme(
 		meshv1alpha1.Install,
 		clusterv1.Install,
+		clusterv1beta1.Install,
 		clusterv1beta2.Install,
 		workv1.Install,
-		operatorsv1.AddToScheme,
-		operatorsv1alpha1.AddToScheme,
 		msav1beta1.AddToScheme,
 		addonv1beta1.Install,
 	)
@@ -91,6 +87,9 @@ var _ = BeforeSuite(func(ctx context.Context) {
 	for name, c := range spokeClients {
 		verifyConnection(ctx, c, name)
 	}
+
+	Step("Verifying mesh operator is installed on spokes (prerequisite)")
+	verifyOperatorInstalled(ctx)
 
 	Step("Checking for existing resources that can interfere with our testing")
 	meshList := &meshv1alpha1.MultiClusterMeshList{}
@@ -129,18 +128,30 @@ func detectPlatform() {
 	case "openshift":
 		testOperatorName = "servicemeshoperator3"
 		testOperatorNamespace = "multicluster-mesh-operator"
-		testCatalogSource = "redhat-operators"
-		testCatalogNamespace = "openshift-marketplace"
 	case "kind":
 		testOperatorName = "sailoperator"
 		testOperatorNamespace = "sail-operator"
-		testCatalogSource = "operatorhubio-catalog"
-		testCatalogNamespace = "olm"
 	default:
 		Fail(fmt.Sprintf("PLATFORM env must be set to 'openshift' or 'kind', got %q", platform))
 	}
-	GinkgoWriter.Printf("Platform %s: operator=%s/%s, catalog=%s/%s\n",
-		platform, testOperatorNamespace, testOperatorName, testCatalogNamespace, testCatalogSource)
+	GinkgoWriter.Printf("Platform %s: operator namespace=%s package=%s\n",
+		platform, testOperatorNamespace, testOperatorName)
+}
+
+func verifyOperatorInstalled(ctx context.Context) {
+	for name, spokeClient := range spokeClients {
+		ns := &corev1.Namespace{}
+		Expect(spokeClient.Get(ctx, client.ObjectKey{Name: testOperatorNamespace}, ns)).To(Succeed(),
+			"operator namespace %q missing on %s; run 'make install-operator' first",
+			testOperatorNamespace, name)
+
+		deploys := &appsv1.DeploymentList{}
+		Expect(spokeClient.List(ctx, deploys, client.InNamespace(testOperatorNamespace))).To(Succeed())
+		Expect(deploys.Items).NotTo(BeEmpty(),
+			"no deployments in %q on %s; mesh operator is not installed",
+			testOperatorNamespace, name)
+		Success("Mesh operator present on %s (namespace %s)", name, testOperatorNamespace)
+	}
 }
 
 func collectArtifacts(ctx context.Context, testName string, hubNamespaces []string, spokeNamespaces []string) {

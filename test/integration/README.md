@@ -53,7 +53,7 @@ To test with external CRDs (e.g., Istio, Sail operator):
 3. Update suite_test.go to include the new directory:
    ```go
    CRDDirectoryPaths: []string{
-       filepath.Join("..", "..", "config", "crd"),
+       filepath.Join("..", "..", "chart", "crds"),
        filepath.Join("..", "..", "test", "integration", "crds", "ocm"),
        filepath.Join("..", "..", "test", "integration", "crds", "istio"), // Add this
    },
@@ -65,36 +65,24 @@ To test with external CRDs (e.g., Istio, Sail operator):
 
 - `suite_test.go` - Test suite setup, envtest initialization
 - `controller_test.go` - Controller reconciliation tests
-- `platform_detection_test.go` - Platform detection tests
-- `util/` - Test helper functions
+- `doc.go` - Package documentation
+- Shared helpers live in `test/util/`
 
 ## Test Coverage
 
 ### Controller Tests (`controller_test.go`)
-- **Basic Reconciliation**: Creates ManifestWorks for clusters in a ClusterSet
-- **Platform-Specific Defaults**: Validates vanilla Kubernetes operator configuration
-- **ClusterSet Not Found**: Handles missing ClusterSet gracefully
-- **Deletion Cleanup**: (Pending - requires finalizer implementation)
 
-### Platform Detection Tests (`platform_detection_test.go`)
-- **OpenShift Variants**: Tests all OpenShift products via ClusterClaims
-  - OpenShift
-  - ROSA (Red Hat OpenShift Service on AWS)
-  - ARO (Azure Red Hat OpenShift)
-  - ROKS (Red Hat OpenShift on IBM Cloud)
-  - OpenShiftDedicated
-- **Vanilla Kubernetes**: Tests non-OpenShift clusters (no ClusterClaims)
-
-Each test verifies:
-- Correct operator selection (OSSM for OpenShift, Sail for Kubernetes)
-- Proper manifest count and structure
+- **Basic reconciliation**: Control plane namespace ManifestWorks, derived namespace labels, Placement not found, no clusters selected, and cleanup when membership changes
+- **Validation**: Rejects mesh names that are longer than 63 characters or are not DNS labels, and rejects an empty `spec.placementRef.name`
+- **Deletion**: Removes the finalizer and mesh-owned ManifestWorks
+- **Certificate distribution**: cert-manager Certificates and cacerts ManifestWorks, including Ready only after the cacerts ManifestWork is Applied and Available
+- **Endpoint discovery**: ManagedServiceAccounts, istio-reader RBAC, and ManifestWorkReplicaSet remote secrets
 
 ## Notes
 
 - Tests use `//go:build integration` tag to separate from unit tests
 - Each test uses unique resource names (with UnixNano timestamps) to avoid conflicts
 - CRDs in `test/integration/crds/ocm/` are auto-generated from go mod dependencies
-- ClusterClaims are persisted via status subresource updates (fetch-then-update pattern)
 
 <!-- Reference links -->
 [envtest]: https://book.kubebuilder.io/reference/envtest.html

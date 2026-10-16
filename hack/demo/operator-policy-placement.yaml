@@ -1,0 +1,16 @@
+# Placement used by samples/operator-policy-*.yaml PlacementBindings.
+# Apply in the mesh-operator-policy namespace.
+apiVersion: cluster.open-cluster-management.io/v1beta2
+kind: ManagedClusterSetBinding
+metadata:
+  name: mesh-cluster-set
+spec:
+  clusterSet: mesh-cluster-set
+---
+apiVersion: cluster.open-cluster-management.io/v1beta1
+kind: Placement
+metadata:
+  name: mesh-operator-placement
+spec:
+  clusterSets:
+    - mesh-cluster-set

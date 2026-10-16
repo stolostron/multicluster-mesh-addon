@@ -2,14 +2,13 @@
 
 The addon runs on an [OCM] hub cluster and automates [multi-cluster Istio service mesh setup][multi-cluster] across managed clusters.
 
-The CRD defaults target OSSM on OpenShift.
-For vanilla Kubernetes clusters, override `spec.operator` fields to use Sail instead.
+The service mesh operator (Sail or OSSM) is a prerequisite that the user installs separately, for example via [OperatorPolicy] from the governance-policy-framework.
 
 ## What the Addon Does
 
 The addon manages the "plumbing" (trust and connectivity) while you configure the mesh control plane using the Istio CRDs.
 
-- **Operator Lifecycle**: Installs the service mesh operator on managed clusters via OLM
+- **Control Plane Namespace**: Creates an auto-derived, unique namespace per mesh on each managed cluster
 - **Trust Distribution**: Mints per-cluster intermediate CAs from a shared root using [cert-manager], implementing Istio's [Plug-in CA] pattern for mTLS trust
 - **Endpoint Discovery**: Exchanges discovery credentials via [ManagedServiceAccount] with appropriate RBAC to each service account, and distributes remote secrets to all peer clusters
 
@@ -32,20 +31,27 @@ flowchart TD
 
 For a detailed resource-level diagram, see the [design doc](dev/design.md#architecture).
 
+## Cluster Selection
+
+The addon uses OCM [Placement] for cluster selection.
+The user creates a `Placement` resource in the same namespace as the `MultiClusterMesh`, and the mesh references it via `spec.placementRef.name`.
+The addon reads the resulting `PlacementDecision` resources to determine which clusters to target.
+
+This gives the user full control over cluster selection using Placement's rich predicate and scheduling capabilities (label selectors, cluster sets, tolerations, priority-based scheduling, etc.).
+
+The addon watches both Placements and PlacementDecisions. It creates resources for selected clusters whose ManagedCluster objects can be read, while cleanup preserves names still present in decisions even if their ManagedCluster objects have disappeared. A mismatch between the decision-entry count and Placement status delays reconciliation.
+
+Each mesh has its own Certificates, ManagedServiceAccounts, namespace ManifestWorks, istio-reader RBAC, and ManifestWorkReplicaSet. The ReplicaSet contains the available remote secrets and references the user's Placement; OCM distributes its template to the selected clusters, including each source cluster itself. Existing remote secrets remain in the template while their source clusters are still selected and replacements cannot yet be built because their ManagedCluster objects, API endpoints, or discovery tokens are unavailable. Updates for clusters with available prerequisites continue during this gap.
+
+## Readiness and Cleanup
+
+Mesh `Ready` reports successful hub reconciliation and, when an issuer is configured, the last observed cacerts ManifestWork conditions. Operator health, Istio readiness, discovery rollout, and connectivity require separate checks. See the [API reference](api-reference.md#readiness-limits) for current status limitations.
+
+Removing a cluster from the decisions requests cleanup of its mesh resources and removes its credentials from the remote-secret template. An empty selection requests cleanup for every cluster. A missing Placement preserves existing resources and clears per-cluster status. Deleting the mesh requests deletion of its ManifestWorks and ManagedServiceAccounts; owner references allow garbage collection of Certificates and the ReplicaSet.
+
 ## Supported Topologies
 
 The addon supports the [Multi-Primary Multi-Network] topology, in which each cluster runs its own control plane.
-
-## Collision Handling
-
-When multiple meshes target the same ClusterSet, the addon validates their configurations during reconciliation to avoid possible destructive collisions:
-
-- If two meshes request different operator configs, the oldest mesh (by creation timestamp) takes precedence.
-  The newer mesh gets an `OperatorConfigConflict` condition.
-- If two meshes use the same control plane namespace, the newer mesh gets a `NamespaceConflict` condition.
-- Reserved operator namespace prefixes (`openshift-`, `kube-`) and the `default` namespace are rejected by CRD validation.
-- The control plane namespace must differ from the operator namespace.
-  The mesh gets a `NamespaceConflict` condition if they match.
 
 <!-- Reference links -->
 [cert-manager]: https://cert-manager.io/
@@ -53,4 +59,6 @@ When multiple meshes target the same ClusterSet, the addon validates their confi
 [multi-cluster]: https://istio.io/latest/docs/setup/install/multicluster/
 [Multi-Primary Multi-Network]: https://istio.io/latest/docs/setup/install/multicluster/multi-primary_multi-network/
 [OCM]: https://open-cluster-management.io/
+[OperatorPolicy]: https://open-cluster-management.io/docs/getting-started/integration/policy-controllers/operator-policy/
+[Placement]: https://open-cluster-management.io/docs/concepts/content-placement/placement/
 [Plug-in CA]: https://istio.io/latest/docs/tasks/security/cert-management/plugin-ca-cert/

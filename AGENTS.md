@@ -5,9 +5,11 @@
 OCM Service Mesh Add-on - a Kubernetes controller that orchestrates multi-cluster Istio service mesh deployments via [Open Cluster Management (OCM)](https://open-cluster-management.io/).
 
 The controller manages the `MultiClusterMesh` custom resource on the hub cluster and automates:
-- **Operator Lifecycle**: Installing Sail/OSSM operator on managed clusters via ManifestWork
-- **Trust Distribution**: Distributing intermediate CA certificates via cert-manager (in progress)
-- **Endpoint Discovery**: Exchanging discovery secrets via ManagedServiceAccount (in progress)
+- **Control plane namespace**: Creating an auto-derived namespace on each managed cluster
+- **Trust Distribution**: Distributing intermediate CA certificates via cert-manager
+- **Endpoint Discovery**: Exchanging discovery secrets via ManagedServiceAccount
+
+The service mesh operator (Sail or OSSM) is a prerequisite. Install it separately, for example with OperatorPolicy.
 
 ## Project Structure
 
@@ -31,10 +33,10 @@ The controller manages the `MultiClusterMesh` custom resource on the hub cluster
 ## Key Patterns
 
 - Controller uses `controller-runtime` with `client.Client` from the manager
-- Watches: `MultiClusterMesh` (primary), `ManagedCluster`, `ManagedClusterSet`
-- Field index on `spec.clusterSet` for efficient mesh lookups in mapper functions
-- Operator ManifestWorks are addon-owned (labeled `app.kubernetes.io/managed-by: multicluster-mesh-addon`), not mesh-owned
-- Cleanup uses `getClustersNeededByAnyMesh()` to check if any active mesh still needs a cluster before deleting its operator ManifestWork
+- Watches: `MultiClusterMesh` (primary), owned `Certificate`, `ManagedCluster`, `Placement`, `PlacementDecision`, `Secret`, `ManagedServiceAccount`, `ManifestWork`
+- Field index on `spec.placementRef.name` for mesh lookups from Placement and PlacementDecision events
+- Mesh-owned ManifestWorks are labeled `app.kubernetes.io/managed-by: multicluster-mesh-addon` plus the mesh name and namespace
+- Cleanup deletes mesh-owned ManifestWorks for clusters no longer selected by the Placement
 - Integration tests use envtest with Ginkgo/Gomega; test helpers are in `test/util/`
 
 ## Common Operations
@@ -51,7 +53,7 @@ The controller manages the `MultiClusterMesh` custom resource on the hub cluster
 ### Adding a New Watch
 
 1. Add the watch in `RegisterController` (use `handler.EnqueueRequestsFromMapFunc` with a mapper function)
-2. Add the mapper function (follow `findMeshesForCluster` / `findMeshesForClusterSet` patterns)
+2. Add the mapper function (follow `findMeshesForCluster` / `findMeshesForPlacement` patterns)
 3. Consider adding predicates to filter irrelevant events (e.g., label-based filtering)
 4. Consider adding field indexes if the mapper needs to look up resources by a spec field
 5. Add integration tests that verify the watch triggers reconciliation
@@ -78,7 +80,7 @@ See [docs/dev/design.md](docs/dev/design.md) for architecture, design decisions,
 ## OCM Concepts
 
 - **ManagedCluster**: A cluster registered with the hub
-- **ManagedClusterSet**: A group of ManagedClusters (uses `ExclusiveClusterSetLabel` selector - one cluster per set)
+- **ManagedClusterSet**: A group of ManagedClusters. A Placement selects mesh members from ClusterSets bound to the mesh namespace.
+- **Placement**: Selects ManagedClusters. The mesh references one via `spec.placementRef.name`.
 - **ManifestWork**: Resources to be applied on a managed cluster (namespace = cluster name)
 - **ManagedServiceAccount**: Projects a service account identity from hub to spoke
-- Product claims (`product.open-cluster-management.io`) identify cluster platform (OpenShift, ROSA, ARO, etc.)

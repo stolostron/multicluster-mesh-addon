@@ -1,0 +1,55 @@
+# Installs the OpenShift Service Mesh (OSSM) operator on clusters selected by
+# mesh-operator-placement.
+#
+# Prerequisites:
+#   - OLM on each managed cluster (available by default on OpenShift)
+#   - governance-policy-framework and config-policy-controller add-ons
+#   - OperatorPolicy enabled on config-policy-controller
+#     (annotate ManagedClusterAddOn: operator-policy-disabled=false)
+#   - Placement named mesh-operator-placement in the apply namespace
+#   - ManagedClusterSetBinding for the ClusterSet used by that Placement
+#
+# Apply on the hub, for example:
+#   kubectl apply -n mesh-operator-policy -f samples/operator-policy-ossm.yaml
+#
+# Optional version pinning (replace upgradeApproval Automatic with None when
+# restricting upgrades to listed versions):
+#   subscription.startingCSV: servicemeshoperator3.v3.0.0
+#   versions: [servicemeshoperator3.v3.0.0]
+apiVersion: policy.open-cluster-management.io/v1
+kind: Policy
+metadata:
+  name: policy-ossm-operator
+spec:
+  remediationAction: enforce
+  disabled: false
+  policy-templates:
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1beta1
+        kind: OperatorPolicy
+        metadata:
+          name: ossm-operator
+        spec:
+          remediationAction: enforce
+          severity: medium
+          complianceType: musthave
+          upgradeApproval: Automatic
+          subscription:
+            namespace: multicluster-mesh-operator
+            name: servicemeshoperator3
+            source: redhat-operators
+            sourceNamespace: openshift-marketplace
+            channel: stable
+---
+apiVersion: policy.open-cluster-management.io/v1
+kind: PlacementBinding
+metadata:
+  name: binding-ossm-operator
+placementRef:
+  apiGroup: cluster.open-cluster-management.io
+  kind: Placement
+  name: mesh-operator-placement
+subjects:
+  - apiGroup: policy.open-cluster-management.io
+    kind: Policy
+    name: policy-ossm-operator

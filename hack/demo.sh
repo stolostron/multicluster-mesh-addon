@@ -55,21 +55,30 @@ for index in "${!SPOKE_CLUSTERS[@]}"; do
     KUBECONFIGS["${SPOKE_CLUSTERS[${index}]}"]="${kubeconfig_paths[$((index + 1))]}"
 done
 
+OPERATOR_POLICY_NAMESPACE=mesh-operator-policy
+
 case "${PLATFORM}" in
     openshift)
         KUBECTL=oc
         MESH_NAME=openshift-mesh
         MESH_SAMPLE=samples/openshift.yaml
+        OPERATOR_POLICY_SAMPLE=samples/operator-policy-ossm.yaml
+        OPERATOR_POLICY_NAME=policy-ossm-operator
         ;;
     kind)
         KUBECTL=kubectl
         MESH_NAME=basic-mesh
         MESH_SAMPLE=samples/basic.yaml
+        OPERATOR_POLICY_SAMPLE=samples/operator-policy-sail.yaml
+        OPERATOR_POLICY_NAME=policy-sail-operator
         ;;
     *)
         fail "PLATFORM must be openshift or kind"
         ;;
 esac
+
+# Populated from MultiClusterMesh status after the mesh becomes Ready.
+CP_NAMESPACE=""
 
 for tool in "${KUBECTL}" clear envsubst bat yq "${HELM}" "${CLUSTERADM}" "${ISTIOCTL}"; do
     command -v "${tool}" >/dev/null 2>&1 || fail "required command not found: ${tool}"
@@ -149,28 +158,82 @@ run_capture() {
 }
 
 configure_istio_spoke() {
+    [[ -n "${CP_NAMESPACE}" ]] || fail "CP_NAMESPACE is not set; create the MultiClusterMesh first"
+
     if [[ "${PLATFORM}" == "openshift" ]]; then
         demo_comment "Create istio-cni namespace and install Istio CNI on $1."
         run_kubectl_apply "$1" hack/demo/istiocni-namespace.yaml
         run_kubectl_apply "$1" samples/istio/istiocni.yaml
     fi
-    demo_comment "Create the Istio control plane with $1's mesh and network identity."
-    demo_run "MESH_NAME=${MESH_NAME} CLUSTER_NAME=$1 NETWORK=$2 envsubst < samples/istio/istio.yaml | ${KUBECTL} --kubeconfig ${KUBECONFIGS[$1]} apply -f -"
+    demo_comment "Create the Istio control plane in ${CP_NAMESPACE} with $1's mesh and network identity."
+    demo_run "MESH_NAME=${MESH_NAME} CLUSTER_NAME=$1 NETWORK=$2 CP_NAMESPACE=${CP_NAMESPACE} envsubst < samples/istio/istio.yaml | ${KUBECTL} --kubeconfig ${KUBECONFIGS[$1]} apply -f -"
     demo_run cat samples/istio/istio.yaml
     demo_comment "Wait for istiod to become available on $1."
     run_kubectl "$1" wait --for=condition=Available deployment/istiod \
-        -n istio-system --timeout="${DEMO_TIMEOUT}"
+        -n "${CP_NAMESPACE}" --timeout="${DEMO_TIMEOUT}"
     demo_comment "Create the east-west Gateway for traffic between networks."
-    demo_run "NETWORK=$2 envsubst < samples/istio/eastwest-gateway.yaml | ${KUBECTL} --kubeconfig ${KUBECONFIGS[$1]} apply -f -"
+    demo_run "NETWORK=$2 CP_NAMESPACE=${CP_NAMESPACE} envsubst < samples/istio/eastwest-gateway.yaml | ${KUBECTL} --kubeconfig ${KUBECONFIGS[$1]} apply -f -"
     demo_run cat samples/istio/eastwest-gateway.yaml
     demo_comment "Wait for the east-west Gateway to receive a LoadBalancer address."
     run_kubectl "$1" wait --for=create \
         --for=jsonpath='{.status.loadBalancer.ingress}' service/eastwestgateway-istio \
-        -n istio-system --timeout="${DEMO_TIMEOUT}"
+        -n "${CP_NAMESPACE}" --timeout="${DEMO_TIMEOUT}"
+}
+
+ensure_governance_policy_framework() {
+    local clusters
+    clusters="$(IFS=,; echo "${SPOKE_CLUSTERS[*]}")"
+
+    if [[ "${DEMO_DRY_RUN}" != "1" ]] && \
+        "${KUBECTL}" --kubeconfig "${KUBECONFIGS[hub]}" get crd policies.policy.open-cluster-management.io &>/dev/null; then
+        demo_comment "Policy framework CRDs are already present on the hub."
+    else
+        demo_comment "Install the governance-policy-framework hub add-on."
+        run_clusteradm install hub-addon --names governance-policy-framework
+    fi
+
+    demo_comment "Enable governance-policy-framework and config-policy-controller on the spokes."
+    run_clusteradm addon enable \
+        --names governance-policy-framework \
+        --namespace open-cluster-management-agent-addon \
+        --clusters "${clusters}"
+    run_clusteradm addon enable \
+        --names config-policy-controller \
+        --namespace open-cluster-management-agent-addon \
+        --clusters "${clusters}"
+
+    for cluster in "${SPOKE_CLUSTERS[@]}"; do
+        demo_comment "Wait for policy add-ons on ${cluster}, then enable OperatorPolicy."
+        run_kubectl hub wait --for=condition=Available \
+            "managedclusteraddon/governance-policy-framework" \
+            -n "${cluster}" --timeout=10m
+        run_kubectl hub wait --for=condition=Available \
+            "managedclusteraddon/config-policy-controller" \
+            -n "${cluster}" --timeout=10m
+        run_kubectl hub annotate "managedclusteraddon/config-policy-controller" \
+            -n "${cluster}" operator-policy-disabled=false --overwrite
+        run_kubectl hub wait --for=condition=Available \
+            "managedclusteraddon/config-policy-controller" \
+            -n "${cluster}" --timeout=10m
+    done
+}
+
+read_control_plane_namespace() {
+    if [[ "${DEMO_DRY_RUN}" == "1" ]]; then
+        # Approximate value for dry-run command display; live runs read status.
+        CP_NAMESPACE="istio-system-${MESH_NAME}-<hash>"
+        return
+    fi
+
+    CP_NAMESPACE="$("${KUBECTL}" --kubeconfig "${KUBECONFIGS[hub]}" get \
+        "multiclustermesh/${MESH_NAME}" -n "${MESH_NAMESPACE}" \
+        -o jsonpath='{.status.controlPlaneNamespace}')"
+    [[ -n "${CP_NAMESPACE}" ]] || fail "mesh status.controlPlaneNamespace is empty"
 }
 
 run_istioctl_remote_clusters() {
-    demo_run "${ISTIOCTL}" remote-clusters --kubeconfig "${KUBECONFIGS[$1]}"
+    [[ -n "${CP_NAMESPACE}" ]] || fail "CP_NAMESPACE is not set; create the MultiClusterMesh first"
+    demo_run "${ISTIOCTL}" remote-clusters --kubeconfig "${KUBECONFIGS[$1]}" -i "${CP_NAMESPACE}"
 }
 
 deploy_bookinfo_version() {
@@ -288,7 +351,7 @@ printf '\033[36m                      ── ACM × OSSM Demo ──\033[0m\n'
 printf '\n'
 demo_comment "Welcome to the multi-cluster service mesh demo."
 demo_comment "We will use Bookinfo to make traffic between clusters visible."
-demo_comment "ACM and the mesh add-on coordinate the clusters and bootstrap OSSM."
+demo_comment "ACM and the mesh add-on coordinate the clusters; the mesh operator is installed via OperatorPolicy."
 demo_comment "You will create the Istio and application resources as a customer would."
 demo_comment "We start with two clusters, then add a third cluster and extend the same story."
 demo_comment "The demo pauses after each part so you can read the result before continuing."
@@ -332,16 +395,29 @@ fi
 demo_wait
 
 demo_title "Step 2: Installing the mesh add-on"
-demo_comment "The add-on is not in an ACM or OLM catalog yet. Install its controller directly from the project's Helm repository."
-demo_comment "Add the add-on's Helm repository."
-run_helm repo add --force-update multicluster-mesh-addon \
-    https://stolostron.github.io/multicluster-mesh-addon
-run_helm repo update
-demo_comment "Install the add-on controller from the Helm chart."
-addon_args=(upgrade --install multicluster-mesh-addon multicluster-mesh-addon/multicluster-mesh-addon \
-    --namespace multicluster-mesh-system --create-namespace --wait --timeout 5m)
 if [[ "${PLATFORM}" == "kind" ]]; then
-    addon_args+=(--set platform=kind --set image.pullPolicy=IfNotPresent)
+    demo_comment "Install the add-on from this branch's chart. demo-dev-env already loaded that controller image into the hub."
+    demo_comment "Apply the MultiClusterMesh CRD first. Helm does not update CRDs for an existing release."
+    run_kubectl hub apply -f chart/crds/mesh.open-cluster-management.io_multiclustermeshes.yaml
+    addon_args=(upgrade --install multicluster-mesh-addon chart \
+        --namespace multicluster-mesh-system --create-namespace --wait --timeout 5m \
+        --reset-values --skip-crds \
+        --set platform=kind --set image.pullPolicy=IfNotPresent)
+    if [[ -n "${ADDON_IMAGE_REPOSITORY:-}" ]]; then
+        addon_args+=(--set "image.repository=${ADDON_IMAGE_REPOSITORY}")
+    fi
+    if [[ -n "${ADDON_IMAGE_TAG:-}" ]]; then
+        addon_args+=(--set "image.tag=${ADDON_IMAGE_TAG}")
+    fi
+else
+    demo_comment "The add-on is not in an ACM or OLM catalog yet. Install its controller directly from the project's Helm repository."
+    demo_comment "Add the add-on's Helm repository."
+    run_helm repo add --force-update multicluster-mesh-addon \
+        https://stolostron.github.io/multicluster-mesh-addon
+    run_helm repo update
+    demo_comment "Install the add-on controller from the Helm chart."
+    addon_args=(upgrade --install multicluster-mesh-addon multicluster-mesh-addon/multicluster-mesh-addon \
+        --namespace multicluster-mesh-system --create-namespace --wait --timeout 5m)
 fi
 run_helm "${addon_args[@]}"
 demo_comment "Wait for the controller that watches MultiClusterMesh resources."
@@ -384,47 +460,68 @@ run_clusteradm clusterset set "${CLUSTER_SET}" --clusters "${SPOKE_CLUSTERS[0]},
 demo_comment "Label the first two clusters with their Istio network identities."
 run_kubectl hub label managedcluster "${SPOKE_CLUSTERS[0]}" topology.istio.io/network=network-a --overwrite
 run_kubectl hub label managedcluster "${SPOKE_CLUSTERS[1]}" topology.istio.io/network=network-b --overwrite
+demo_comment "Bind the ClusterSet to the mesh namespace and create the Placement the MultiClusterMesh will reference."
+run_kubectl_apply hub hack/demo/mesh-placement.yaml -n "${MESH_NAMESPACE}"
 demo_wait
 
-demo_title "Step 5: Creating the MultiClusterMesh"
-demo_comment "Create the MultiClusterMesh resource on the hub. The add-on watches this resource and bootstraps OSSM on the selected clusters."
+demo_title "Step 5: Installing the mesh operator"
+demo_comment "The mesh operator is a prerequisite. Install it on the selected clusters with an OperatorPolicy before creating the MultiClusterMesh."
+ensure_governance_policy_framework
+demo_comment "Create the namespace and Placement used by the OperatorPolicy."
+run_kubectl_apply hub hack/demo/operator-policy-namespace.yaml
+run_kubectl_apply hub hack/demo/operator-policy-placement.yaml -n "${OPERATOR_POLICY_NAMESPACE}"
+demo_comment "Review the OperatorPolicy that installs the mesh operator on every cluster in the ClusterSet."
+demo_run cat "${OPERATOR_POLICY_SAMPLE}"
+demo_comment "Apply the OperatorPolicy."
+run_kubectl_apply hub "${OPERATOR_POLICY_SAMPLE}" -n "${OPERATOR_POLICY_NAMESPACE}"
+demo_comment "Wait for the OperatorPolicy to become Compliant (operator installed and healthy on the selected spokes)."
+run_kubectl hub wait --for=jsonpath='{.status.compliant}'=Compliant \
+    "policy/${OPERATOR_POLICY_NAME}" -n "${OPERATOR_POLICY_NAMESPACE}" --timeout="${DEMO_TIMEOUT}"
+run_kubectl hub get "policy/${OPERATOR_POLICY_NAME}" -n "${OPERATOR_POLICY_NAMESPACE}"
+demo_wait
+
+demo_title "Step 6: Creating the MultiClusterMesh"
+demo_comment "Create the MultiClusterMesh resource on the hub. The add-on watches this resource and prepares trust and discovery on the selected clusters."
 run_kubectl_apply hub "${MESH_SAMPLE}" -n "${MESH_NAMESPACE}"
 demo_comment "Let's check in on the mesh while the selected clusters are being prepared."
 demo_run "${KUBECTL} --kubeconfig ${KUBECONFIGS[hub]} get multiclustermesh/${MESH_NAME} -n ${MESH_NAMESPACE} -o yaml | yq -C .status | bat"
-demo_comment "Wait for the add-on to report the mesh ready. This covers OSSM operator bootstrapping; Istio is still customer-managed."
+demo_comment "Wait for the add-on to report the mesh ready. Istio itself remains customer-managed."
 run_kubectl hub wait --for=condition=Ready=True "multiclustermesh/${MESH_NAME}" \
     -n "${MESH_NAMESPACE}" --timeout="${DEMO_TIMEOUT}"
 run_kubectl hub get "multiclustermesh/${MESH_NAME}" -n "${MESH_NAMESPACE}"
+demo_comment "Read the auto-derived control plane namespace from the mesh status."
+read_control_plane_namespace
+demo_run "echo ${CP_NAMESPACE}"
 demo_wait
 
-demo_title "Step 6: Configuring Istio - Phase 1: Configure Istio on ${SPOKE_CLUSTERS[0]}"
+demo_title "Step 7: Configuring Istio - Phase 1: Configure Istio on ${SPOKE_CLUSTERS[0]}"
 demo_comment "The add-on has finished its part. Now create the customer-owned Istio control plane and east-west gateway on the first cluster."
 configure_istio_spoke "${SPOKE_CLUSTERS[0]}" network-a
 demo_wait
 
-demo_title "Step 6: Configuring Istio - Phase 2: Configure Istio on ${SPOKE_CLUSTERS[1]}"
+demo_title "Step 7: Configuring Istio - Phase 2: Configure Istio on ${SPOKE_CLUSTERS[1]}"
 demo_comment "Apply the same customer-owned Istio resources on the second cluster with its own cluster and network identity."
 configure_istio_spoke "${SPOKE_CLUSTERS[1]}" network-b
 demo_wait
 
-demo_title "Step 6: Configuring Istio - Phase 3: Verify mesh connectivity"
+demo_title "Step 7: Configuring Istio - Phase 3: Verify mesh connectivity"
 demo_comment "Both control planes are installed. Check that they can see each other before deploying the Bookinfo application."
 run_istioctl_remote_clusters "${SPOKE_CLUSTERS[0]}"
 run_istioctl_remote_clusters "${SPOKE_CLUSTERS[1]}"
 demo_comment "The multi-cluster Istio setup is now connected. The add-on supplied shared trust and endpoint discovery; the control planes and gateways are customer-owned."
 demo_wait
 
-demo_title "Step 7: Showing Bookinfo traffic - Phase 1: Deploy Bookinfo v1 on ${SPOKE_CLUSTERS[0]}"
+demo_title "Step 8: Showing Bookinfo traffic - Phase 1: Deploy Bookinfo v1 on ${SPOKE_CLUSTERS[0]}"
 demo_comment "Deploy the first reviews version on cluster1. The shared Bookinfo service name will be reused on the other clusters."
 deploy_bookinfo_version "${SPOKE_CLUSTERS[0]}" v1
 demo_wait
 
-demo_title "Step 7: Showing Bookinfo traffic - Phase 2: Deploy Bookinfo v2 on ${SPOKE_CLUSTERS[1]}"
+demo_title "Step 8: Showing Bookinfo traffic - Phase 2: Deploy Bookinfo v2 on ${SPOKE_CLUSTERS[1]}"
 demo_comment "Deploy a different reviews version on cluster2. Istio will make both versions available through the shared service."
 deploy_bookinfo_version "${SPOKE_CLUSTERS[1]}" v2
 demo_wait
 
-demo_title "Step 7: Showing Bookinfo traffic - Phase 3: Generate and verify cross-cluster traffic"
+demo_title "Step 8: Showing Bookinfo traffic - Phase 3: Generate and verify cross-cluster traffic"
 demo_comment "Use the small curl client from the e2e test to call reviews repeatedly and make the cross-cluster responses visible."
 demo_comment "Create the curl client used by the cross-cluster e2e test in cluster1's injected Bookinfo namespace."
 run_kubectl_apply "${SPOKE_CLUSTERS[0]}" test/e2e/testdata/curl.yaml -n bookinfo
@@ -432,13 +529,36 @@ run_kubectl "${SPOKE_CLUSTERS[0]}" wait --for=condition=Available deployment/cur
 show_bookinfo_traffic "Expected: reviews-v1 answers from ${SPOKE_CLUSTERS[0]} and reviews-v2 answers from ${SPOKE_CLUSTERS[1]}."
 demo_wait
 
-demo_title "Step 8: Scaling out to another cluster - Phase 1: Add ${SPOKE_CLUSTERS[2]} to the mesh"
-demo_comment "Label a third cluster, add it to the exclusive ClusterSet, and watch the add-on bootstrap it automatically."
+demo_title "Step 9: Scaling out to another cluster - Phase 1: Add ${SPOKE_CLUSTERS[2]} to the mesh"
+demo_comment "Label a third cluster, add it to the exclusive ClusterSet, and wait for the OperatorPolicy and add-on to prepare it."
 demo_comment "Give ${SPOKE_CLUSTERS[2]} its Istio network identity before adding it to the mesh."
 run_kubectl hub label managedcluster "${SPOKE_CLUSTERS[2]}" topology.istio.io/network=network-c --overwrite
 demo_comment "Add the labeled cluster to the exclusive ClusterSet."
 run_clusteradm clusterset set "${CLUSTER_SET}" \
     --clusters "${SPOKE_CLUSTERS[0]},${SPOKE_CLUSTERS[1]},${SPOKE_CLUSTERS[2]}"
+demo_comment "Enable policy add-ons and OperatorPolicy on the new spoke if they are not already present."
+run_clusteradm addon enable \
+    --names governance-policy-framework \
+    --namespace open-cluster-management-agent-addon \
+    --clusters "${SPOKE_CLUSTERS[2]}"
+run_clusteradm addon enable \
+    --names config-policy-controller \
+    --namespace open-cluster-management-agent-addon \
+    --clusters "${SPOKE_CLUSTERS[2]}"
+run_kubectl hub wait --for=condition=Available \
+    "managedclusteraddon/governance-policy-framework" \
+    -n "${SPOKE_CLUSTERS[2]}" --timeout=10m
+run_kubectl hub wait --for=condition=Available \
+    "managedclusteraddon/config-policy-controller" \
+    -n "${SPOKE_CLUSTERS[2]}" --timeout=10m
+run_kubectl hub annotate "managedclusteraddon/config-policy-controller" \
+    -n "${SPOKE_CLUSTERS[2]}" operator-policy-disabled=false --overwrite
+run_kubectl hub wait --for=condition=Available \
+    "managedclusteraddon/config-policy-controller" \
+    -n "${SPOKE_CLUSTERS[2]}" --timeout=10m
+demo_comment "Wait for the OperatorPolicy to install the mesh operator on the new member."
+run_kubectl hub wait --for=jsonpath='{.status.compliant}'=Compliant \
+    "policy/${OPERATOR_POLICY_NAME}" -n "${OPERATOR_POLICY_NAMESPACE}" --timeout="${DEMO_TIMEOUT}"
 demo_comment "Check the MultiClusterMesh while ${SPOKE_CLUSTERS[2]} joins the mesh."
 run_kubectl hub get "multiclustermesh/${MESH_NAME}" -n "${MESH_NAMESPACE}"
 run_kubectl hub wait --for=condition=Ready=True "multiclustermesh/${MESH_NAME}" \
@@ -446,8 +566,8 @@ run_kubectl hub wait --for=condition=Ready=True "multiclustermesh/${MESH_NAME}" 
 run_kubectl hub get "multiclustermesh/${MESH_NAME}" -n "${MESH_NAMESPACE}"
 demo_wait
 
-demo_title "Step 8: Scaling out to another cluster - Phase 2: Configure Istio on ${SPOKE_CLUSTERS[2]}"
-demo_comment "The add-on has bootstrapped OSSM on the new member. Install and configure Istio there as the customer."
+demo_title "Step 9: Scaling out to another cluster - Phase 2: Configure Istio on ${SPOKE_CLUSTERS[2]}"
+demo_comment "The operator and add-on have prepared the new member. Install and configure Istio there as the customer."
 configure_istio_spoke "${SPOKE_CLUSTERS[2]}" network-c
 #demo_comment "Verify that all three control planes can see each other."
 #run_istioctl_remote_clusters "${SPOKE_CLUSTERS[0]}"
@@ -455,7 +575,7 @@ configure_istio_spoke "${SPOKE_CLUSTERS[2]}" network-c
 #run_istioctl_remote_clusters "${SPOKE_CLUSTERS[2]}"
 demo_wait
 
-demo_title "Step 8: Scaling out to another cluster - Phase 3: Deploy Bookinfo v3 and verify traffic"
+demo_title "Step 9: Scaling out to another cluster - Phase 3: Deploy Bookinfo v3 and verify traffic"
 demo_comment "Deploy the third reviews version on the new member, then call the same shared service to see all three clusters answer."
 deploy_bookinfo_version "${SPOKE_CLUSTERS[2]}" v3
 show_bookinfo_traffic "Expected: the shared reviews service can now answer with reviews-v1, reviews-v2, or reviews-v3 from the three clusters."
@@ -464,7 +584,7 @@ show_bookinfo_productpage
 demo_wait
 
 if [[ "${PLATFORM}" == "openshift" ]]; then
-    demo_title "Step 9: Opening the console"
+    demo_title "Step 10: Opening the console"
     demo_comment "Install the OSSM Console plugin and open the ACM hub console so you can continue exploring the mesh from the UI."
     demo_comment "Install the OSSM Console operator on the ACM hub."
     run_kubectl_apply hub hack/demo/kiali-ossm-subscription.yaml

@@ -3,12 +3,13 @@
 #   MESH_NAME: use the MultiClusterMesh CR name (used as CA trust domain)
 #   CLUSTER_NAME: the managed cluster name
 #   NETWORK: must match the topology.istio.io/network label on the control plane namespace
+#   CP_NAMESPACE: status.controlPlaneNamespace from the MultiClusterMesh
 apiVersion: sailoperator.io/v1
 kind: Istio
 metadata:
   name: default
 spec:
-  namespace: istio-system
+  namespace: ${CP_NAMESPACE}
   values:
     meshConfig:
       trustDomain: ${MESH_NAME}
