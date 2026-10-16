@@ -13,7 +13,7 @@ For production, use your own configurations (e.g., your organization's CA instea
 
 - An OCM hub cluster with managed clusters registered
 - [cert-manager] installed on the hub cluster (mints per-cluster intermediate CAs for mTLS trust)
-- [governance-policy-framework][gpf] installed on the hub cluster (installs the service mesh operator via OperatorPolicy)
+- A service mesh operator installed on the managed clusters. This guide uses [OperatorPolicy] from the [governance-policy-framework][gpf]; any other installation method is fine.
 - [`ManifestWorkReplicaSet`][mwrs] feature gate enabled on the hub's `ClusterManager`
 
 ## Step 1: Install the Addon

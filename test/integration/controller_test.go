@@ -761,6 +761,42 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 				})
 			})
 
+			It("should preserve remote secrets while all selected ManagedClusters are missing and refresh them after restoration", func() {
+				var originalManifests []workv1.Manifest
+				expectManifestWorkReplicaSetContent(meshName, testNs, func(g Gomega, mwrset *workv1alpha1.ManifestWorkReplicaSet) {
+					g.Expect(mwrset.Spec.ManifestWorkTemplate.Workload.Manifests).To(HaveLen(1))
+					originalManifests = mwrset.Spec.ManifestWorkTemplate.Workload.Manifests
+				})
+
+				util.DeleteResource(ctx, k8sClient, &clusterv1.ManagedCluster{}, clusterName, "")
+				expectMeshConditionReason(meshName, testNs, meshv1alpha1.ConditionReady, meshv1alpha1.ReasonNoClustersSelected)
+
+				By("preserving the template after reconciliation observes the missing ManagedCluster")
+				Consistently(func(g Gomega) {
+					mwrset := &workv1alpha1.ManifestWorkReplicaSet{}
+					g.Expect(k8sClient.Get(ctx, key.Of(meshName, testNs), mwrset)).To(Succeed())
+					g.Expect(mwrset.Spec.ManifestWorkTemplate.Workload.Manifests).To(Equal(originalManifests))
+				}).Should(Succeed())
+
+				By("restoring the ManagedCluster and refreshing its discovery credentials")
+				util.CreateManagedCluster(ctx, k8sClient, clusterName)
+				simulateMsaTokenSecretRotation(mesh, clusterName)
+				expectManifestWorkReplicaSetContent(meshName, testNs, func(g Gomega, mwrset *workv1alpha1.ManifestWorkReplicaSet) {
+					manifests := mwrset.Spec.ManifestWorkTemplate.Workload.Manifests
+					g.Expect(manifests).To(HaveLen(1))
+					secret := &corev1.Secret{}
+					g.Expect(unmarshalManifest(manifests[0], secret)).To(Succeed())
+					g.Expect(string(secret.Data[clusterName])).To(ContainSubstring("new-token-data"))
+				})
+
+				By("removing the secret when the missing cluster leaves the PlacementDecision")
+				util.DeleteResource(ctx, k8sClient, &clusterv1.ManagedCluster{}, clusterName, "")
+				util.UpdatePlacementDecision(ctx, k8sClient, testPlacement, testNs)
+				expectManifestWorkReplicaSetContent(meshName, testNs, func(g Gomega, mwrset *workv1alpha1.ManifestWorkReplicaSet) {
+					g.Expect(mwrset.Spec.ManifestWorkTemplate.Workload.Manifests).To(BeEmpty())
+				})
+			})
+
 			It("should drop one ManifestWorkReplicaSet manifest when removing one cluster from the PlacementDecision", func() {
 				cluster2Name := util.UniqueName("cluster")
 				util.CreateManagedCluster(ctx, k8sClient, cluster2Name)

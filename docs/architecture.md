@@ -41,7 +41,7 @@ This gives the user full control over cluster selection using Placement's rich p
 
 The addon watches both Placements and PlacementDecisions. It creates resources for selected clusters whose ManagedCluster objects can be read, while cleanup preserves names still present in decisions even if their ManagedCluster objects have disappeared. A mismatch between the decision-entry count and Placement status delays reconciliation.
 
-Each mesh has its own Certificates, ManagedServiceAccounts, namespace ManifestWorks, istio-reader RBAC, and ManifestWorkReplicaSet. The ReplicaSet contains the available remote secrets and references the user's Placement; OCM distributes its template to the selected clusters, including each source cluster itself.
+Each mesh has its own Certificates, ManagedServiceAccounts, namespace ManifestWorks, istio-reader RBAC, and ManifestWorkReplicaSet. The ReplicaSet contains the available remote secrets and references the user's Placement; OCM distributes its template to the selected clusters, including each source cluster itself. Existing remote secrets remain in the template while their source clusters are still selected and replacements cannot yet be built because their ManagedCluster objects, API endpoints, or discovery tokens are unavailable. Updates for clusters with available prerequisites continue during this gap.
 
 ## Readiness and Cleanup
 

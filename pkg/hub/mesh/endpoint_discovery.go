@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	_ "embed"
+	"encoding/json"
 	"fmt"
 	"maps"
 
@@ -156,8 +157,12 @@ func (r *Reconciler) ensureManagedServiceAccountUpdated(ctx context.Context, mes
 }
 
 // ensureRemoteSecretDistribution builds Istio remote discovery secrets from ManagedServiceAccount tokens and distributes them via ManifestWorkReplicaSet.
-func (r *Reconciler) ensureRemoteSecretDistribution(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, clusters []clusterv1.ManagedCluster) error {
-	manifests := []workv1.Manifest{}
+func (r *Reconciler) ensureRemoteSecretDistribution(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, clusters []clusterv1.ManagedCluster, desiredClusters []string) error {
+	manifestsByCluster := make(map[string]workv1.Manifest, len(desiredClusters))
+	secretsToPreserve := make(map[string]string, len(desiredClusters))
+	for _, name := range desiredClusters {
+		secretsToPreserve["istio-remote-secret-"+name] = name
+	}
 	for _, cluster := range clusters {
 		if len(cluster.Spec.ManagedClusterClientConfigs) == 0 {
 			klog.V(4).Infof("no API endpoint found, skipping secret distribution for cluster %s", cluster.Name)
@@ -181,9 +186,10 @@ func (r *Reconciler) ensureRemoteSecretDistribution(ctx context.Context, mesh *m
 		if err != nil {
 			return fmt.Errorf("failed to build Istio remote secret for cluster %s: %w", cluster.Name, err)
 		}
-		manifests = append(manifests, workv1.Manifest{
+		manifestsByCluster[cluster.Name] = workv1.Manifest{
 			RawExtension: runtime.RawExtension{Object: remoteSecret},
-		})
+		}
+		delete(secretsToPreserve, remoteSecret.Name)
 	}
 
 	mwrset := &workv1alpha1.ManifestWorkReplicaSet{
@@ -191,6 +197,30 @@ func (r *Reconciler) ensureRemoteSecretDistribution(ctx context.Context, mesh *m
 	}
 
 	result, err := controllerutil.CreateOrUpdate(ctx, r.Client, mwrset, func() error {
+		// During re-import, the ManagedCluster may return before its endpoint or
+		// token is ready. Preserve selected clusters' credentials until replaced.
+		if len(secretsToPreserve) > 0 {
+			for _, manifest := range mwrset.Spec.ManifestWorkTemplate.Workload.Manifests {
+				data, err := json.Marshal(manifest)
+				if err != nil {
+					return fmt.Errorf("failed to marshal existing remote secret manifest: %w", err)
+				}
+				secret := &corev1.Secret{}
+				if err := json.Unmarshal(data, secret); err != nil {
+					return fmt.Errorf("failed to unmarshal existing remote secret manifest: %w", err)
+				}
+				if name, ok := secretsToPreserve[secret.Name]; ok &&
+					secret.APIVersion == "v1" && secret.Kind == "Secret" && secret.Namespace == mesh.GetControlPlaneNamespace() {
+					manifestsByCluster[name] = manifest
+				}
+			}
+		}
+		manifests := make([]workv1.Manifest, 0, len(desiredClusters))
+		for _, name := range desiredClusters {
+			if manifest, ok := manifestsByCluster[name]; ok {
+				manifests = append(manifests, manifest)
+			}
+		}
 		if mwrset.Labels == nil {
 			mwrset.Labels = make(map[string]string)
 		}

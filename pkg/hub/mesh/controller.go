@@ -315,7 +315,7 @@ func (r *Reconciler) doReconcile(ctx context.Context, mesh *meshv1alpha1.MultiCl
 		return fmt.Errorf("failed to cleanup ManagedServiceAccounts: %w", err)
 	}
 
-	if err := r.ensureRemoteSecretDistribution(ctx, mesh, clusters); err != nil {
+	if err := r.ensureRemoteSecretDistribution(ctx, mesh, clusters, desiredClusters); err != nil {
 		return fmt.Errorf("failed to ensure ManifestWorkReplicaSet for mesh %s/%s: %w", mesh.Namespace, mesh.Name, err)
 	}
 
