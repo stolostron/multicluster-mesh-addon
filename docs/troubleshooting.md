@@ -83,7 +83,9 @@ If the Placement exists and has selected zero clusters, the mesh reports `NoClus
 
 ### Mesh shows ClustersNotReady
 
-When trust is configured (cert-manager issuer is set), the mesh waits for the cacerts ManifestWork to be `Applied` and `Available` on every managed cluster before becoming `Ready`.
+When trust is configured (cert-manager issuer is set), mesh waits for cacerts ManifestWork to report `Applied=True` for its current generation and `Available=True` on every managed cluster before becoming `Ready`.
+After certificate rotation, mesh can temporarily report `ClustersNotReady` until updated trust material is applied.
+Existing traffic can continue using valid older material during this interval.
 
 Check the per-cluster `TrustDistributed` condition in the mesh status:
 
@@ -91,7 +93,7 @@ Check the per-cluster `TrustDistributed` condition in the mesh status:
 kubectl get multiclustermesh -n <mesh-namespace> <mesh-name> -o jsonpath='{.status.clusterStatus}' | jq .
 ```
 
-If a cluster shows `CacertsPending`, check:
+If a cluster shows `DistributionPending`, check:
 
 1. **Certificate created and ready?**
    ```bash
@@ -101,16 +103,19 @@ If a cluster shows `CacertsPending`, check:
    ```bash
    kubectl get manifestwork -n <cluster-name> -l 'mesh.open-cluster-management.io/mesh-name=<mesh-name>,mesh.open-cluster-management.io/mesh-namespace=<mesh-namespace>'
    ```
-3. **ManifestWork applied on the spoke?** Check `.status.conditions` on the ManifestWork for `Applied` and `Available`.
+3. **ManifestWork applied and Secret available on spoke?** Check `.status.conditions` for `Applied=True` and `Available=True`. Applied condition's `observedGeneration` must equal ManifestWork's `metadata.generation`.
 4. **Work agent running on the managed cluster?** The OCM work agent must be running to apply ManifestWorks.
 
 ### Mesh is Ready but discovery or Istio is not working
 
 Ready does not check operator installation, Istio health, discovery-token availability, remote-secret rollout, or cluster reachability. Without an issuer, it does not wait for any spoke work to be applied. Selected names whose ManagedCluster objects are missing are excluded from readiness checks when other clusters still resolve.
 
-### No cacerts secret on spoke clusters
+### No cacerts secret on spoke clusters (TrustDistributed=False)
 
-The addon creates cert-manager `Certificate` resources on the hub, which produce `Secret` resources that get distributed to spokes via `ManifestWork` resources.
+When `spec.security.trust` is configured, addon creates cert-manager `Certificate` resources on hub.
+These produce `Secret` resources distributed to spokes via `ManifestWork` resources.
+
+`TrustDistributed` tracks whether this chain completed for each spoke cluster.
 
 Check each step:
 
@@ -125,12 +130,16 @@ kubectl get certificate -n <mesh-namespace> -o jsonpath='{.items[*].status.condi
 kubectl get issuer -n <mesh-namespace>
 # Or if using a ClusterIssuer:
 kubectl get clusterissuer
+
+# Cacerts ManifestWork applied to the spoke?
+kubectl get manifestwork -n <cluster-name> multicluster-mesh-cacerts-<mesh-namespace>.<mesh-name> -o yaml
 ```
 
 Common causes:
 - cert-manager not installed or not running on the hub.
 - The `Issuer` (or `ClusterIssuer`) referenced in `spec.security.trust.certManager.issuerRef` doesn't exist or isn't ready.
 - cert-manager failed to issue the certificate (check cert-manager controller logs for details).
+- The cacerts ManifestWork exists but hasn't been applied on the spoke (e.g., the control plane namespace doesn't exist on the spoke cluster).
 
 ### Mesh shows PlacementNotFound
 

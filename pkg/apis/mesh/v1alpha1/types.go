@@ -35,6 +35,11 @@ func (m *MultiClusterMesh) GetTrustDomain() string {
 	return m.Name
 }
 
+// HasTrustConfigured returns true if trust distribution is configured.
+func (m *MultiClusterMesh) HasTrustConfigured() bool {
+	return m.Spec.Security.Trust.CertManager.IssuerRef.Name != ""
+}
+
 // GetControlPlaneNamespace returns the auto-derived control plane namespace.
 // The namespace is deterministic and unique per mesh:
 // istio-system-{meshName (truncated to 39 chars)}-{first 10 chars of SHA-256("meshNamespace/meshName")}
@@ -78,6 +83,16 @@ func (m *MultiClusterMesh) SetClusterCondition(clusterName string, conditionType
 		ObservedGeneration: m.Generation,
 		Message:            fmt.Sprintf(messageFmt, args...),
 	})
+}
+
+// RemoveClusterCondition removes a condition from a cluster's status, if present.
+func (m *MultiClusterMesh) RemoveClusterCondition(clusterName string, conditionType string) {
+	for i := range m.Status.ClusterStatus {
+		if m.Status.ClusterStatus[i].ClusterName == clusterName {
+			meta.RemoveStatusCondition(&m.Status.ClusterStatus[i].Conditions, conditionType)
+			return
+		}
+	}
 }
 
 func (m *MultiClusterMesh) getOrCreateClusterStatus(clusterName string) *ClusterMeshStatus {
@@ -176,18 +191,17 @@ const (
 	// ReasonNoClustersSelected indicates the Placement selected zero clusters
 	ReasonNoClustersSelected = "NoClustersSelected"
 
-	// ReasonClustersNotReady indicates not all clusters have trust distributed
+	// ReasonClustersNotReady indicates that one or more clusters are not ready
 	ReasonClustersNotReady = "ClustersNotReady"
 
-	// ConditionTrustDistributed indicates whether cacerts have been
-	// distributed to this cluster (per-cluster condition)
+	// ConditionTrustDistributed indicates whether trust has been distributed to a cluster
 	ConditionTrustDistributed = "TrustDistributed"
 
-	// ReasonCacertsApplied indicates cacerts are distributed and available on the cluster
-	ReasonCacertsApplied = "CacertsApplied"
+	// ReasonDistributed indicates trust has been distributed to the cluster
+	ReasonDistributed = "Distributed"
 
-	// ReasonCacertsPending indicates cacerts have not yet been distributed to the cluster
-	ReasonCacertsPending = "CacertsPending"
+	// ReasonDistributionPending indicates trust distribution is in progress
+	ReasonDistributionPending = "DistributionPending"
 )
 
 // MultiClusterMeshStatus defines the observed state of MultiClusterMesh
