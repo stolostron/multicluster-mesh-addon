@@ -179,30 +179,36 @@ var _ = Describe("MultiClusterMesh lifecycle", Ordered, func() {
 		Expect(rootPool.AppendCertsFromPEM(hubRootCert)).To(BeTrue(), "failed to parse hub root CA")
 
 		for cluster, spokeClient := range spokeClients {
-			Step("Verifying cacerts secret on %s", cluster)
+			Step("Verifying cacerts secret and certificate chain on %s", cluster)
 			secret := &corev1.Secret{}
+			var cert *x509.Certificate
 			Eventually(func(g Gomega) {
 				g.Expect(spokeClient.Get(ctx, key.Of(meshcontroller.CacertsSecretName, cpNamespace), secret)).To(Succeed())
 				g.Expect(secret.Type).To(Equal(corev1.SecretTypeTLS))
 				g.Expect(secret.Data["tls.crt"]).NotTo(BeEmpty(), "tls.crt")
 				g.Expect(secret.Data["tls.key"]).NotTo(BeEmpty(), "tls.key")
 				g.Expect(secret.Data["ca.crt"]).To(Equal(hubRootCert), "ca.crt vs hub root CA")
-			}).WithTimeout(2 * time.Minute).Should(Succeed())
+
+				block, _ := pem.Decode(secret.Data["tls.crt"])
+				g.Expect(block).NotTo(BeNil(), "failed to decode tls.crt PEM")
+
+				var err error
+				cert, err = x509.ParseCertificate(block.Bytes)
+				g.Expect(err).NotTo(HaveOccurred())
+
+				// cert-manager stamps NotBefore from the hub clock without backdating, so a
+				// freshly issued intermediate can look not-yet-valid to a test runner whose
+				// clock lags the hub. Retrying lets the local clock catch up.
+				_, err = cert.Verify(x509.VerifyOptions{Roots: rootPool})
+				g.Expect(err).NotTo(HaveOccurred(), "intermediate CA verification failed")
+			}).WithTimeout(2 * time.Minute).WithPolling(time.Second).Should(Succeed())
 			track(cluster, spokeClient, secret)
 
-			Step("Verifying certificate chain and subject on %s", cluster)
-			block, _ := pem.Decode(secret.Data["tls.crt"])
-			Expect(block).NotTo(BeNil(), "failed to decode tls.crt PEM")
-			cert, err := x509.ParseCertificate(block.Bytes)
-			Expect(err).NotTo(HaveOccurred())
-
+			Step("Verifying certificate subject on %s", cluster)
 			Expect(cert.IsCA).To(BeTrue())
 			Expect(cert.Subject.CommonName).To(Equal("Istio CA"))
 			Expect(cert.Subject.Organization).To(ConsistOf(mesh.GetTrustDomain()))
 			Expect(cert.Subject.OrganizationalUnit).To(ConsistOf(cluster))
-
-			_, err = cert.Verify(x509.VerifyOptions{Roots: rootPool})
-			Expect(err).NotTo(HaveOccurred(), "intermediate CA not signed by hub root CA")
 		}
 	})
 
