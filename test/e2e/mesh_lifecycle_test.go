@@ -200,7 +200,7 @@ var _ = Describe("MultiClusterMesh lifecycle", Ordered, func() {
 				// freshly issued intermediate can look not-yet-valid to a test runner whose
 				// clock lags the hub. Retrying lets the local clock catch up.
 				_, err = cert.Verify(x509.VerifyOptions{Roots: rootPool})
-				g.Expect(err).NotTo(HaveOccurred(), "intermediate CA not signed by hub root CA")
+				g.Expect(err).NotTo(HaveOccurred(), "intermediate CA verification failed")
 			}).WithTimeout(2 * time.Minute).WithPolling(time.Second).Should(Succeed())
 			track(cluster, spokeClient, secret)
 
