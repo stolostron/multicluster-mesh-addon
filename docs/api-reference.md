@@ -25,34 +25,45 @@ API group: `mesh.open-cluster-management.io/v1alpha1`
 |-------|-------------|
 | `status.controlPlaneNamespace` | Auto-derived control plane namespace: `istio-system-{mesh name truncated to 39 characters}-{first 10 hex characters of SHA-256(namespace/name)}` |
 | `status.conditions` | Mesh-level conditions (see below) |
-| `status.clusterStatus` | Entries are created for resolved clusters, including when no issuer is configured. Existing entries are retained while their names remain selected, even if their ManagedCluster objects are missing. `TrustDistributed` is added or updated only while an issuer is configured; removing the issuer does not clear an existing trust condition. |
+| `status.clusterStatus` | Entries are created for resolved clusters, including when no issuer is configured. Existing entries are retained while their names remain selected, even if their ManagedCluster objects are missing. `TrustDistributed` is present only while an issuer is configured; removing issuer clears existing trust conditions. |
 
 ### Status Conditions
 
+Mesh-level `Ready` requires all applicable per-cluster conditions to be True.
+Optional conditions affect `Ready` only when corresponding feature is configured.
+
 | Condition | Scope | Meaning |
 |-----------|-------|---------|
-| `Ready` | Mesh | After successful reconciliation, `True` when every resolved cluster's cacerts ManifestWork reports `Applied=True` and `Available=True`. |
-| `TrustDistributed` | Per-cluster | The controller's last observation of the cacerts ManifestWork's `Applied` and `Available` conditions. Updated only while an issuer is configured. |
+| `Ready` | Mesh | Every resolved cluster reports `DiscoveryDistributed=True` and, when trust is configured, `TrustDistributed=True`. |
+| `TrustDistributed` | Per-cluster | Latest trust material has been distributed to this cluster and remains available. Present only when `spec.security.trust` is configured. |
+| `DiscoveryDistributed` | Per-cluster | Cluster has an API endpoint, discovery RBAC is applied and available, and current remote secrets are distributed and available on all selected clusters. |
 
 **Reason values** (appear in a condition's `.reason`):
 
 | Reason | Scope | Description |
 |--------|-------|-------------|
 | `AllClustersReady` | Mesh | All clusters are ready |
-| `ClustersNotReady` | Mesh | One or more clusters do not yet have trust distributed |
+| `ClustersNotReady` | Mesh | One or more clusters are not ready |
 | `PlacementNotFound` | Mesh | The referenced Placement does not exist. Existing mesh plumbing is left in place. |
 | `NoClustersSelected` | Mesh | The Placement exists. If it selected zero clusters, mesh plumbing is removed. If its decisions still name clusters but every corresponding ManagedCluster object is missing, namespace ManifestWorks and ManagedServiceAccounts for those names are kept. |
 | `ReconcileError` | Mesh | An error occurred during reconciliation |
-| `CacertsApplied` | Per-cluster | Cacerts are distributed and available on the cluster |
-| `CacertsPending` | Per-cluster | Cacerts have not yet been distributed to the cluster |
+| `DistributionPending` | Per-cluster | Trust or discovery distribution is pending or unavailable |
+| `Distributed` | Per-cluster | Trust or discovery resources are distributed and available |
+| `NoAPIEndpoint` | Per-cluster | Cluster has no API endpoint configured |
+
+During certificate rotation, `TrustDistributed=False` with reason `DistributionPending` and mesh `Ready=False` until updated trust material is distributed and available.
+Existing traffic can continue using valid older trust material while distribution is pending.
+
+During discovery-token rotation, `DiscoveryDistributed=False` with reason `DistributionPending` and mesh `Ready=False` until updated credentials are distributed and available on all selected clusters.
+The status updates can lag briefly while OCM reconciles distribution.
 
 ### Readiness Limits
 
-`Ready` does not verify the service mesh operator, Istio control planes, discovery-token availability, remote-secret rollout, or cross-cluster connectivity. Check those separately before using the mesh.
+Ready reports trust and discovery resource distribution. It does not verify operator or Istio health, authentication works with distributed credentials, or test cross-cluster connectivity.
 
-The current controller checks only resolved ManagedCluster objects and accepts true ManifestWork conditions without comparing their `observedGeneration` with the work's generation. A partially missing selection or an updated cacerts payload can therefore leave `Ready=True` before all desired work is current.
+Controller checks only resolved ManagedCluster objects, so partially missing selection can still report `Ready=True`.
 
-Clearing the issuer name deletes Certificates but retains cacerts ManifestWorks on still-selected clusters and does not clear earlier `TrustDistributed` conditions. Certificate Secret retention depends on cert-manager configuration. See [lifecycle behavior](dev/design.md#lifecycle-events) and [troubleshooting](troubleshooting.md).
+Clearing the issuer name deletes Certificates but retains cacerts ManifestWorks on still-selected clusters and clears earlier `TrustDistributed` conditions. Certificate Secret retention depends on cert-manager configuration. See [lifecycle behavior](dev/design.md#lifecycle-events) and [troubleshooting](troubleshooting.md).
 
 <!-- Reference links -->
 [Placement]: https://open-cluster-management.io/docs/concepts/content-placement/placement/

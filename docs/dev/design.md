@@ -262,9 +262,25 @@ Certificate rotation is handled automatically by cert-manager. Updated certifica
 
 Deleting a Certificate does not explicitly delete its hub Secret. cert-manager retains that Secret by default; installations using `--enable-certificate-owner-ref` can garbage-collect it with the Certificate. Reselecting a cluster can reuse valid retained material and does not guarantee a fresh intermediate CA. See [cert-manager Secret cleanup][cert-secret-cleanup].
 
-### Readiness
+### Trust Status
 
-Each resolved cluster is recorded in `status.clusterStatus`. Existing entries are retained while their names remain selected, even if their ManagedCluster objects are missing. When trust is configured, the mesh does not become `Ready` until the cacerts ManifestWork is confirmed `Applied` and `Available` on every managed cluster. This prevents istiod from starting before the intermediate CA is in place (which would cause it to fall back to a self-signed CA, breaking cross-cluster mTLS). Each cluster then reports a per-cluster `TrustDistributed` condition with reason `CacertsApplied` or `CacertsPending`. Without an issuer, the controller records cluster entries without adding or updating trust conditions. Removing the issuer does not clear an existing `TrustDistributed` condition.
+Each resolved cluster appears in `status.clusterStatus`.
+Existing entries remain while their names stay selected, even if their ManagedCluster objects are missing.
+
+When trust is configured (`spec.security.trust`), controller reports per-cluster `TrustDistributed` condition:
+
+| Status | Reason | When |
+|---|---|---|
+| False | `DistributionPending` | Latest trust material has not yet been distributed to cluster or is unavailable |
+| True | `Distributed` | Latest trust material is distributed and available on cluster |
+
+Mesh-level `Ready` requires `DiscoveryDistributed=True` for every resolved cluster, and `TrustDistributed=True` for every cluster when trust is configured.
+This lets users wait for intermediate CA distribution before starting istiod, which otherwise can fall back to self-signed CA and break cross-cluster mTLS.
+During certificate rotation, affected cluster reports `DistributionPending` until updated trust material is distributed and available.
+Mesh reports `Ready=False` while any cluster is pending.
+This status tracks distribution of latest desired trust material; existing traffic can continue using valid older material.
+When trust is unconfigured, `TrustDistributed` is omitted.
+Removing issuer clears existing trust conditions, including retained entries for missing ManagedClusters.
 
 ## Endpoint Discovery
 
@@ -276,6 +292,27 @@ For multi-primary mesh topologies, each control plane needs API access to its pe
 4. Distributes remote secrets to all peer clusters in the mesh via [ManifestWorkReplicaSet], using the same Placement referenced by the mesh
 5. Token rotation is handled automatically by the OCM platform
 6. When a cluster is removed from the mesh, its MSA is deleted and its remote secrets are removed from all peers
+
+### Discovery Status
+
+Controller reports per-cluster `DiscoveryDistributed` condition that tracks the distribution of endpoint discovery resources:
+
+| Status | Reason | When |
+|---|---|---|
+| False | `NoAPIEndpoint` | The cluster has no API endpoint configured |
+| False | `DistributionPending` | Discovery resources are pending distribution or unavailable |
+| True | `Distributed` | Discovery resources are distributed and available |
+
+Distribution covers all clusters selected by the mesh's `Placement`.
+A cluster must have an API endpoint and its remote secret included in the `ManifestWorkReplicaSet` template.
+During token rotation, discovery status is reported as pending until updated credentials reach every selected cluster.
+The status can briefly lag while OCM reconciles distribution.
+
+Its istio-reader `ManifestWork` must report `Applied=True` for the current generation and `Available=True`.
+Remote-secret distribution requires the `ManifestWorkReplicaSet` to report both `PlacementRolledOut=True` and `ManifestworkApplied=True`.
+
+Each remote secret has a CEL rule reporting `Progressing=False` because secrets need no rollout after application.
+This lets OCM verify current-generation application through its rollout condition, while `ManifestworkApplied` tracks availability.
 
 ## Lifecycle Events
 

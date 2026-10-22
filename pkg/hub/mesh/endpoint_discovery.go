@@ -13,6 +13,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/tools/clientcmd"
@@ -20,6 +21,7 @@ import (
 	"k8s.io/client-go/tools/clientcmd/api/latest"
 	"k8s.io/klog/v2"
 	clusterv1 "open-cluster-management.io/api/cluster/v1"
+	clusterv1alpha1 "open-cluster-management.io/api/cluster/v1alpha1"
 	workv1 "open-cluster-management.io/api/work/v1"
 	workv1alpha1 "open-cluster-management.io/api/work/v1alpha1"
 	msav1beta1 "open-cluster-management.io/managed-serviceaccount/apis/authentication/v1beta1"
@@ -57,6 +59,11 @@ func EndpointDiscoveryName(mesh *meshv1alpha1.MultiClusterMesh) string {
 // IstioReaderName is the name for RBAC granting the "endpoint discovery" identity read access.
 func IstioReaderName(mesh *meshv1alpha1.MultiClusterMesh) string {
 	return fmt.Sprintf("istio-reader-%s.%s", mesh.Namespace, mesh.Name)
+}
+
+// RemoteSecretName returns the name of the Istio remote discovery secret for a cluster.
+func RemoteSecretName(clusterName string) string {
+	return "istio-remote-secret-" + clusterName
 }
 
 // IstioReaderManifestWorkName is the addon-prefixed name of the ManifestWork that delivers the istio-reader RBAC to a spoke.
@@ -161,7 +168,7 @@ func (r *Reconciler) ensureRemoteSecretDistribution(ctx context.Context, mesh *m
 	manifestsByCluster := make(map[string]workv1.Manifest, len(desiredClusters))
 	secretsToPreserve := make(map[string]string, len(desiredClusters))
 	for _, name := range desiredClusters {
-		secretsToPreserve["istio-remote-secret-"+name] = name
+		secretsToPreserve[RemoteSecretName(name)] = name
 	}
 	for _, cluster := range clusters {
 		if len(cluster.Spec.ManagedClusterClientConfigs) == 0 {
@@ -196,17 +203,13 @@ func (r *Reconciler) ensureRemoteSecretDistribution(ctx context.Context, mesh *m
 		ObjectMeta: metav1.ObjectMeta{Name: mesh.Name, Namespace: mesh.Namespace},
 	}
 
-	result, err := controllerutil.CreateOrUpdate(ctx, r.Client, mwrset, func() error {
+	result, err := controllerutil.CreateOrPatch(ctx, r.Client, mwrset, func() error {
 		// During re-import, the ManagedCluster may return before its endpoint or
 		// token is ready. Preserve selected clusters' credentials until replaced.
 		if len(secretsToPreserve) > 0 {
 			for _, manifest := range mwrset.Spec.ManifestWorkTemplate.Workload.Manifests {
-				data, err := json.Marshal(manifest)
-				if err != nil {
-					return fmt.Errorf("failed to marshal existing remote secret manifest: %w", err)
-				}
 				secret := &corev1.Secret{}
-				if err := json.Unmarshal(data, secret); err != nil {
+				if err := unmarshalManifest(manifest, secret); err != nil {
 					return fmt.Errorf("failed to unmarshal existing remote secret manifest: %w", err)
 				}
 				if name, ok := secretsToPreserve[secret.Name]; ok &&
@@ -216,9 +219,27 @@ func (r *Reconciler) ensureRemoteSecretDistribution(ctx context.Context, mesh *m
 			}
 		}
 		manifests := make([]workv1.Manifest, 0, len(desiredClusters))
+		manifestConfigs := make([]workv1.ManifestConfigOption, 0, len(desiredClusters))
 		for _, name := range desiredClusters {
 			if manifest, ok := manifestsByCluster[name]; ok {
 				manifests = append(manifests, manifest)
+
+				// Use MWRS rollout status to distinguish rotated credentials from still-available old Secrets.
+				// Secrets need no rollout after application, so we use a simple Progressing=False condition here.
+				// This lets MWRS report PlacementRolledOut=True once the latest Secrets are applied on all selected clusters.
+				manifestConfigs = append(manifestConfigs, workv1.ManifestConfigOption{
+					ResourceIdentifier: workv1.ResourceIdentifier{
+						Resource:  "secrets",
+						Name:      RemoteSecretName(name),
+						Namespace: mesh.GetControlPlaneNamespace(),
+					},
+					FeedbackScrapeType: workv1.FeedbackWatchType,
+					ConditionRules: []workv1.ConditionRule{{
+						Condition:      workv1.WorkProgressing,
+						Type:           workv1.CelConditionExpressionsType,
+						CelExpressions: []string{"false"},
+					}},
+				})
 			}
 		}
 		if mwrset.Labels == nil {
@@ -227,8 +248,16 @@ func (r *Reconciler) ensureRemoteSecretDistribution(ctx context.Context, mesh *m
 		mwrset.Labels[ManagedByLabel] = ManagedByValue
 		mwrset.Labels[MeshNameLabel] = mesh.Name
 		mwrset.Labels[MeshNamespaceLabel] = mesh.Namespace
-		mwrset.Spec.PlacementRefs = []workv1alpha1.LocalPlacementReference{{Name: mesh.Spec.PlacementRef.Name}}
-		mwrset.Spec.ManifestWorkTemplate = workv1.ManifestWorkSpec{Workload: workv1.ManifestsTemplate{Manifests: manifests}}
+
+		// Keep the API-defaulted rollout type to avoid reconcile loops.
+		mwrset.Spec.PlacementRefs = []workv1alpha1.LocalPlacementReference{{
+			Name:            mesh.Spec.PlacementRef.Name,
+			RolloutStrategy: clusterv1alpha1.RolloutStrategy{Type: clusterv1alpha1.All},
+		}}
+		mwrset.Spec.ManifestWorkTemplate = workv1.ManifestWorkSpec{
+			Workload:        workv1.ManifestsTemplate{Manifests: manifests},
+			ManifestConfigs: manifestConfigs,
+		}
 		return controllerutil.SetControllerReference(mesh, mwrset, r.Scheme)
 	})
 
@@ -284,7 +313,7 @@ func buildIstioRemoteSecret(tokenSecret *corev1.Secret, clusterName, server, nam
 	return &corev1.Secret{
 		TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "Secret"},
 		ObjectMeta: metav1.ObjectMeta{
-			Name:        "istio-remote-secret-" + clusterName,
+			Name:        RemoteSecretName(clusterName),
 			Namespace:   namespace,
 			Annotations: map[string]string{"networking.istio.io/cluster": clusterName},
 			Labels:      map[string]string{"istio/multiCluster": "true"},
@@ -309,4 +338,50 @@ func buildIstioReaderManifestWork(mesh *meshv1alpha1.MultiClusterMesh, cluster *
 	}}
 
 	return buildMeshOwnedManifestWork(mesh, cluster.Name, IstioReaderManifestWorkName(mesh), cr, crb)
+}
+
+func (r *Reconciler) updateDiscoveryStatusCondition(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, cluster *clusterv1.ManagedCluster, mwrset *workv1alpha1.ManifestWorkReplicaSet) (ready bool, err error) {
+	if len(cluster.Spec.ManagedClusterClientConfigs) == 0 {
+		mesh.SetClusterCondition(cluster.Name, meshv1alpha1.ConditionDiscoveryDistributed, metav1.ConditionFalse,
+			meshv1alpha1.ReasonNoAPIEndpoint, "Cluster has no API endpoint configured")
+		return false, nil
+	}
+
+	rbacWork := &workv1.ManifestWork{}
+	if err := r.Get(ctx, key.Of(IstioReaderManifestWorkName(mesh), cluster.Name), rbacWork); client.IgnoreNotFound(err) != nil {
+		return false, fmt.Errorf("failed to get istio-reader ManifestWork for cluster %s: %w", cluster.Name, err)
+	}
+
+	if isManifestWorkReady(rbacWork) &&
+		mwrset.DeletionTimestamp.IsZero() &&
+		mwrsContainsClusterSecret(mwrset, cluster.Name) &&
+		meta.IsStatusConditionTrue(mwrset.Status.Conditions, workv1alpha1.ManifestWorkReplicaSetConditionPlacementRolledOut) &&
+		meta.IsStatusConditionTrue(mwrset.Status.Conditions, workv1alpha1.ManifestWorkReplicaSetConditionManifestworkApplied) {
+		mesh.SetClusterCondition(cluster.Name, meshv1alpha1.ConditionDiscoveryDistributed, metav1.ConditionTrue,
+			meshv1alpha1.ReasonDistributed, "Discovery resources distributed")
+		return true, nil
+	}
+
+	mesh.SetClusterCondition(cluster.Name, meshv1alpha1.ConditionDiscoveryDistributed, metav1.ConditionFalse,
+		meshv1alpha1.ReasonDistributionPending, "Discovery distribution is pending")
+	return false, nil
+}
+
+func mwrsContainsClusterSecret(mwrset *workv1alpha1.ManifestWorkReplicaSet, clusterName string) bool {
+	for _, manifest := range mwrset.Spec.ManifestWorkTemplate.Workload.Manifests {
+		secret := &corev1.Secret{}
+		if err := unmarshalManifest(manifest, secret); err == nil && secret.APIVersion == "v1" && secret.Kind == "Secret" &&
+			secret.Name == RemoteSecretName(clusterName) {
+			return true
+		}
+	}
+	return false
+}
+
+func unmarshalManifest(manifest workv1.Manifest, into any) error {
+	data, err := json.Marshal(manifest)
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal(data, into)
 }

@@ -5,11 +5,13 @@ import (
 
 	. "github.com/onsi/gomega"
 	"github.com/stolostron/multicluster-mesh-addon/pkg/key"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	clusterv1 "open-cluster-management.io/api/cluster/v1"
 	clusterv1beta1 "open-cluster-management.io/api/cluster/v1beta1"
 	clusterv1beta2 "open-cluster-management.io/api/cluster/v1beta2"
 	workv1 "open-cluster-management.io/api/work/v1"
+	workv1alpha1 "open-cluster-management.io/api/work/v1alpha1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -128,4 +130,25 @@ func SetManifestWorkFeedback(ctx context.Context, k8sClient client.Client, workN
 		}},
 	}
 	Expect(k8sClient.Status().Update(ctx, work)).To(Succeed())
+}
+
+// SetManifestWorkCondition simulates a work agent condition for the work's current generation.
+func SetManifestWorkCondition(ctx context.Context, k8sClient client.Client, work *workv1.ManifestWork, conditionType string, status metav1.ConditionStatus) {
+	patch := client.MergeFrom(work.DeepCopy())
+	meta.SetStatusCondition(&work.Status.Conditions, metav1.Condition{
+		Type:               conditionType,
+		Status:             status,
+		Reason:             "ReportedByTest",
+		ObservedGeneration: work.Generation,
+	})
+	Expect(k8sClient.Status().Patch(ctx, work, patch)).To(Succeed())
+}
+
+// SetManifestWorkReplicaSetCondition simulates a condition reported by the ReplicaSet controller.
+func SetManifestWorkReplicaSetCondition(ctx context.Context, k8sClient client.Client, mwrset *workv1alpha1.ManifestWorkReplicaSet, conditionType string, status metav1.ConditionStatus) {
+	patch := client.MergeFrom(mwrset.DeepCopy())
+	meta.SetStatusCondition(&mwrset.Status.Conditions, metav1.Condition{
+		Type: conditionType, Status: status, Reason: "ReportedByTest",
+	})
+	Expect(k8sClient.Status().Patch(ctx, mwrset, patch)).To(Succeed())
 }

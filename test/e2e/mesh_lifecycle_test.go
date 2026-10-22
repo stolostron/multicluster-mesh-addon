@@ -179,6 +179,16 @@ var _ = Describe("MultiClusterMesh lifecycle", Ordered, func() {
 		Expect(rootPool.AppendCertsFromPEM(hubRootCert)).To(BeTrue(), "failed to parse hub root CA")
 
 		for cluster, spokeClient := range spokeClients {
+			cs := findClusterStatus(mesh, cluster)
+			Expect(cs).NotTo(BeNil(), "missing cluster status for %s", cluster)
+			Step("Verifying TrustDistributed condition for %s", cluster)
+			Expect(meta.IsStatusConditionTrue(cs.Conditions, meshv1alpha1.ConditionTrustDistributed)).To(BeTrue(),
+				"expected TrustDistributed=True for %s", cluster)
+
+			Step("Verifying DiscoveryDistributed condition for %s", cluster)
+			Expect(meta.IsStatusConditionTrue(cs.Conditions, meshv1alpha1.ConditionDiscoveryDistributed)).To(BeTrue(),
+				"expected DiscoveryDistributed=True for %s", cluster)
+
 			Step("Verifying cacerts secret and certificate chain on %s", cluster)
 			secret := &corev1.Secret{}
 			var cert *x509.Certificate
@@ -279,6 +289,15 @@ var _ = Describe("MultiClusterMesh lifecycle", Ordered, func() {
 
 func getMesh(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh) error {
 	return hubClient.Get(ctx, key.For(mesh), mesh)
+}
+
+func findClusterStatus(mesh *meshv1alpha1.MultiClusterMesh, clusterName string) *meshv1alpha1.ClusterMeshStatus {
+	for _, cs := range mesh.Status.ClusterStatus {
+		if cs.ClusterName == clusterName {
+			return &cs
+		}
+	}
+	return nil
 }
 
 func listMeshMSAs(g Gomega, ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, opts ...client.ListOption) *msav1beta1.ManagedServiceAccountList {

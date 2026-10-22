@@ -5,9 +5,9 @@ import (
 	"errors"
 	"strings"
 	"testing"
-	"time"
 
 	certmanagerv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -16,10 +16,10 @@ import (
 	clusterv1 "open-cluster-management.io/api/cluster/v1"
 	clusterv1beta1 "open-cluster-management.io/api/cluster/v1beta1"
 	workv1 "open-cluster-management.io/api/work/v1"
+	workv1alpha1 "open-cluster-management.io/api/work/v1alpha1"
 	msav1beta1 "open-cluster-management.io/managed-serviceaccount/apis/authentication/v1beta1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
-	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	meshv1alpha1 "github.com/stolostron/multicluster-mesh-addon/pkg/apis/mesh/v1alpha1"
 )
@@ -178,81 +178,120 @@ func TestGetClustersFromPlacementReturnsSortedClusters(t *testing.T) {
 }
 
 func TestDetermineStatus(t *testing.T) {
+	mesh := &meshv1alpha1.MultiClusterMesh{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-mesh", Namespace: "default", Generation: 1},
+	}
+
 	tests := []struct {
-		name               string
-		mesh               *meshv1alpha1.MultiClusterMesh
-		clusters           []clusterv1.ManagedCluster
-		works              []workv1.ManifestWork
-		expectReadyStatus  metav1.ConditionStatus
-		expectReason       string
-		expectRequeue      bool
-		expectClusters     []string
-		expectClusterTrust map[string]metav1.ConditionStatus
+		name                string
+		mesh                *meshv1alpha1.MultiClusterMesh
+		clusters            []clusterv1.ManagedCluster
+		mwrsets             []workv1alpha1.ManifestWorkReplicaSet
+		works               []workv1.ManifestWork
+		expectReadyStatus   metav1.ConditionStatus
+		expectReason        string
+		expectClusterStatus map[string]map[string]metav1.ConditionStatus
 	}{
 		{
-			name: "sets Ready when trust is not configured",
-			mesh: &meshv1alpha1.MultiClusterMesh{
-				ObjectMeta: metav1.ObjectMeta{Name: "test-mesh", Namespace: "default", Generation: 1},
+			name:     "sets Ready when discovery is distributed without trust configured",
+			mesh:     mesh.DeepCopy(),
+			clusters: []clusterv1.ManagedCluster{clusterWithAPIEndpoint("cluster-a")},
+			mwrsets: []workv1alpha1.ManifestWorkReplicaSet{
+				mwrsetWithConditions(mesh, []string{"cluster-a"}, mwrsRolledOut(metav1.ConditionTrue), mwrsApplied(metav1.ConditionTrue)),
 			},
-			clusters: []clusterv1.ManagedCluster{
-				{ObjectMeta: metav1.ObjectMeta{Name: "cluster-a"}},
+			works: []workv1.ManifestWork{
+				rbacWorkWithConditions(mesh, "cluster-a", workApplied(metav1.ConditionTrue), workAvailable(metav1.ConditionTrue)),
 			},
 			expectReadyStatus: metav1.ConditionTrue,
 			expectReason:      meshv1alpha1.ReasonAllClustersReady,
-			expectClusters:    []string{"cluster-a"},
-		},
-		{
-			name: "does not set Ready when no clusters",
-			mesh: &meshv1alpha1.MultiClusterMesh{
-				ObjectMeta: metav1.ObjectMeta{Name: "test-mesh", Namespace: "default", Generation: 1},
+			expectClusterStatus: map[string]map[string]metav1.ConditionStatus{
+				"cluster-a": {meshv1alpha1.ConditionDiscoveryDistributed: metav1.ConditionTrue},
 			},
-			clusters: nil,
 		},
 		{
-			name:     "sets Ready when all clusters have trust distributed",
-			mesh:     trustConfiguredMesh("test-mesh", "default"),
-			clusters: []clusterv1.ManagedCluster{{ObjectMeta: metav1.ObjectMeta{Name: "cluster-a"}}},
-			works: []workv1.ManifestWork{
-				cacertsWorkWithConditions("test-mesh", "default", "cluster-a", true, true),
+			name:     "stays pending when one cluster has discovery pending",
+			mesh:     mesh.DeepCopy(),
+			clusters: []clusterv1.ManagedCluster{clusterWithAPIEndpoint("cluster-a"), clusterWithAPIEndpoint("cluster-b")},
+			mwrsets: []workv1alpha1.ManifestWorkReplicaSet{
+				mwrsetWithConditions(mesh, []string{"cluster-a", "cluster-b"}, mwrsRolledOut(metav1.ConditionTrue), mwrsApplied(metav1.ConditionTrue)),
 			},
-			expectReadyStatus:  metav1.ConditionTrue,
-			expectReason:       meshv1alpha1.ReasonAllClustersReady,
-			expectClusterTrust: map[string]metav1.ConditionStatus{"cluster-a": metav1.ConditionTrue},
-		},
-		{
-			name:               "requeues when cacerts ManifestWork is not found",
-			mesh:               trustConfiguredMesh("test-mesh", "default"),
-			clusters:           []clusterv1.ManagedCluster{{ObjectMeta: metav1.ObjectMeta{Name: "cluster-a"}}},
-			expectReadyStatus:  metav1.ConditionFalse,
-			expectReason:       meshv1alpha1.ReasonClustersNotReady,
-			expectRequeue:      true,
-			expectClusterTrust: map[string]metav1.ConditionStatus{"cluster-a": metav1.ConditionFalse},
-		},
-		{
-			name:     "requeues when cacerts ManifestWork is not yet applied",
-			mesh:     trustConfiguredMesh("test-mesh", "default"),
-			clusters: []clusterv1.ManagedCluster{{ObjectMeta: metav1.ObjectMeta{Name: "cluster-a"}}},
 			works: []workv1.ManifestWork{
-				cacertsWorkWithConditions("test-mesh", "default", "cluster-a", false, false),
-			},
-			expectReadyStatus:  metav1.ConditionFalse,
-			expectReason:       meshv1alpha1.ReasonClustersNotReady,
-			expectRequeue:      true,
-			expectClusterTrust: map[string]metav1.ConditionStatus{"cluster-a": metav1.ConditionFalse},
-		},
-		{
-			name:     "requeues when one of two clusters has trust pending",
-			mesh:     trustConfiguredMesh("test-mesh", "default"),
-			clusters: []clusterv1.ManagedCluster{{ObjectMeta: metav1.ObjectMeta{Name: "cluster-a"}}, {ObjectMeta: metav1.ObjectMeta{Name: "cluster-b"}}},
-			works: []workv1.ManifestWork{
-				cacertsWorkWithConditions("test-mesh", "default", "cluster-a", true, true),
+				rbacWorkWithConditions(mesh, "cluster-a", workApplied(metav1.ConditionTrue), workAvailable(metav1.ConditionTrue)),
 			},
 			expectReadyStatus: metav1.ConditionFalse,
 			expectReason:      meshv1alpha1.ReasonClustersNotReady,
-			expectRequeue:     true,
-			expectClusterTrust: map[string]metav1.ConditionStatus{
-				"cluster-a": metav1.ConditionTrue,
-				"cluster-b": metav1.ConditionFalse,
+			expectClusterStatus: map[string]map[string]metav1.ConditionStatus{
+				"cluster-a": {meshv1alpha1.ConditionDiscoveryDistributed: metav1.ConditionTrue},
+				"cluster-b": {meshv1alpha1.ConditionDiscoveryDistributed: metav1.ConditionFalse},
+			},
+		},
+		{
+			name:     "does not set Ready when no clusters",
+			mesh:     mesh.DeepCopy(),
+			clusters: nil,
+		},
+		{
+			name:     "sets Ready when all clusters have trust and discovery distributed",
+			mesh:     meshWithTrust(mesh),
+			clusters: []clusterv1.ManagedCluster{clusterWithAPIEndpoint("cluster-a")},
+			mwrsets: []workv1alpha1.ManifestWorkReplicaSet{
+				mwrsetWithConditions(mesh, []string{"cluster-a"}, mwrsRolledOut(metav1.ConditionTrue), mwrsApplied(metav1.ConditionTrue)),
+			},
+			works: []workv1.ManifestWork{
+				cacertsWorkWithConditions(mesh, "cluster-a", workApplied(metav1.ConditionTrue), workAvailable(metav1.ConditionTrue)),
+				rbacWorkWithConditions(mesh, "cluster-a", workApplied(metav1.ConditionTrue), workAvailable(metav1.ConditionTrue)),
+			},
+			expectReadyStatus: metav1.ConditionTrue,
+			expectReason:      meshv1alpha1.ReasonAllClustersReady,
+			expectClusterStatus: map[string]map[string]metav1.ConditionStatus{
+				"cluster-a": {
+					meshv1alpha1.ConditionTrustDistributed:     metav1.ConditionTrue,
+					meshv1alpha1.ConditionDiscoveryDistributed: metav1.ConditionTrue,
+				},
+			},
+		},
+		{
+			name:     "stays pending when cacerts ManifestWork is not found",
+			mesh:     meshWithTrust(mesh),
+			clusters: []clusterv1.ManagedCluster{clusterWithAPIEndpoint("cluster-a")},
+			mwrsets: []workv1alpha1.ManifestWorkReplicaSet{
+				mwrsetWithConditions(mesh, []string{"cluster-a"}, mwrsRolledOut(metav1.ConditionTrue), mwrsApplied(metav1.ConditionTrue)),
+			},
+			works: []workv1.ManifestWork{
+				rbacWorkWithConditions(mesh, "cluster-a", workApplied(metav1.ConditionTrue), workAvailable(metav1.ConditionTrue)),
+			},
+			expectReadyStatus: metav1.ConditionFalse,
+			expectReason:      meshv1alpha1.ReasonClustersNotReady,
+			expectClusterStatus: map[string]map[string]metav1.ConditionStatus{
+				"cluster-a": {
+					meshv1alpha1.ConditionTrustDistributed:     metav1.ConditionFalse,
+					meshv1alpha1.ConditionDiscoveryDistributed: metav1.ConditionTrue,
+				},
+			},
+		},
+		{
+			name:     "stays pending when one of two clusters has trust pending",
+			mesh:     meshWithTrust(mesh),
+			clusters: []clusterv1.ManagedCluster{clusterWithAPIEndpoint("cluster-a"), clusterWithAPIEndpoint("cluster-b")},
+			mwrsets: []workv1alpha1.ManifestWorkReplicaSet{
+				mwrsetWithConditions(mesh, []string{"cluster-a", "cluster-b"}, mwrsRolledOut(metav1.ConditionTrue), mwrsApplied(metav1.ConditionTrue)),
+			},
+			works: []workv1.ManifestWork{
+				cacertsWorkWithConditions(mesh, "cluster-a", workApplied(metav1.ConditionTrue), workAvailable(metav1.ConditionTrue)),
+				rbacWorkWithConditions(mesh, "cluster-a", workApplied(metav1.ConditionTrue), workAvailable(metav1.ConditionTrue)),
+				rbacWorkWithConditions(mesh, "cluster-b", workApplied(metav1.ConditionTrue), workAvailable(metav1.ConditionTrue)),
+			},
+			expectReadyStatus: metav1.ConditionFalse,
+			expectReason:      meshv1alpha1.ReasonClustersNotReady,
+			expectClusterStatus: map[string]map[string]metav1.ConditionStatus{
+				"cluster-a": {
+					meshv1alpha1.ConditionTrustDistributed:     metav1.ConditionTrue,
+					meshv1alpha1.ConditionDiscoveryDistributed: metav1.ConditionTrue,
+				},
+				"cluster-b": {
+					meshv1alpha1.ConditionTrustDistributed:     metav1.ConditionFalse,
+					meshv1alpha1.ConditionDiscoveryDistributed: metav1.ConditionTrue,
+				},
 			},
 		},
 	}
@@ -264,10 +303,13 @@ func TestDetermineStatus(t *testing.T) {
 			for i := range tc.works {
 				objs[i] = &tc.works[i]
 			}
+			for i := range tc.mwrsets {
+				objs = append(objs, &tc.mwrsets[i])
+			}
 			c := fake.NewClientBuilder().WithScheme(scheme).WithRuntimeObjects(objs...).Build()
 			r := &Reconciler{Client: c, Scheme: scheme}
 
-			result, err := r.determineStatus(context.Background(), tc.mesh, tc.clusters)
+			err := r.determineStatus(context.Background(), tc.mesh, tc.clusters)
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
@@ -289,94 +331,325 @@ func TestDetermineStatus(t *testing.T) {
 				}
 			}
 
-			if tc.expectRequeue {
-				if result.RequeueAfter != 5*time.Second {
-					t.Errorf("expected RequeueAfter=5s, got %v", result.RequeueAfter)
-				}
-			} else {
-				if result != (reconcile.Result{}) {
-					t.Errorf("expected empty result, got %v", result)
-				}
+			if len(tc.mesh.Status.ClusterStatus) != len(tc.expectClusterStatus) {
+				t.Fatalf("expected %d cluster statuses, got %d", len(tc.expectClusterStatus), len(tc.mesh.Status.ClusterStatus))
 			}
-
-			if tc.expectClusters != nil {
-				if len(tc.mesh.Status.ClusterStatus) != len(tc.expectClusters) {
-					t.Fatalf("expected %d cluster statuses, got %d", len(tc.expectClusters), len(tc.mesh.Status.ClusterStatus))
+			for _, cs := range tc.mesh.Status.ClusterStatus {
+				expected, ok := tc.expectClusterStatus[cs.ClusterName]
+				if !ok {
+					t.Errorf("unexpected cluster status for %s", cs.ClusterName)
+					continue
 				}
-				for i, name := range tc.expectClusters {
-					cs := tc.mesh.Status.ClusterStatus[i]
-					if cs.ClusterName != name {
-						t.Errorf("cluster status[%d] = %s, want %s", i, cs.ClusterName, name)
-					}
-					if meta.FindStatusCondition(cs.Conditions, meshv1alpha1.ConditionTrustDistributed) != nil {
-						t.Errorf("cluster %s has TrustDistributed without an issuer", name)
-					}
+				if len(cs.Conditions) != len(expected) {
+					t.Errorf("expected %d conditions for cluster %s, got %d", len(expected), cs.ClusterName, len(cs.Conditions))
 				}
-			}
-
-			for clusterName, expectStatus := range tc.expectClusterTrust {
-				var found bool
-				for _, cs := range tc.mesh.Status.ClusterStatus {
-					if cs.ClusterName != clusterName {
+				for conditionType, status := range expected {
+					condition := meta.FindStatusCondition(cs.Conditions, conditionType)
+					if condition == nil {
+						t.Errorf("expected %s condition for cluster %s", conditionType, cs.ClusterName)
 						continue
 					}
-					found = true
-					trustCond := meta.FindStatusCondition(cs.Conditions, meshv1alpha1.ConditionTrustDistributed)
-					if trustCond == nil {
-						t.Errorf("expected TrustDistributed condition for cluster %s", clusterName)
-					} else if trustCond.Status != expectStatus {
-						t.Errorf("expected TrustDistributed=%s for cluster %s, got %s", expectStatus, clusterName, trustCond.Status)
+					if condition.Status != status {
+						t.Errorf("expected %s=%s for cluster %s, got %s", conditionType, status, cs.ClusterName, condition.Status)
 					}
-				}
-				if !found {
-					t.Errorf("expected cluster status for %s, not found", clusterName)
 				}
 			}
 		})
 	}
 }
 
-func trustConfiguredMesh(name, namespace string) *meshv1alpha1.MultiClusterMesh {
-	return &meshv1alpha1.MultiClusterMesh{
-		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace, Generation: 1},
-		Spec: meshv1alpha1.MultiClusterMeshSpec{
-			Security: meshv1alpha1.SecurityConfig{
-				Trust: meshv1alpha1.TrustConfig{
-					CertManager: meshv1alpha1.CertManagerConfig{
-						IssuerRef: meshv1alpha1.IssuerReference{Name: "test-issuer"},
-					},
-				},
-			},
+func TestUpdateTrustStatusCondition(t *testing.T) {
+	mesh := meshWithTrust(&meshv1alpha1.MultiClusterMesh{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-mesh", Namespace: "mesh-ns", Generation: 1},
+	})
+
+	tests := []struct {
+		name           string
+		conditions     []metav1.Condition
+		workGeneration int64
+		expectStatus   metav1.ConditionStatus
+		expectReason   string
+	}{
+		{
+			name:           "reports distributed when current trust is applied and available",
+			conditions:     []metav1.Condition{workApplied(metav1.ConditionTrue), workAvailable(metav1.ConditionTrue)},
+			workGeneration: 1,
+			expectStatus:   metav1.ConditionTrue,
+			expectReason:   meshv1alpha1.ReasonDistributed,
+		},
+		{
+			name:           "reports pending when only the previous generation was applied",
+			conditions:     []metav1.Condition{workApplied(metav1.ConditionTrue), workAvailable(metav1.ConditionTrue)},
+			workGeneration: 2,
+			expectStatus:   metav1.ConditionFalse,
+			expectReason:   meshv1alpha1.ReasonDistributionPending,
+		},
+		{
+			name:           "reports pending when application fails despite availability",
+			conditions:     []metav1.Condition{workApplied(metav1.ConditionFalse), workAvailable(metav1.ConditionTrue)},
+			workGeneration: 1,
+			expectStatus:   metav1.ConditionFalse,
+			expectReason:   meshv1alpha1.ReasonDistributionPending,
+		},
+		{
+			name:           "reports pending when application is unknown despite availability",
+			conditions:     []metav1.Condition{workApplied(metav1.ConditionUnknown), workAvailable(metav1.ConditionTrue)},
+			workGeneration: 1,
+			expectStatus:   metav1.ConditionFalse,
+			expectReason:   meshv1alpha1.ReasonDistributionPending,
+		},
+		{
+			name:           "reports pending when application condition is missing",
+			conditions:     []metav1.Condition{workAvailable(metav1.ConditionTrue)},
+			workGeneration: 1,
+			expectStatus:   metav1.ConditionFalse,
+			expectReason:   meshv1alpha1.ReasonDistributionPending,
+		},
+		{
+			name:           "reports pending when applied trust is unavailable",
+			conditions:     []metav1.Condition{workApplied(metav1.ConditionTrue), workAvailable(metav1.ConditionFalse)},
+			workGeneration: 1,
+			expectStatus:   metav1.ConditionFalse,
+			expectReason:   meshv1alpha1.ReasonDistributionPending,
+		},
+		{
+			name:           "reports pending when applied trust has unknown availability",
+			conditions:     []metav1.Condition{workApplied(metav1.ConditionTrue), workAvailable(metav1.ConditionUnknown)},
+			workGeneration: 1,
+			expectStatus:   metav1.ConditionFalse,
+			expectReason:   meshv1alpha1.ReasonDistributionPending,
+		},
+		{
+			name:           "reports pending when availability condition is missing",
+			conditions:     []metav1.Condition{workApplied(metav1.ConditionTrue)},
+			workGeneration: 1,
+			expectStatus:   metav1.ConditionFalse,
+			expectReason:   meshv1alpha1.ReasonDistributionPending,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			mesh := mesh.DeepCopy()
+			work := cacertsWorkWithConditions(mesh, "cluster-a", tc.conditions...)
+			work.Generation = tc.workGeneration
+			r := &Reconciler{Client: fake.NewClientBuilder().WithScheme(newTestScheme()).WithObjects(&work).Build()}
+
+			ready, err := r.updateTrustStatusCondition(context.Background(), mesh, "cluster-a")
+			if err != nil {
+				t.Fatalf("updateTrustStatusCondition() returned error: %v", err)
+			}
+			expectReady := tc.expectStatus == metav1.ConditionTrue
+			if ready != expectReady {
+				t.Errorf("updateTrustStatusCondition() ready = %t, want %t", ready, expectReady)
+			}
+			if len(mesh.Status.ClusterStatus) != 1 {
+				t.Fatalf("expected one cluster status, got %v", mesh.Status.ClusterStatus)
+			}
+			condition := meta.FindStatusCondition(mesh.Status.ClusterStatus[0].Conditions, meshv1alpha1.ConditionTrustDistributed)
+			if condition == nil {
+				t.Fatal("expected TrustDistributed condition")
+			}
+			if condition.Status != tc.expectStatus || condition.Reason != tc.expectReason {
+				t.Errorf("TrustDistributed = %s/%s, want %s/%s", condition.Status, condition.Reason, tc.expectStatus, tc.expectReason)
+			}
+		})
+	}
+}
+
+func TestUpdateDiscoveryStatusCondition(t *testing.T) {
+	mesh := &meshv1alpha1.MultiClusterMesh{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-mesh", Namespace: "mesh-ns", Generation: 1},
+	}
+
+	tests := []struct {
+		name             string
+		cluster          clusterv1.ManagedCluster
+		workConditions   []metav1.Condition
+		workGeneration   int64
+		mwrsetConditions []metav1.Condition
+		expectStatus     metav1.ConditionStatus
+		expectReason     string
+	}{
+		{
+			name:             "reports distributed when RBAC and remote secrets are ready",
+			cluster:          clusterWithAPIEndpoint("cluster-a"),
+			workConditions:   []metav1.Condition{workApplied(metav1.ConditionTrue), workAvailable(metav1.ConditionTrue)},
+			mwrsetConditions: []metav1.Condition{mwrsRolledOut(metav1.ConditionTrue), mwrsApplied(metav1.ConditionTrue)},
+			workGeneration:   1,
+			expectStatus:     metav1.ConditionTrue,
+			expectReason:     meshv1alpha1.ReasonDistributed,
+		},
+		{
+			name:         "reports no API endpoint before checking distribution",
+			cluster:      clusterv1.ManagedCluster{ObjectMeta: metav1.ObjectMeta{Name: "cluster-a"}},
+			expectStatus: metav1.ConditionFalse,
+			expectReason: meshv1alpha1.ReasonNoAPIEndpoint,
+		},
+		{
+			name:             "reports pending when RBAC is unavailable",
+			cluster:          clusterWithAPIEndpoint("cluster-a"),
+			workConditions:   []metav1.Condition{workApplied(metav1.ConditionTrue), workAvailable(metav1.ConditionFalse)},
+			mwrsetConditions: []metav1.Condition{mwrsRolledOut(metav1.ConditionTrue), mwrsApplied(metav1.ConditionTrue)},
+			workGeneration:   1,
+			expectStatus:     metav1.ConditionFalse,
+			expectReason:     meshv1alpha1.ReasonDistributionPending,
+		},
+		{
+			name:             "reports pending when the previous RBAC generation was applied",
+			cluster:          clusterWithAPIEndpoint("cluster-a"),
+			workConditions:   []metav1.Condition{workApplied(metav1.ConditionTrue), workAvailable(metav1.ConditionTrue)},
+			mwrsetConditions: []metav1.Condition{mwrsRolledOut(metav1.ConditionTrue), mwrsApplied(metav1.ConditionTrue)},
+			workGeneration:   2,
+			expectStatus:     metav1.ConditionFalse,
+			expectReason:     meshv1alpha1.ReasonDistributionPending,
+		},
+		{
+			name:             "reports pending while remote secrets are rolling out despite availability",
+			cluster:          clusterWithAPIEndpoint("cluster-a"),
+			workConditions:   []metav1.Condition{workApplied(metav1.ConditionTrue), workAvailable(metav1.ConditionTrue)},
+			mwrsetConditions: []metav1.Condition{mwrsRolledOut(metav1.ConditionFalse), mwrsApplied(metav1.ConditionTrue)},
+			workGeneration:   1,
+			expectStatus:     metav1.ConditionFalse,
+			expectReason:     meshv1alpha1.ReasonDistributionPending,
+		},
+		{
+			name:             "reports pending when remote-secret rollout is unreported",
+			cluster:          clusterWithAPIEndpoint("cluster-a"),
+			workConditions:   []metav1.Condition{workApplied(metav1.ConditionTrue), workAvailable(metav1.ConditionTrue)},
+			mwrsetConditions: []metav1.Condition{mwrsApplied(metav1.ConditionTrue)},
+			workGeneration:   1,
+			expectStatus:     metav1.ConditionFalse,
+			expectReason:     meshv1alpha1.ReasonDistributionPending,
+		},
+		{
+			name:             "reports pending when remote secrets are unavailable",
+			cluster:          clusterWithAPIEndpoint("cluster-a"),
+			workConditions:   []metav1.Condition{workApplied(metav1.ConditionTrue), workAvailable(metav1.ConditionTrue)},
+			mwrsetConditions: []metav1.Condition{mwrsRolledOut(metav1.ConditionTrue), mwrsApplied(metav1.ConditionFalse)},
+			workGeneration:   1,
+			expectStatus:     metav1.ConditionFalse,
+			expectReason:     meshv1alpha1.ReasonDistributionPending,
+		},
+		{
+			name:             "reports pending when remote-secret availability is unknown",
+			cluster:          clusterWithAPIEndpoint("cluster-a"),
+			workConditions:   []metav1.Condition{workApplied(metav1.ConditionTrue), workAvailable(metav1.ConditionTrue)},
+			mwrsetConditions: []metav1.Condition{mwrsRolledOut(metav1.ConditionTrue), mwrsApplied(metav1.ConditionUnknown)},
+			workGeneration:   1,
+			expectStatus:     metav1.ConditionFalse,
+			expectReason:     meshv1alpha1.ReasonDistributionPending,
+		},
+		{
+			name:             "reports pending when remote-secret availability is unreported",
+			cluster:          clusterWithAPIEndpoint("cluster-a"),
+			workConditions:   []metav1.Condition{workApplied(metav1.ConditionTrue), workAvailable(metav1.ConditionTrue)},
+			mwrsetConditions: []metav1.Condition{mwrsRolledOut(metav1.ConditionTrue)},
+			workGeneration:   1,
+			expectStatus:     metav1.ConditionFalse,
+			expectReason:     meshv1alpha1.ReasonDistributionPending,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			mesh := mesh.DeepCopy()
+			work := rbacWorkWithConditions(mesh, tc.cluster.Name, tc.workConditions...)
+			work.Generation = tc.workGeneration
+			mwrset := mwrsetWithConditions(mesh, []string{tc.cluster.Name}, tc.mwrsetConditions...)
+
+			r := &Reconciler{Client: fake.NewClientBuilder().WithScheme(newTestScheme()).WithObjects(&work).Build()}
+			ready, err := r.updateDiscoveryStatusCondition(context.Background(), mesh, &tc.cluster, &mwrset)
+			if err != nil {
+				t.Fatalf("updateDiscoveryStatusCondition() returned error: %v", err)
+			}
+			if ready != (tc.expectStatus == metav1.ConditionTrue) {
+				t.Errorf("unexpected readiness: %t", ready)
+			}
+			if len(mesh.Status.ClusterStatus) != 1 {
+				t.Fatalf("expected one cluster status, got %v", mesh.Status.ClusterStatus)
+			}
+			condition := meta.FindStatusCondition(mesh.Status.ClusterStatus[0].Conditions, meshv1alpha1.ConditionDiscoveryDistributed)
+			if condition == nil {
+				t.Fatal("expected DiscoveryDistributed condition")
+			}
+			if condition.Status != tc.expectStatus || condition.Reason != tc.expectReason {
+				t.Errorf("DiscoveryDistributed = %s/%s, want %s/%s", condition.Status, condition.Reason, tc.expectStatus, tc.expectReason)
+			}
+		})
+	}
+}
+
+func clusterWithAPIEndpoint(name string) clusterv1.ManagedCluster {
+	return clusterv1.ManagedCluster{
+		ObjectMeta: metav1.ObjectMeta{Name: name},
+		Spec: clusterv1.ManagedClusterSpec{
+			ManagedClusterClientConfigs: []clusterv1.ClientConfig{{URL: "https://" + name + ":6443"}},
 		},
 	}
 }
 
-func cacertsWorkWithConditions(meshName, meshNamespace, clusterName string, applied, available bool) workv1.ManifestWork {
-	mesh := &meshv1alpha1.MultiClusterMesh{
-		ObjectMeta: metav1.ObjectMeta{Name: meshName, Namespace: meshNamespace},
+func mwrsetWithConditions(mesh *meshv1alpha1.MultiClusterMesh, clusterNames []string, conditions ...metav1.Condition) workv1alpha1.ManifestWorkReplicaSet {
+	mwrset := workv1alpha1.ManifestWorkReplicaSet{
+		ObjectMeta: metav1.ObjectMeta{Name: mesh.Name, Namespace: mesh.Namespace},
 	}
+	for _, condition := range conditions {
+		meta.SetStatusCondition(&mwrset.Status.Conditions, condition)
+	}
+	for _, name := range clusterNames {
+		mwrset.Spec.ManifestWorkTemplate.Workload.Manifests = append(mwrset.Spec.ManifestWorkTemplate.Workload.Manifests, workv1.Manifest{
+			RawExtension: runtime.RawExtension{Object: &corev1.Secret{
+				TypeMeta:   metav1.TypeMeta{APIVersion: "v1", Kind: "Secret"},
+				ObjectMeta: metav1.ObjectMeta{Name: RemoteSecretName(name), Namespace: mesh.GetControlPlaneNamespace()},
+			}},
+		})
+	}
+	return mwrset
+}
+
+func meshWithTrust(mesh *meshv1alpha1.MultiClusterMesh) *meshv1alpha1.MultiClusterMesh {
+	trustedMesh := mesh.DeepCopy()
+	trustedMesh.Spec.Security.Trust.CertManager.IssuerRef.Name = "test-issuer"
+	return trustedMesh
+}
+
+func cacertsWorkWithConditions(mesh *meshv1alpha1.MultiClusterMesh, clusterName string, conditions ...metav1.Condition) workv1.ManifestWork {
+	return workWithConditions(mesh, CacertsManifestWorkName(mesh), clusterName, conditions...)
+}
+
+func rbacWorkWithConditions(mesh *meshv1alpha1.MultiClusterMesh, clusterName string, conditions ...metav1.Condition) workv1.ManifestWork {
+	return workWithConditions(mesh, IstioReaderManifestWorkName(mesh), clusterName, conditions...)
+}
+
+func workWithConditions(mesh *meshv1alpha1.MultiClusterMesh, name, clusterName string, conditions ...metav1.Condition) workv1.ManifestWork {
 	work := workv1.ManifestWork{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      CacertsManifestWorkName(mesh),
-			Namespace: clusterName,
-			Labels:    meshOwnedLabels(mesh, clusterName),
+			Name:       name,
+			Namespace:  clusterName,
+			Labels:     meshOwnedLabels(mesh, clusterName),
+			Generation: 1,
 		},
 	}
-	if applied {
-		meta.SetStatusCondition(&work.Status.Conditions, metav1.Condition{
-			Type:   workv1.WorkApplied,
-			Status: metav1.ConditionTrue,
-			Reason: "Applied",
-		})
-	}
-	if available {
-		meta.SetStatusCondition(&work.Status.Conditions, metav1.Condition{
-			Type:   workv1.WorkAvailable,
-			Status: metav1.ConditionTrue,
-			Reason: "Available",
-		})
+	for _, condition := range conditions {
+		condition.ObservedGeneration = work.Generation
+		meta.SetStatusCondition(&work.Status.Conditions, condition)
 	}
 	return work
+}
+
+func workApplied(status metav1.ConditionStatus) metav1.Condition {
+	return metav1.Condition{Type: workv1.WorkApplied, Status: status}
+}
+
+func workAvailable(status metav1.ConditionStatus) metav1.Condition {
+	return metav1.Condition{Type: workv1.WorkAvailable, Status: status}
+}
+
+func mwrsApplied(status metav1.ConditionStatus) metav1.Condition {
+	return metav1.Condition{Type: workv1alpha1.ManifestWorkReplicaSetConditionManifestworkApplied, Status: status}
+}
+
+func mwrsRolledOut(status metav1.ConditionStatus) metav1.Condition {
+	return metav1.Condition{Type: workv1alpha1.ManifestWorkReplicaSetConditionPlacementRolledOut, Status: status}
 }
 
 func TestGetClustersFromPlacementNotFound(t *testing.T) {
@@ -840,6 +1113,7 @@ func newTestScheme() *runtime.Scheme {
 	_ = clusterv1beta1.Install(scheme)
 	_ = meshv1alpha1.Install(scheme)
 	_ = workv1.Install(scheme)
+	_ = workv1alpha1.Install(scheme)
 	return scheme
 }
 
