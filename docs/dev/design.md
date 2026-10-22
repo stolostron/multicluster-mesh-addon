@@ -196,7 +196,7 @@ The controller lists decisions by Placement-name label in the mesh namespace and
 
 Selected names and resolved ManagedCluster objects are tracked separately. Resource creation and remote-secret updates use resolved objects. Existing remote-secret manifests are retained for selected clusters until replacements can be built, including when their ManagedCluster objects, API endpoints, or discovery tokens are not yet available. If no manifest exists yet, creation waits until these prerequisites are available. Cleanup and status pruning use the selected names, preserving resources for a missing ManagedCluster until its name leaves the decisions. Readiness uses the resolved objects, so a partially missing selection is not currently reflected as an unready member.
 
-Placement and PlacementDecision events enqueue meshes using a namespace-scoped field index on `spec.placementRef.name`. ManagedCluster events find affected meshes from their labeled ManifestWorks. The addon also watches mesh-labeled Secrets and ManagedServiceAccounts, addon-managed ManifestWorks, and generation changes to owned Certificates. It does not watch ManifestWorkReplicaSets directly.
+Placement and PlacementDecision events enqueue meshes using a namespace-scoped field index on `spec.placementRef.name`. ManagedCluster events find affected meshes from their labeled ManifestWorks. The addon also watches mesh-labeled Secrets and ManagedServiceAccounts, addon-managed ManifestWorks, owned ManifestWorkReplicaSets, and generation changes to owned Certificates.
 
 ## Operator Lifecycle
 
@@ -275,7 +275,7 @@ When trust is configured (`spec.security.trust`), controller reports per-cluster
 | False | `DistributionPending` | Latest trust material has not yet been distributed to cluster or is unavailable |
 | True | `Distributed` | Latest trust material is distributed and available on cluster |
 
-Mesh-level `Ready` requires `TrustDistributed=True` for every resolved cluster when trust is configured.
+Mesh-level `Ready` requires `DiscoveryDistributed=True` for every resolved cluster, and `TrustDistributed=True` for every cluster when trust is configured.
 This lets users wait for intermediate CA distribution before starting istiod, which otherwise can fall back to self-signed CA and break cross-cluster mTLS.
 During certificate rotation, affected cluster reports `DistributionPending` until updated trust material is distributed and available.
 Mesh reports `Ready=False` while any cluster is pending.
@@ -293,6 +293,27 @@ For multi-primary mesh topologies, each control plane needs API access to its pe
 4. Distributes remote secrets to all peer clusters in the mesh via [ManifestWorkReplicaSet], using the same Placement referenced by the mesh
 5. Token rotation is handled automatically by the OCM platform
 6. When a cluster is removed from the mesh, its MSA is deleted and its remote secrets are removed from all peers
+
+### Discovery Status
+
+Controller reports per-cluster `DiscoveryDistributed` condition that tracks the distribution of endpoint discovery resources:
+
+| Status | Reason | When |
+|---|---|---|
+| False | `NoAPIEndpoint` | The cluster has no API endpoint configured |
+| False | `DistributionPending` | Discovery resources are pending distribution or unavailable |
+| True | `Distributed` | Discovery resources are distributed and available |
+
+Distribution covers all clusters selected by the mesh's `Placement`.
+A cluster must have an API endpoint and its remote secret included in the `ManifestWorkReplicaSet` template.
+During token rotation, discovery status is reported as pending until updated credentials reach every selected cluster.
+The status can briefly lag while OCM reconciles distribution.
+
+Its istio-reader `ManifestWork` must report `Applied=True` for the current generation and `Available=True`.
+Remote-secret distribution requires the `ManifestWorkReplicaSet` to report both `PlacementRolledOut=True` and `ManifestworkApplied=True`.
+
+Each remote secret has a CEL rule reporting `Progressing=False` because secrets need no rollout after application.
+This lets OCM verify current-generation application through its rollout condition, while `ManifestworkApplied` tracks availability.
 
 ## Lifecycle Events
 

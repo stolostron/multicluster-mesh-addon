@@ -76,7 +76,7 @@ To test with external CRDs (e.g., Istio, Sail operator):
 - **Validation**: Rejects mesh names that are longer than 63 characters or are not DNS labels, and rejects an empty `spec.placementRef.name`
 - **Deletion**: Removes the finalizer and mesh-owned ManifestWorks
 - **Certificate distribution**: cert-manager Certificates and cacerts ManifestWorks, per-cluster trust distribution, pending status and recovery during certificate rotation, and mesh readiness aggregation
-- **Endpoint discovery**: ManagedServiceAccounts, istio-reader RBAC, and ManifestWorkReplicaSet remote secrets
+- **Endpoint discovery**: ManagedServiceAccounts, istio-reader RBAC, ManifestWorkReplicaSet remote secrets, API endpoint recovery, availability loss and recovery, credential updates, and mesh readiness aggregation
 
 ## Notes
 
