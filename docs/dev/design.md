@@ -262,9 +262,25 @@ Certificate rotation is handled automatically by cert-manager. Updated certifica
 
 Deleting a Certificate does not explicitly delete its hub Secret. cert-manager retains that Secret by default; installations using `--enable-certificate-owner-ref` can garbage-collect it with the Certificate. Reselecting a cluster can reuse valid retained material and does not guarantee a fresh intermediate CA. See [cert-manager Secret cleanup][cert-secret-cleanup].
 
-### Readiness
+### Trust Status
 
-Each resolved cluster is recorded in `status.clusterStatus`. Existing entries are retained while their names remain selected, even if their ManagedCluster objects are missing. When trust is configured, the mesh does not become `Ready` until the cacerts ManifestWork is confirmed `Applied` and `Available` on every managed cluster. This prevents istiod from starting before the intermediate CA is in place (which would cause it to fall back to a self-signed CA, breaking cross-cluster mTLS). Each cluster then reports a per-cluster `TrustDistributed` condition with reason `CacertsApplied` or `CacertsPending`. Without an issuer, the controller records cluster entries without adding or updating trust conditions. Removing the issuer does not clear an existing `TrustDistributed` condition.
+Each resolved cluster appears in `status.clusterStatus`.
+Existing entries remain while their names stay selected, even if their ManagedCluster objects are missing.
+
+When trust is configured (`spec.security.trust`), controller reports per-cluster `TrustDistributed` condition:
+
+| Status | Reason | When |
+|---|---|---|
+| False | `DistributionPending` | Latest trust material has not yet been distributed to cluster or is unavailable |
+| True | `Distributed` | Latest trust material is distributed and available on cluster |
+
+Mesh-level `Ready` requires `TrustDistributed=True` for every resolved cluster when trust is configured.
+This lets users wait for intermediate CA distribution before starting istiod, which otherwise can fall back to self-signed CA and break cross-cluster mTLS.
+During certificate rotation, affected cluster reports `DistributionPending` until updated trust material is distributed and available.
+Mesh reports `Ready=False` while any cluster is pending.
+This status tracks distribution of latest desired trust material; existing traffic can continue using valid older material.
+When trust is unconfigured, `TrustDistributed` is omitted.
+Removing issuer clears existing trust conditions, including retained entries for missing ManagedClusters.
 
 ## Endpoint Discovery
 
