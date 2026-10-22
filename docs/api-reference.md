@@ -34,8 +34,9 @@ Optional conditions affect `Ready` only when corresponding feature is configured
 
 | Condition | Scope | Meaning |
 |-----------|-------|---------|
-| `Ready` | Mesh | All clusters are ready. When trust is configured, every resolved cluster must report `TrustDistributed=True`. |
+| `Ready` | Mesh | Every resolved cluster reports `DiscoveryDistributed=True` and, when trust is configured, `TrustDistributed=True`. |
 | `TrustDistributed` | Per-cluster | Latest trust material has been distributed to this cluster and remains available. Present only when `spec.security.trust` is configured. |
+| `DiscoveryDistributed` | Per-cluster | Cluster has an API endpoint, discovery RBAC is applied and available, and current remote secrets are distributed and available on all selected clusters. |
 
 **Reason values** (appear in a condition's `.reason`):
 
@@ -46,15 +47,19 @@ Optional conditions affect `Ready` only when corresponding feature is configured
 | `PlacementNotFound` | Mesh | The referenced Placement does not exist. Existing mesh plumbing is left in place. |
 | `NoClustersSelected` | Mesh | The Placement exists. If it selected zero clusters, mesh plumbing is removed. If its decisions still name clusters but every corresponding ManagedCluster object is missing, namespace ManifestWorks and ManagedServiceAccounts for those names are kept. |
 | `ReconcileError` | Mesh | An error occurred during reconciliation |
-| `DistributionPending` | Per-cluster | Trust distribution is in progress |
-| `Distributed` | Per-cluster | Trust has been distributed to the cluster |
+| `DistributionPending` | Per-cluster | Trust or discovery distribution is pending or unavailable |
+| `Distributed` | Per-cluster | Trust or discovery resources are distributed and available |
+| `NoAPIEndpoint` | Per-cluster | Cluster has no API endpoint configured |
 
 During certificate rotation, `TrustDistributed=False` with reason `DistributionPending` and mesh `Ready=False` until updated trust material is distributed and available.
 Existing traffic can continue using valid older trust material while distribution is pending.
 
+During discovery-token rotation, `DiscoveryDistributed=False` with reason `DistributionPending` and mesh `Ready=False` until updated credentials are distributed and available on all selected clusters.
+The status updates can lag briefly while OCM reconciles distribution.
+
 ### Readiness Limits
 
-`Ready` does not verify the service mesh operator, Istio control planes, discovery-token availability, remote-secret rollout, or cross-cluster connectivity. Check those separately before using the mesh.
+Ready reports trust and discovery resource distribution. It does not verify operator or Istio health, authentication works with distributed credentials, or test cross-cluster connectivity.
 
 Controller checks only resolved ManagedCluster objects, so partially missing selection can still report `Ready=True`.
 

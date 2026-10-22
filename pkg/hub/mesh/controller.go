@@ -26,6 +26,7 @@ import (
 	clusterv1 "open-cluster-management.io/api/cluster/v1"
 	clusterv1beta1 "open-cluster-management.io/api/cluster/v1beta1"
 	workv1 "open-cluster-management.io/api/work/v1"
+	workv1alpha1 "open-cluster-management.io/api/work/v1alpha1"
 	"open-cluster-management.io/sdk-go/pkg/apis/work/v1/applier"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
@@ -141,6 +142,7 @@ func RegisterController(mgr manager.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&meshv1alpha1.MultiClusterMesh{}).
 		Owns(&certmanagerv1.Certificate{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
+		Owns(&workv1alpha1.ManifestWorkReplicaSet{}).
 		Watches(
 			&clusterv1.ManagedCluster{},
 			handler.EnqueueRequestsFromMapFunc(reconciler.findMeshesForCluster),
@@ -182,7 +184,7 @@ func RegisterController(mgr manager.Manager) error {
 //+kubebuilder:rbac:groups=cluster.open-cluster-management.io,resources=placements,verbs=get;list;watch
 //+kubebuilder:rbac:groups=cluster.open-cluster-management.io,resources=placementdecisions,verbs=get;list;watch
 //+kubebuilder:rbac:groups=work.open-cluster-management.io,resources=manifestworks,verbs=get;list;watch;create;update;patch;delete
-//+kubebuilder:rbac:groups=work.open-cluster-management.io,resources=manifestworkreplicasets,verbs=get;list;watch;create;update
+//+kubebuilder:rbac:groups=work.open-cluster-management.io,resources=manifestworkreplicasets,verbs=get;list;watch;create;patch
 //+kubebuilder:rbac:groups=cert-manager.io,resources=certificates,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=authentication.open-cluster-management.io,resources=managedserviceaccounts,verbs=get;list;watch;create;update;delete
 //+kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
@@ -518,10 +520,21 @@ func (r *Reconciler) determineStatus(ctx context.Context, mesh *meshv1alpha1.Mul
 		return nil
 	}
 
+	mwrset := &workv1alpha1.ManifestWorkReplicaSet{}
+	if err := r.Get(ctx, key.Of(mesh.Name, mesh.Namespace), mwrset); client.IgnoreNotFound(err) != nil {
+		return fmt.Errorf("failed to get ManifestWorkReplicaSet %s/%s: %w", mesh.Namespace, mesh.Name, err)
+	}
+
 	allReady := true
 	for _, cluster := range clusters {
 		mesh.EnsureClusterStatus(cluster.Name)
 		if ready, err := r.updateTrustStatusCondition(ctx, mesh, cluster.Name); err != nil {
+			return err
+		} else if !ready {
+			allReady = false
+		}
+
+		if ready, err := r.updateDiscoveryStatusCondition(ctx, mesh, &cluster, mwrset); err != nil {
 			return err
 		} else if !ready {
 			allReady = false
@@ -549,10 +562,7 @@ func (r *Reconciler) updateTrustStatusCondition(ctx context.Context, mesh *meshv
 		return false, fmt.Errorf("failed to get cacerts ManifestWork for cluster %s: %w", clusterName, err)
 	}
 
-	applied := meta.FindStatusCondition(cacertsWork.Status.Conditions, workv1.WorkApplied)
-	if applied != nil && applied.Status == metav1.ConditionTrue &&
-		applied.ObservedGeneration == cacertsWork.Generation &&
-		meta.IsStatusConditionTrue(cacertsWork.Status.Conditions, workv1.WorkAvailable) {
+	if isManifestWorkReady(cacertsWork) {
 		mesh.SetClusterCondition(clusterName, meshv1alpha1.ConditionTrustDistributed, metav1.ConditionTrue,
 			meshv1alpha1.ReasonDistributed, "Trust distributed")
 		return true, nil
@@ -561,6 +571,13 @@ func (r *Reconciler) updateTrustStatusCondition(ctx context.Context, mesh *meshv
 	mesh.SetClusterCondition(clusterName, meshv1alpha1.ConditionTrustDistributed, metav1.ConditionFalse,
 		meshv1alpha1.ReasonDistributionPending, "Trust distribution is pending")
 	return false, nil
+}
+
+func isManifestWorkReady(work *workv1.ManifestWork) bool {
+	applied := meta.FindStatusCondition(work.Status.Conditions, workv1.WorkApplied)
+	return work.DeletionTimestamp.IsZero() && applied != nil && applied.Status == metav1.ConditionTrue &&
+		applied.ObservedGeneration == work.Generation &&
+		meta.IsStatusConditionTrue(work.Status.Conditions, workv1.WorkAvailable)
 }
 
 func clusterNameSet(names []string) map[string]bool {

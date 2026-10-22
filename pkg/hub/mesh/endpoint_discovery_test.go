@@ -208,3 +208,53 @@ func TestEnsureRemoteSecretDistributionPreservesSelectedClusters(t *testing.T) {
 		})
 	}
 }
+
+func TestEnsureRemoteSecretDistributionDoesNotUpdateUnchangedReplicaSet(t *testing.T) {
+	ctx := context.Background()
+	scheme := newTestScheme()
+	if err := corev1.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	if err := msav1beta1.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	mesh := &meshv1alpha1.MultiClusterMesh{
+		ObjectMeta: metav1.ObjectMeta{Name: "mesh", Namespace: "mesh-ns", UID: "mesh-uid"},
+		Spec: meshv1alpha1.MultiClusterMeshSpec{
+			PlacementRef: meshv1alpha1.PlacementReference{Name: "placement"},
+		},
+	}
+	cluster := clusterWithAPIEndpoint("cluster-a")
+	msa := &msav1beta1.ManagedServiceAccount{
+		ObjectMeta: metav1.ObjectMeta{Name: EndpointDiscoveryName(mesh), Namespace: cluster.Name},
+		Status:     msav1beta1.ManagedServiceAccountStatus{TokenSecretRef: &msav1beta1.SecretRef{Name: "token"}},
+	}
+	tokenSecret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "token", Namespace: cluster.Name},
+		Data: map[string][]byte{
+			corev1.ServiceAccountRootCAKey: []byte("test-ca"),
+			corev1.ServiceAccountTokenKey:  []byte("test-token"),
+		},
+	}
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(msa, tokenSecret).Build()
+	r := &Reconciler{Client: c, Scheme: scheme}
+	clusters := []clusterv1.ManagedCluster{cluster}
+	desiredClusters := []string{cluster.Name}
+	if err := r.ensureRemoteSecretDistribution(ctx, mesh, clusters, desiredClusters); err != nil {
+		t.Fatal(err)
+	}
+	mwrs := &workv1alpha1.ManifestWorkReplicaSet{}
+	if err := c.Get(ctx, key.For(mesh), mwrs); err != nil {
+		t.Fatal(err)
+	}
+	resourceVersion := mwrs.ResourceVersion
+	if err := r.ensureRemoteSecretDistribution(ctx, mesh, clusters, desiredClusters); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Get(ctx, key.For(mesh), mwrs); err != nil {
+		t.Fatal(err)
+	}
+	if mwrs.ResourceVersion != resourceVersion {
+		t.Errorf("unchanged distribution updated the ReplicaSet: resourceVersion %s became %s", resourceVersion, mwrs.ResourceVersion)
+	}
+}
