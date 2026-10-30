@@ -158,6 +158,22 @@ Common causes of an empty selection:
    to be a member of the bound ClusterSet.
 3. **Predicate mismatch** - the Placement's label selector doesn't match any clusters.
 
+### Mesh shows TooManyPlacementDecisions
+
+Each mesh supports at most 100 clusters, which corresponds to a single PlacementDecision object. OCM splits placement decisions across multiple PlacementDecision objects when a Placement selects more than 100 clusters.
+
+When the addon detects more than one PlacementDecision for the mesh's Placement, it sets `Ready=False` with reason `TooManyPlacementDecisions` and preserves existing mesh resources without creating, updating, or deleting anything.
+
+Check the number of PlacementDecisions:
+
+```bash
+kubectl get placementdecision -n <mesh-namespace> -l cluster.open-cluster-management.io/placement=<placement-name>
+```
+
+To resolve, reduce the number of clusters selected by the Placement to 100 or fewer by adjusting the Placement's cluster set membership, or cluster labels. The mesh recovers automatically once OCM consolidates to a single PlacementDecision.
+
+This limit is per mesh (each mesh references its own Placement), not per hub.
+
 ### No remote secrets on spoke clusters
 
 The addon creates ManagedServiceAccounts to obtain tokens, grants istio-reader RBAC via ManifestWork, and distributes remote secrets to peer clusters via ManifestWorkReplicaSet.

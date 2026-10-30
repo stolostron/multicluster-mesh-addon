@@ -156,6 +156,8 @@ kubectl get placementdecision -n mesh-system -l cluster.open-cluster-management.
 >
 > This empty selection usually comes from an adjacent change: deleting the ManagedClusterSetBinding, removing a cluster's clusterset label, or editing Placement predicates so they no longer match.
 
+> **Note:** Each mesh supports at most 100 clusters. OCM packs up to 100 cluster decisions into a single PlacementDecision object; selecting more causes multiple PlacementDecisions. The addon detects this and reports `TooManyPlacementDecisions` without modifying existing resources. Reduce the Placement's selection to 100 or fewer clusters to resolve. This limit is per mesh, not per hub.
+
 ## Step 5: Install the Service Mesh Operator
 
 The service mesh operator must be installed on managed clusters before creating a mesh.
