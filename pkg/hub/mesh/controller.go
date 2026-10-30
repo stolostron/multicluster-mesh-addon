@@ -67,6 +67,8 @@ const (
 // reconciler requeues without making changes until the counts converge.
 var errDecisionsPending = errors.New("PlacementDecision entries do not match Placement status")
 
+var errTooManyDecisions = errors.New("placement has more than one PlacementDecision")
+
 // Reconciler reconciles MultiClusterMesh resources
 type Reconciler struct {
 	client.Client
@@ -220,6 +222,8 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	clusters, desiredClusters, placementFound, err := r.getClustersFromPlacement(ctx, mesh)
 	if errors.Is(err, errDecisionsPending) {
 		return reconcile.Result{RequeueAfter: 2 * time.Second}, nil
+	} else if errors.Is(err, errTooManyDecisions) {
+		// Preserve existing resources. PlacementDecision watch will re-trigger when the user shrinks the Placement.
 	} else if err != nil {
 		reconcileErr = err
 	} else if !placementFound {
@@ -773,6 +777,13 @@ func (r *Reconciler) getClustersFromPlacement(ctx context.Context, mesh *meshv1a
 		client.MatchingLabels{PlacementLabel: mesh.Spec.PlacementRef.Name},
 	); err != nil {
 		return nil, nil, false, fmt.Errorf("failed to list PlacementDecisions for Placement %s: %w", mesh.Spec.PlacementRef.Name, err)
+	}
+
+	if len(pdList.Items) > 1 {
+		mesh.SetReadyCondition(metav1.ConditionFalse, meshv1alpha1.ReasonTooManyPlacementDecisions,
+			"Mesh supports at most 100 clusters but Placement %s has %d PlacementDecisions",
+			mesh.Spec.PlacementRef.Name, len(pdList.Items))
+		return nil, nil, true, errTooManyDecisions
 	}
 
 	var clusterNames []string

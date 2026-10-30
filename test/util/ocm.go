@@ -69,6 +69,31 @@ func updatePlacementSelectedCount(ctx context.Context, k8sClient client.Client, 
 	Expect(k8sClient.Status().Update(ctx, placement)).To(Succeed())
 }
 
+// CreateAdditionalPlacementDecision creates a second PlacementDecision for the
+// given Placement (named <placementName>-decision-2) with specified cluster
+// decisions. It does NOT update NumberOfSelectedClusters on the Placement
+// because OCM updates that field last, after all PlacementDecision objects
+// have been written. Leaving the count stale simulates a read during that window.
+func CreateAdditionalPlacementDecision(ctx context.Context, k8sClient client.Client, placementName, namespace string, clusterNames ...string) {
+	pd := &clusterv1beta1.PlacementDecision{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      placementName + "-decision-2",
+			Namespace: namespace,
+			Labels: map[string]string{
+				"cluster.open-cluster-management.io/placement": placementName,
+			},
+		},
+	}
+	Expect(k8sClient.Create(ctx, pd)).To(Succeed())
+
+	decisions := make([]clusterv1beta1.ClusterDecision, len(clusterNames))
+	for i, name := range clusterNames {
+		decisions[i] = clusterv1beta1.ClusterDecision{ClusterName: name}
+	}
+	pd.Status.Decisions = decisions
+	Expect(k8sClient.Status().Update(ctx, pd)).To(Succeed())
+}
+
 // CreateManagedClusterSetBinding binds a ManagedClusterSet to a namespace,
 // allowing Placements in that namespace to select clusters from the set.
 func CreateManagedClusterSetBinding(ctx context.Context, k8sClient client.Client, clusterSetName, namespace string) {

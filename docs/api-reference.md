@@ -42,6 +42,7 @@ API group: `mesh.open-cluster-management.io/v1alpha1`
 | `ClustersNotReady` | Mesh | One or more clusters do not yet have trust distributed |
 | `PlacementNotFound` | Mesh | The referenced Placement does not exist. Existing mesh plumbing is left in place. |
 | `NoClustersSelected` | Mesh | The Placement exists. If it selected zero clusters, mesh plumbing is removed. If its decisions still name clusters but every corresponding ManagedCluster object is missing, namespace ManifestWorks and ManagedServiceAccounts for those names are kept. |
+| `TooManyPlacementDecisions` | Mesh | The Placement selected more than 100 clusters (multiple PlacementDecision objects exist). Existing mesh resources are preserved. The mesh recovers automatically when the Placement shrinks back to 100 or fewer. |
 | `ReconcileError` | Mesh | An error occurred during reconciliation |
 | `CacertsApplied` | Per-cluster | Cacerts are distributed and available on the cluster |
 | `CacertsPending` | Per-cluster | Cacerts have not yet been distributed to the cluster |

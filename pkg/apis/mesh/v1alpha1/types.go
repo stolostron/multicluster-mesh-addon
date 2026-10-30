@@ -179,6 +179,10 @@ const (
 	// ReasonClustersNotReady indicates not all clusters have trust distributed
 	ReasonClustersNotReady = "ClustersNotReady"
 
+	// ReasonTooManyPlacementDecisions indicates the Placement selected more clusters
+	// than the mesh supports (more than one PlacementDecision object exists)
+	ReasonTooManyPlacementDecisions = "TooManyPlacementDecisions"
+
 	// ConditionTrustDistributed indicates whether cacerts have been
 	// distributed to this cluster (per-cluster condition)
 	ConditionTrustDistributed = "TrustDistributed"

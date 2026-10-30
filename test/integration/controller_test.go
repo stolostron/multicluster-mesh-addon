@@ -320,6 +320,98 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 		})
 	})
 
+	Context("PlacementDecision limit", func() {
+		When("multiple PlacementDecisions exist from the start", func() {
+			var cluster2Name string
+
+			BeforeEach(func() {
+				cluster2Name = util.UniqueName("cluster")
+				util.CreateManagedCluster(ctx, k8sClient, clusterName)
+				util.CreateManagedCluster(ctx, k8sClient, cluster2Name)
+				util.CreatePlacement(ctx, k8sClient, testPlacement, testNs)
+				util.CreatePlacementDecision(ctx, k8sClient, testPlacement, testNs, clusterName)
+				util.CreateAdditionalPlacementDecision(ctx, k8sClient, testPlacement, testNs, cluster2Name)
+			})
+
+			It("should report TooManyPlacementDecisions and not create ManifestWorks", func() {
+				util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testPlacement)
+
+				expectMeshConditionReason(meshName, testNs, meshv1alpha1.ConditionReady, meshv1alpha1.ReasonTooManyPlacementDecisions)
+
+				Eventually(func(g Gomega) {
+					mesh := &meshv1alpha1.MultiClusterMesh{}
+					g.Expect(k8sClient.Get(ctx, key.Of(meshName, testNs), mesh)).To(Succeed())
+					c := findCondition(g, mesh.Status.Conditions, meshv1alpha1.ConditionReady)
+					g.Expect(c.Message).To(ContainSubstring(testPlacement))
+					g.Expect(c.Message).To(ContainSubstring("2 PlacementDecisions"))
+				}).Should(Succeed())
+
+				expectNoManifestWorks()
+			})
+		})
+
+		When("Placement grows beyond the limit after initial reconciliation", func() {
+			var cluster2Name string
+
+			BeforeEach(func() {
+				cluster2Name = util.UniqueName("cluster")
+				util.CreateManagedCluster(ctx, k8sClient, clusterName)
+				util.CreateManagedCluster(ctx, k8sClient, cluster2Name)
+				util.CreatePlacement(ctx, k8sClient, testPlacement, testNs)
+				util.CreatePlacementDecision(ctx, k8sClient, testPlacement, testNs, clusterName)
+				util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testPlacement)
+				expectControlPlaneNamespace(meshName, testNs, clusterName)
+				expectMeshReady(meshName, testNs)
+			})
+
+			It("should preserve existing resources", func() {
+				util.CreateAdditionalPlacementDecision(ctx, k8sClient, testPlacement, testNs, cluster2Name)
+
+				expectMeshConditionReason(meshName, testNs, meshv1alpha1.ConditionReady, meshv1alpha1.ReasonTooManyPlacementDecisions)
+
+				Consistently(func() []workv1.ManifestWork {
+					workList := &workv1.ManifestWorkList{}
+					Expect(k8sClient.List(ctx, workList)).To(Succeed())
+					return workList.Items
+				}).ShouldNot(BeEmpty())
+			})
+		})
+
+		When("extra PlacementDecision is removed", func() {
+			var cluster2Name string
+
+			BeforeEach(func() {
+				cluster2Name = util.UniqueName("cluster")
+				util.CreateManagedCluster(ctx, k8sClient, clusterName)
+				util.CreateManagedCluster(ctx, k8sClient, cluster2Name)
+				util.CreatePlacement(ctx, k8sClient, testPlacement, testNs)
+				util.CreatePlacementDecision(ctx, k8sClient, testPlacement, testNs, clusterName)
+				util.CreateAdditionalPlacementDecision(ctx, k8sClient, testPlacement, testNs, cluster2Name)
+				util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testPlacement)
+				expectMeshConditionReason(meshName, testNs, meshv1alpha1.ConditionReady, meshv1alpha1.ReasonTooManyPlacementDecisions)
+			})
+
+			It("should recover when the Placement shrinks back to one PlacementDecision", func() {
+				By("updating the first PlacementDecision and count while two decisions remain")
+				util.UpdatePlacementDecision(ctx, k8sClient, testPlacement, testNs, clusterName)
+
+				By("verifying reconciliation stays blocked with two PlacementDecisions")
+				Consistently(func(g Gomega) {
+					mesh := &meshv1alpha1.MultiClusterMesh{}
+					g.Expect(k8sClient.Get(ctx, key.Of(meshName, testNs), mesh)).To(Succeed())
+					c := findCondition(g, mesh.Status.Conditions, meshv1alpha1.ConditionReady)
+					g.Expect(c.Reason).To(Equal(meshv1alpha1.ReasonTooManyPlacementDecisions))
+				}).Should(Succeed())
+
+				By("deleting the extra PlacementDecision")
+				util.DeleteResource(ctx, k8sClient, &clusterv1beta1.PlacementDecision{}, testPlacement+"-decision-2", testNs)
+
+				expectMeshReady(meshName, testNs)
+				expectControlPlaneNamespace(meshName, testNs, clusterName)
+			})
+		})
+	})
+
 	Context("Validation", func() {
 		BeforeEach(func() {
 			util.CreateManagedCluster(ctx, k8sClient, clusterName)
