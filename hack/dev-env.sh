@@ -321,8 +321,8 @@ install_managed_serviceaccount() {
     on "${HUB}" kubectl get managedclusteraddon -A
 }
 
-OPERATOR_POLICY_NAMESPACE="mesh-operator-policy"
-OPERATOR_PLACEMENT_NAME="mesh-operator-placement"
+MESH_NAMESPACE="mesh-system"
+MESH_PLACEMENT_NAME="mesh-placement"
 CLUSTER_SET_NAME="mesh-cluster-set"
 
 install_governance_policy_framework() {
@@ -421,39 +421,39 @@ install_operator() {
     esac
     [[ -f "${sample}" ]] || err "OperatorPolicy sample not found: ${sample}"
 
-    if on "${HUB}" kubectl get namespace "${OPERATOR_POLICY_NAMESPACE}" &>/dev/null; then
-        log "Namespace ${OPERATOR_POLICY_NAMESPACE} already exists"
+    if on "${HUB}" kubectl get namespace "${MESH_NAMESPACE}" &>/dev/null; then
+        log "Namespace ${MESH_NAMESPACE} already exists"
     else
-        log "Creating namespace ${OPERATOR_POLICY_NAMESPACE}"
-        on "${HUB}" kubectl create namespace "${OPERATOR_POLICY_NAMESPACE}"
+        log "Creating namespace ${MESH_NAMESPACE}"
+        on "${HUB}" kubectl create namespace "${MESH_NAMESPACE}"
     fi
 
-    log "Binding ManagedClusterSet ${CLUSTER_SET_NAME} to ${OPERATOR_POLICY_NAMESPACE}"
+    log "Binding ManagedClusterSet ${CLUSTER_SET_NAME} to ${MESH_NAMESPACE}"
     cat <<EOF | on "${HUB}" kubectl apply -f -
 apiVersion: cluster.open-cluster-management.io/v1beta2
 kind: ManagedClusterSetBinding
 metadata:
   name: ${CLUSTER_SET_NAME}
-  namespace: ${OPERATOR_POLICY_NAMESPACE}
+  namespace: ${MESH_NAMESPACE}
 spec:
   clusterSet: ${CLUSTER_SET_NAME}
 EOF
 
-    log "Creating Placement ${OPERATOR_PLACEMENT_NAME} for operator install"
+    log "Creating Placement ${MESH_PLACEMENT_NAME} for operator install"
     cat <<EOF | on "${HUB}" kubectl apply -f -
 apiVersion: cluster.open-cluster-management.io/v1beta1
 kind: Placement
 metadata:
-  name: ${OPERATOR_PLACEMENT_NAME}
-  namespace: ${OPERATOR_POLICY_NAMESPACE}
+  name: ${MESH_PLACEMENT_NAME}
+  namespace: ${MESH_NAMESPACE}
 spec:
   clusterSets:
     - ${CLUSTER_SET_NAME}
 EOF
 
-    if on "${HUB}" kubectl get policy "${policy_name}" -n "${OPERATOR_POLICY_NAMESPACE}" &>/dev/null; then
+    if on "${HUB}" kubectl get policy "${policy_name}" -n "${MESH_NAMESPACE}" &>/dev/null; then
         local state
-        state="$(on "${HUB}" kubectl get policy "${policy_name}" -n "${OPERATOR_POLICY_NAMESPACE}" \
+        state="$(on "${HUB}" kubectl get policy "${policy_name}" -n "${MESH_NAMESPACE}" \
             -o jsonpath='{.status.compliant}' 2>/dev/null || true)"
         if [[ "${state}" == "Compliant" ]]; then
             log "Policy ${policy_name} already Compliant, skipping apply"
@@ -462,12 +462,12 @@ EOF
     fi
 
     log "Applying OperatorPolicy sample for platform=${platform}: ${sample}"
-    on "${HUB}" kubectl apply -n "${OPERATOR_POLICY_NAMESPACE}" -f "${sample}"
+    on "${HUB}" kubectl apply -n "${MESH_NAMESPACE}" -f "${sample}"
 
-    wait_for_policy_compliant "${policy_name}" "${OPERATOR_POLICY_NAMESPACE}" 900
+    wait_for_policy_compliant "${policy_name}" "${MESH_NAMESPACE}" 900
 
     log "Mesh operator installed via OperatorPolicy (${policy_name})"
-    on "${HUB}" kubectl get policy -n "${OPERATOR_POLICY_NAMESPACE}"
+    on "${HUB}" kubectl get policy -n "${MESH_NAMESPACE}"
 }
 
 install_metallb() {
@@ -543,11 +543,11 @@ install_gateway_api() {
 }
 
 setup_mesh() {
-    if on "${HUB}" kubectl get namespace mesh-system &>/dev/null; then
-        log "Namespace mesh-system already exists, skipping"
+    if on "${HUB}" kubectl get namespace "${MESH_NAMESPACE}" &>/dev/null; then
+        log "Namespace ${MESH_NAMESPACE} already exists, skipping"
     else
-        log "Creating namespace mesh-system"
-        on "${HUB}" kubectl create namespace mesh-system
+        log "Creating namespace ${MESH_NAMESPACE}"
+        on "${HUB}" kubectl create namespace "${MESH_NAMESPACE}"
     fi
 
     log "Waiting for cert-manager-cainjector to be ready..."
@@ -555,25 +555,25 @@ setup_mesh() {
         -n cert-manager --timeout=120s
 
     log "Applying cert-manager trust chain (self-signed Issuer, root CA Certificate, CA-backed Issuer)"
-    on "${HUB}" kubectl apply -n mesh-system -f "${SCRIPT_DIR}/samples/cert-manager-issuer.yaml"
+    on "${HUB}" kubectl apply -n "${MESH_NAMESPACE}" -f "${SCRIPT_DIR}/samples/cert-manager-issuer.yaml"
 
     log "Waiting for bootstrap Issuer to be ready..."
     on "${HUB}" retry kubectl wait issuer/mesh-selfsigned-issuer \
-        -n mesh-system --for=condition=Ready --timeout=60s
+        -n "${MESH_NAMESPACE}" --for=condition=Ready --timeout=60s
 
     log "Waiting for root CA Certificate to be issued..."
     on "${HUB}" retry kubectl wait certificate/mesh-root-ca \
-        -n mesh-system --for=condition=Ready --timeout=120s
+        -n "${MESH_NAMESPACE}" --for=condition=Ready --timeout=120s
 
     log "Waiting for CA-backed Issuer to be ready..."
     on "${HUB}" retry kubectl wait issuer/mesh-root-ca \
-        -n mesh-system --for=condition=Ready --timeout=60s
+        -n "${MESH_NAMESPACE}" --for=condition=Ready --timeout=60s
 
     log "Creating MultiClusterMesh CR"
-    on "${HUB}" kubectl apply -n mesh-system -f "${SCRIPT_DIR}/samples/basic.yaml"
+    on "${HUB}" kubectl apply -n "${MESH_NAMESPACE}" -f "${SCRIPT_DIR}/samples/basic.yaml"
 
     log "Mesh setup complete. The controller will now reconcile the mesh."
-    log "Monitor progress: $(on "${HUB}" echo kubectl get multiclustermesh -n mesh-system)"
+    log "Monitor progress: $(on "${HUB}" echo kubectl get multiclustermesh -n "${MESH_NAMESPACE}")"
 }
 
 ACTION="${1:-}"
