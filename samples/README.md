@@ -35,7 +35,51 @@ Apply on the hub, for example:
 kubectl apply -n mesh-operator-policy -f samples/operator-policy-sail.yaml
 ```
 
-## Spoke (Istio)
+## Hub (Istio Control Plane Policy)
+
+Pre-built ACM policies that configure the Istio control plane on managed clusters from the hub using hub templates. No spoke access or build tools needed. The control plane policy creates the cluster-scoped `Istio/default` resource and is intended for one mesh per spoke.
+
+| Manifest | Purpose |
+|----------|---------|
+| [policy-istio-control-plane.yaml](policy-istio-control-plane.yaml) | Istio CR + east-west Gateway (hub templates resolve per-cluster values) |
+| [policy-istiocni.yaml](policy-istiocni.yaml) | IstioCNI namespace + CR (cluster-level prerequisite for OpenShift and ambient; apply once, not per mesh) |
+
+Replace `<MESH_NAME>`, `<MESH_NAMESPACE>`, and `<PLACEMENT_NAME>` in the sample with your values, then apply on the hub:
+
+```bash
+sed -e 's/<MESH_NAMESPACE>/mesh-system/g' -e 's/<MESH_NAME>/basic-mesh/g' \
+  -e 's/<PLACEMENT_NAME>/mesh-placement/g' \
+  samples/policy-istio-control-plane.yaml \
+  | kubectl apply -n mesh-system -f -
+```
+
+See [Step 8 of the User Guide](../docs/user-guide.md#step-8-configure-istio) for the full procedure.
+
+## Hub (PolicyGenerator for GitOps)
+
+Decomposed manifests with hub templates for use with the [PolicyGenerator Kustomize plugin](https://open-cluster-management.io/getting-started/integration/policy-framework/). Suitable for GitOps workflows with Kustomize or ArgoCD.
+
+| Path | Purpose |
+|------|---------|
+| [policygenerator/kustomization.yaml](policygenerator/kustomization.yaml) | Kustomize entry point |
+| [policygenerator/policygenerator.yaml](policygenerator/policygenerator.yaml) | PolicyGenerator CR defining policies |
+| [policygenerator/istio-manifests/istio.yaml](policygenerator/istio-manifests/istio.yaml) | Istio CR with hub templates |
+| [policygenerator/istio-manifests/eastwest-gateway.yaml](policygenerator/istio-manifests/eastwest-gateway.yaml) | East-west Gateway with hub templates |
+
+IstioCNI (OpenShift/ambient) is a cluster-level prerequisite. Manage it separately using [policy-istiocni.yaml](policy-istiocni.yaml).
+
+Build and apply:
+
+```bash
+kustomize build --enable-alpha-plugins samples/policygenerator/ \
+  | kubectl apply -n mesh-system -f -
+```
+
+See [Configure Istio with PolicyGenerator](../docs/istio-policygenerator.md) for the full guide.
+
+## Spoke (Istio, manual)
+
+Raw Istio manifests with `${VARIABLE}` placeholders for use with `envsubst` on each spoke cluster directly.
 
 | Manifest | Purpose |
 |----------|---------|
@@ -44,4 +88,4 @@ kubectl apply -n mesh-operator-policy -f samples/operator-policy-sail.yaml
 | [istio/istiocni.yaml](istio/istiocni.yaml) | IstioCNI (required on OpenShift and ambient) |
 
 Apply spoke samples on each managed cluster.
-See the [User Guide](../docs/user-guide.md#step-8-configure-istio) for the full procedure.
+See [Configure Istio (Manual)](../docs/istio-manual.md) for the full procedure.

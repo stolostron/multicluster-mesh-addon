@@ -834,6 +834,16 @@ func TestPruneStaleClusterStatus(t *testing.T) {
 	}
 }
 
+func TestMeshConfigMapName(t *testing.T) {
+	mesh := &meshv1alpha1.MultiClusterMesh{
+		ObjectMeta: metav1.ObjectMeta{Name: "prod-mesh", Namespace: "team-a"},
+	}
+	name := MeshConfigMapName(mesh)
+	if name != "mesh-config-prod-mesh" {
+		t.Errorf("expected mesh-config-prod-mesh, got %s", name)
+	}
+}
+
 func newTestScheme() *runtime.Scheme {
 	scheme := runtime.NewScheme()
 	_ = clusterv1.Install(scheme)

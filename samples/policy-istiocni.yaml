@@ -1,0 +1,70 @@
+# Installs IstioCNI on managed clusters. Required for OpenShift and ambient
+# mode. Can be skipped for sidecar mode on vanilla Kubernetes.
+#
+# IstioCNI is a cluster-level prerequisite, not a per-mesh resource. Apply
+# this policy once with a Placement that covers all clusters needing CNI.
+# Do not re-apply it per mesh; the binding would overwrite the previous one.
+# The operator Placement (e.g. mesh-operator-placement) is a good default
+# if all operator clusters need CNI.
+#
+# Apply this before the Istio control plane policy so the CNI DaemonSet is
+# ready when istiod starts.
+#
+# Before applying, replace <CNI_PLACEMENT_NAME> with the Placement that
+# selects the clusters needing IstioCNI.
+#
+# Apply on the hub:
+#   kubectl apply -n <namespace> -f samples/policy-istiocni.yaml
+apiVersion: policy.open-cluster-management.io/v1
+kind: Policy
+metadata:
+  name: policy-istiocni
+spec:
+  remediationAction: enforce
+  disabled: false
+  policy-templates:
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: istiocni-namespace
+        spec:
+          remediationAction: enforce
+          severity: medium
+          object-templates:
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: v1
+                kind: Namespace
+                metadata:
+                  name: istio-cni
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: istiocni
+        spec:
+          remediationAction: enforce
+          severity: medium
+          object-templates:
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: sailoperator.io/v1
+                kind: IstioCNI
+                metadata:
+                  name: default
+                spec:
+                  namespace: istio-cni
+---
+apiVersion: policy.open-cluster-management.io/v1
+kind: PlacementBinding
+metadata:
+  name: binding-istiocni
+placementRef:
+  apiGroup: cluster.open-cluster-management.io
+  kind: Placement
+  name: <CNI_PLACEMENT_NAME>
+subjects:
+  - apiGroup: policy.open-cluster-management.io
+    kind: Policy
+    name: policy-istiocni

@@ -1,0 +1,18 @@
+# East-west gateway with hub template placeholders.
+# Replace <MESH_NAME> and <MESH_NAMESPACE> before building with PolicyGenerator.
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: eastwestgateway
+  namespace: '{{hub fromConfigMap "<MESH_NAMESPACE>" "mesh-config-<MESH_NAME>" "controlPlaneNamespace" hub}}'
+  labels:
+    topology.istio.io/network: '{{hub (index .ManagedClusterLabels "topology.istio.io/network") | default .ManagedClusterName hub}}'
+spec:
+  gatewayClassName: istio
+  listeners:
+    - name: cross-network
+      hostname: "*.local"
+      port: 15443
+      protocol: TLS
+      tls:
+        mode: Passthrough

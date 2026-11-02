@@ -46,6 +46,24 @@ API group: `mesh.open-cluster-management.io/v1alpha1`
 | `CacertsApplied` | Per-cluster | Cacerts are distributed and available on the cluster |
 | `CacertsPending` | Per-cluster | Cacerts have not yet been distributed to the cluster |
 
+### Mesh Config ConfigMap
+
+The controller creates a ConfigMap named `mesh-config-<meshName>` in the mesh namespace on every reconciliation. This ConfigMap exposes mesh-level values for use in ACM hub templates (for example, in [PolicyGenerator-based Istio configuration](istio-policygenerator.md) or the [pre-built policy samples](../samples/policy-istio-control-plane.yaml)).
+
+| Key | Value | Source |
+|-----|-------|--------|
+| `meshName` | The mesh name | `metadata.name` |
+| `controlPlaneNamespace` | The auto-derived control plane namespace | `status.controlPlaneNamespace` |
+| `trustDomain` | The SPIFFE trust domain | Same as the mesh name |
+| `placementName` | The Placement that selects mesh member clusters | `spec.placementRef.name` |
+
+The ConfigMap is owned by the MultiClusterMesh via an owner reference and is garbage-collected when the mesh is deleted.
+Hub templates can reference it with `fromConfigMap` as shown below:
+
+```
+{{hub fromConfigMap "<mesh-namespace>" "mesh-config-<mesh-name>" "controlPlaneNamespace" hub}}
+```
+
 ### Readiness Limits
 
 `Ready` does not verify the service mesh operator, Istio control planes, discovery-token availability, remote-secret rollout, or cross-cluster connectivity. Check those separately before using the mesh.

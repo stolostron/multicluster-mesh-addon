@@ -122,6 +122,19 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 				expectMeshReady(meshName, testNs)
 				expectStatusControlPlaneNamespace(meshName, testNs)
 			})
+
+			It("should create a mesh config ConfigMap with mesh-level values", func() {
+				cm := expectMeshConfigMap(meshName, testNs)
+				Expect(cm.Data["meshName"]).To(Equal(meshName))
+				Expect(cm.Data["controlPlaneNamespace"]).To(Equal(cpNamespaceFor(meshName, testNs)))
+				Expect(cm.Data["trustDomain"]).To(Equal(meshName))
+				Expect(cm.Data["placementName"]).To(Equal(testPlacement))
+				Expect(cm.Labels[meshcontroller.ManagedByLabel]).To(Equal(meshcontroller.ManagedByValue))
+				Expect(cm.Labels[meshcontroller.MeshNameLabel]).To(Equal(meshName))
+				Expect(cm.Labels[meshcontroller.MeshNamespaceLabel]).To(Equal(testNs))
+				Expect(cm.OwnerReferences).To(HaveLen(1))
+				Expect(cm.OwnerReferences[0].Name).To(Equal(meshName))
+			})
 		})
 
 		When("referencing a non-existent Placement", func() {
@@ -371,6 +384,19 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 			util.DeleteResource(ctx, k8sClient, &meshv1alpha1.MultiClusterMesh{}, meshName, testNs)
 			util.ExpectResourceDeleted(ctx, k8sClient, &workv1.ManifestWork{}, cpNsMWName, clusterName)
 			util.ExpectResourceDeleted(ctx, k8sClient, &workv1.ManifestWork{}, cpNsMWName, cluster2)
+		})
+
+		It("should delete mesh config ConfigMap", func() {
+			util.CreateManagedCluster(ctx, k8sClient, clusterName)
+			util.CreatePlacement(ctx, k8sClient, testPlacement, testNs)
+			util.CreatePlacementDecision(ctx, k8sClient, testPlacement, testNs, clusterName)
+			util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testPlacement)
+			expectMeshConfigMap(meshName, testNs)
+
+			util.DeleteResource(ctx, k8sClient, &meshv1alpha1.MultiClusterMesh{}, meshName, testNs)
+			util.ExpectResourceDeleted(ctx, k8sClient, &corev1.ConfigMap{}, meshcontroller.MeshConfigMapName(
+				&meshv1alpha1.MultiClusterMesh{ObjectMeta: metav1.ObjectMeta{Name: meshName}},
+			), testNs)
 		})
 
 		It("should work when Placement doesn't exist", func() {
@@ -1014,6 +1040,15 @@ func expectManifestWork(name, namespace string) *workv1.ManifestWork {
 		return k8sClient.Get(ctx, key.Of(name, namespace), work)
 	}).Should(Succeed())
 	return work
+}
+
+func expectMeshConfigMap(meshName, meshNamespace string) *corev1.ConfigMap {
+	mesh := &meshv1alpha1.MultiClusterMesh{ObjectMeta: metav1.ObjectMeta{Name: meshName}}
+	cm := &corev1.ConfigMap{}
+	Eventually(func() error {
+		return k8sClient.Get(ctx, key.Of(meshcontroller.MeshConfigMapName(mesh), meshNamespace), cm)
+	}).Should(Succeed())
+	return cm
 }
 
 func expectCacertsManifestWork(mesh *meshv1alpha1.MultiClusterMesh, clusterNamespace string) *workv1.ManifestWork {
