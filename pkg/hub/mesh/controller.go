@@ -219,7 +219,10 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 
 	clusters, desiredClusters, placementFound, err := r.getClustersFromPlacement(ctx, mesh)
 	if errors.Is(err, errDecisionsPending) {
-		return reconcile.Result{RequeueAfter: 2 * time.Second}, nil
+		mesh.SetReadyCondition(metav1.ConditionFalse, meshv1alpha1.ReasonPlacementDecisionPending,
+			"Pending for PlacementDecisions being redistributed")
+		// Set the requeue result and continue down so the status update executes
+		result = reconcile.Result{RequeueAfter: 2 * time.Second}
 	} else if err != nil {
 		reconcileErr = err
 	} else if !placementFound {
@@ -794,8 +797,6 @@ func (r *Reconciler) getClustersFromPlacement(ctx context.Context, mesh *meshv1a
 	if int32(len(clusterNames)) != placement.Status.NumberOfSelectedClusters {
 		klog.Infof("PlacementDecision entries (%d) do not match Placement %s/%s NumberOfSelectedClusters (%d), requeueing",
 			len(clusterNames), placement.Namespace, placement.Name, placement.Status.NumberOfSelectedClusters)
-		mesh.SetReadyCondition(metav1.ConditionFalse, meshv1alpha1.ReasonPlacementDecisionPending,
-			"Pending for PlacementDecisions being redistributed")
 		return nil, nil, true, errDecisionsPending
 	}
 

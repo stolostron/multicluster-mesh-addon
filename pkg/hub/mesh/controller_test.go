@@ -593,6 +593,36 @@ func TestGetClustersFromPlacementAllMissing(t *testing.T) {
 }
 
 func TestGetClustersFromPlacementErrorPaths(t *testing.T) {
+	// test fixture objects needed for full recovery reconciliation
+	basePlacement := &clusterv1beta1.Placement{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-placement",
+			Namespace: "default",
+		},
+		Status: clusterv1beta1.PlacementStatus{
+			NumberOfSelectedClusters: 1,
+		},
+	}
+
+	baseDecision := &clusterv1beta1.PlacementDecision{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-placement-decision-1",
+			Namespace: "default",
+			Labels:    map[string]string{PlacementLabel: "test-placement"},
+		},
+		Status: clusterv1beta1.PlacementDecisionStatus{
+			Decisions: []clusterv1beta1.ClusterDecision{
+				{ClusterName: "cluster-a"},
+			},
+		},
+	}
+
+	baseManagedCluster := &clusterv1.ManagedCluster{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "cluster-a",
+		},
+	}
+
 	tests := []struct {
 		name              string
 		initObjs          []client.Object
@@ -603,11 +633,8 @@ func TestGetClustersFromPlacementErrorPaths(t *testing.T) {
 	}{
 		{
 			name: "Placement Get API Failure - returns wrapped error",
-			initObjs: []client.Object{
-				&clusterv1beta1.Placement{
-					ObjectMeta: metav1.ObjectMeta{Name: "test-placement", Namespace: "default"},
-				},
-			},
+			// include decision and cluster so recovery succeeds down to AllClustersReady
+			initObjs: []client.Object{basePlacement, baseDecision, baseManagedCluster},
 			interceptorFuncs: func(failToggle *atomic.Bool) interceptor.Funcs {
 				return interceptor.Funcs{
 					Get: func(ctx context.Context, c client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
@@ -627,12 +654,8 @@ func TestGetClustersFromPlacementErrorPaths(t *testing.T) {
 			},
 		},
 		{
-			name: "PlacementDecision List API Failure - returns wrapped error",
-			initObjs: []client.Object{
-				&clusterv1beta1.Placement{
-					ObjectMeta: metav1.ObjectMeta{Name: "test-placement", Namespace: "default"},
-				},
-			},
+			name:     "PlacementDecision List API Failure - returns wrapped error",
+			initObjs: []client.Object{basePlacement, baseDecision, baseManagedCluster},
 			interceptorFuncs: func(failToggle *atomic.Bool) interceptor.Funcs {
 				return interceptor.Funcs{
 					List: func(ctx context.Context, c client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
@@ -652,27 +675,8 @@ func TestGetClustersFromPlacementErrorPaths(t *testing.T) {
 			},
 		},
 		{
-			name: "ManagedCluster Get API Failure - returns wrapped error",
-			initObjs: []client.Object{
-				&clusterv1beta1.Placement{
-					ObjectMeta: metav1.ObjectMeta{Name: "test-placement", Namespace: "default"},
-					Status: clusterv1beta1.PlacementStatus{
-						NumberOfSelectedClusters: 1,
-					},
-				},
-				&clusterv1beta1.PlacementDecision{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "test-placement-decision-1",
-						Namespace: "default",
-						Labels:    map[string]string{PlacementLabel: "test-placement"},
-					},
-					Status: clusterv1beta1.PlacementDecisionStatus{
-						Decisions: []clusterv1beta1.ClusterDecision{
-							{ClusterName: "cluster-a"},
-						},
-					},
-				},
-			},
+			name:     "ManagedCluster Get API Failure - returns wrapped error",
+			initObjs: []client.Object{basePlacement, baseDecision, baseManagedCluster},
 			interceptorFuncs: func(failToggle *atomic.Bool) interceptor.Funcs {
 				return interceptor.Funcs{
 					Get: func(ctx context.Context, c client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
@@ -701,7 +705,12 @@ func TestGetClustersFromPlacementErrorPaths(t *testing.T) {
 			failToggle.Store(true)
 
 			mesh := &meshv1alpha1.MultiClusterMesh{
-				ObjectMeta: metav1.ObjectMeta{Name: "test-mesh", Namespace: "default", Generation: 1},
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "test-mesh",
+					Namespace:  "default",
+					Generation: 1,
+					Finalizers: []string{FinalizerName},
+				},
 				Spec: meshv1alpha1.MultiClusterMeshSpec{
 					PlacementRef: meshv1alpha1.PlacementReference{Name: "test-placement"},
 				},
@@ -714,21 +723,36 @@ func TestGetClustersFromPlacementErrorPaths(t *testing.T) {
 				},
 			}
 
-			allInitObjs := append(tc.initObjs, existingWork)
+			allInitObjs := append(tc.initObjs, mesh, existingWork)
 			c := fake.NewClientBuilder().
 				WithScheme(scheme).
 				WithObjects(allInitObjs...).
+				WithStatusSubresource(&meshv1alpha1.MultiClusterMesh{}, &clusterv1beta1.Placement{}).
 				WithInterceptorFuncs(tc.interceptorFuncs(failToggle)).
 				Build()
+
 			r := &Reconciler{Client: c, Scheme: scheme}
 
-			_, _, _, err := r.getClustersFromPlacement(ctx, mesh)
+			req := reconcile.Request{
+				NamespacedName: types.NamespacedName{
+					Namespace: mesh.Namespace,
+					Name:      mesh.Name,
+				},
+			}
+
+			_, err := r.Reconcile(ctx, req)
 			if err == nil {
 				t.Fatal("expected error on failure path, got nil")
 			}
 
+			updatedMesh := &meshv1alpha1.MultiClusterMesh{}
+			err = c.Get(ctx, req.NamespacedName, updatedMesh)
+			if err != nil {
+				t.Fatalf("unexpected error on getting the existing mesh: %v", err)
+			}
+
 			// Verify Ready Condition on failure
-			cond := meta.FindStatusCondition(mesh.Status.Conditions, meshv1alpha1.ConditionReady)
+			cond := meta.FindStatusCondition(updatedMesh.Status.Conditions, meshv1alpha1.ConditionReady)
 			if cond == nil {
 				t.Fatal("expected Ready condition to be set during failure")
 			}
@@ -745,7 +769,7 @@ func TestGetClustersFromPlacementErrorPaths(t *testing.T) {
 			if err := c.Get(ctx, key, work); err != nil {
 				t.Fatalf("expected mesh resource %s to be preserved during failure, but failed to get: %v", key, err)
 			}
-			if work.Labels["mesh.open-cluster-management.io/mesh-name"] != mesh.Name {
+			if work.Labels["mesh.open-cluster-management.io/mesh-name"] != updatedMesh.Name {
 				t.Errorf("mesh resource %s metadata altered during failure", key)
 			}
 
@@ -753,15 +777,23 @@ func TestGetClustersFromPlacementErrorPaths(t *testing.T) {
 			if tc.recover != nil {
 				tc.recover(ctx, c, failToggle)
 
-				_, _, _, err := r.getClustersFromPlacement(ctx, mesh)
+				clusters, _, _, err := r.getClustersFromPlacement(ctx, mesh)
 				if err != nil {
 					t.Fatalf("unexpected error during recovery reconciliation: %v", err)
 				}
 
-				// The controller's downstream step marks Ready=True upon successful reconciliation
-				mesh.SetReadyCondition(metav1.ConditionTrue, meshv1alpha1.ReasonAllClustersReady, "Mesh reconciled successfully")
+				updatedMesh := &meshv1alpha1.MultiClusterMesh{}
+				err = c.Get(ctx, req.NamespacedName, updatedMesh)
+				if err != nil {
+					t.Fatalf("unexpected error on getting the existing mesh: %v", err)
+				}
 
-				recoveredCond := meta.FindStatusCondition(mesh.Status.Conditions, meshv1alpha1.ConditionReady)
+				_, err = r.determineStatus(context.Background(), updatedMesh, clusters)
+				if err != nil {
+					t.Fatalf("unexpected error on getting recovery status: %v", err)
+				}
+
+				recoveredCond := meta.FindStatusCondition(updatedMesh.Status.Conditions, meshv1alpha1.ConditionReady)
 				if recoveredCond == nil {
 					t.Fatal("expected Ready condition to be set after recovery")
 				}
