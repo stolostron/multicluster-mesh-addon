@@ -92,10 +92,18 @@ done
 
 > **Note:** Replace `policy-sail-operator` with `policy-ossm-operator` when using the OSSM sample.
 
-You can also verify the operator pod directly on a spoke if you have access:
+You can also verify the operator pod directly on a spoke if you have access. Replace `context-for-cluster1` with the spoke's kubeconfig context.
+
+For Sail:
 
 ```bash
-kubectl --context cluster1 get pods -n sail-operator --no-headers
+kubectl --context context-for-cluster1 get pods -n sail-operator --no-headers
+```
+
+For OSSM:
+
+```bash
+kubectl --context context-for-cluster1 get pods -n multicluster-mesh-operator --no-headers
 ```
 
 ## Version pinning

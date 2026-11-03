@@ -57,7 +57,7 @@ See [Step 8 of the User Guide](../docs/user-guide.md#step-8-configure-istio) for
 
 ## Hub (PolicyGenerator for GitOps)
 
-Decomposed manifests with hub templates for use with the [PolicyGenerator Kustomize plugin](https://open-cluster-management.io/getting-started/integration/policy-framework/). Suitable for GitOps workflows with Kustomize or ArgoCD.
+Decomposed manifests with hub templates for use with the [PolicyGenerator Kustomize plugin](../docs/istio-policygenerator.md#prerequisites). Suitable for GitOps workflows with Kustomize or ArgoCD.
 
 | Path | Purpose |
 |------|---------|

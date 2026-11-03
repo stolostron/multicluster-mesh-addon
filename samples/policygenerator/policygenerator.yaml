@@ -7,11 +7,12 @@
 #      (spec.placementRef.name on the MultiClusterMesh).
 #   3. Replace <MESH_NAME> and <MESH_NAMESPACE> in the istio-manifests/ files.
 #   4. Install the PolicyGenerator Kustomize plugin.
-#      See: https://open-cluster-management.io/getting-started/integration/policy-framework/
+#      See docs/istio-policygenerator.md#prerequisites for installation instructions.
 #
 # The Istio manifests create the cluster-scoped Istio/default resource.
-# This sample is intended for one mesh per spoke. If you run multiple meshes,
-# update the policy names below to be unique per mesh.
+# This sample is intended for one mesh per spoke. If multiple meshes share a hub
+# namespace, set policies[].name and placementBindingDefaults.name below to be
+# unique per mesh so their placements remain independent.
 #
 # IstioCNI (OpenShift/ambient) is a cluster-level prerequisite and should be
 # managed separately. See samples/policy-istiocni.yaml.

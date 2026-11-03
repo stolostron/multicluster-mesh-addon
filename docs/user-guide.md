@@ -289,6 +289,8 @@ See the [Fleet Service Mesh Dev Preview Guide][fleet-mesh] for setup instruction
 
 ## Step 9: Cleanup
 
+If you used PolicyGenerator, follow its [cleanup instructions](istio-policygenerator.md#cleanup) to remove the generated policy and spoke Istio CRs before deleting the MultiClusterMesh below.
+
 First remove the Istio configuration. If you used the policy-based approach from Step 8, delete the policy and its binding on the hub. Deleting an enforced policy does not remove the resources it created on the spokes, so delete the Istio CR on each spoke afterwards:
 
 ```bash

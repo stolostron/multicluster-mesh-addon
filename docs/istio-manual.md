@@ -15,15 +15,24 @@ See the [Sail operator multicluster docs][sail-multicluster] for the full proced
 - Your kubeconfig must have contexts for each managed cluster.
 - The sample manifests from [samples/istio/](../samples/istio/).
 
+Run the examples below in the same Bash session with the current kubeconfig context set to the hub.
+
+List the ManagedCluster names and their kubeconfig contexts in the same order. Replace the example context names with those from your kubeconfig:
+
+```bash
+CLUSTER_NAMES=(cluster1 cluster2)
+CLUSTER_CONTEXTS=("context-for-cluster1" "context-for-cluster2")
+```
+
 ## Install Gateway API CRDs
 
 The east-west gateway sample uses [Gateway API]. Check the CRDs on each spoke, and install a compatible version supported by your Istio/operator release when they are absent:
 
 ```bash
-for CLUSTER_NAME in cluster1 cluster2; do
-  if ! kubectl --context "$CLUSTER_NAME" get crd \
+for CONTEXT in "${CLUSTER_CONTEXTS[@]}"; do
+  if ! kubectl --context "$CONTEXT" get crd \
     gateways.gateway.networking.k8s.io gatewayclasses.gateway.networking.k8s.io >/dev/null 2>&1; then
-    kubectl --context "$CLUSTER_NAME" apply --server-side \
+    kubectl --context "$CONTEXT" apply --server-side \
       -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.2.1/standard-install.yaml
   fi
 done
@@ -43,9 +52,9 @@ The sample manifests use four variables that must be set per cluster:
 IstioCNI is required on OpenShift and for ambient mode. Create its namespace and apply the sample on those clusters before installing Istio. It can be skipped for sidecar mode on vanilla Kubernetes.
 
 ```bash
-for CLUSTER_NAME in cluster1 cluster2; do
-  kubectl --context "$CLUSTER_NAME" apply -f hack/demo/istiocni-namespace.yaml
-  kubectl --context "$CLUSTER_NAME" apply -f samples/istio/istiocni.yaml
+for CONTEXT in "${CLUSTER_CONTEXTS[@]}"; do
+  kubectl --context "$CONTEXT" apply -f hack/demo/istiocni-namespace.yaml
+  kubectl --context "$CONTEXT" apply -f samples/istio/istiocni.yaml
 done
 ```
 
@@ -58,17 +67,22 @@ export MESH_NAME=basic-mesh
 export CP_NAMESPACE="$(kubectl get multiclustermesh "$MESH_NAME" -n mesh-system -o jsonpath='{.status.controlPlaneNamespace}')"
 test -n "$CP_NAMESPACE" || { echo "Mesh control plane namespace is not available yet" >&2; exit 1; }
 
-for CLUSTER_NAME in cluster1 cluster2; do
+for i in "${!CLUSTER_NAMES[@]}"; do
+  CLUSTER_NAME="${CLUSTER_NAMES[$i]}"
+  CONTEXT="${CLUSTER_CONTEXTS[$i]}"
   export CLUSTER_NAME
-  NETWORK="$(kubectl get managedcluster "$CLUSTER_NAME" -o jsonpath='{.metadata.labels.topology\.istio\.io/network}')"
+  NETWORK="$(kubectl get managedcluster "$CLUSTER_NAME" -o jsonpath='{.metadata.labels.topology\.istio\.io/network}')" || {
+    echo "Failed to read network label for ManagedCluster $CLUSTER_NAME" >&2
+    exit 1
+  }
   export NETWORK="${NETWORK:-$CLUSTER_NAME}"
 
-  envsubst < samples/istio/istio.yaml | kubectl apply --context "$CLUSTER_NAME" -f -
-  kubectl --context "$CLUSTER_NAME" wait --for=create \
+  envsubst < samples/istio/istio.yaml | kubectl apply --context "$CONTEXT" -f -
+  kubectl --context "$CONTEXT" wait --for=create \
     deployment/istiod -n "$CP_NAMESPACE" --timeout=15m
-  kubectl --context "$CLUSTER_NAME" wait --for=condition=Available \
+  kubectl --context "$CONTEXT" wait --for=condition=Available \
     deployment/istiod -n "$CP_NAMESPACE" --timeout=15m
-  envsubst < samples/istio/eastwest-gateway.yaml | kubectl apply --context "$CLUSTER_NAME" -f -
+  envsubst < samples/istio/eastwest-gateway.yaml | kubectl apply --context "$CONTEXT" -f -
 done
 ```
 
