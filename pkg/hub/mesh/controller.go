@@ -67,6 +67,14 @@ const (
 // reconciler requeues without making changes until the counts converge.
 var errDecisionsPending = errors.New("PlacementDecision entries do not match Placement status")
 
+// managedClusterPredicate accepts create, delete, and update events where
+// labels or generation (spec) changed. Status-only updates are filtered out
+// because the controller does not consume ManagedCluster status.
+var managedClusterPredicate = predicate.Or(
+	predicate.GenerationChangedPredicate{},
+	predicate.LabelChangedPredicate{},
+)
+
 // Reconciler reconciles MultiClusterMesh resources
 type Reconciler struct {
 	client.Client
@@ -144,6 +152,7 @@ func RegisterController(mgr manager.Manager) error {
 		Watches(
 			&clusterv1.ManagedCluster{},
 			handler.EnqueueRequestsFromMapFunc(reconciler.findMeshesForCluster),
+			builder.WithPredicates(managedClusterPredicate),
 		).
 		Watches(
 			&clusterv1beta1.PlacementDecision{},

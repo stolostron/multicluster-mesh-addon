@@ -239,6 +239,43 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 			})
 		})
 
+		Context("ManagedCluster watch filtering", func() {
+			var mesh *meshv1alpha1.MultiClusterMesh
+
+			BeforeEach(func() {
+				util.CreateManagedCluster(ctx, k8sClient, clusterName)
+				util.CreatePlacement(ctx, k8sClient, testPlacement, testNs)
+				util.CreatePlacementDecision(ctx, k8sClient, testPlacement, testNs, clusterName)
+				mesh = util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testPlacement)
+				setupMsaTokenSecret(mesh, clusterName)
+			})
+
+			It("should reconcile when ManagedCluster client config URL changes", func() {
+				expectManifestWorkReplicaSetContent(meshName, testNs, func(g Gomega, mwrset *workv1alpha1.ManifestWorkReplicaSet) {
+					g.Expect(mwrset.Spec.ManifestWorkTemplate.Workload.Manifests).To(HaveLen(1))
+					secret := &corev1.Secret{}
+					g.Expect(unmarshalManifest(mwrset.Spec.ManifestWorkTemplate.Workload.Manifests[0], secret)).To(Succeed())
+					g.Expect(string(secret.Data[clusterName])).To(ContainSubstring("https://" + clusterName + ":6443"))
+				})
+
+				By("updating the ManagedCluster API server URL")
+				cluster := &clusterv1.ManagedCluster{}
+				Expect(k8sClient.Get(ctx, key.Of(clusterName), cluster)).To(Succeed())
+				cluster.Spec.ManagedClusterClientConfigs = []clusterv1.ClientConfig{{URL: "https://new-api-server:6443"}}
+				Expect(k8sClient.Update(ctx, cluster)).To(Succeed())
+
+				By("verifying the ManifestWorkReplicaSet remote secret reflects the new URL")
+				Eventually(func(g Gomega) {
+					mwrset := &workv1alpha1.ManifestWorkReplicaSet{}
+					g.Expect(k8sClient.Get(ctx, key.Of(meshName, testNs), mwrset)).To(Succeed())
+					g.Expect(mwrset.Spec.ManifestWorkTemplate.Workload.Manifests).To(HaveLen(1))
+					secret := &corev1.Secret{}
+					g.Expect(unmarshalManifest(mwrset.Spec.ManifestWorkTemplate.Workload.Manifests[0], secret)).To(Succeed())
+					g.Expect(string(secret.Data[clusterName])).To(ContainSubstring("https://new-api-server:6443"))
+				}).Should(Succeed())
+			})
+		})
+
 		When("referencing a Placement with a cluster", func() {
 			BeforeEach(func() {
 				util.CreateManagedCluster(ctx, k8sClient, clusterName)
