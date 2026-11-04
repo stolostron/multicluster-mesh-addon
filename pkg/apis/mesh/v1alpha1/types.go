@@ -200,6 +200,9 @@ const (
 	// ReasonDistributed indicates trust has been distributed to the cluster
 	ReasonDistributed = "Distributed"
 
+	// ReasonCertificatePending indicates trust distribution is waiting for the CA certificate
+	ReasonCertificatePending = "CertificatePending"
+
 	// ReasonDistributionPending indicates trust distribution is in progress
 	ReasonDistributionPending = "DistributionPending"
 )

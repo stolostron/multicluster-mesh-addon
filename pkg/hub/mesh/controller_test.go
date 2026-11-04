@@ -318,9 +318,16 @@ func TestUpdateTrustStatusCondition(t *testing.T) {
 		name           string
 		conditions     []metav1.Condition
 		workGeneration int64
+		workAbsent     bool
 		expectStatus   metav1.ConditionStatus
 		expectReason   string
 	}{
+		{
+			name:         "reports certificate pending when the work does not exist",
+			workAbsent:   true,
+			expectStatus: metav1.ConditionFalse,
+			expectReason: meshv1alpha1.ReasonCertificatePending,
+		},
 		{
 			name:           "reports distributed when current trust is applied and available",
 			conditions:     []metav1.Condition{workApplied(metav1.ConditionTrue), workAvailable(metav1.ConditionTrue)},
@@ -382,9 +389,13 @@ func TestUpdateTrustStatusCondition(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			mesh := mesh.DeepCopy()
-			work := cacertsWorkWithConditions(mesh, "cluster-a", tc.conditions...)
-			work.Generation = tc.workGeneration
-			r := &Reconciler{Client: fake.NewClientBuilder().WithScheme(newTestScheme()).WithObjects(&work).Build()}
+			var objs []client.Object
+			if !tc.workAbsent {
+				work := cacertsWorkWithConditions(mesh, "cluster-a", tc.conditions...)
+				work.Generation = tc.workGeneration
+				objs = append(objs, &work)
+			}
+			r := &Reconciler{Client: fake.NewClientBuilder().WithScheme(newTestScheme()).WithObjects(objs...).Build()}
 
 			ready, err := r.updateTrustStatusCondition(context.Background(), mesh, "cluster-a")
 			if err != nil {

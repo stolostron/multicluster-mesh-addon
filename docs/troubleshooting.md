@@ -93,7 +93,10 @@ Check the per-cluster `TrustDistributed` condition in the mesh status:
 kubectl get multiclustermesh -n <mesh-namespace> <mesh-name> -o jsonpath='{.status.clusterStatus}' | jq .
 ```
 
-If a cluster shows `DistributionPending`, check:
+If a cluster shows `CertificatePending`, the CA certificate has not been issued yet. Start with steps 1 and 2.
+If a cluster shows `DistributionPending`, distribution has started. Start with steps 3 and 4.
+
+Check each step:
 
 1. **Certificate created and ready?**
    ```bash

@@ -271,6 +271,7 @@ When trust is configured (`spec.security.trust`), controller reports per-cluster
 
 | Status | Reason | When |
 |---|---|---|
+| False | `CertificatePending` | CA certificate has not been issued yet |
 | False | `DistributionPending` | Latest trust material has not yet been distributed to cluster or is unavailable |
 | True | `Distributed` | Latest trust material is distributed and available on cluster |
 

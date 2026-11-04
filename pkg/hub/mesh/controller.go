@@ -545,7 +545,13 @@ func (r *Reconciler) updateTrustStatusCondition(ctx context.Context, mesh *meshv
 	}
 
 	cacertsWork := &workv1.ManifestWork{}
-	if err := r.Get(ctx, key.Of(CacertsManifestWorkName(mesh), clusterName), cacertsWork); client.IgnoreNotFound(err) != nil {
+	err = r.Get(ctx, key.Of(CacertsManifestWorkName(mesh), clusterName), cacertsWork)
+	if apierrors.IsNotFound(err) {
+		mesh.SetClusterCondition(clusterName, meshv1alpha1.ConditionTrustDistributed, metav1.ConditionFalse,
+			meshv1alpha1.ReasonCertificatePending, "Waiting for the CA certificate to be issued")
+		return false, nil
+	}
+	if err != nil {
 		return false, fmt.Errorf("failed to get cacerts ManifestWork for cluster %s: %w", clusterName, err)
 	}
 

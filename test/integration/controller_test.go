@@ -340,8 +340,8 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 				expectMeshNotReady(meshName, testNs)
 			})
 
-			It("should report the TrustDistributed condition is DistributionPending before cacerts secret exists", func() {
-				expectClusterTrustCondition(meshName, testNs, clusterName, meshv1alpha1.ReasonDistributionPending)
+			It("should report the TrustDistributed condition is CertificatePending before cacerts secret exists", func() {
+				expectClusterTrustCondition(meshName, testNs, clusterName, meshv1alpha1.ReasonCertificatePending)
 			})
 
 			It("should require trust distributed on all clusters", func() {
@@ -623,7 +623,7 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 			})
 
 			It("should remove cluster status", func() {
-				expectClusterTrustCondition(meshName, testNs, clusterName, meshv1alpha1.ReasonDistributionPending)
+				expectClusterTrustCondition(meshName, testNs, clusterName, meshv1alpha1.ReasonCertificatePending)
 
 				util.UpdatePlacementDecision(ctx, k8sClient, testPlacement, testNs)
 
@@ -651,7 +651,7 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 			})
 
 			It("should remove TrustDistributed condition", func() {
-				expectClusterTrustCondition(meshName, testNs, clusterName, meshv1alpha1.ReasonDistributionPending)
+				expectClusterTrustCondition(meshName, testNs, clusterName, meshv1alpha1.ReasonCertificatePending)
 
 				updateMesh(meshName, testNs, func(mesh *meshv1alpha1.MultiClusterMesh) {
 					mesh.Spec.Security.Trust.CertManager.IssuerRef.Name = ""

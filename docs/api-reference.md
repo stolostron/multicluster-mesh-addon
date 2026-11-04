@@ -46,6 +46,7 @@ Optional conditions affect `Ready` only when corresponding feature is configured
 | `PlacementNotFound` | Mesh | The referenced Placement does not exist. Existing mesh plumbing is left in place. |
 | `NoClustersSelected` | Mesh | The Placement exists. If it selected zero clusters, mesh plumbing is removed. If its decisions still name clusters but every corresponding ManagedCluster object is missing, namespace ManifestWorks and ManagedServiceAccounts for those names are kept. |
 | `ReconcileError` | Mesh | An error occurred during reconciliation |
+| `CertificatePending` | Per-cluster | Trust distribution is waiting for the CA certificate to be issued |
 | `DistributionPending` | Per-cluster | Trust distribution is in progress |
 | `Distributed` | Per-cluster | Trust has been distributed to the cluster |
 
