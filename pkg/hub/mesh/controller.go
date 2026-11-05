@@ -218,7 +218,10 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 
 	clusters, desiredClusters, placementFound, err := r.getClustersFromPlacement(ctx, mesh)
 	if errors.Is(err, errDecisionsPending) {
-		return reconcile.Result{RequeueAfter: 2 * time.Second}, nil
+		mesh.SetReadyCondition(metav1.ConditionFalse, meshv1alpha1.ReasonPlacementDecisionPending,
+			"Pending for PlacementDecisions being redistributed")
+		// Set the requeue result and continue down so the status update executes
+		result = reconcile.Result{RequeueAfter: 2 * time.Second}
 	} else if err != nil {
 		reconcileErr = err
 	} else if !placementFound {
@@ -772,6 +775,8 @@ func (r *Reconciler) getClustersFromPlacement(ctx context.Context, mesh *meshv1a
 				"Placement %s not found in namespace %s", mesh.Spec.PlacementRef.Name, mesh.Namespace)
 			return nil, nil, false, nil
 		}
+		mesh.SetReadyCondition(metav1.ConditionFalse, meshv1alpha1.ReasonReconcileError,
+			"Encountered an error while getting Placement %s: %v", mesh.Spec.PlacementRef.Name, err)
 		return nil, nil, false, fmt.Errorf("failed to get Placement %s: %w", mesh.Spec.PlacementRef.Name, err)
 	}
 
@@ -780,6 +785,8 @@ func (r *Reconciler) getClustersFromPlacement(ctx context.Context, mesh *meshv1a
 		client.InNamespace(mesh.Namespace),
 		client.MatchingLabels{PlacementLabel: mesh.Spec.PlacementRef.Name},
 	); err != nil {
+		mesh.SetReadyCondition(metav1.ConditionFalse, meshv1alpha1.ReasonReconcileError,
+			"Encountered an error while listing PlacementDecisions for Placement %s: %v", mesh.Spec.PlacementRef.Name, err)
 		return nil, nil, false, fmt.Errorf("failed to list PlacementDecisions for Placement %s: %w", mesh.Spec.PlacementRef.Name, err)
 	}
 
@@ -822,6 +829,8 @@ func (r *Reconciler) getClustersFromPlacement(ctx context.Context, mesh *meshv1a
 				klog.V(4).Infof("Cluster %s from PlacementDecision not found, skipping", name)
 				continue
 			}
+			mesh.SetReadyCondition(metav1.ConditionFalse, meshv1alpha1.ReasonReconcileError,
+				"Encountered an error while getting ManagedCluster %s: %v", name, err)
 			return nil, nil, false, fmt.Errorf("failed to get ManagedCluster %s: %w", name, err)
 		}
 		clusters = append(clusters, *cluster)

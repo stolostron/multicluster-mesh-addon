@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	certmanagerv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -18,6 +20,8 @@ import (
 	msav1beta1 "open-cluster-management.io/managed-serviceaccount/apis/authentication/v1beta1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	meshv1alpha1 "github.com/stolostron/multicluster-mesh-addon/pkg/apis/mesh/v1alpha1"
 )
@@ -656,6 +660,229 @@ func TestGetClustersFromPlacementAllMissing(t *testing.T) {
 	}
 	if !strings.Contains(cond.Message, "none of the selected ManagedClusters exist") {
 		t.Errorf("expected message about missing ManagedClusters, got: %s", cond.Message)
+	}
+}
+
+func TestGetClustersFromPlacementErrorPaths(t *testing.T) {
+	// test fixture objects needed for full recovery reconciliation
+	basePlacement := &clusterv1beta1.Placement{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-placement",
+			Namespace: "default",
+		},
+		Status: clusterv1beta1.PlacementStatus{
+			NumberOfSelectedClusters: 1,
+		},
+	}
+
+	baseDecision := &clusterv1beta1.PlacementDecision{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-placement-decision-1",
+			Namespace: "default",
+			Labels:    map[string]string{PlacementLabel: "test-placement"},
+		},
+		Status: clusterv1beta1.PlacementDecisionStatus{
+			Decisions: []clusterv1beta1.ClusterDecision{
+				{ClusterName: "cluster-a"},
+			},
+		},
+	}
+
+	baseManagedCluster := &clusterv1.ManagedCluster{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "cluster-a",
+		},
+	}
+
+	tests := []struct {
+		name              string
+		initObjs          []client.Object
+		interceptorFuncs  func(failToggle *atomic.Bool) interceptor.Funcs
+		expectReadyStatus metav1.ConditionStatus
+		expectReason      string
+		recover           func(ctx context.Context, c client.Client, failToggle *atomic.Bool)
+	}{
+		{
+			name: "Placement Get API Failure - returns wrapped error",
+			// include decision and cluster so recovery succeeds down to AllClustersReady
+			initObjs: []client.Object{basePlacement, baseDecision, baseManagedCluster},
+			interceptorFuncs: func(failToggle *atomic.Bool) interceptor.Funcs {
+				return interceptor.Funcs{
+					Get: func(ctx context.Context, c client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+						if failToggle.Load() {
+							if _, ok := obj.(*clusterv1beta1.Placement); ok {
+								return errors.New("etcd connection timeout")
+							}
+						}
+						return c.Get(ctx, key, obj, opts...)
+					},
+				}
+			},
+			expectReadyStatus: metav1.ConditionFalse,
+			expectReason:      meshv1alpha1.ReasonReconcileError,
+			recover: func(ctx context.Context, c client.Client, failToggle *atomic.Bool) {
+				failToggle.Store(false)
+			},
+		},
+		{
+			name:     "PlacementDecision List API Failure - returns wrapped error",
+			initObjs: []client.Object{basePlacement, baseDecision, baseManagedCluster},
+			interceptorFuncs: func(failToggle *atomic.Bool) interceptor.Funcs {
+				return interceptor.Funcs{
+					List: func(ctx context.Context, c client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
+						if failToggle.Load() {
+							if _, ok := list.(*clusterv1beta1.PlacementDecisionList); ok {
+								return errors.New("failed to reach kube-apiserver")
+							}
+						}
+						return c.List(ctx, list, opts...)
+					},
+				}
+			},
+			expectReadyStatus: metav1.ConditionFalse,
+			expectReason:      meshv1alpha1.ReasonReconcileError,
+			recover: func(ctx context.Context, c client.Client, failToggle *atomic.Bool) {
+				failToggle.Store(false)
+			},
+		},
+		{
+			name:     "ManagedCluster Get API Failure - returns wrapped error",
+			initObjs: []client.Object{basePlacement, baseDecision, baseManagedCluster},
+			interceptorFuncs: func(failToggle *atomic.Bool) interceptor.Funcs {
+				return interceptor.Funcs{
+					Get: func(ctx context.Context, c client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+						if failToggle.Load() {
+							if _, ok := obj.(*clusterv1.ManagedCluster); ok {
+								return apierrors.NewInternalError(errors.New("etcd disk full"))
+							}
+						}
+						return c.Get(ctx, key, obj, opts...)
+					},
+				}
+			},
+			expectReadyStatus: metav1.ConditionFalse,
+			expectReason:      meshv1alpha1.ReasonReconcileError,
+			recover: func(ctx context.Context, c client.Client, failToggle *atomic.Bool) {
+				failToggle.Store(false)
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			scheme := newTestScheme()
+			failToggle := &atomic.Bool{}
+			failToggle.Store(true)
+
+			mesh := &meshv1alpha1.MultiClusterMesh{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "test-mesh",
+					Namespace:  "default",
+					Generation: 1,
+					Finalizers: []string{FinalizerName},
+				},
+				Spec: meshv1alpha1.MultiClusterMeshSpec{
+					PlacementRef: meshv1alpha1.PlacementReference{Name: "test-placement"},
+				},
+			}
+			existingWork := &workv1.ManifestWork{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "mesh-work-cluster-a",
+					Namespace: "cluster-a",
+					Labels:    meshOwnedLabels(mesh, "cluster-a"),
+				},
+			}
+
+			allInitObjs := append(tc.initObjs, mesh, existingWork)
+			c := fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithObjects(allInitObjs...).
+				WithStatusSubresource(&meshv1alpha1.MultiClusterMesh{}, &clusterv1beta1.Placement{}).
+				WithInterceptorFuncs(tc.interceptorFuncs(failToggle)).
+				Build()
+
+			r := &Reconciler{Client: c, Scheme: scheme}
+
+			req := reconcile.Request{
+				NamespacedName: types.NamespacedName{
+					Namespace: mesh.Namespace,
+					Name:      mesh.Name,
+				},
+			}
+
+			_, err := r.Reconcile(ctx, req)
+			if err == nil {
+				t.Fatal("expected error on failure path, got nil")
+			}
+
+			updatedMesh := &meshv1alpha1.MultiClusterMesh{}
+			err = c.Get(ctx, req.NamespacedName, updatedMesh)
+			if err != nil {
+				t.Fatalf("unexpected error on getting the existing mesh: %v", err)
+			}
+
+			// Verify Ready Condition on failure
+			cond := meta.FindStatusCondition(updatedMesh.Status.Conditions, meshv1alpha1.ConditionReady)
+			if cond == nil {
+				t.Fatal("expected Ready condition to be set during failure")
+			}
+			if cond.Status != tc.expectReadyStatus {
+				t.Errorf("expected Ready=%s, got %s", tc.expectReadyStatus, cond.Status)
+			}
+			if cond.Reason != tc.expectReason {
+				t.Errorf("expected reason %s, got %s", tc.expectReason, cond.Reason)
+			}
+
+			// Verify existing ManifestWork resource is preserved
+			work := &workv1.ManifestWork{}
+			key := types.NamespacedName{Name: existingWork.GetName(), Namespace: existingWork.GetNamespace()}
+			if err := c.Get(ctx, key, work); err != nil {
+				t.Fatalf("expected mesh resource %s to be preserved during failure, but failed to get: %v", key, err)
+			}
+			if work.Labels["mesh.open-cluster-management.io/mesh-name"] != updatedMesh.Name {
+				t.Errorf("mesh resource %s metadata altered during failure", key)
+			}
+
+			// Trigger recovery and verify Readiness recovers
+			if tc.recover != nil {
+				tc.recover(ctx, c, failToggle)
+
+				clusters, _, _, err := r.getClustersFromPlacement(ctx, mesh)
+				if err != nil {
+					t.Fatalf("unexpected error during recovery reconciliation: %v", err)
+				}
+
+				updatedMesh := &meshv1alpha1.MultiClusterMesh{}
+				err = c.Get(ctx, req.NamespacedName, updatedMesh)
+				if err != nil {
+					t.Fatalf("unexpected error on getting the existing mesh: %v", err)
+				}
+
+				err = r.determineStatus(context.Background(), updatedMesh, clusters)
+				if err != nil {
+					t.Fatalf("unexpected error on getting recovery status: %v", err)
+				}
+
+				recoveredCond := meta.FindStatusCondition(updatedMesh.Status.Conditions, meshv1alpha1.ConditionReady)
+				if recoveredCond == nil {
+					t.Fatal("expected Ready condition to be set after recovery")
+				}
+				if recoveredCond.Status != metav1.ConditionTrue {
+					t.Errorf("recovered path: expected Ready=%s, got %s", metav1.ConditionTrue, recoveredCond.Status)
+				}
+				if recoveredCond.Reason != meshv1alpha1.ReasonAllClustersReady {
+					t.Errorf("recovered path: expected reason=%s, got %s", meshv1alpha1.ReasonAllClustersReady, recoveredCond.Reason)
+				}
+
+				// Verify mesh resources remain intact post-recovery
+				work := &workv1.ManifestWork{}
+				key := types.NamespacedName{Name: existingWork.GetName(), Namespace: existingWork.GetNamespace()}
+				if err := c.Get(ctx, key, work); err != nil {
+					t.Errorf("expected mesh resource %s to persist after recovery: %v", key, err)
+				}
+			}
+		})
 	}
 }
 
