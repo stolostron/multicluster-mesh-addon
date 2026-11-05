@@ -554,7 +554,7 @@ kubectl --context "$HUB_CONTEXT" wait \
 ~~~
 
 Wait for cluster3's trust distribution. Mesh `Ready=True` can likewise still describe the previous membership until the controller updates it.
-`TrustDistributed=True` on that cluster means its cacerts ManifestWork is applied and available:
+`TrustDistributed=True` confirms latest trust material is distributed and available on that cluster:
 
 ~~~bash
 kubectl --context "$HUB_CONTEXT" wait \
