@@ -238,7 +238,7 @@ The addon creates the control plane namespace, distributes trust, and handles en
 Both OSSM 3.x and upstream Sail use the `sailoperator.io` API group.
 See the [Sail operator multicluster docs][sail-multicluster] for the full procedure.
 
-The recommended approach uses ACM policies to configure all clusters from the hub. No direct spoke access is needed. The addon creates a ConfigMap (`mesh-config-<meshName>`) in the mesh namespace with the mesh-level values that the policy samples reference via hub templates.
+The recommended approach uses ACM policies to configure all clusters from the hub. No direct spoke access is needed. The policy samples read the control plane namespace from the MultiClusterMesh status using the `lookup` hub template function.
 
 > **Note:** The east-west gateway uses [Gateway API]. Make sure the Gateway API CRDs are installed on each spoke before applying the policy. See the [manual guide](istio-manual.md) for the install command.
 

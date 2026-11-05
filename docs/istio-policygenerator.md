@@ -16,15 +16,16 @@ This page covers the [PolicyGenerator] + Kustomize approach for users who manage
 
 PolicyGenerator is a Kustomize plugin that reads Kubernetes manifest files and wraps them into `Policy`, `ConfigurationPolicy`, and `PlacementBinding` objects. The manifests can contain [hub templates][hub-templates] that the governance-policy-propagator resolves per cluster at propagation time.
 
-The addon creates a ConfigMap (`mesh-config-<meshName>`) in the mesh namespace with mesh-level values. The Istio manifests reference this ConfigMap via hub templates:
+The Istio manifests use hub templates to read the control plane namespace from the MultiClusterMesh status and to derive per-cluster values:
 
 | Variable | Hub template |
 |---|---|
-| Mesh name | `{{hub fromConfigMap "<ns>" "mesh-config-<mesh>" "meshName" hub}}` |
-| Control plane namespace | `{{hub fromConfigMap "<ns>" "mesh-config-<mesh>" "controlPlaneNamespace" hub}}` |
-| Trust domain | `{{hub fromConfigMap "<ns>" "mesh-config-<mesh>" "trustDomain" hub}}` |
+| Control plane namespace | `{{hub (lookup "mesh.open-cluster-management.io/v1alpha1" "MultiClusterMesh" "<MESH_NAMESPACE>" "<MESH_NAME>").status.controlPlaneNamespace hub}}` |
+| Mesh name / trust domain | `<MESH_NAME>` (literal; the trust domain is the mesh name) |
 | Cluster name | `{{hub .ManagedClusterName hub}}` |
 | Network | `{{hub (index .ManagedClusterLabels "topology.istio.io/network") \| default .ManagedClusterName hub}}` |
+
+The Policy must be in the same namespace as the MultiClusterMesh, because the default hub-template resolver restricts `lookup` to the policy namespace.
 
 ## Sample directory structure
 

@@ -18,7 +18,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	applyconfigcorev1 "k8s.io/client-go/applyconfigurations/core/v1"
 	applyconfigv1 "k8s.io/client-go/applyconfigurations/meta/v1"
 	"k8s.io/client-go/util/retry"
 	"k8s.io/klog/v2"
@@ -187,7 +186,6 @@ func RegisterController(mgr manager.Manager) error {
 //+kubebuilder:rbac:groups=cert-manager.io,resources=certificates,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=authentication.open-cluster-management.io,resources=managedserviceaccounts,verbs=get;list;watch;create;update;delete
 //+kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
-//+kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch;create;update;patch;delete
 
 // Reconcile implements the reconcile loop for MultiClusterMesh resources
 func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
@@ -245,10 +243,6 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	}
 
 	mesh.Status.ControlPlaneNamespace = mesh.GetControlPlaneNamespace()
-
-	if err := r.ensureMeshConfigMap(ctx, mesh); err != nil {
-		reconcileErr = errors.Join(reconcileErr, fmt.Errorf("failed to ensure mesh config ConfigMap: %w", err))
-	}
 
 	var statusErr error
 	if !reflect.DeepEqual(oldStatus, &mesh.Status) {
@@ -425,10 +419,6 @@ func (r *Reconciler) handleDeletion(ctx context.Context, mesh *meshv1alpha1.Mult
 
 	if err := r.deleteAllManagedServiceAccounts(ctx, mesh); err != nil {
 		return fmt.Errorf("failed to cleanup ManagedServiceAccount resources: %w", err)
-	}
-
-	if err := r.deleteMeshConfigMap(ctx, mesh); err != nil {
-		return fmt.Errorf("failed to cleanup mesh config ConfigMap: %w", err)
 	}
 
 	klog.Infof("Removing finalizer from MultiClusterMesh %s/%s", mesh.Namespace, mesh.Name)
@@ -615,58 +605,6 @@ func CacertsName(mesh *meshv1alpha1.MultiClusterMesh, clusterName string) string
 // It lives in a cluster's namespace, so it is keyed on the mesh namespace and name to stay unique per mesh.
 func CacertsManifestWorkName(mesh *meshv1alpha1.MultiClusterMesh) string {
 	return fmt.Sprintf("multicluster-mesh-cacerts-%s.%s", mesh.Namespace, mesh.Name)
-}
-
-// MeshConfigMapName returns the name of the ConfigMap that exposes mesh-level
-// values for use in ACM hub templates (e.g. PolicyGenerator policies).
-func MeshConfigMapName(mesh *meshv1alpha1.MultiClusterMesh) string {
-	return fmt.Sprintf("mesh-config-%s", mesh.Name)
-}
-
-func (r *Reconciler) ensureMeshConfigMap(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh) error {
-	cmName := MeshConfigMapName(mesh)
-
-	gvk, err := r.GroupVersionKindFor(mesh)
-	if err != nil {
-		return fmt.Errorf("failed to get GVK for MultiClusterMesh: %w", err)
-	}
-
-	cm := applyconfigcorev1.ConfigMap(cmName, mesh.Namespace).
-		WithLabels(map[string]string{
-			ManagedByLabel:     ManagedByValue,
-			MeshNameLabel:      mesh.Name,
-			MeshNamespaceLabel: mesh.Namespace,
-		}).
-		WithOwnerReferences(applyconfigv1.OwnerReference().
-			WithAPIVersion(gvk.GroupVersion().String()).
-			WithKind(gvk.Kind).
-			WithName(mesh.Name).
-			WithUID(mesh.UID).
-			WithController(true).
-			WithBlockOwnerDeletion(true)).
-		WithData(map[string]string{
-			"meshName":              mesh.Name,
-			"controlPlaneNamespace": mesh.GetControlPlaneNamespace(),
-			"trustDomain":           mesh.GetTrustDomain(),
-			"placementName":         mesh.Spec.PlacementRef.Name,
-		})
-
-	if err := r.Apply(ctx, cm, client.FieldOwner(ManagedByValue), client.ForceOwnership); err != nil {
-		return fmt.Errorf("failed to apply mesh config ConfigMap %s/%s: %w", mesh.Namespace, cmName, err)
-	}
-
-	klog.V(4).Infof("Applied mesh config ConfigMap %s/%s", mesh.Namespace, cmName)
-	return nil
-}
-
-func (r *Reconciler) deleteMeshConfigMap(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh) error {
-	cm := &corev1.ConfigMap{}
-	cm.Name = MeshConfigMapName(mesh)
-	cm.Namespace = mesh.Namespace
-	if err := client.IgnoreNotFound(r.Delete(ctx, cm)); err != nil {
-		return fmt.Errorf("failed to delete mesh config ConfigMap %s/%s: %w", cm.Namespace, cm.Name, err)
-	}
-	return nil
 }
 
 // ensureCertificateForCluster applies the desired Certificate state for a specific cluster using server-side apply.

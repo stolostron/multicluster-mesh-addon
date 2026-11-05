@@ -4,17 +4,21 @@
 # Before applying:
 #   1. Replace <MESH_NAME> and <MESH_NAMESPACE> with your mesh name and namespace.
 #   2. Replace <PLACEMENT_NAME> with your mesh's Placement name
-#      (you can refer to spec.placementRef.name on the MultiClusterMesh as well as in
-#      the controller-created ConfigMap under the "placementName" key).
-#   3. The addon must have created the MultiClusterMesh (so the ConfigMap exists).
+#      (spec.placementRef.name on the MultiClusterMesh).
+#   3. The addon must have created the MultiClusterMesh and populated
+#      status.controlPlaneNamespace.
 #   4. governance-policy-framework and config-policy-controller must be enabled
 #      on the managed clusters. See docs/operator-installation.md for setup.
 #
 # Apply on the hub:
 #   kubectl apply -n <mesh-namespace> -f samples/policy-istio-control-plane.yaml
 #
+# The Policy must be in the same namespace as the MultiClusterMesh: the policy
+# propagator restricts hub template lookups to the policy namespace by default.
+#
 # The hub template variables are resolved per cluster at propagation time:
-#   - meshName, controlPlaneNamespace, trustDomain: from the controller-created ConfigMap
+#   - controlPlaneNamespace: read from the MultiClusterMesh status via lookup
+#   - meshName, trustDomain: literals supplied below (the trust domain is the mesh name)
 #   - ManagedClusterName: built-in, resolves to the cluster name
 #   - topology.istio.io/network label: falls back to the cluster name
 #
@@ -51,12 +55,12 @@ spec:
                 metadata:
                   name: default
                 spec:
-                  namespace: '{{hub fromConfigMap "<MESH_NAMESPACE>" "mesh-config-<MESH_NAME>" "controlPlaneNamespace" hub}}'
+                  namespace: '{{hub (lookup "mesh.open-cluster-management.io/v1alpha1" "MultiClusterMesh" "<MESH_NAMESPACE>" "<MESH_NAME>").status.controlPlaneNamespace hub}}'
                   values:
                     meshConfig:
-                      trustDomain: '{{hub fromConfigMap "<MESH_NAMESPACE>" "mesh-config-<MESH_NAME>" "trustDomain" hub}}'
+                      trustDomain: '<MESH_NAME>'
                     global:
-                      meshID: '{{hub fromConfigMap "<MESH_NAMESPACE>" "mesh-config-<MESH_NAME>" "meshName" hub}}'
+                      meshID: '<MESH_NAME>'
                       multiCluster:
                         clusterName: '{{hub .ManagedClusterName hub}}'
                       network: '{{hub (index .ManagedClusterLabels "topology.istio.io/network") | default .ManagedClusterName hub}}'
@@ -75,7 +79,7 @@ spec:
                 kind: Gateway
                 metadata:
                   name: eastwestgateway
-                  namespace: '{{hub fromConfigMap "<MESH_NAMESPACE>" "mesh-config-<MESH_NAME>" "controlPlaneNamespace" hub}}'
+                  namespace: '{{hub (lookup "mesh.open-cluster-management.io/v1alpha1" "MultiClusterMesh" "<MESH_NAMESPACE>" "<MESH_NAME>").status.controlPlaneNamespace hub}}'
                   labels:
                     topology.istio.io/network: '{{hub (index .ManagedClusterLabels "topology.istio.io/network") | default .ManagedClusterName hub}}'
                 spec:

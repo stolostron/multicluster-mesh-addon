@@ -9,12 +9,12 @@ kind: Istio
 metadata:
   name: default
 spec:
-  namespace: '{{hub fromConfigMap "<MESH_NAMESPACE>" "mesh-config-<MESH_NAME>" "controlPlaneNamespace" hub}}'
+  namespace: '{{hub (lookup "mesh.open-cluster-management.io/v1alpha1" "MultiClusterMesh" "<MESH_NAMESPACE>" "<MESH_NAME>").status.controlPlaneNamespace hub}}'
   values:
     meshConfig:
-      trustDomain: '{{hub fromConfigMap "<MESH_NAMESPACE>" "mesh-config-<MESH_NAME>" "trustDomain" hub}}'
+      trustDomain: '<MESH_NAME>'
     global:
-      meshID: '{{hub fromConfigMap "<MESH_NAMESPACE>" "mesh-config-<MESH_NAME>" "meshName" hub}}'
+      meshID: '<MESH_NAME>'
       multiCluster:
         clusterName: '{{hub .ManagedClusterName hub}}'
       network: '{{hub (index .ManagedClusterLabels "topology.istio.io/network") | default .ManagedClusterName hub}}'

@@ -4,7 +4,7 @@ apiVersion: gateway.networking.k8s.io/v1
 kind: Gateway
 metadata:
   name: eastwestgateway
-  namespace: '{{hub fromConfigMap "<MESH_NAMESPACE>" "mesh-config-<MESH_NAME>" "controlPlaneNamespace" hub}}'
+  namespace: '{{hub (lookup "mesh.open-cluster-management.io/v1alpha1" "MultiClusterMesh" "<MESH_NAMESPACE>" "<MESH_NAME>").status.controlPlaneNamespace hub}}'
   labels:
     topology.istio.io/network: '{{hub (index .ManagedClusterLabels "topology.istio.io/network") | default .ManagedClusterName hub}}'
 spec:
