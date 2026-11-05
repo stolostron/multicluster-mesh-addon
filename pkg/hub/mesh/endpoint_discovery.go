@@ -347,6 +347,13 @@ func (r *Reconciler) updateDiscoveryStatusCondition(ctx context.Context, mesh *m
 		return false, nil
 	}
 
+	// ensureRemoteSecretDistribution omits clusters whose token secret is not available yet, so an absent remote secret means the token is the blocker.
+	if !secretNames[RemoteSecretName(cluster.Name)] {
+		mesh.SetClusterCondition(cluster.Name, meshv1alpha1.ConditionDiscoveryDistributed, metav1.ConditionFalse,
+			meshv1alpha1.ReasonTokenPending, "Waiting for the endpoint discovery token to be available")
+		return false, nil
+	}
+
 	rbacWork := &workv1.ManifestWork{}
 	if err := r.Get(ctx, key.Of(IstioReaderManifestWorkName(mesh), cluster.Name), rbacWork); client.IgnoreNotFound(err) != nil {
 		return false, fmt.Errorf("failed to get istio-reader ManifestWork for cluster %s: %w", cluster.Name, err)
@@ -354,7 +361,6 @@ func (r *Reconciler) updateDiscoveryStatusCondition(ctx context.Context, mesh *m
 
 	if isManifestWorkReady(rbacWork) &&
 		mwrset.DeletionTimestamp.IsZero() &&
-		secretNames[RemoteSecretName(cluster.Name)] &&
 		meta.IsStatusConditionTrue(mwrset.Status.Conditions, workv1alpha1.ManifestWorkReplicaSetConditionPlacementRolledOut) &&
 		meta.IsStatusConditionTrue(mwrset.Status.Conditions, workv1alpha1.ManifestWorkReplicaSetConditionManifestworkApplied) {
 		mesh.SetClusterCondition(cluster.Name, meshv1alpha1.ConditionDiscoveryDistributed, metav1.ConditionTrue,

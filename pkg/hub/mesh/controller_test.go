@@ -493,10 +493,11 @@ func TestUpdateDiscoveryStatusCondition(t *testing.T) {
 			expectReason:     meshv1alpha1.ReasonDistributed,
 		},
 		{
-			name:         "reports no API endpoint before checking distribution",
-			cluster:      clusterv1.ManagedCluster{ObjectMeta: metav1.ObjectMeta{Name: "cluster-a"}},
-			expectStatus: metav1.ConditionFalse,
-			expectReason: meshv1alpha1.ReasonNoAPIEndpoint,
+			name:                 "reports no API endpoint before checking the token",
+			cluster:              clusterv1.ManagedCluster{ObjectMeta: metav1.ObjectMeta{Name: "cluster-a"}},
+			remoteSecretClusters: []string{},
+			expectStatus:         metav1.ConditionFalse,
+			expectReason:         meshv1alpha1.ReasonNoAPIEndpoint,
 		},
 		{
 			name:             "reports pending when RBAC is unavailable",
@@ -535,14 +536,14 @@ func TestUpdateDiscoveryStatusCondition(t *testing.T) {
 			expectReason:     meshv1alpha1.ReasonDistributionPending,
 		},
 		{
-			name:                 "reports pending when the cluster's remote secret is missing from the MWRS",
+			name:                 "reports token pending when the cluster's remote secret is missing from the MWRS",
 			cluster:              clusterWithAPIEndpoint("cluster-a"),
 			workConditions:       []metav1.Condition{workApplied(metav1.ConditionTrue), workAvailable(metav1.ConditionTrue)},
 			mwrsetConditions:     []metav1.Condition{mwrsRolledOut(metav1.ConditionTrue), mwrsApplied(metav1.ConditionTrue)},
 			workGeneration:       1,
 			remoteSecretClusters: []string{"cluster-b"},
 			expectStatus:         metav1.ConditionFalse,
-			expectReason:         meshv1alpha1.ReasonDistributionPending,
+			expectReason:         meshv1alpha1.ReasonTokenPending,
 		},
 		{
 			name:             "reports pending when remote secrets are unavailable",

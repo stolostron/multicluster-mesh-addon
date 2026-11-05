@@ -301,11 +301,13 @@ Controller reports per-cluster `DiscoveryDistributed` condition that tracks the 
 | Status | Reason | When |
 |---|---|---|
 | False | `NoAPIEndpoint` | The cluster has no API endpoint configured |
+| False | `TokenPending` | The managed-serviceaccount addon has not created the cluster's token secret yet |
 | False | `DistributionPending` | Discovery resources are pending distribution or unavailable |
 | True | `Distributed` | Discovery resources are distributed and available |
 
 Distribution covers all clusters selected by the mesh's `Placement`.
 A cluster must have an API endpoint and its remote secret included in the `ManifestWorkReplicaSet` template.
+Until the managed-serviceaccount addon creates the cluster's token secret, no remote secret is built and the condition reports `TokenPending`.
 During token rotation, discovery status is reported as pending until updated credentials reach every selected cluster.
 The status can briefly lag while OCM reconciles distribution.
 

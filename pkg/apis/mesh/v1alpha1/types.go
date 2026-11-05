@@ -206,6 +206,9 @@ const (
 	// ReasonCertificatePending indicates trust distribution is waiting for the CA certificate
 	ReasonCertificatePending = "CertificatePending"
 
+	// ReasonTokenPending indicates discovery distribution is waiting for the MSA token secret
+	ReasonTokenPending = "TokenPending"
+
 	// ReasonDistributionPending indicates resource distribution is pending or unavailable
 	ReasonDistributionPending = "DistributionPending"
 

@@ -48,6 +48,7 @@ Optional conditions affect `Ready` only when corresponding feature is configured
 | `NoClustersSelected` | Mesh | The Placement exists. If it selected zero clusters, mesh plumbing is removed. If its decisions still name clusters but every corresponding ManagedCluster object is missing, namespace ManifestWorks and ManagedServiceAccounts for those names are kept. |
 | `ReconcileError` | Mesh | An error occurred during reconciliation |
 | `CertificatePending` | Per-cluster | Trust distribution is waiting for the CA certificate to be issued |
+| `TokenPending` | Per-cluster | Discovery distribution is waiting for the MSA token to be available |
 | `DistributionPending` | Per-cluster | Trust or discovery distribution is pending or unavailable |
 | `Distributed` | Per-cluster | Trust or discovery resources are distributed and available |
 | `NoAPIEndpoint` | Per-cluster | Cluster has no API endpoint configured |

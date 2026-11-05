@@ -84,7 +84,7 @@ If the Placement exists and has selected zero clusters, the mesh reports `NoClus
 ### Mesh shows ClustersNotReady
 
 The mesh waits for `DiscoveryDistributed=True` on every resolved cluster.
-For `DistributionPending` or `NoAPIEndpoint` on `DiscoveryDistributed`, see [discovery troubleshooting](#no-remote-secrets-on-spoke-clusters-discoverydistributedfalse).
+For `TokenPending`, `DistributionPending`, or `NoAPIEndpoint` on `DiscoveryDistributed`, see [discovery troubleshooting](#no-remote-secrets-on-spoke-clusters-discoverydistributedfalse).
 
 When trust is configured (cert-manager issuer is set), mesh waits for cacerts ManifestWork to report `Applied=True` for its current generation and `Available=True` on every managed cluster before becoming `Ready`.
 After certificate rotation, mesh can temporarily report `ClustersNotReady` until updated trust material is applied.
@@ -183,6 +183,7 @@ During token rotation, discovery stays pending until the updated credentials are
 The status can lag briefly while OCM reconciles distribution.
 
 * A `NoAPIEndpoint` reason means cluster has no API endpoint configured in its ManagedCluster spec.
+* A `TokenPending` reason means the managed-serviceaccount addon has not created the cluster's token secret yet.
 * A `DistributionPending` reason means discovery RBAC or remote-secret distribution is pending or unavailable.
 * The istio-reader `ManifestWork` should have conditions `Applied=True` and `Available=True`.
 * The secrets `ManifestWorkReplicaSet` should have `PlacementRolledOut=True` and `ManifestworkApplied=True`.

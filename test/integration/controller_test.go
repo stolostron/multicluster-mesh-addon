@@ -799,7 +799,7 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 					Expect(k8sClient.Get(ctx, key.Of(clusterName), cluster)).To(Succeed())
 					cluster.Spec.ManagedClusterClientConfigs = []clusterv1.ClientConfig{{URL: "https://" + clusterName + ":6443"}}
 					Expect(k8sClient.Update(ctx, cluster)).To(Succeed())
-					expectClusterDiscoveryCondition(meshName, testNs, clusterName, meshv1alpha1.ReasonDistributionPending)
+					expectClusterDiscoveryCondition(meshName, testNs, clusterName, meshv1alpha1.ReasonTokenPending)
 
 					By("completing discovery distribution")
 					simulateDiscoveryDistributed(mesh, clusterName)
@@ -813,6 +813,15 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 				BeforeEach(func() {
 					mesh = util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testPlacement)
 					expectManagedServiceAccount(mesh, clusterName)
+				})
+
+				It("should report TokenPending until the token secret is available", func() {
+					expectClusterDiscoveryCondition(meshName, testNs, clusterName, meshv1alpha1.ReasonTokenPending)
+					expectMeshNotReady(meshName, testNs)
+
+					By("creating the token secret")
+					setupMsaTokenSecret(mesh, clusterName)
+					expectClusterDiscoveryCondition(meshName, testNs, clusterName, meshv1alpha1.ReasonDistributionPending)
 				})
 
 				It("should update ManagedServiceAccount validity when mesh spec changes", func() {
