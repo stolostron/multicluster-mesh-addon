@@ -194,17 +194,26 @@ const (
 	// ReasonClustersNotReady indicates that one or more clusters are not ready
 	ReasonClustersNotReady = "ClustersNotReady"
 
+	// ConditionDiscoveryDistributed indicates whether endpoint discovery resources are distributed and available
+	ConditionDiscoveryDistributed = "DiscoveryDistributed"
+
 	// ConditionTrustDistributed indicates whether trust has been distributed to a cluster
 	ConditionTrustDistributed = "TrustDistributed"
 
-	// ReasonDistributed indicates trust has been distributed to the cluster
+	// ReasonDistributed indicates required resources are distributed and available
 	ReasonDistributed = "Distributed"
 
 	// ReasonCertificatePending indicates trust distribution is waiting for the CA certificate
 	ReasonCertificatePending = "CertificatePending"
 
-	// ReasonDistributionPending indicates trust distribution is in progress
+	// ReasonTokenPending indicates discovery distribution is waiting for the MSA token secret
+	ReasonTokenPending = "TokenPending"
+
+	// ReasonDistributionPending indicates resource distribution is pending or unavailable
 	ReasonDistributionPending = "DistributionPending"
+
+	// ReasonNoAPIEndpoint indicates the cluster has no API endpoint configured, so endpoint discovery can't work
+	ReasonNoAPIEndpoint = "NoAPIEndpoint"
 )
 
 // MultiClusterMeshStatus defines the observed state of MultiClusterMesh
