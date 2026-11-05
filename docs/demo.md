@@ -237,6 +237,7 @@ kubectl --context "$HUB_CONTEXT" apply \
 
 The OSSM operator is a prerequisite. The add-on does not install it.
 OperatorPolicy installs it on the clusters selected by `mesh-operator-placement`.
+See [Install the Service Mesh Operator](operator-installation.md) for a full guide on governance framework setup, version pinning, and adding clusters later.
 
 Install the governance-policy-framework hub add-on when its CRDs are not already present:
 
@@ -342,6 +343,7 @@ Those resources support the mesh but are not the primary demo object.
 
 The add-on does not create Istio resources.
 Apply the Istio configuration on each spoke as the customer would, directly or through GitOps.
+For a hub-only approach using ACM policies (no spoke access needed), see [Step 8 of the user guide](user-guide.md#step-8-configure-istio) or the [PolicyGenerator guide](istio-policygenerator.md).
 
 The [Istio CNI](../samples/istio/istiocni.yaml), [Istio control plane](../samples/istio/istio.yaml), and [east-west Gateway](../samples/istio/eastwest-gateway.yaml) samples use MESH_NAME, CLUSTER_NAME, NETWORK, and CP_NAMESPACE.
 MESH_NAME is already `openshift-mesh`, which matches the sample and is the trust domain.

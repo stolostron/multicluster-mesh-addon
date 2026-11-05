@@ -1,0 +1,20 @@
+# Istio control plane with hub template placeholders.
+# Replace <MESH_NAME> and <MESH_NAMESPACE> before building with PolicyGenerator.
+#
+# This is a minimal template. Add fields under spec.values to match your mesh
+# requirements (e.g. meshConfig.discoverySelectors, pilot settings, proxy
+# resource limits). See the Sail operator API reference for all available fields.
+apiVersion: sailoperator.io/v1
+kind: Istio
+metadata:
+  name: default
+spec:
+  namespace: '{{hub (lookup "mesh.open-cluster-management.io/v1alpha1" "MultiClusterMesh" "<MESH_NAMESPACE>" "<MESH_NAME>").status.controlPlaneNamespace hub}}'
+  values:
+    meshConfig:
+      trustDomain: '<MESH_NAME>'
+    global:
+      meshID: '<MESH_NAME>'
+      multiCluster:
+        clusterName: '{{hub .ManagedClusterName hub}}'
+      network: '{{hub (index .ManagedClusterLabels "topology.istio.io/network") | default .ManagedClusterName hub}}'

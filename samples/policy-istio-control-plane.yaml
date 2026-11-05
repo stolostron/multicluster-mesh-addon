@@ -1,0 +1,108 @@
+# Installs the Istio control plane and east-west gateway on clusters selected
+# by the mesh Placement, using hub templates for per-cluster values.
+#
+# Before applying:
+#   1. Replace <MESH_NAME> and <MESH_NAMESPACE> with your mesh name and namespace.
+#   2. Replace <PLACEMENT_NAME> with your mesh's Placement name
+#      (spec.placementRef.name on the MultiClusterMesh).
+#   3. The addon must have created the MultiClusterMesh and populated
+#      status.controlPlaneNamespace.
+#   4. governance-policy-framework and config-policy-controller must be enabled
+#      on the managed clusters. See docs/operator-installation.md for setup.
+#
+# Apply on the hub:
+#   kubectl apply -n <mesh-namespace> -f samples/policy-istio-control-plane.yaml
+#
+# The Policy must be in the same namespace as the MultiClusterMesh: the policy
+# propagator restricts hub template lookups to the policy namespace by default.
+#
+# The hub template variables are resolved per cluster at propagation time:
+#   - controlPlaneNamespace: read from the MultiClusterMesh status via lookup
+#   - meshName, trustDomain: literals supplied below (the trust domain is the mesh name)
+#   - ManagedClusterName: built-in, resolves to the cluster name
+#   - topology.istio.io/network label: falls back to the cluster name
+#
+# This sample creates the cluster-scoped Istio/default resource and is intended
+# for one mesh per spoke. Running two meshes on the same cluster requires
+# distinct Istio resource names plus revision, injection, discovery-selector,
+# and gateway ownership configuration.
+#
+# This is a minimal template. Add fields under spec.values in the Istio
+# objectDefinition to match your mesh requirements (e.g. meshConfig.discoverySelectors,
+# pilot settings, proxy resource limits). See the Sail operator API reference
+# for all available fields.
+apiVersion: policy.open-cluster-management.io/v1
+kind: Policy
+metadata:
+  name: policy-istio-<MESH_NAME>
+spec:
+  remediationAction: enforce
+  disabled: false
+  policy-templates:
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: istio-cp-<MESH_NAME>
+        spec:
+          remediationAction: enforce
+          severity: medium
+          pruneObjectBehavior: DeleteIfCreated
+          object-templates:
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: sailoperator.io/v1
+                kind: Istio
+                metadata:
+                  name: default
+                spec:
+                  namespace: '{{hub (lookup "mesh.open-cluster-management.io/v1alpha1" "MultiClusterMesh" "<MESH_NAMESPACE>" "<MESH_NAME>").status.controlPlaneNamespace hub}}'
+                  values:
+                    meshConfig:
+                      trustDomain: '<MESH_NAME>'
+                    global:
+                      meshID: '<MESH_NAME>'
+                      multiCluster:
+                        clusterName: '{{hub .ManagedClusterName hub}}'
+                      network: '{{hub (index .ManagedClusterLabels "topology.istio.io/network") | default .ManagedClusterName hub}}'
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: istio-gw-<MESH_NAME>
+        spec:
+          remediationAction: enforce
+          severity: medium
+          pruneObjectBehavior: DeleteIfCreated
+          object-templates:
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: gateway.networking.k8s.io/v1
+                kind: Gateway
+                metadata:
+                  name: eastwestgateway
+                  namespace: '{{hub (lookup "mesh.open-cluster-management.io/v1alpha1" "MultiClusterMesh" "<MESH_NAMESPACE>" "<MESH_NAME>").status.controlPlaneNamespace hub}}'
+                  labels:
+                    topology.istio.io/network: '{{hub (index .ManagedClusterLabels "topology.istio.io/network") | default .ManagedClusterName hub}}'
+                spec:
+                  gatewayClassName: istio
+                  listeners:
+                    - name: cross-network
+                      hostname: "*.local"
+                      port: 15443
+                      protocol: TLS
+                      tls:
+                        mode: Passthrough
+---
+apiVersion: policy.open-cluster-management.io/v1
+kind: PlacementBinding
+metadata:
+  name: binding-istio-<MESH_NAME>
+placementRef:
+  apiGroup: cluster.open-cluster-management.io
+  kind: Placement
+  name: <PLACEMENT_NAME>
+subjects:
+  - apiGroup: policy.open-cluster-management.io
+    kind: Policy
+    name: policy-istio-<MESH_NAME>
