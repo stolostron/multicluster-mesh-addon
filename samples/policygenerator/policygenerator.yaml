@@ -30,6 +30,7 @@ policyDefaults:
   namespace: <mesh-system>
   remediationAction: enforce
   severity: medium
+  pruneObjectBehavior: DeleteIfCreated
   placement:
     placementName: <mesh-placement>
 policies:

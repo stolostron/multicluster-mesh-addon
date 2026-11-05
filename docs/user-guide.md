@@ -289,17 +289,16 @@ See the [Fleet Service Mesh Dev Preview Guide][fleet-mesh] for setup instruction
 
 ## Step 9: Cleanup
 
-If you used PolicyGenerator, follow its [cleanup instructions](istio-policygenerator.md#cleanup) to remove the generated policy and spoke Istio CRs before deleting the MultiClusterMesh below.
+If you used PolicyGenerator, follow its [cleanup instructions](istio-policygenerator.md#cleanup) to remove the generated policy before deleting the MultiClusterMesh below.
 
-First remove the Istio configuration. If you used the policy-based approach from Step 8, delete the policy and its binding on the hub. Deleting an enforced policy does not remove the resources it created on the spokes, so delete the Istio CR on each spoke afterwards:
+First remove the Istio configuration. If you used the policy-based approach from Step 8, delete the policy and its binding on the hub:
 
 ```bash
 kubectl delete policy policy-istio-basic-mesh -n mesh-system
 kubectl delete placementbinding binding-istio-basic-mesh -n mesh-system
-for CLUSTER_NAME in cluster1 cluster2; do
-  kubectl --context "$CLUSTER_NAME" delete istio.sailoperator.io default --ignore-not-found
-done
 ```
+
+The sample policies set `pruneObjectBehavior: DeleteIfCreated`, so deleting them also removes the Istio CR and east-west gateway they created on the spokes. The same applies to the IstioCNI policy from Step 8: deleting it removes the `IstioCNI` CR and the `istio-cni` namespace it created. Pruning is asynchronous and only covers objects the policy created.
 
 If you used the [manual approach](istio-manual.md), delete the Istio CR on each spoke directly:
 

@@ -102,14 +102,14 @@ For larger setups where you want to avoid duplicating manifests, use a two-stage
 
 ## Cleanup
 
-Delete the generated policy and its binding on the hub before deleting the Istio CRs on the spokes. Use the namespace configured in `policyDefaults.namespace`. If you changed the generated resource names, use those names instead:
+Delete the generated policy and its binding on the hub. Use the namespace configured in `policyDefaults.namespace`. If you changed the generated resource names, use those names instead:
 
 ```bash
 kubectl delete policy policy-istio -n "$MESH_NAMESPACE"
 kubectl delete placementbinding binding-istio -n "$MESH_NAMESPACE"
 ```
 
-Deleting the policy does not remove the resources it created on the spokes. Delete the Istio CR on each spoke, replacing the example context names with those from your kubeconfig:
+The generated policy sets `pruneObjectBehavior: DeleteIfCreated`, so deleting it also removes the Istio CR and east-west gateway it created on the spokes. Pruning is asynchronous and only covers objects the policy created. If the `Istio/default` CR already existed before the policy was applied, delete it on each spoke, replacing the example context names with those from your kubeconfig:
 
 ```bash
 for CONTEXT in context-for-cluster1 context-for-cluster2; do
