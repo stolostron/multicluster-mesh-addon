@@ -311,13 +311,15 @@ The user is responsible for:
 
 - Installing the service mesh operator on managed clusters (via [OperatorPolicy] or equivalent)
 - Creating and managing Istio custom resources on each spoke cluster (directly or via GitOps)
+- Optionally generating an ACM Policy and PlacementBinding with `meshctl scaffold`; the generated policy remains user-owned and uses hub templates to consume MCM and ManagedCluster values
 - Setting `values.global.network` in the Istio CR to match the cluster's network identity (cluster name by default, or the value of `topology.istio.io/network` on the ManagedCluster if set). See [Network Partitioning](#network-partitioning).
-- Enabling Istio CNI on OpenShift clusters
+- Enabling Istio CNI on OpenShift clusters, directly or with `meshctl scaffold istiocni`; `scaffold istio --depends-on-istiocni` can wait for its readiness policy
 - Configuring `discoverySelectors` in multi-tenant environments to prevent cross-mesh service visibility
 - Labeling application namespaces to match discovery selector configuration
 - Creating and managing Placement resources for cluster selection
 
 ArgoCD with ApplicationSets is the recommended approach for managing Istio configuration across clusters.
+The `meshctl` scaffold is a PoC convenience for authoring an OCM policy bundle; it does not change resource ownership or add Istio fields to the MCM API.
 
 **Phase 2 (Future)**: "Full" approach - the add-on also manages Istio custom resources centrally, automating topology configuration and enforcing consistency.
 

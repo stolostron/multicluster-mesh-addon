@@ -32,7 +32,11 @@ It prepares the add-on image and MetalLB, but leaves the controller and Gateway 
 `make demo-sail` installs the controller from the local chart, using the image loaded into the hub.
 The demo creates the set and adds the first two clusters interactively.
 The third cluster is registered and available, then added to the set during the scale-out portion of the demo.
-The script installs the governance policy addons and mesh operator later in the interactive flow.
+The script enables the hub governance policy controllers and the governance/config-policy controllers on all three spokes before creating a policy.
+Both the kind and OpenShift flows use `meshctl scaffold` to generate user-owned hub Policies for Istio and the east-west Gateway.
+On OpenShift, the demo also applies a separate IstioCNI policy; the Istio policy waits for its readiness check.
+The Policies install resources on the third spoke when it joins the Placement.
+The generated Istio policy remains at `.kube/istio-installation.yaml`; on OpenShift, the CNI policy remains at `.kube/istiocni-installation.yaml`.
 
 ```bash
 make demo-dev-env
@@ -43,6 +47,12 @@ Clean up the three-spoke environment with:
 
 ```bash
 make demo-dev-clean
+```
+
+For an unattended run of the local demo, keep the usual `.kube` development environment and skip the interactive pauses:
+
+```bash
+DEMO_AUTO_CONTINUE=1 DEMO_COMMAND_PAUSE=0 TYPEWRITER_DELAY=0 make demo-sail
 ```
 
 Run `make help` to see all available targets, including individual steps if you need to re-run only part of the setup.

@@ -1,7 +1,7 @@
 # OpenShift ACM and OSSM demo
 
 This walkthrough tells a simple Bookinfo story across three OpenShift clusters.
-ACM provides the hub, the mesh add-on prepares the selected clusters, and you create the Istio and application resources just as a customer would.
+ACM provides the hub, the mesh add-on prepares the selected clusters, and a user-owned ACM Policy installs Istio and the east-west Gateway on each mesh member.
 We start with two clusters, show reviews traffic crossing them, and then add a third cluster to show scale-out.
 
 The commands are deliberately explicit and the demo pauses between sections.
@@ -22,7 +22,7 @@ The following must already exist:
 - The ACM managed-serviceaccount add-on installed and available.
 - OLM on all three managed clusters.
 - Permission to enable the ManifestWorkReplicaSet feature gate on the ACM hub if it is not already enabled.
-- kubectl, helm, clusteradm, istioctl, envsubst, yq, and bat on the machine running the commands.
+- kubectl, helm, clusteradm, istioctl, envsubst, yq, bat, make, and Go on the machine running the commands.
 - A kubeconfig context for the hub and each spoke.
 - Permission to install cluster-scoped operators and the add-on.
 
@@ -50,6 +50,7 @@ export CLUSTER_C=cluster3
 
 export MESH_NAMESPACE=mesh-system
 export MESH_NAME=openshift-mesh
+export ISTIO_VERSION=1.30.4
 export CLUSTER_SET=mesh-cluster-set
 export OPERATOR_POLICY_NAMESPACE=mesh-operator-policy
 ~~~
@@ -209,9 +210,13 @@ kubectl --context "$HUB_CONTEXT" wait \
 
 Create the ClusterSet and add the first two spokes.
 The default clusteradm create clusterset behavior creates an exclusive ClusterSet.
+Clear the third cluster's membership label so the demo can be restarted after a previous scale-out run:
 
 ~~~bash
 clusteradm --context "$HUB_CONTEXT" create clusterset "$CLUSTER_SET"
+kubectl --context "$HUB_CONTEXT" patch managedcluster "$CLUSTER_C" \
+  --type=merge \
+  -p '{"metadata":{"labels":{"cluster.open-cluster-management.io/clusterset":null}}}'
 clusteradm --context "$HUB_CONTEXT" clusterset set "$CLUSTER_SET" \
   --clusters "$CLUSTER_A,$CLUSTER_B"
 ~~~
@@ -338,53 +343,67 @@ echo "$CP_NAMESPACE"
 The add-on also creates trust and endpoint-discovery resources behind the scenes.
 Those resources support the mesh but are not the primary demo object.
 
-## 7. Configure Istio on the initial mesh members
+## 7. Install Istio with the generated ACM Policy
 
-The add-on does not create Istio resources.
-Apply the Istio configuration on each spoke as the customer would, directly or through GitOps.
+The add-on does not create Istio resources. `meshctl scaffold istio` generates a root Policy and PlacementBinding for the spoke `Istio` and east-west Gateway.
+`meshctl scaffold istiocni` generates a separate policy for the OpenShift CNI namespace and `IstioCNI` resource.
+The Istio policy depends on the CNI readiness ConfigurationPolicy, which checks `IstioCNI` status for `Ready=True`.
+ACM fills in the control-plane namespace from MCM status and the network and cluster name from each ManagedCluster.
+The bundles are user-owned, so you can review them, apply them, or commit them to GitOps.
 
-The [Istio CNI](../samples/istio/istiocni.yaml), [Istio control plane](../samples/istio/istio.yaml), and [east-west Gateway](../samples/istio/eastwest-gateway.yaml) samples use MESH_NAME, CLUSTER_NAME, NETWORK, and CP_NAMESPACE.
-MESH_NAME is already `openshift-mesh`, which matches the sample and is the trust domain.
-
-### 7.1. Configure Istio on cluster1
-
-~~~bash
-export CLUSTER_NAME="$CLUSTER_A"
-export NETWORK=network-a
-kubectl --context "$SPOKE_A_CONTEXT" apply -f hack/demo/istiocni-namespace.yaml
-kubectl --context "$SPOKE_A_CONTEXT" apply -f samples/istio/istiocni.yaml
-envsubst < samples/istio/istio.yaml | \
-  kubectl --context "$SPOKE_A_CONTEXT" apply -f -
-kubectl --context "$SPOKE_A_CONTEXT" wait --for=create \
-  deployment/istiod -n "$CP_NAMESPACE" --timeout=15m
-kubectl --context "$SPOKE_A_CONTEXT" wait \
-  --for=condition=Available \
-  deployment/istiod \
-  -n "$CP_NAMESPACE" --timeout=15m
-envsubst < samples/istio/eastwest-gateway.yaml | \
-  kubectl --context "$SPOKE_A_CONTEXT" apply -f -
-~~~
-
-### 7.2. Configure Istio on cluster2
+Build the offline CLI and generate the policy bundle from the repository root:
 
 ~~~bash
-export CLUSTER_NAME="$CLUSTER_B"
-export NETWORK=network-b
-kubectl --context "$SPOKE_B_CONTEXT" apply -f hack/demo/istiocni-namespace.yaml
-kubectl --context "$SPOKE_B_CONTEXT" apply -f samples/istio/istiocni.yaml
-envsubst < samples/istio/istio.yaml | \
-  kubectl --context "$SPOKE_B_CONTEXT" apply -f -
-kubectl --context "$SPOKE_B_CONTEXT" wait --for=create \
-  deployment/istiod -n "$CP_NAMESPACE" --timeout=15m
-kubectl --context "$SPOKE_B_CONTEXT" wait \
-  --for=condition=Available \
-  deployment/istiod \
-  -n "$CP_NAMESPACE" --timeout=15m
-envsubst < samples/istio/eastwest-gateway.yaml | \
-  kubectl --context "$SPOKE_B_CONTEXT" apply -f -
+make build-meshctl
+bin/meshctl scaffold istiocni \
+  --namespace "$MESH_NAMESPACE" \
+  --placement mesh-placement \
+  --policy-name "istiocni-installation-$MESH_NAME" \
+  > istiocni-installation.yaml
+bin/meshctl scaffold istio "$MESH_NAME" \
+  --namespace "$MESH_NAMESPACE" \
+  --placement mesh-placement \
+  --istio-version "v$ISTIO_VERSION" \
+  --policy-name "istio-installation-$MESH_NAME" \
+  --depends-on-istiocni "istiocni-installation-$MESH_NAME" \
+  > mesh-installation.yaml
 ~~~
 
-### 7.3. Verify mesh connectivity
+Review and apply the CNI bundle first, then the Istio bundle:
+
+~~~bash
+kubectl --context "$HUB_CONTEXT" diff -f istiocni-installation.yaml
+kubectl --context "$HUB_CONTEXT" apply -f istiocni-installation.yaml
+kubectl --context "$HUB_CONTEXT" diff -f mesh-installation.yaml
+kubectl --context "$HUB_CONTEXT" apply -f mesh-installation.yaml
+~~~
+
+Wait for both policies to become Compliant on each initial member. The CNI policy only becomes Compliant after the `IstioCNI` Ready condition is true:
+
+~~~bash
+for CLUSTER in "$CLUSTER_A" "$CLUSTER_B"; do
+  for POLICY in "istiocni-installation-$MESH_NAME" "istio-installation-$MESH_NAME"; do
+    kubectl --context "$HUB_CONTEXT" wait \
+      --for="jsonpath={.status.status[?(@.clustername==\"${CLUSTER}\")].compliant}=Compliant" \
+      "policy/$POLICY" -n "$MESH_NAMESPACE" --timeout=15m
+  done
+done
+~~~
+
+Wait for the control plane and east-west gateway Services:
+
+~~~bash
+for CONTEXT in "$SPOKE_A_CONTEXT" "$SPOKE_B_CONTEXT"; do
+  kubectl --context "$CONTEXT" wait --for=condition=Available \
+    deployment/istiod -n "$CP_NAMESPACE" --timeout=15m
+  kubectl --context "$CONTEXT" wait \
+    --for=jsonpath='{.status.loadBalancer.ingress}' \
+    service/eastwestgateway-istio \
+    -n "$CP_NAMESPACE" --timeout=15m
+done
+~~~
+
+### 7.1. Verify mesh connectivity
 
 Wait for each east-west gateway Service to receive a LoadBalancer address. The Gateway is programmed after the service receives an address:
 
@@ -421,12 +440,11 @@ Deploy one Bookinfo reviews version on each cluster. Keep the same service names
 
 ### 8.1. Deploy Bookinfo v1 on cluster1
 
-Set ISTIO_VERSION to the Istio version supported by the OSSM version installed by your catalog.
-The repository's demo default is Istio 1.30.4; check that it matches your installed operator and istioctl version before using it.
+Use an `ISTIO_VERSION` supported by the OSSM version installed by your catalog.
+The demo default is Istio 1.30.4; check that it matches your installed operator and istioctl version before using it.
 The Bookinfo manifest uses the matching Istio minor-release branch.
 
 ~~~bash
-export ISTIO_VERSION=1.30.4
 export BOOKINFO_REF="release-${ISTIO_VERSION%.*}"
 
 kubectl --context "$SPOKE_A_CONTEXT" apply \
@@ -568,35 +586,27 @@ kubectl --context "$HUB_CONTEXT" get \
 ~~~
 
 The OperatorPolicy has installed the OSSM operator on the new member, and cluster3's cacerts ManifestWork is applied.
-The customer still needs to install and configure Istio there.
-
-### 9.2. Configure Istio on cluster3
-
-Configure Istio on cluster3:
+Because the existing mesh Placement now selects cluster3, both installation policies target it automatically. The Istio policy waits for the CNI readiness check on that cluster before creating its ConfigurationPolicy.
+Wait for the policies and gateway:
 
 ~~~bash
-export CLUSTER_NAME="$CLUSTER_C"
-export NETWORK=network-c
-kubectl --context "$SPOKE_C_CONTEXT" apply -f hack/demo/istiocni-namespace.yaml
-kubectl --context "$SPOKE_C_CONTEXT" apply -f samples/istio/istiocni.yaml
-envsubst < samples/istio/istio.yaml | \
-  kubectl --context "$SPOKE_C_CONTEXT" apply -f -
-kubectl --context "$SPOKE_C_CONTEXT" wait --for=create \
-  deployment/istiod -n "$CP_NAMESPACE" --timeout=15m
+for POLICY in "istiocni-installation-$MESH_NAME" "istio-installation-$MESH_NAME"; do
+  kubectl --context "$HUB_CONTEXT" wait \
+    --for="jsonpath={.status.status[?(@.clustername==\"${CLUSTER_C}\")].compliant}=Compliant" \
+    "policy/$POLICY" -n "$MESH_NAMESPACE" --timeout=15m
+done
 kubectl --context "$SPOKE_C_CONTEXT" wait \
   --for=condition=Available deployment/istiod \
   -n "$CP_NAMESPACE" --timeout=15m
-envsubst < samples/istio/eastwest-gateway.yaml | \
-  kubectl --context "$SPOKE_C_CONTEXT" apply -f -
-kubectl --context "$SPOKE_C_CONTEXT" wait \
-  --for=create service/eastwestgateway-istio -n "$CP_NAMESPACE" --timeout=15m
 kubectl --context "$SPOKE_C_CONTEXT" wait \
   --for=jsonpath='{.status.loadBalancer.ingress}' \
   service/eastwestgateway-istio \
   -n "$CP_NAMESPACE" --timeout=15m
 ~~~
 
-Verify that all three control planes can see each other:
+### 9.2. Verify mesh connectivity
+
+Confirm that all three control planes can see each other:
 
 ~~~bash
 istioctl remote-clusters --context "$SPOKE_A_CONTEXT" -i "$CP_NAMESPACE"
@@ -710,15 +720,16 @@ kubectl --context "$HUB_CONTEXT" get route console \
 
 ## Cleanup
 
-First remove the user-owned, cluster-scoped Istio resources so the operator stops recreating their control-plane components. The sample used `Istio/default` on each spoke:
+First delete the generated hub policies so the spoke ConfigurationPolicies can prune resources they created:
 
 ~~~bash
-for CONTEXT in "$SPOKE_A_CONTEXT" "$SPOKE_B_CONTEXT" "$SPOKE_C_CONTEXT"; do
-  kubectl --context "$CONTEXT" delete istio.sailoperator.io default --ignore-not-found
-done
+kubectl --context "$HUB_CONTEXT" delete -f mesh-installation.yaml
+kubectl --context "$HUB_CONTEXT" delete -f istiocni-installation.yaml
 ~~~
 
-Deleting the MultiClusterMesh requests asynchronous cleanup of each spoke's mesh namespace, cacerts, discovery resources, and istio-reader RBAC. The finalizer does not wait for all spoke resources to disappear. Deleting the demo hub namespace also deletes its issuers and retained certificate Secrets:
+Wait for the spoke `Istio`, Gateway, and CNI resources to disappear before deleting the MultiClusterMesh.
+Policy pruning and add-on cleanup are asynchronous and are not coordinated.
+Deleting the MultiClusterMesh requests cleanup of each spoke's mesh namespace, cacerts, discovery resources, and istio-reader RBAC. The finalizer does not wait for all spoke resources to disappear. Deleting the demo hub namespace also deletes its issuers and retained certificate Secrets:
 
 ~~~bash
 kubectl --context "$HUB_CONTEXT" delete \
@@ -735,7 +746,7 @@ for CONTEXT in "$SPOKE_A_CONTEXT" "$SPOKE_B_CONTEXT" "$SPOKE_C_CONTEXT"; do
 done
 ~~~
 
-The separately installed mesh operator, its OperatorPolicy in `$OPERATOR_POLICY_NAMESPACE`, the ClusterSet, and cluster-scoped IstioCNI resources remain. Remove those separately only when they are no longer needed by other meshes.
+The separately installed mesh operator, its OperatorPolicy in `$OPERATOR_POLICY_NAMESPACE`, and the ClusterSet remain. Remove those separately only when they are no longer needed by other meshes.
 
 ## References
 
