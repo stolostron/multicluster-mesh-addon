@@ -153,7 +153,9 @@ Create the Placement or fix the reference.
 
 ### Mesh shows PlacementDecisionPending
 
-The Placement referenced by `spec.placementRef.name` is writing its PlacementDecision objects. This reason shows PlacementDecision objects are still being redistributed. Reconciliation requests are requeued. Check the Placement status and wait for the Placement controller distributing PlacementDecision objects.
+The Placement controller is still writing the PlacementDecision objects for the Placement referenced by `spec.placementRef.name`, so the decision entries do not yet match `status.numberOfSelectedClusters`. Reconciliation is requeued every 2 seconds and no mesh resources are created, updated, or deleted in this case.
+A mesh that already reports `Ready=True` keeps that condition across the gap, so this reason appears only on a mesh that has not become ready yet.
+Check the Placement status and wait for the Placement controller to finish distributing PlacementDecision objects.
 
 ### Mesh shows NoClustersSelected
 
