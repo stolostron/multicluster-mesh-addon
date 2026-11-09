@@ -718,18 +718,20 @@ func TestGetClustersFromPlacementErrorPaths(t *testing.T) {
 	tests := []struct {
 		name               string
 		initObjs           []client.Object
+		seedReady          bool
 		interceptorFuncs   func(failToggle *atomic.Bool) interceptor.Funcs
 		expectErr          bool
 		expectRequeueAfter time.Duration
 		expectReadyStatus  metav1.ConditionStatus
 		expectReason       string
-		seedReady          bool
+		expectMessage      string
 		recover            func(ctx context.Context, t *testing.T, c client.Client, failToggle *atomic.Bool)
 	}{
 		{
-			name: "Placement Get API Failure - returns wrapped error",
+			name: "Placement Get API Failure - flips a Ready mesh to ReconcileError",
 			// include decision and cluster so recovery succeeds down to AllClustersReady
-			initObjs: []client.Object{placementWithSelected(1), baseDecision, baseManagedCluster},
+			initObjs:  []client.Object{placementWithSelected(1), baseDecision, baseManagedCluster},
+			seedReady: true,
 			interceptorFuncs: func(failToggle *atomic.Bool) interceptor.Funcs {
 				return interceptor.Funcs{
 					Get: func(ctx context.Context, c client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
@@ -745,13 +747,15 @@ func TestGetClustersFromPlacementErrorPaths(t *testing.T) {
 			expectErr:         true,
 			expectReadyStatus: metav1.ConditionFalse,
 			expectReason:      meshv1alpha1.ReasonReconcileError,
+			expectMessage:     "failed to get Placement test-placement",
 			recover: func(ctx context.Context, t *testing.T, c client.Client, failToggle *atomic.Bool) {
 				failToggle.Store(false)
 			},
 		},
 		{
-			name:     "PlacementDecision List API Failure - returns wrapped error",
-			initObjs: []client.Object{placementWithSelected(1), baseDecision, baseManagedCluster},
+			name:      "PlacementDecision List API Failure - flips a Ready mesh to ReconcileError",
+			initObjs:  []client.Object{placementWithSelected(1), baseDecision, baseManagedCluster},
+			seedReady: true,
 			interceptorFuncs: func(failToggle *atomic.Bool) interceptor.Funcs {
 				return interceptor.Funcs{
 					List: func(ctx context.Context, c client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
@@ -767,13 +771,15 @@ func TestGetClustersFromPlacementErrorPaths(t *testing.T) {
 			expectErr:         true,
 			expectReadyStatus: metav1.ConditionFalse,
 			expectReason:      meshv1alpha1.ReasonReconcileError,
+			expectMessage:     "failed to list PlacementDecisions for Placement test-placement",
 			recover: func(ctx context.Context, t *testing.T, c client.Client, failToggle *atomic.Bool) {
 				failToggle.Store(false)
 			},
 		},
 		{
-			name:     "ManagedCluster Get API Failure - returns wrapped error",
-			initObjs: []client.Object{placementWithSelected(1), baseDecision, baseManagedCluster},
+			name:      "ManagedCluster Get API Failure - flips a Ready mesh to ReconcileError",
+			initObjs:  []client.Object{placementWithSelected(1), baseDecision, baseManagedCluster},
+			seedReady: true,
 			interceptorFuncs: func(failToggle *atomic.Bool) interceptor.Funcs {
 				return interceptor.Funcs{
 					Get: func(ctx context.Context, c client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
@@ -789,6 +795,7 @@ func TestGetClustersFromPlacementErrorPaths(t *testing.T) {
 			expectErr:         true,
 			expectReadyStatus: metav1.ConditionFalse,
 			expectReason:      meshv1alpha1.ReasonReconcileError,
+			expectMessage:     "failed to get ManagedCluster cluster-a",
 			recover: func(ctx context.Context, t *testing.T, c client.Client, failToggle *atomic.Bool) {
 				failToggle.Store(false)
 			},
@@ -797,10 +804,12 @@ func TestGetClustersFromPlacementErrorPaths(t *testing.T) {
 			name: "PlacementDecisions pending - requeues without error",
 			// Placement claims 2 selected clusters but only one decision entry exists, simulating decisions still being redistributed.
 			initObjs:           []client.Object{placementWithSelected(2), baseDecision, baseManagedCluster},
+			seedReady:          false,
 			expectErr:          false,
 			expectRequeueAfter: 2 * time.Second,
 			expectReadyStatus:  metav1.ConditionFalse,
 			expectReason:       meshv1alpha1.ReasonPlacementDecisionPending,
+			expectMessage:      "Waiting for PlacementDecisions for Placement test-placement",
 			recover:            recoverDecisionCount,
 		},
 		{
@@ -813,6 +822,7 @@ func TestGetClustersFromPlacementErrorPaths(t *testing.T) {
 			expectRequeueAfter: 2 * time.Second,
 			expectReadyStatus:  metav1.ConditionTrue,
 			expectReason:       meshv1alpha1.ReasonAllClustersReady,
+			expectMessage:      "All clusters are ready",
 			recover:            recoverDecisionCount,
 		},
 	}
@@ -914,6 +924,9 @@ func TestGetClustersFromPlacementErrorPaths(t *testing.T) {
 			}
 			if cond.Reason != tc.expectReason {
 				t.Errorf("expected reason %s, got %s", tc.expectReason, cond.Reason)
+			}
+			if !strings.Contains(cond.Message, tc.expectMessage) {
+				t.Errorf("expected Ready message to contain %s, got %s", tc.expectMessage, cond.Message)
 			}
 
 			// Verify existing ManifestWork resources are preserved
