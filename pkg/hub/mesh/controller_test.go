@@ -1244,7 +1244,7 @@ func newTestScheme() *runtime.Scheme {
 // newTestWorkApplier returns a WorkApplier backed by a fake work clientset so tests can drive a full Reconcile.
 // The lister is empty, so every Apply goes through create/patch against the returned clientset.
 func newTestWorkApplier(objects ...runtime.Object) (*applier.WorkApplier, *workfake.Clientset) {
-	workClient := workfake.NewSimpleClientset(objects...)
+	workClient := workfake.NewSimpleClientset(objects...) //nolint:staticcheck // SA1019: no non-deprecated alternative exists
 	informers := workinformers.NewSharedInformerFactory(workClient, 0)
 	return applier.NewWorkApplierWithTypedClient(workClient, informers.Work().V1().ManifestWorks().Lister()), workClient
 }
