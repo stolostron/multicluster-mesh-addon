@@ -238,11 +238,12 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 			r.pruneStaleClusterStatus(mesh, desiredClusters)
 			reconcileErr = r.determineStatus(ctx, mesh, clusters)
 		}
+	}
 
-		if reconcileErr != nil {
-			klog.Errorf("Encountered an error while reconciling MultiClusterMesh %s/%s: %v", mesh.Namespace, mesh.Name, reconcileErr)
-			mesh.SetReadyCondition(metav1.ConditionFalse, meshv1alpha1.ReasonReconcileError, "%v", reconcileErr)
-		}
+	// Single place that reports errors on the Ready condition
+	if reconcileErr != nil {
+		klog.Errorf("Encountered an error while reconciling MultiClusterMesh %s/%s: %v", mesh.Namespace, mesh.Name, reconcileErr)
+		mesh.SetReadyCondition(metav1.ConditionFalse, meshv1alpha1.ReasonReconcileError, "%v", reconcileErr)
 	}
 
 	mesh.Status.ControlPlaneNamespace = mesh.GetControlPlaneNamespace()
@@ -768,6 +769,9 @@ func meshOwnedLabels(mesh *meshv1alpha1.MultiClusterMesh, clusterName string) ma
 // deleting resources for clusters that are still in the PlacementDecision —
 // the Placement controller will remove them shortly, triggering a clean
 // reconciliation via the PlacementDecision watch.
+//
+// Error returns only wrap the error; Reconcile reports it on the Ready condition as ReconcileError.
+// Conditions are set here only for outcomes that return a nil error, such as a missing Placement or empty decisions.
 func (r *Reconciler) getClustersFromPlacement(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh) ([]clusterv1.ManagedCluster, []string, bool, error) {
 	placement := &clusterv1beta1.Placement{}
 	if err := r.Get(ctx, key.Of(mesh.Spec.PlacementRef.Name, mesh.Namespace), placement); err != nil {
@@ -776,8 +780,6 @@ func (r *Reconciler) getClustersFromPlacement(ctx context.Context, mesh *meshv1a
 				"Placement %s not found in namespace %s", mesh.Spec.PlacementRef.Name, mesh.Namespace)
 			return nil, nil, false, nil
 		}
-		mesh.SetReadyCondition(metav1.ConditionFalse, meshv1alpha1.ReasonReconcileError,
-			"Encountered an error while getting Placement %s: %v", mesh.Spec.PlacementRef.Name, err)
 		return nil, nil, false, fmt.Errorf("failed to get Placement %s: %w", mesh.Spec.PlacementRef.Name, err)
 	}
 
@@ -786,8 +788,6 @@ func (r *Reconciler) getClustersFromPlacement(ctx context.Context, mesh *meshv1a
 		client.InNamespace(mesh.Namespace),
 		client.MatchingLabels{PlacementLabel: mesh.Spec.PlacementRef.Name},
 	); err != nil {
-		mesh.SetReadyCondition(metav1.ConditionFalse, meshv1alpha1.ReasonReconcileError,
-			"Encountered an error while listing PlacementDecisions for Placement %s: %v", mesh.Spec.PlacementRef.Name, err)
 		return nil, nil, false, fmt.Errorf("failed to list PlacementDecisions for Placement %s: %w", mesh.Spec.PlacementRef.Name, err)
 	}
 
@@ -830,8 +830,6 @@ func (r *Reconciler) getClustersFromPlacement(ctx context.Context, mesh *meshv1a
 				klog.V(4).Infof("Cluster %s from PlacementDecision not found, skipping", name)
 				continue
 			}
-			mesh.SetReadyCondition(metav1.ConditionFalse, meshv1alpha1.ReasonReconcileError,
-				"Encountered an error while getting ManagedCluster %s: %v", name, err)
 			return nil, nil, false, fmt.Errorf("failed to get ManagedCluster %s: %w", name, err)
 		}
 		clusters = append(clusters, *cluster)
