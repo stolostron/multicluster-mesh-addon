@@ -9,16 +9,21 @@ import (
 	"time"
 
 	certmanagerv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
+	workfake "open-cluster-management.io/api/client/work/clientset/versioned/fake"
+	workinformers "open-cluster-management.io/api/client/work/informers/externalversions"
 	clusterv1 "open-cluster-management.io/api/cluster/v1"
 	clusterv1beta1 "open-cluster-management.io/api/cluster/v1beta1"
 	workv1 "open-cluster-management.io/api/work/v1"
+	workv1alpha1 "open-cluster-management.io/api/work/v1alpha1"
 	msav1beta1 "open-cluster-management.io/managed-serviceaccount/apis/authentication/v1beta1"
+	"open-cluster-management.io/sdk-go/pkg/apis/work/v1/applier"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
@@ -813,17 +818,15 @@ func TestGetClustersFromPlacementErrorPaths(t *testing.T) {
 			failToggle := &atomic.Bool{}
 			failToggle.Store(true)
 
-			mesh := &meshv1alpha1.MultiClusterMesh{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:       "test-mesh",
-					Namespace:  "default",
-					Generation: 1,
-					Finalizers: []string{FinalizerName},
-				},
-				Spec: meshv1alpha1.MultiClusterMeshSpec{
-					PlacementRef: meshv1alpha1.PlacementReference{Name: "test-placement"},
-				},
-			}
+			mesh := meshWithTrust(&meshv1alpha1.MultiClusterMesh{
+				ObjectMeta: metav1.ObjectMeta{Name: "test-mesh", Namespace: "default", Generation: 1},
+			})
+
+			mesh.Finalizers = []string{FinalizerName}
+			mesh.Spec.PlacementRef = meshv1alpha1.PlacementReference{Name: "test-placement"}
+			// defaulted by the CRD, set explicitly since there is no API server
+			mesh.Spec.Security.Discovery.TokenValidity = &metav1.Duration{Duration: 360 * time.Hour}
+
 			existingWork := &workv1.ManifestWork{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "mesh-work-cluster-a",
@@ -832,7 +835,18 @@ func TestGetClustersFromPlacementErrorPaths(t *testing.T) {
 				},
 			}
 
-			allInitObjs := append(tc.initObjs, mesh, existingWork)
+			// cert-manager has already issued the cacerts secret and the distributed cacerts ManifestWork is applied on cluster-a,
+			// so a successful reconcile reaches AllClustersReady.
+			cacertsSecret := &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      CacertsName(mesh, "cluster-a"),
+					Namespace: mesh.Namespace,
+				},
+				Data: map[string][]byte{"tls.crt": []byte("cert"), "tls.key": []byte("key"), "ca.crt": []byte("ca")},
+			}
+			cacertsWork := cacertsWorkWithConditions(mesh, "cluster-a", workApplied(metav1.ConditionTrue), workAvailable(metav1.ConditionTrue))
+
+			allInitObjs := append(tc.initObjs, mesh, existingWork, cacertsSecret, &cacertsWork)
 			var funcs interceptor.Funcs
 			if tc.interceptorFuncs != nil {
 				funcs = tc.interceptorFuncs(failToggle)
@@ -844,7 +858,8 @@ func TestGetClustersFromPlacementErrorPaths(t *testing.T) {
 				WithInterceptorFuncs(funcs).
 				Build()
 
-			r := &Reconciler{Client: c, Scheme: scheme}
+			workApplier, workClient := newTestWorkApplier(existingWork.DeepCopy(), cacertsWork.DeepCopy())
+			r := &Reconciler{Client: c, Scheme: scheme, workApplier: workApplier}
 
 			req := reconcile.Request{
 				NamespacedName: types.NamespacedName{
@@ -896,20 +911,17 @@ func TestGetClustersFromPlacementErrorPaths(t *testing.T) {
 			if tc.recover != nil {
 				tc.recover(ctx, t, c, failToggle)
 
-				clusters, _, _, err := r.getClustersFromPlacement(ctx, mesh)
+				recoveredResult, err := r.Reconcile(ctx, req)
 				if err != nil {
 					t.Fatalf("unexpected error during recovery reconciliation: %v", err)
 				}
-
-				updatedMesh := &meshv1alpha1.MultiClusterMesh{}
-				err = c.Get(ctx, req.NamespacedName, updatedMesh)
-				if err != nil {
-					t.Fatalf("unexpected error on getting the existing mesh: %v", err)
+				if recoveredResult.RequeueAfter != 0 {
+					t.Errorf("recovered path: expected no requeue, got %v", recoveredResult.RequeueAfter)
 				}
 
-				err = r.determineStatus(context.Background(), updatedMesh, clusters)
-				if err != nil {
-					t.Fatalf("unexpected error on getting recovery status: %v", err)
+				updatedMesh := &meshv1alpha1.MultiClusterMesh{}
+				if err := c.Get(ctx, req.NamespacedName, updatedMesh); err != nil {
+					t.Fatalf("unexpected error on getting the existing mesh: %v", err)
 				}
 
 				recoveredCond := meta.FindStatusCondition(updatedMesh.Status.Conditions, meshv1alpha1.ConditionReady)
@@ -917,17 +929,23 @@ func TestGetClustersFromPlacementErrorPaths(t *testing.T) {
 					t.Fatal("expected Ready condition to be set after recovery")
 				}
 				if recoveredCond.Status != metav1.ConditionTrue {
-					t.Errorf("recovered path: expected Ready=%s, got %s", metav1.ConditionTrue, recoveredCond.Status)
+					t.Errorf("recovered path: expected Ready=%s, got %s (reason %s: %s)",
+						metav1.ConditionTrue, recoveredCond.Status, recoveredCond.Reason, recoveredCond.Message)
 				}
 				if recoveredCond.Reason != meshv1alpha1.ReasonAllClustersReady {
 					t.Errorf("recovered path: expected reason=%s, got %s", meshv1alpha1.ReasonAllClustersReady, recoveredCond.Reason)
 				}
 
+				// The recovered reconcile applied the cluster's resources
+				cpNsWorkName := ManifestWorkNameCPNSPrefix + mesh.GetControlPlaneNamespace()
+				if _, err := workClient.WorkV1().ManifestWorks("cluster-a").Get(ctx, cpNsWorkName, metav1.GetOptions{}); err != nil {
+					t.Errorf("expected control plane namespace ManifestWork to be applied after recovery: %v", err)
+				}
+
 				// Verify mesh resources remain intact post-recovery
-				work := &workv1.ManifestWork{}
-				key := types.NamespacedName{Name: existingWork.GetName(), Namespace: existingWork.GetNamespace()}
-				if err := c.Get(ctx, key, work); err != nil {
-					t.Errorf("expected mesh resource %s to persist after recovery: %v", key, err)
+				if _, err := workClient.WorkV1().ManifestWorks(existingWork.Namespace).Get(ctx, existingWork.Name, metav1.GetOptions{}); err != nil {
+					t.Errorf("expected mesh resource %s/%s to persist after recovery: %v",
+						existingWork.Namespace, existingWork.Name, err)
 				}
 			}
 		})
@@ -1181,11 +1199,23 @@ func TestPruneStaleClusterStatus(t *testing.T) {
 
 func newTestScheme() *runtime.Scheme {
 	scheme := runtime.NewScheme()
+	_ = corev1.AddToScheme(scheme)
 	_ = clusterv1.Install(scheme)
 	_ = clusterv1beta1.Install(scheme)
 	_ = meshv1alpha1.Install(scheme)
 	_ = workv1.Install(scheme)
+	_ = workv1alpha1.Install(scheme)
+	_ = certmanagerv1.AddToScheme(scheme)
+	_ = msav1beta1.AddToScheme(scheme)
 	return scheme
+}
+
+// newTestWorkApplier returns a WorkApplier backed by a fake work clientset so tests can drive a full Reconcile.
+// The lister is empty, so every Apply goes through create/patch against the returned clientset.
+func newTestWorkApplier(objects ...runtime.Object) (*applier.WorkApplier, *workfake.Clientset) {
+	workClient := workfake.NewSimpleClientset(objects...)
+	informers := workinformers.NewSharedInformerFactory(workClient, 0)
+	return applier.NewWorkApplierWithTypedClient(workClient, informers.Work().V1().ManifestWorks().Lister()), workClient
 }
 
 func meshOwnedWork(namespace, name, meshName, meshNamespace string) workv1.ManifestWork {
