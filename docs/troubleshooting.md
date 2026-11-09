@@ -151,6 +151,10 @@ Existing control plane namespaces, Certificates, cacerts, ManagedServiceAccounts
 `status.clusterStatus` is cleared until the Placement exists again.
 Create the Placement or fix the reference.
 
+### Mesh shows PlacementDecisionPending
+
+The Placement referenced by `spec.placementRef.name` is writing its PlacementDecision objects. This reason shows PlacementDecision objects are still being redistributed. Reconciliation requests are requeued. Check the Placement status and wait for the Placement controller distributing PlacementDecision objects.
+
 ### Mesh shows NoClustersSelected
 
 The Placement exists. This reason has two causes. Read the condition message to tell them apart.

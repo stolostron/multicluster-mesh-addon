@@ -6,6 +6,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	certmanagerv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -695,12 +696,14 @@ func TestGetClustersFromPlacementErrorPaths(t *testing.T) {
 	}
 
 	tests := []struct {
-		name              string
-		initObjs          []client.Object
-		interceptorFuncs  func(failToggle *atomic.Bool) interceptor.Funcs
-		expectReadyStatus metav1.ConditionStatus
-		expectReason      string
-		recover           func(ctx context.Context, c client.Client, failToggle *atomic.Bool)
+		name               string
+		initObjs           []client.Object
+		interceptorFuncs   func(failToggle *atomic.Bool) interceptor.Funcs
+		expectErr          bool
+		expectRequeueAfter time.Duration
+		expectReadyStatus  metav1.ConditionStatus
+		expectReason       string
+		recover            func(ctx context.Context, t *testing.T, c client.Client, failToggle *atomic.Bool)
 	}{
 		{
 			name: "Placement Get API Failure - returns wrapped error",
@@ -718,9 +721,10 @@ func TestGetClustersFromPlacementErrorPaths(t *testing.T) {
 					},
 				}
 			},
+			expectErr:         true,
 			expectReadyStatus: metav1.ConditionFalse,
 			expectReason:      meshv1alpha1.ReasonReconcileError,
-			recover: func(ctx context.Context, c client.Client, failToggle *atomic.Bool) {
+			recover: func(ctx context.Context, t *testing.T, c client.Client, failToggle *atomic.Bool) {
 				failToggle.Store(false)
 			},
 		},
@@ -739,9 +743,10 @@ func TestGetClustersFromPlacementErrorPaths(t *testing.T) {
 					},
 				}
 			},
+			expectErr:         true,
 			expectReadyStatus: metav1.ConditionFalse,
 			expectReason:      meshv1alpha1.ReasonReconcileError,
-			recover: func(ctx context.Context, c client.Client, failToggle *atomic.Bool) {
+			recover: func(ctx context.Context, t *testing.T, c client.Client, failToggle *atomic.Bool) {
 				failToggle.Store(false)
 			},
 		},
@@ -760,10 +765,43 @@ func TestGetClustersFromPlacementErrorPaths(t *testing.T) {
 					},
 				}
 			},
+			expectErr:         true,
 			expectReadyStatus: metav1.ConditionFalse,
 			expectReason:      meshv1alpha1.ReasonReconcileError,
-			recover: func(ctx context.Context, c client.Client, failToggle *atomic.Bool) {
+			recover: func(ctx context.Context, t *testing.T, c client.Client, failToggle *atomic.Bool) {
 				failToggle.Store(false)
+			},
+		},
+		{
+			name: "PlacementDecisions pending - requeues without error",
+			// Placement claims 2 selected clusters but only one decision entry exists, simulating decisions still being redistributed.
+			initObjs: []client.Object{
+				&clusterv1beta1.Placement{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-placement",
+						Namespace: "default",
+					},
+					Status: clusterv1beta1.PlacementStatus{
+						NumberOfSelectedClusters: 2,
+					},
+				},
+				baseDecision,
+				baseManagedCluster,
+			},
+			expectErr:          false,
+			expectRequeueAfter: 2 * time.Second,
+			expectReadyStatus:  metav1.ConditionFalse,
+			expectReason:       meshv1alpha1.ReasonPlacementDecisionPending,
+			recover: func(ctx context.Context, t *testing.T, c client.Client, failToggle *atomic.Bool) {
+				placement := &clusterv1beta1.Placement{}
+				placementKey := types.NamespacedName{Name: "test-placement", Namespace: "default"}
+				if err := c.Get(ctx, placementKey, placement); err != nil {
+					t.Fatalf("failed to get Placement during recovery: %v", err)
+				}
+				placement.Status.NumberOfSelectedClusters = 1
+				if err := c.Status().Update(ctx, placement); err != nil {
+					t.Fatalf("failed to update Placement status during recovery: %v", err)
+				}
 			},
 		},
 	}
@@ -795,11 +833,15 @@ func TestGetClustersFromPlacementErrorPaths(t *testing.T) {
 			}
 
 			allInitObjs := append(tc.initObjs, mesh, existingWork)
+			var funcs interceptor.Funcs
+			if tc.interceptorFuncs != nil {
+				funcs = tc.interceptorFuncs(failToggle)
+			}
 			c := fake.NewClientBuilder().
 				WithScheme(scheme).
 				WithObjects(allInitObjs...).
 				WithStatusSubresource(&meshv1alpha1.MultiClusterMesh{}, &clusterv1beta1.Placement{}).
-				WithInterceptorFuncs(tc.interceptorFuncs(failToggle)).
+				WithInterceptorFuncs(funcs).
 				Build()
 
 			r := &Reconciler{Client: c, Scheme: scheme}
@@ -811,9 +853,15 @@ func TestGetClustersFromPlacementErrorPaths(t *testing.T) {
 				},
 			}
 
-			_, err := r.Reconcile(ctx, req)
-			if err == nil {
+			result, err := r.Reconcile(ctx, req)
+			if tc.expectErr && err == nil {
 				t.Fatal("expected error on failure path, got nil")
+			}
+			if !tc.expectErr && err != nil {
+				t.Fatalf("expected no error, got %v", err)
+			}
+			if result.RequeueAfter != tc.expectRequeueAfter {
+				t.Errorf("expected RequeueAfter=%v, got %v", tc.expectRequeueAfter, result.RequeueAfter)
 			}
 
 			updatedMesh := &meshv1alpha1.MultiClusterMesh{}
@@ -840,13 +888,13 @@ func TestGetClustersFromPlacementErrorPaths(t *testing.T) {
 			if err := c.Get(ctx, key, work); err != nil {
 				t.Fatalf("expected mesh resource %s to be preserved during failure, but failed to get: %v", key, err)
 			}
-			if work.Labels["mesh.open-cluster-management.io/mesh-name"] != updatedMesh.Name {
+			if work.Labels[MeshNameLabel] != updatedMesh.Name {
 				t.Errorf("mesh resource %s metadata altered during failure", key)
 			}
 
 			// Trigger recovery and verify Readiness recovers
 			if tc.recover != nil {
-				tc.recover(ctx, c, failToggle)
+				tc.recover(ctx, t, c, failToggle)
 
 				clusters, _, _, err := r.getClustersFromPlacement(ctx, mesh)
 				if err != nil {

@@ -215,11 +215,12 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	oldStatus := mesh.Status.DeepCopy()
 
 	var reconcileErr error
+	var result reconcile.Result
 
 	clusters, desiredClusters, placementFound, err := r.getClustersFromPlacement(ctx, mesh)
 	if errors.Is(err, errDecisionsPending) {
 		mesh.SetReadyCondition(metav1.ConditionFalse, meshv1alpha1.ReasonPlacementDecisionPending,
-			"Pending for PlacementDecisions being redistributed")
+			"Waiting for PlacementDecisions for Placement %s to be redistributed", mesh.Spec.PlacementRef.Name)
 		// Set the requeue result and continue down so the status update executes
 		result = reconcile.Result{RequeueAfter: 2 * time.Second}
 	} else if err != nil {
@@ -259,7 +260,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		})
 	}
 
-	return reconcile.Result{}, errors.Join(reconcileErr, statusErr)
+	return result, errors.Join(reconcileErr, statusErr)
 }
 
 // doReconcile creates resources for resolved clusters and cleans up resources
