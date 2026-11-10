@@ -75,6 +75,8 @@ These are not rewritten by changing `policyDefaults.namespace`, so each environm
 If multiple meshes share a hub namespace, set `policies[].name` and `placementBindingDefaults.name` to unique values for each mesh.
 For example, use `policy-istio-basic-mesh` and `binding-istio-basic-mesh`.
 Renaming only the policy leaves the meshes sharing the same PlacementBinding.
+Unique policy and binding names only separate hub resources.
+If meshes select the same spoke, additional Istio configuration is required as described in [Step 8 of the user guide](user-guide.md#step-8-configure-istio).
 
 Copy the `samples/policygenerator/` directory for each environment and set the values:
 
