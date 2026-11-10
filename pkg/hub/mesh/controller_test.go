@@ -945,6 +945,12 @@ func TestGetClustersFromPlacementErrorPaths(t *testing.T) {
 					staleWork.Namespace, staleWork.Name, err)
 			}
 
+			// When resolution is failing or decisions are pending, no cluster resources are applied
+			cpNsWorkName := ManifestWorkNameCPNSPrefix + mesh.GetControlPlaneNamespace()
+			if _, err := workClient.WorkV1().ManifestWorks("cluster-a").Get(ctx, cpNsWorkName, metav1.GetOptions{}); !apierrors.IsNotFound(err) {
+				t.Errorf("expected no control plane namespace ManifestWork during pending, but got unexpected error: %v", err)
+			}
+
 			// Trigger recovery and verify Readiness recovers
 			if tc.recover != nil {
 				tc.recover(ctx, t, c, failToggle)
