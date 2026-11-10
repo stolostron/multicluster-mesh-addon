@@ -9,8 +9,7 @@ This page covers the [PolicyGenerator] + Kustomize approach for users who manage
 - The [PolicyGenerator Kustomize plugin][PolicyGenerator] must be installed. For ACM, the CLI is available from the OpenShift console. See [Red Hat's download instructions][policygenerator-download]. Follow the [installation instructions][policygenerator-install] to set up the local Kustomize plugin.
 - The governance-policy-framework and config-policy-controller add-ons must be enabled on the managed clusters. See [Install the Service Mesh Operator](operator-installation.md) for setup.
 - The MultiClusterMesh must be created and reporting `status.controlPlaneNamespace`.
-
-> **Warning:** The sample manifests create the cluster-scoped `Istio/default` resource. This means one mesh per spoke cluster. Running two meshes on the same cluster requires distinct Istio resource names plus revision, injection, discovery-selector, and gateway ownership configuration.
+- Compatible Gateway API CRDs are available on each spoke. If they are not already present, see [Install Gateway API CRDs](operator-installation.md#install-gateway-api-crds).
 
 ## How it works
 
@@ -52,7 +51,7 @@ kustomize build --enable-alpha-plugins samples/policygenerator/ \
   | kubectl apply -n "$MESH_NAMESPACE" -f -
 ```
 
-> **Tip:** The manifest files under `istio-manifests/` are minimal templates. To configure additional Istio fields (discovery selectors, pilot settings, proxy resource limits, etc.), edit `spec.values` in `istio-manifests/istio.yaml` before building. See the [Sail operator API reference][sail-api] for all available fields.
+For additional Istio settings and the sample file to edit, see [Customize Istio](user-guide.md#customize-istio).
 
 Check the generated policies:
 
@@ -69,9 +68,13 @@ kubectl wait --for=jsonpath='{.status.compliant}'=Compliant \
 
 ## Per-environment customization
 
-PolicyGenerator requires all manifest paths to be within the build directory tree. The Istio manifests also contain literal mesh-specific values inside hub template expressions (`<MESH_NAME>`, `<MESH_NAMESPACE>`), which are not rewritten by changing `policyDefaults.namespace`. Each environment therefore needs its own self-contained directory with the correct values filled in.
+PolicyGenerator requires all manifest paths to be within the build directory tree.
+The Istio manifests also contain literal mesh-specific values inside hub template expressions.
+These are not rewritten by changing `policyDefaults.namespace`, so each environment needs its own directory with the values filled in.
 
-If multiple meshes share a hub namespace, set `policies[].name` and `placementBindingDefaults.name` to unique values for each mesh, for example `policy-istio-basic-mesh` and `binding-istio-basic-mesh`. Renaming only the policy leaves the meshes sharing the same PlacementBinding.
+If multiple meshes share a hub namespace, set `policies[].name` and `placementBindingDefaults.name` to unique values for each mesh.
+For example, use `policy-istio-basic-mesh` and `binding-istio-basic-mesh`.
+Renaming only the policy leaves the meshes sharing the same PlacementBinding.
 
 Copy the `samples/policygenerator/` directory for each environment and set the values:
 
@@ -98,7 +101,10 @@ kustomize build --enable-alpha-plugins my-mesh-config/production/ \
   | kubectl apply -n prod-mesh -f -
 ```
 
-For larger setups where you want to avoid duplicating manifests, use a two-stage approach: maintain shared base manifests under plain Kustomize, render them with `kustomize build` first, then feed the rendered output to PolicyGenerator. See the [ACM PolicyGenerator documentation][PolicyGenerator] and the [ZTP GitOps workflow][ZTP] for more on this pattern.
+For larger setups, you can avoid duplicating manifests with a two-stage approach.
+Maintain shared base manifests under plain Kustomize and render them with `kustomize build`.
+Then feed the rendered output to PolicyGenerator.
+See the [ACM PolicyGenerator documentation][PolicyGenerator] and the [ZTP GitOps workflow][ZTP] for more on this pattern.
 
 ## Cleanup
 
@@ -109,7 +115,12 @@ kubectl delete policy policy-istio -n "$MESH_NAMESPACE"
 kubectl delete placementbinding binding-istio -n "$MESH_NAMESPACE"
 ```
 
-The generated policy sets `pruneObjectBehavior: DeleteIfCreated`, so deleting it also removes the Istio CR and east-west gateway it created on the spokes. Pruning is asynchronous and only covers objects the policy created. If the `Istio/default` CR already existed before the policy was applied, delete it on each spoke, replacing the example context names with those from your kubeconfig:
+The generated policy sets `pruneObjectBehavior: DeleteIfCreated`.
+Deleting it also removes the Istio CR and east-west gateway it created on the spokes.
+Pruning is asynchronous and only covers objects the policy created.
+
+If the `Istio/default` CR already existed before the policy was applied, delete it on each spoke.
+Replace the example context names with those from your kubeconfig:
 
 ```bash
 for CONTEXT in context-for-cluster1 context-for-cluster2; do
@@ -123,5 +134,4 @@ Then continue with the MultiClusterMesh deletion in [Step 9 of the user guide](u
 [policygenerator-download]: https://access.redhat.com/articles/7049658
 [policygenerator-install]: https://github.com/open-cluster-management-io/policy-generator-plugin#install-the-policy-generator
 [hub-templates]: https://open-cluster-management.io/concepts/policy/#hub-cluster-templates
-[sail-api]: https://docs.sailoperator.io/docs/api-reference/sailoperator.io/
 [ZTP]: https://docs.openshift.com/container-platform/latest/scalability_and_performance/ztp-deploying-disconnected.html

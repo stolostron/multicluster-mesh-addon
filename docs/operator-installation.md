@@ -6,7 +6,27 @@ The service mesh operator is a prerequisite for the addon. The addon creates the
 
 ## Prerequisites
 
+OperatorPolicy creates OLM Subscriptions to install the operator. On non-OpenShift managed clusters, such as kind, install Operator Lifecycle Manager (OLM) if it is not already present. OpenShift includes OLM by default.
+
 Before applying an OperatorPolicy, set up the governance framework on the hub and on each managed cluster that will run the operator.
+
+### Install Gateway API CRDs
+
+The east-west gateway samples use [Gateway API] in all three configuration paths: ACM policies, PolicyGenerator, and manual installation. Your clusters may already provide these CRDs. If compatible CRDs are already present, no separate installation is needed.
+
+The following example checks each spoke and installs the CRDs only when they are absent. Use a Gateway API version supported by your Istio/operator release. Replace the example context names with those from your kubeconfig:
+
+```bash
+CLUSTER_CONTEXTS=("context-for-cluster1" "context-for-cluster2")
+
+for CONTEXT in "${CLUSTER_CONTEXTS[@]}"; do
+  if ! kubectl --context "$CONTEXT" get crd \
+    gateways.gateway.networking.k8s.io gatewayclasses.gateway.networking.k8s.io >/dev/null 2>&1; then
+    kubectl --context "$CONTEXT" apply --server-side \
+      -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.2.1/standard-install.yaml
+  fi
+done
+```
 
 ### Install the governance hub add-on
 
@@ -119,6 +139,8 @@ spec:
     - sail-operator.v1.23.0
 ```
 
+> **Note:** This example uses a Sail CSV name. OSSM uses different CSV names, such as `servicemeshoperator3.v3.0.0` in the [OSSM sample](../samples/operator-policy-ossm.yaml). Set both `startingCSV` and `versions` to the CSV name for your chosen operator release.
+
 With `upgradeApproval: None`, the operator stays on the listed versions until you update the policy.
 
 ## Adding clusters later
@@ -156,6 +178,7 @@ OperatorPolicy is not the only way to install the operator. The addon only requi
 - **Manual OLM Subscription**: create the Subscription and OperatorGroup resources yourself.
 - **ArgoCD ApplicationSet**: distribute the operator via ArgoCD using a cluster generator.
 
-If you use a different method, skip this page and proceed to the next step in the [user guide](user-guide.md#step-6-create-a-multiclustermesh).
+If you use a different method, check the [Gateway API prerequisites](#install-gateway-api-crds), then proceed to the next step in the [user guide](user-guide.md#step-6-create-a-multiclustermesh).
 
 [OperatorPolicy]: https://open-cluster-management.io/concepts/policy/
+[Gateway API]: https://gateway-api.sigs.k8s.io/

@@ -159,35 +159,9 @@ kubectl get placementdecision -n mesh-system -l cluster.open-cluster-management.
 ## Step 5: Install the Service Mesh Operator
 
 The service mesh operator must be installed on managed clusters before creating a mesh.
-The recommended approach uses [OperatorPolicy] from the governance-policy-framework, which distributes the operator to managed clusters using the same Placement-based targeting. This requires the governance-policy-framework and config-policy-controller add-ons on each managed cluster, with OperatorPolicy enabled.
+The recommended approach uses [OperatorPolicy] from the governance-policy-framework to distribute the operator using Placement-based targeting.
 
-Apply the sample, pointing the PlacementBinding at `mesh-placement` from Step 4. Kubernetes (Sail):
-
-```bash
-sed 's/name: mesh-operator-placement/name: mesh-placement/' samples/operator-policy-sail.yaml \
-  | kubectl apply -n mesh-system -f -
-kubectl wait --for=jsonpath='{.status.compliant}'=Compliant \
-  policy/policy-sail-operator -n mesh-system --timeout=15m
-for CLUSTER_NAME in cluster1 cluster2; do
-  kubectl wait --for="jsonpath={.status.status[?(@.clustername==\"${CLUSTER_NAME}\")].compliant}=Compliant" \
-    policy/policy-sail-operator -n mesh-system --timeout=15m
-done
-```
-
-OpenShift (OSSM):
-
-```bash
-sed 's/name: mesh-operator-placement/name: mesh-placement/' samples/operator-policy-ossm.yaml \
-  | kubectl apply -n mesh-system -f -
-kubectl wait --for=jsonpath='{.status.compliant}'=Compliant \
-  policy/policy-ossm-operator -n mesh-system --timeout=15m
-for CLUSTER_NAME in cluster1 cluster2; do
-  kubectl wait --for="jsonpath={.status.status[?(@.clustername==\"${CLUSTER_NAME}\")].compliant}=Compliant" \
-    policy/policy-ossm-operator -n mesh-system --timeout=15m
-done
-```
-
-For the full walkthrough, including governance framework setup, version pinning, spoke verification, and adding clusters later, see [Install the Service Mesh Operator](operator-installation.md).
+Follow [Install the Service Mesh Operator](operator-installation.md) to set up the prerequisites, install Sail or OSSM using `mesh-placement` from Step 4, and verify the operator on each cluster. Once verification is complete, continue with [Step 6](#step-6-create-a-multiclustermesh).
 
 ## Step 6: Create a MultiClusterMesh
 
@@ -240,7 +214,7 @@ See the [Sail operator multicluster docs][sail-multicluster] for the full proced
 
 The recommended approach uses ACM policies to configure all clusters from the hub. No direct spoke access is needed. The policy samples read the control plane namespace from the MultiClusterMesh status using the `lookup` hub template function.
 
-> **Note:** The east-west gateway uses [Gateway API]. Make sure the Gateway API CRDs are installed on each spoke before applying the policy. See the [manual guide](istio-manual.md) for the install command.
+> **Note:** The east-west gateway uses Gateway API CRDs, which your clusters may already provide. If they are not already present, see [Install Gateway API CRDs](operator-installation.md#install-gateway-api-crds) for compatibility guidance and installation instructions.
 
 > **Warning:** The policy sample creates the cluster-scoped `Istio/default` resource. This means one mesh per spoke cluster. Running two meshes on the same cluster requires distinct Istio resource names plus revision, injection, discovery-selector, and gateway ownership configuration.
 
@@ -276,10 +250,22 @@ done
 
 When new clusters are added to the Placement, the policies propagate to them automatically.
 
-> **Tip:** The policy sample is a minimal starting point. To configure additional Istio fields (discovery selectors, pilot settings, proxy resource limits, etc.), edit the Istio `objectDefinition` under `spec.values` in the sample before applying. See the [Sail operator API reference][sail-api] for all available fields.
-
 For direct spoke-cluster access without ACM policies, see [Configure Istio (Manual)](istio-manual.md).
 For GitOps workflows with Kustomize, see [Configure Istio with PolicyGenerator](istio-policygenerator.md).
+
+### Customize Istio
+
+The samples are minimal starting points. To configure additional Istio fields, such as discovery selectors, pilot settings, or proxy resource limits, edit `spec.values` in the Istio resource. See the [Sail operator API reference][sail-api] for all available fields.
+
+Use the sample for your configuration path:
+
+| Configuration path | File to edit |
+|---|---|
+| ACM policies | The Istio `objectDefinition` in [samples/policy-istio-control-plane.yaml](../samples/policy-istio-control-plane.yaml) |
+| Manual | [samples/istio/istio.yaml](../samples/istio/istio.yaml) |
+| PolicyGenerator | [samples/policygenerator/istio-manifests/istio.yaml](../samples/policygenerator/istio-manifests/istio.yaml) |
+
+Make these changes before applying the policy, substituting variables in the manual samples, or building with PolicyGenerator.
 
 ### Next Steps
 
@@ -298,7 +284,9 @@ kubectl delete policy policy-istio-basic-mesh -n mesh-system
 kubectl delete placementbinding binding-istio-basic-mesh -n mesh-system
 ```
 
-The sample policies set `pruneObjectBehavior: DeleteIfCreated`, so deleting them also removes the Istio CR and east-west gateway they created on the spokes. The same applies to the IstioCNI policy from Step 8: deleting it removes the `IstioCNI` CR and the `istio-cni` namespace it created. Pruning is asynchronous and only covers objects the policy created.
+The sample policies set `pruneObjectBehavior: DeleteIfCreated`, so deleting them also removes the Istio CR and east-west gateway they created on the spokes. Pruning is asynchronous and only covers objects the policy created.
+
+> **Note:** The IstioCNI policy from Step 8 is shared across meshes on the selected clusters. Delete it only when no remaining mesh needs CNI on those clusters. Deleting it removes the `IstioCNI` CR and the `istio-cni` namespace it created, affecting all meshes that use them.
 
 If you used the [manual approach](istio-manual.md), delete the Istio CR on each spoke directly:
 
@@ -320,7 +308,6 @@ kubectl delete multiclustermesh -n mesh-system <mesh-name>
 <!-- Reference links -->
 [cert-manager]: https://cert-manager.io/
 [clusteradm]: https://open-cluster-management.io/docs/getting-started/installation/start-the-control-plane/
-[Gateway API]: https://gateway-api.sigs.k8s.io/
 [fleet-mesh]: https://github.com/kiali/openshift-servicemesh-plugin/blob/main/docs/fleet-mesh/DEV-PREVIEW-GUIDE.md
 [gpf]: https://open-cluster-management.io/docs/getting-started/integration/policy-controllers/
 [kind]: https://kind.sigs.k8s.io/

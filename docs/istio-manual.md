@@ -13,6 +13,7 @@ See the [Sail operator multicluster docs][sail-multicluster] for the full proced
 
 - The MultiClusterMesh must be created and reporting `status.controlPlaneNamespace`. See the [user guide](user-guide.md#step-6-create-a-multiclustermesh).
 - Your kubeconfig must have contexts for each managed cluster.
+- Compatible Gateway API CRDs are available on each spoke. If they are not already present, see [Install Gateway API CRDs](operator-installation.md#install-gateway-api-crds).
 - The sample manifests from [samples/istio/](../samples/istio/).
 
 Run the examples below in the same Bash session with the current kubeconfig context set to the hub.
@@ -22,20 +23,6 @@ List the ManagedCluster names and their kubeconfig contexts in the same order. R
 ```bash
 CLUSTER_NAMES=(cluster1 cluster2)
 CLUSTER_CONTEXTS=("context-for-cluster1" "context-for-cluster2")
-```
-
-## Install Gateway API CRDs
-
-The east-west gateway sample uses [Gateway API]. Check the CRDs on each spoke, and install a compatible version supported by your Istio/operator release when they are absent:
-
-```bash
-for CONTEXT in "${CLUSTER_CONTEXTS[@]}"; do
-  if ! kubectl --context "$CONTEXT" get crd \
-    gateways.gateway.networking.k8s.io gatewayclasses.gateway.networking.k8s.io >/dev/null 2>&1; then
-    kubectl --context "$CONTEXT" apply --server-side \
-      -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.2.1/standard-install.yaml
-  fi
-done
 ```
 
 ## Variable reference
@@ -86,13 +73,10 @@ for i in "${!CLUSTER_NAMES[@]}"; do
 done
 ```
 
-> **Tip:** The `samples/istio/istio.yaml` file is a minimal template. To configure additional Istio fields (discovery selectors, pilot settings, proxy resource limits, etc.), edit `spec.values` in the sample before substituting variables. See the [Sail operator API reference][sail-api] for all available fields.
+For additional Istio settings and the sample file to edit, see [Customize Istio](user-guide.md#customize-istio).
 
 ## Notes
 
-* The Istio sample creates the cluster-scoped resource `Istio/default`. Use this example for one mesh per spoke. Multiple meshes require distinct Istio resource names and appropriate revision/injection and discovery-selector configuration.
-* `NETWORK` is read from the `topology.istio.io/network` label on the ManagedCluster. If the label is absent, the cluster name is used as the network identity. Each cluster on a separate network needs a unique value.
+`NETWORK` is read from the `topology.istio.io/network` label on the ManagedCluster. If the label is absent, the cluster name is used as the network identity. Each cluster on a separate network needs a unique value.
 
-[sail-api]: https://docs.sailoperator.io/docs/api-reference/sailoperator.io/
 [sail-multicluster]: https://docs.sailoperator.io/docs/multicluster/multi-primary-multi-network
-[Gateway API]: https://gateway-api.sigs.k8s.io/

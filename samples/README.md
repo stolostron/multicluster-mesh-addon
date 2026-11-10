@@ -37,7 +37,7 @@ kubectl apply -n mesh-operator-policy -f samples/operator-policy-sail.yaml
 
 ## Hub (Istio Control Plane Policy)
 
-Pre-built ACM policies that configure the Istio control plane on managed clusters from the hub using hub templates. No spoke access or build tools needed. The control plane policy creates the cluster-scoped `Istio/default` resource and is intended for one mesh per spoke.
+Pre-built ACM policies that configure the Istio control plane on managed clusters from the hub using hub templates. No spoke access or build tools needed.
 
 | Manifest | Purpose |
 |----------|---------|
