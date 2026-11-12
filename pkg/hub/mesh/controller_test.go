@@ -670,7 +670,7 @@ func TestFindMeshesForCluster(t *testing.T) {
 		{
 			name: "finds mesh from labeled ManifestWork",
 			works: []workv1.ManifestWork{
-				meshOwnedWork("cluster-a", "some-work", "mesh-a", "ns-a"),
+				meshOwnedWork("some-work", "mesh-a", "ns-a"),
 			},
 			expected: []types.NamespacedName{{Name: "mesh-a", Namespace: "ns-a"}},
 		},
@@ -687,16 +687,16 @@ func TestFindMeshesForCluster(t *testing.T) {
 		{
 			name: "deduplicates multiple ManifestWorks for same mesh",
 			works: []workv1.ManifestWork{
-				meshOwnedWork("cluster-a", "work-1", "mesh-a", "ns-a"),
-				meshOwnedWork("cluster-a", "work-2", "mesh-a", "ns-a"),
+				meshOwnedWork("work-1", "mesh-a", "ns-a"),
+				meshOwnedWork("work-2", "mesh-a", "ns-a"),
 			},
 			expected: []types.NamespacedName{{Name: "mesh-a", Namespace: "ns-a"}},
 		},
 		{
 			name: "returns multiple meshes from different ManifestWorks",
 			works: []workv1.ManifestWork{
-				meshOwnedWork("cluster-a", "work-1", "mesh-a", "ns-a"),
-				meshOwnedWork("cluster-a", "work-2", "mesh-b", "ns-b"),
+				meshOwnedWork("work-1", "mesh-a", "ns-a"),
+				meshOwnedWork("work-2", "mesh-b", "ns-b"),
 			},
 			expected: []types.NamespacedName{
 				{Name: "mesh-a", Namespace: "ns-a"},
@@ -913,11 +913,11 @@ func newTestScheme() *runtime.Scheme {
 	return scheme
 }
 
-func meshOwnedWork(namespace, name, meshName, meshNamespace string) workv1.ManifestWork {
+func meshOwnedWork(name, meshName, meshNamespace string) workv1.ManifestWork {
 	return workv1.ManifestWork{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
-			Namespace: namespace,
+			Namespace: "cluster-a",
 			Labels: map[string]string{
 				ManagedByLabel:     ManagedByValue,
 				MeshNameLabel:      meshName,
