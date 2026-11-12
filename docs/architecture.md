@@ -45,7 +45,9 @@ Each mesh has its own Certificates, ManagedServiceAccounts, namespace ManifestWo
 
 ## Readiness and Cleanup
 
-Mesh `Ready` reports successful hub reconciliation and, when an issuer is configured, the last observed cacerts ManifestWork conditions. Operator health, Istio readiness, discovery rollout, and connectivity require separate checks. See the [API reference](api-reference.md#readiness-limits) for current status limitations.
+Mesh `Ready` requires `DiscoveryDistributed=True` for every resolved cluster and `TrustDistributed=True` when trust is configured.
+Operator health, Istio readiness, token validity, and connectivity require separate checks.
+See [API reference](api-reference.md#readiness-limits) for current status limitations.
 
 Removing a cluster from the decisions requests cleanup of its mesh resources and removes its credentials from the remote-secret template. An empty selection requests cleanup for every cluster. A missing Placement preserves existing resources and clears per-cluster status. Deleting the mesh requests deletion of its ManifestWorks and ManagedServiceAccounts; owner references allow garbage collection of Certificates and the ReplicaSet.
 
