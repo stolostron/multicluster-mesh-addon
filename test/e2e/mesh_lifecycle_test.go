@@ -30,8 +30,6 @@ import (
 const (
 	controllerName = "multicluster-mesh-controller"
 
-	msaSpokeNamespace = "open-cluster-management-agent-addon"
-
 	testIssuerName       = "mesh-test-root-ca"
 	testIssuerKind       = "ClusterIssuer"
 	testIssuerSecretName = "mesh-test-root-ca-secret"
@@ -228,8 +226,8 @@ var _ = Describe("MultiClusterMesh lifecycle", Ordered, func() {
 
 				msa := msaList.Items[0]
 				sa := &corev1.ServiceAccount{}
-				g.Expect(spokeClient.Get(ctx, key.Of(msa.Name, msaSpokeNamespace), sa)).To(Succeed(),
-					"ServiceAccount %s/%s should exist on spoke %s", msaSpokeNamespace, msa.Name, cluster)
+				g.Expect(spokeClient.Get(ctx, key.Of(msa.Name, meshcontroller.MSANamespace), sa)).To(Succeed(),
+					"ServiceAccount %s/%s should exist on spoke %s", meshcontroller.MSANamespace, msa.Name, cluster)
 				track(cluster, spokeClient, sa)
 
 				g.Expect(msa.Status.TokenSecretRef).NotTo(BeNil(),
@@ -266,7 +264,7 @@ var _ = Describe("MultiClusterMesh lifecycle", Ordered, func() {
 				g.Expect(crb.Subjects).To(HaveLen(1))
 				g.Expect(crb.Subjects[0].Kind).To(Equal("ServiceAccount"))
 				g.Expect(crb.Subjects[0].Name).To(Equal(msaList.Items[0].Name))
-				g.Expect(crb.Subjects[0].Namespace).To(Equal(msaSpokeNamespace))
+				g.Expect(crb.Subjects[0].Namespace).To(Equal(meshcontroller.MSANamespace))
 				track(cluster, spokeClient, crb)
 			}).Should(Succeed())
 		}

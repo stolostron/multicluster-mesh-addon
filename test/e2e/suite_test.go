@@ -212,7 +212,6 @@ func collectNamespaceArtifacts(ctx context.Context, c *util.E2EClient, dir strin
 	for _, ns := range namespaces {
 		nsDir := filepath.Join(dir, ns)
 		collectDeploymentYAMLs(ctx, c, nsDir, ns)
-		collectPodYAMLs(ctx, c, nsDir, ns)
 		collectPods(ctx, c, nsDir, ns)
 		collectEvents(ctx, c, nsDir, ns)
 	}
@@ -228,16 +227,6 @@ func collectDeploymentYAMLs(ctx context.Context, c *util.E2EClient, dir, namespa
 	}
 }
 
-func collectPodYAMLs(ctx context.Context, c *util.E2EClient, dir, namespace string) {
-	pods := &corev1.PodList{}
-	if err := c.List(ctx, pods, client.InNamespace(namespace)); err != nil {
-		return
-	}
-	for i := range pods.Items {
-		writeYAML(filepath.Join(dir, "pods"), pods.Items[i].Name+".yaml", &pods.Items[i])
-	}
-}
-
 func collectPods(ctx context.Context, c *util.E2EClient, dir, namespace string) {
 	pods := &corev1.PodList{}
 	if err := c.List(ctx, pods, client.InNamespace(namespace)); err != nil {
@@ -246,6 +235,7 @@ func collectPods(ctx context.Context, c *util.E2EClient, dir, namespace string) 
 
 	var lines []string
 	for _, p := range pods.Items {
+		writeYAML(filepath.Join(dir, "pods"), p.Name+".yaml", p)
 		lines = append(lines, fmt.Sprintf("%-50s %-10s %-20s %s",
 			p.Name, string(p.Status.Phase), p.Status.PodIP, p.Spec.NodeName))
 		c.SaveLogs(ctx, dir, namespace, p.Name)
