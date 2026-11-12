@@ -67,10 +67,10 @@ const (
 // reconciler requeues without making changes until the counts converge.
 var errDecisionsPending = errors.New("PlacementDecision entries do not match Placement status")
 
-// managedClusterPredicate accepts create, delete, and update events where
-// labels or generation (spec) changed. Status-only updates are filtered out
-// because the controller does not consume ManagedCluster status.
 var managedClusterPredicate = predicate.Or(
+	// ManagedCluster enables the status subresource, so status-only updates
+	// leave generation unchanged. Annotation-only updates do too; neither
+	// affects the mesh configuration.
 	predicate.GenerationChangedPredicate{},
 	predicate.LabelChangedPredicate{},
 )

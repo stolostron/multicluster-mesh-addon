@@ -239,7 +239,7 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 			})
 		})
 
-		Context("ManagedCluster watch filtering", func() {
+		Context("ManagedCluster client config updates", func() {
 			var mesh *meshv1alpha1.MultiClusterMesh
 
 			BeforeEach(func() {
@@ -261,8 +261,10 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 				By("updating the ManagedCluster API server URL")
 				cluster := &clusterv1.ManagedCluster{}
 				Expect(k8sClient.Get(ctx, key.Of(clusterName), cluster)).To(Succeed())
+				oldGeneration := cluster.Generation
 				cluster.Spec.ManagedClusterClientConfigs = []clusterv1.ClientConfig{{URL: "https://new-api-server:6443"}}
 				Expect(k8sClient.Update(ctx, cluster)).To(Succeed())
+				Expect(cluster.Generation).To(BeNumerically(">", oldGeneration))
 
 				By("verifying the ManifestWorkReplicaSet remote secret reflects the new URL")
 				Eventually(func(g Gomega) {

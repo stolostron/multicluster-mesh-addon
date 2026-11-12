@@ -949,9 +949,6 @@ func TestManagedClusterPredicate(t *testing.T) {
 			Generation: 1,
 			Labels:     map[string]string{"env": "prod"},
 		},
-		Spec: clusterv1.ManagedClusterSpec{
-			ManagedClusterClientConfigs: []clusterv1.ClientConfig{{URL: "https://cluster-a:6443"}},
-		},
 	}
 
 	tests := []struct {
@@ -970,6 +967,13 @@ func TestManagedClusterPredicate(t *testing.T) {
 			expect: false,
 		},
 		{
+			name: "annotation-only update is filtered",
+			mutate: func(c *clusterv1.ManagedCluster) {
+				c.Annotations = map[string]string{"description": "updated"}
+			},
+			expect: false,
+		},
+		{
 			name: "label change passes",
 			mutate: func(c *clusterv1.ManagedCluster) {
 				c.Labels[IstioNetworkLabel] = "network-east"
@@ -980,7 +984,6 @@ func TestManagedClusterPredicate(t *testing.T) {
 			name: "generation change passes",
 			mutate: func(c *clusterv1.ManagedCluster) {
 				c.Generation = 2
-				c.Spec.ManagedClusterClientConfigs = []clusterv1.ClientConfig{{URL: "https://new-api:6443"}}
 			},
 			expect: true,
 		},
