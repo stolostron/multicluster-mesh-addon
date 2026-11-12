@@ -1109,17 +1109,6 @@ func expectCacertsManifestWork(mesh *meshv1alpha1.MultiClusterMesh, clusterNames
 	return expectManifestWork(meshcontroller.CacertsManifestWorkName(mesh), clusterNamespace)
 }
 
-func expectNoCertificate(namespace, meshName string) {
-	Consistently(func() []certmanagerv1.Certificate {
-		certList := &certmanagerv1.CertificateList{}
-		Expect(k8sClient.List(ctx, certList,
-			client.InNamespace(namespace),
-			client.MatchingLabels{meshcontroller.MeshNameLabel: meshName},
-		)).To(Succeed())
-		return certList.Items
-	}).Should(BeEmpty())
-}
-
 func expectNoCacertsManifestWork(mesh *meshv1alpha1.MultiClusterMesh, clusterNamespace string) {
 	Consistently(func() bool {
 		work := &workv1.ManifestWork{}
