@@ -116,12 +116,24 @@ vet: ## Run go vet
 	go vet ./...
 
 .PHONY: verify
-verify: verify-gofmt verify-modules verify-gen vet verify-istio-reader-rbac verify-demo ## Run all checks (may regenerate files)
+verify: verify-gofmt verify-modules verify-gen vet verify-istio-reader-rbac verify-demo verify-meshctl-sample ## Run all checks (may regenerate files)
 
 .PHONY: verify-gofmt
 verify-gofmt: ## Verify code is formatted correctly
 	@echo "Verifying gofmt..."
 	@test -z "$$(gofmt -s -l . | grep -v zz_generated)" || (echo "Code not formatted, run 'make fmt'" && exit 1)
+
+.PHONY: verify-meshctl-sample
+verify-meshctl-sample: build-meshctl ## Check the checked-in meshctl sample matches generator output
+	@$(BIN_DIR)/meshctl scaffold istio basic-mesh \
+		--namespace mesh-system \
+		--placement mesh-placement \
+		--istio-version v1.30.4 \
+		--policy-name istio-installation-basic-mesh | diff -u samples/istio-policy.yaml -
+	@$(BIN_DIR)/meshctl scaffold istiocni \
+		--namespace mesh-system \
+		--placement mesh-placement \
+		--policy-name istiocni-installation-default | diff -u samples/istio-cni-policy.yaml -
 
 .PHONY: verify-modules
 verify-modules: ## Verify go modules are up to date
@@ -145,7 +157,7 @@ golangci-lint: ## Run golangci-lint
 
 .PHONY: test
 test: ## Run unit tests
-	go test -short ./pkg/...
+	go test -short ./pkg/... ./cmd/meshctl
 
 .PHONY: update-test-crds
 update-test-crds: deps ## Update test CRDs from OCM API, managed-serviceaccount and cert-manager dependencies
@@ -297,10 +309,11 @@ DEMO_KUBECONFIG ?=
 ISTIO_VERSION ?= 1.30.4
 ISTIOCTL_BIN := $(BIN_DIR)/istioctl
 ISTIOCTL ?= $(shell which istioctl 2>/dev/null || echo $(ISTIOCTL_BIN))
+MESHCTL ?= $(BIN_DIR)/meshctl
 
 export DEV_KUBE_DIR K8S_VERSION OLM_VERSION CERT_MANAGER_VERSION MSA_VERSION
 export METALLB_VERSION GATEWAY_API_VERSION
-export KIND CLUSTERADM HELM ISTIOCTL CONTAINER_ENGINE
+export KIND CLUSTERADM HELM ISTIOCTL MESHCTL CONTAINER_ENGINE
 export SPOKE_CLUSTERS
 export DEMO_DRY_RUN DEMO_KUBECONFIG ISTIO_VERSION
 export PLATFORM
@@ -327,6 +340,12 @@ $(ISTIOCTL_BIN): $(BIN_DIR)
 		rm -rf $$tmp_dir; \
 	fi
 
+$(MESHCTL): $(BIN_DIR) $(shell find cmd -type f) ## Build meshctl
+	CGO_ENABLED=0 go build $(GO_BUILD_FLAGS) -buildvcs=false -ldflags "$(LDFLAGS)" -o $(MESHCTL) ./cmd/meshctl
+
+.PHONY: build-meshctl
+build-meshctl: $(MESHCTL)
+
 .PHONY: dev-env-base
 dev-env-base:
 	$(DEV_ENV_SCRIPT) check-host
@@ -350,7 +369,7 @@ demo-dev-clean: ## Destroy the local 3-spoke demo environment
 	$(MAKE) --no-print-directory SPOKE_CLUSTERS="cluster1 cluster2 cluster3" dev-clean
 
 .PHONY: demo
-demo: $(CLUSTERADM) $(HELM_BIN) $(ISTIOCTL_BIN)
+demo: $(CLUSTERADM) $(HELM_BIN) $(ISTIOCTL_BIN) $(MESHCTL)
 demo: ## Run the interactive OpenShift ACM and OSSM demo
 	@if [ -z "$(DEMO_KUBECONFIG)" ]; then \
 		echo "ERROR: DEMO_KUBECONFIG is required (hub:spoke1:spoke2:spoke3 kubeconfig paths)"; exit 1; \
@@ -361,7 +380,7 @@ demo: ## Run the interactive OpenShift ACM and OSSM demo
 	@$(DEMO_SCRIPT)
 
 .PHONY: demo-sail
-demo-sail: $(CLUSTERADM) $(HELM_BIN) $(ISTIOCTL_BIN)
+demo-sail: $(CLUSTERADM) $(HELM_BIN) $(ISTIOCTL_BIN) $(MESHCTL)
 demo-sail: export PLATFORM=kind
 demo-sail: export SPOKE_CLUSTERS=cluster1 cluster2 cluster3
 demo-sail: export DEMO_KUBECONFIG=.kube/hub.config:.kube/cluster1.config:.kube/cluster2.config:.kube/cluster3.config

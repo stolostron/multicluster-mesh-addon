@@ -1,0 +1,70 @@
+apiVersion: policy.open-cluster-management.io/v1
+kind: Policy
+metadata:
+  name: istio-installation-basic-mesh
+  namespace: mesh-system
+spec:
+  disabled: false
+  policy-templates:
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: istio-installation-basic-mesh
+        spec:
+          object-templates:
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: sailoperator.io/v1
+                kind: Istio
+                metadata:
+                  name: default
+                spec:
+                  namespace: &controlPlaneNamespace '{{hub (lookup "mesh.open-cluster-management.io/v1alpha1" "MultiClusterMesh" "mesh-system" "basic-mesh").status.controlPlaneNamespace hub}}'
+                  updateStrategy:
+                    type: InPlace
+                  values:
+                    global:
+                      meshID: &meshName "basic-mesh"
+                      multiCluster:
+                        clusterName: '{{hub .ManagedClusterName hub}}'
+                      network: &network '{{hub index .ManagedClusterLabels "topology.istio.io/network" | default .ManagedClusterName hub}}'
+                    meshConfig:
+                      trustDomain: *meshName
+                  version: v1.30.4
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: gateway.networking.k8s.io/v1
+                kind: Gateway
+                metadata:
+                  labels:
+                    topology.istio.io/network: *network
+                  name: eastwestgateway
+                  namespace: *controlPlaneNamespace
+                spec:
+                  gatewayClassName: istio
+                  listeners:
+                    - hostname: '*.local'
+                      name: cross-network
+                      port: 15443
+                      protocol: TLS
+                      tls:
+                        mode: Passthrough
+          pruneObjectBehavior: DeleteIfCreated
+          remediationAction: enforce
+          severity: medium
+  remediationAction: enforce
+---
+apiVersion: policy.open-cluster-management.io/v1
+kind: PlacementBinding
+metadata:
+  name: binding-istio-installation-basic-mesh
+  namespace: mesh-system
+placementRef:
+  apiGroup: cluster.open-cluster-management.io
+  kind: Placement
+  name: mesh-placement
+subjects:
+  - apiGroup: policy.open-cluster-management.io
+    kind: Policy
+    name: istio-installation-basic-mesh

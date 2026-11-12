@@ -241,6 +241,17 @@ The addon creates the control plane namespace, distributes trust, and handles en
 Both OSSM 3.x and upstream Sail use the `sailoperator.io` API group.
 See the [Sail operator multicluster docs][sail-multicluster] for the full procedure.
 
+For a policy-managed setup, the PoC [`meshctl scaffold`](meshctl.md) command
+generates an ACM Policy bundle that resolves mesh identity and network values
+from hub state, then installs Istio and the east-west Gateway on selected
+spokes. The base bundle works with compatible Sail and OSSM 3.x operators. When
+the selected clusters require Istio CNI, generate a separate bundle with
+`meshctl scaffold istiocni` and pass its policy name to
+`meshctl scaffold istio --depends-on-istiocni`; the latter waits for the CNI
+readiness check. Validate the operator and Gateway API versions before using
+the PoC outside the demo. Both commands are offline; apply their output to the
+hub or commit them to GitOps.
+
 To get started quickly, use the provided sample manifests from [samples/istio/](../samples/istio/).
 
 The following commands run against the spoke clusters (not the hub).
