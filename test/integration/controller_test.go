@@ -100,8 +100,7 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 
 				util.CreateManagedCluster(ctx, k8sClient, clusterName)
 				util.CreateManagedCluster(ctx, k8sClient, cluster2Name)
-				util.CreatePlacement(ctx, k8sClient, testPlacement, testNs)
-				util.CreatePlacementDecision(ctx, k8sClient, testPlacement, testNs, clusterName, cluster2Name)
+				createPlacementWithDecision(testPlacement, testNs, clusterName, cluster2Name)
 				util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testPlacement)
 			})
 
@@ -119,6 +118,8 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 				Expect(ns2.Labels[meshcontroller.MeshNameLabel]).To(Equal(meshName))
 				Expect(ns2.Labels[meshcontroller.MeshNamespaceLabel]).To(Equal(testNs))
 
+				expectPlacementSelected(meshName, testNs, clusterName, meshv1alpha1.ReasonSelected)
+				expectPlacementSelected(meshName, testNs, cluster2Name, meshv1alpha1.ReasonSelected)
 				expectMeshReady(meshName, testNs)
 				expectStatusControlPlaneNamespace(meshName, testNs)
 			})
@@ -137,8 +138,7 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 			It("should reconcile when the Placement is created with clusters", func() {
 				expectMeshConditionReason(meshName, testNs, meshv1alpha1.ConditionReady, meshv1alpha1.ReasonPlacementNotFound)
 				util.CreateManagedCluster(ctx, k8sClient, clusterName)
-				util.CreatePlacement(ctx, k8sClient, "nonexistent-placement", testNs)
-				util.CreatePlacementDecision(ctx, k8sClient, "nonexistent-placement", testNs, clusterName)
+				createPlacementWithDecision("nonexistent-placement", testNs, clusterName)
 				expectControlPlaneNamespace(meshName, testNs, clusterName)
 				expectMeshReady(meshName, testNs)
 			})
@@ -146,8 +146,7 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 
 		When("Placement selects no clusters", func() {
 			BeforeEach(func() {
-				util.CreatePlacement(ctx, k8sClient, testPlacement, testNs)
-				util.CreatePlacementDecision(ctx, k8sClient, testPlacement, testNs)
+				createPlacementWithDecision(testPlacement, testNs)
 				util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testPlacement)
 			})
 
@@ -158,16 +157,30 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 
 			It("should process a cluster when it's added to the PlacementDecision", func() {
 				util.CreateManagedCluster(ctx, k8sClient, clusterName)
-				util.UpdatePlacementDecision(ctx, k8sClient, testPlacement, testNs, clusterName)
+				updatePlacementWithDecision(testPlacement, testNs, clusterName)
 				expectControlPlaneNamespace(meshName, testNs, clusterName)
 				expectMeshReady(meshName, testNs)
+			})
+
+			It("should remove all cluster resources after the grace period", func() {
+				util.CreateManagedCluster(ctx, k8sClient, clusterName)
+				updatePlacementWithDecision(testPlacement, testNs, clusterName)
+				expectMeshReady(meshName, testNs)
+
+				updatePlacementWithDecision(testPlacement, testNs)
+
+				expectMeshConditionReason(meshName, testNs, meshv1alpha1.ConditionReady, meshv1alpha1.ReasonNoClustersSelected)
+				expectPlacementSelected(meshName, testNs, clusterName, meshv1alpha1.ReasonRemovalPending)
+
+				util.ExpectResourceDeleted(ctx, k8sClient, &workv1.ManifestWork{},
+					meshcontroller.ManifestWorkNameCPNSPrefix+cpNamespaceFor(meshName, testNs), clusterName)
+				expectNoClusterStatus(meshName, testNs, clusterName)
 			})
 		})
 
 		It("should not tear down infrastructure when PlacementDecision count is inconsistent with NumberOfSelectedClusters", func() {
 			util.CreateManagedCluster(ctx, k8sClient, clusterName)
-			util.CreatePlacement(ctx, k8sClient, testPlacement, testNs)
-			util.CreatePlacementDecision(ctx, k8sClient, testPlacement, testNs, clusterName)
+			createPlacementWithDecision(testPlacement, testNs, clusterName)
 			util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testPlacement)
 			expectControlPlaneNamespace(meshName, testNs, clusterName)
 
@@ -185,22 +198,59 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 			}).ShouldNot(BeEmpty())
 
 			By("resolving the inconsistency — setting NumberOfSelectedClusters to 0")
-			util.UpdatePlacementDecision(ctx, k8sClient, testPlacement, testNs)
+			updatePlacementWithDecision(testPlacement, testNs)
 			expectAllManifestWorksDeleted()
 		})
 
 		It("should add finalizer on MultiClusterMesh creation", func() {
-			util.CreatePlacement(ctx, k8sClient, testPlacement, testNs)
-			util.CreatePlacementDecision(ctx, k8sClient, testPlacement, testNs)
+			createPlacementWithDecision(testPlacement, testNs)
 			util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testPlacement)
 			expectFinalizer(meshName, testNs)
+		})
+
+		When("a cluster is pushed to another PlacementDecision while a new one is added", func() {
+			var clusters []string
+
+			BeforeEach(func() {
+				clusters = []string{clusterName, util.UniqueName("cluster"), util.UniqueName("cluster"), util.UniqueName("cluster")}
+				for _, name := range clusters {
+					util.CreateManagedCluster(ctx, k8sClient, name)
+				}
+
+				createPlacementWithDecision(testPlacement, testNs, clusters[0], clusters[1])
+				util.CreatePlacementDecision(ctx, k8sClient, testPlacement+"-decision-2", testPlacement, testNs, clusters[2])
+				util.UpdatePlacementSelectedCount(ctx, k8sClient, testPlacement, testNs, 3)
+
+				util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testPlacement)
+				expectMeshReady(meshName, testNs)
+			})
+
+			It("should defer removal until the PlacementDecisions settle", func() {
+				cpnsWork, _ := expectControlPlaneNamespace(meshName, testNs, clusters[0])
+
+				By("rewriting the first PlacementDecision while the second keeps stale content")
+				// Simulates OCM mid-write: the added cluster takes the pushed cluster's slot in decision-1, decision-2 still holds the old content, and the count still reflects the old selection.
+				// The deduped set matches the stale count, so the reconcile proceeds and the removal must be deferred.
+				util.UpdatePlacementDecision(ctx, k8sClient, testPlacement+"-decision-1", testNs, clusters[1], clusters[3])
+
+				expectPlacementSelected(meshName, testNs, clusters[0], meshv1alpha1.ReasonRemovalPending)
+
+				By("completing the redistribution")
+				util.UpdatePlacementDecision(ctx, k8sClient, testPlacement+"-decision-2", testNs, clusters[0], clusters[2])
+				util.UpdatePlacementSelectedCount(ctx, k8sClient, testPlacement, testNs, 4)
+
+				expectPlacementSelected(meshName, testNs, clusters[0], meshv1alpha1.ReasonSelected)
+				preservedWork, _ := expectControlPlaneNamespace(meshName, testNs, clusters[0])
+				Expect(preservedWork.UID).To(Equal(cpnsWork.UID))
+				expectControlPlaneNamespace(meshName, testNs, clusters[3])
+				expectMeshReady(meshName, testNs)
+			})
 		})
 
 		Context("Control plane namespace", func() {
 			BeforeEach(func() {
 				util.CreateManagedCluster(ctx, k8sClient, clusterName)
-				util.CreatePlacement(ctx, k8sClient, testPlacement, testNs)
-				util.CreatePlacementDecision(ctx, k8sClient, testPlacement, testNs, clusterName)
+				createPlacementWithDecision(testPlacement, testNs, clusterName)
 			})
 
 			It("should derive a unique control plane namespace from mesh identity", func() {
@@ -242,14 +292,17 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 		When("referencing a Placement with a cluster", func() {
 			BeforeEach(func() {
 				util.CreateManagedCluster(ctx, k8sClient, clusterName)
-				util.CreatePlacement(ctx, k8sClient, testPlacement, testNs)
-				util.CreatePlacementDecision(ctx, k8sClient, testPlacement, testNs, clusterName)
+				createPlacementWithDecision(testPlacement, testNs, clusterName)
 				util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testPlacement)
 				expectControlPlaneNamespace(meshName, testNs, clusterName)
 			})
 
 			It("should cleanup ManifestWorks when the cluster is removed from PlacementDecision", func() {
-				util.UpdatePlacementDecision(ctx, k8sClient, testPlacement, testNs)
+				updatePlacementWithDecision(testPlacement, testNs)
+
+				// The cluster should temporarily show a RemovalPending until we remove all resources from it.
+				expectPlacementSelected(meshName, testNs, clusterName, meshv1alpha1.ReasonRemovalPending)
+
 				expectAllManifestWorksDeleted()
 				expectNoClusterStatus(meshName, testNs, clusterName)
 			})
@@ -265,7 +318,7 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 				}).ShouldNot(BeEmpty())
 
 				By("simulating Placement controller removing the cluster from PlacementDecision")
-				util.UpdatePlacementDecision(ctx, k8sClient, testPlacement, testNs)
+				updatePlacementWithDecision(testPlacement, testNs)
 				expectAllManifestWorksDeleted()
 				expectNoClusterStatus(meshName, testNs, clusterName)
 			})
@@ -288,8 +341,7 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 					otherMesh = util.UniqueName("other-mesh")
 					util.CreateNamespace(ctx, k8sClient, otherNs)
 					otherPlacement := util.UniqueName("placement")
-					util.CreatePlacement(ctx, k8sClient, otherPlacement, otherNs)
-					util.CreatePlacementDecision(ctx, k8sClient, otherPlacement, otherNs, clusterName)
+					createPlacementWithDecision(otherPlacement, otherNs, clusterName)
 					util.CreateMultiClusterMesh(ctx, k8sClient, otherMesh, otherNs, otherPlacement)
 				})
 
@@ -328,8 +380,7 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 
 			util.CreateManagedCluster(ctx, k8sClient, clusterName)
 			util.CreateManagedCluster(ctx, k8sClient, cluster2Name)
-			util.CreatePlacement(ctx, k8sClient, testPlacement, testNs)
-			util.CreatePlacementDecision(ctx, k8sClient, testPlacement, testNs, clusterName, cluster2Name)
+			createPlacementWithDecision(testPlacement, testNs, clusterName, cluster2Name)
 		})
 
 		When("trust is configured", func() {
@@ -399,8 +450,7 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 	Context("Validation", func() {
 		BeforeEach(func() {
 			util.CreateManagedCluster(ctx, k8sClient, clusterName)
-			util.CreatePlacement(ctx, k8sClient, testPlacement, testNs)
-			util.CreatePlacementDecision(ctx, k8sClient, testPlacement, testNs, clusterName)
+			createPlacementWithDecision(testPlacement, testNs, clusterName)
 			util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testPlacement)
 			expectControlPlaneNamespace(meshName, testNs, clusterName)
 		})
@@ -436,8 +486,7 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 			cluster2 := util.UniqueName("cluster2")
 			util.CreateManagedCluster(ctx, k8sClient, clusterName)
 			util.CreateManagedCluster(ctx, k8sClient, cluster2)
-			util.CreatePlacement(ctx, k8sClient, testPlacement, testNs)
-			util.CreatePlacementDecision(ctx, k8sClient, testPlacement, testNs, clusterName, cluster2)
+			createPlacementWithDecision(testPlacement, testNs, clusterName, cluster2)
 			util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testPlacement)
 			expectFinalizer(meshName, testNs)
 			expectControlPlaneNamespace(meshName, testNs, clusterName)
@@ -455,6 +504,20 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 
 			util.DeleteResource(ctx, k8sClient, &meshv1alpha1.MultiClusterMesh{}, meshName, testNs)
 		})
+
+		It("should remove a pending cluster's resources on mesh deletion", func() {
+			util.CreateManagedCluster(ctx, k8sClient, clusterName)
+			createPlacementWithDecision(testPlacement, testNs, clusterName)
+			util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testPlacement)
+			expectMeshReady(meshName, testNs)
+
+			updatePlacementWithDecision(testPlacement, testNs)
+			expectPlacementSelected(meshName, testNs, clusterName, meshv1alpha1.ReasonRemovalPending)
+
+			util.DeleteResource(ctx, k8sClient, &meshv1alpha1.MultiClusterMesh{}, meshName, testNs)
+			util.ExpectResourceDeleted(ctx, k8sClient, &workv1.ManifestWork{},
+				meshcontroller.ManifestWorkNameCPNSPrefix+cpNamespaceFor(meshName, testNs), clusterName)
+		})
 	})
 
 	Context("Certificate distribution", func() {
@@ -463,8 +526,7 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 
 			BeforeEach(func() {
 				util.CreateManagedCluster(ctx, k8sClient, clusterName)
-				util.CreatePlacement(ctx, k8sClient, testPlacement, testNs)
-				util.CreatePlacementDecision(ctx, k8sClient, testPlacement, testNs, clusterName)
+				createPlacementWithDecision(testPlacement, testNs, clusterName)
 				mesh = util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testPlacement, util.CertManagerSpec("mesh-issuer"))
 			})
 
@@ -484,7 +546,7 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 			It("should set Subject and URI SAN on Certificate", func() {
 				longCluster := "ci-managed-cluster-with-a-long-generated-name-for-subject-test"
 				util.CreateManagedCluster(ctx, k8sClient, longCluster)
-				util.UpdatePlacementDecision(ctx, k8sClient, testPlacement, testNs, clusterName, longCluster)
+				updatePlacementWithDecision(testPlacement, testNs, clusterName, longCluster)
 
 				cert := expectCertificate(testNs, longCluster, meshName, "mesh-issuer", "Issuer")
 
@@ -577,8 +639,7 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 		When("cert-manager ClusterIssuer is configured", func() {
 			BeforeEach(func() {
 				util.CreateManagedCluster(ctx, k8sClient, clusterName)
-				util.CreatePlacement(ctx, k8sClient, testPlacement, testNs)
-				util.CreatePlacementDecision(ctx, k8sClient, testPlacement, testNs, clusterName)
+				createPlacementWithDecision(testPlacement, testNs, clusterName)
 				util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testPlacement, util.CertManagerSpecWithKind("cluster-issuer", "ClusterIssuer"))
 			})
 
@@ -594,8 +655,7 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 
 				util.CreateManagedCluster(ctx, k8sClient, cluster1)
 				util.CreateManagedCluster(ctx, k8sClient, cluster2)
-				util.CreatePlacement(ctx, k8sClient, testPlacement, testNs)
-				util.CreatePlacementDecision(ctx, k8sClient, testPlacement, testNs, cluster1, cluster2)
+				createPlacementWithDecision(testPlacement, testNs, cluster1, cluster2)
 				mesh := util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testPlacement, util.CertManagerSpec("mesh-issuer"))
 
 				util.CreateCacertsSecret(ctx, k8sClient, mesh, cluster1)
@@ -609,15 +669,14 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 		When("a cluster is removed from PlacementDecision", func() {
 			BeforeEach(func() {
 				util.CreateManagedCluster(ctx, k8sClient, clusterName)
-				util.CreatePlacement(ctx, k8sClient, testPlacement, testNs)
-				util.CreatePlacementDecision(ctx, k8sClient, testPlacement, testNs, clusterName)
+				createPlacementWithDecision(testPlacement, testNs, clusterName)
 				util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testPlacement, util.CertManagerSpec("mesh-issuer"))
 			})
 
 			It("should cleanup Certificate for that cluster", func() {
 				cert := expectCertificate(testNs, clusterName, meshName, "mesh-issuer", "Issuer")
 
-				util.UpdatePlacementDecision(ctx, k8sClient, testPlacement, testNs)
+				updatePlacementWithDecision(testPlacement, testNs)
 
 				util.ExpectResourceDeleted(ctx, k8sClient, &certmanagerv1.Certificate{}, cert.Name, testNs)
 			})
@@ -625,7 +684,7 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 			It("should remove cluster status", func() {
 				expectClusterTrustCondition(meshName, testNs, clusterName, meshv1alpha1.ReasonCertificatePending)
 
-				util.UpdatePlacementDecision(ctx, k8sClient, testPlacement, testNs)
+				updatePlacementWithDecision(testPlacement, testNs)
 
 				expectNoClusterStatus(meshName, testNs, clusterName)
 				expectMeshConditionReason(meshName, testNs, meshv1alpha1.ConditionReady, meshv1alpha1.ReasonNoClustersSelected)
@@ -635,8 +694,7 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 		When("issuer is removed after initial configuration", func() {
 			BeforeEach(func() {
 				util.CreateManagedCluster(ctx, k8sClient, clusterName)
-				util.CreatePlacement(ctx, k8sClient, testPlacement, testNs)
-				util.CreatePlacementDecision(ctx, k8sClient, testPlacement, testNs, clusterName)
+				createPlacementWithDecision(testPlacement, testNs, clusterName)
 				util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testPlacement, util.CertManagerSpec("mesh-issuer"))
 			})
 
@@ -670,8 +728,7 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 		When("no issuer is configured", func() {
 			It("should not create cacerts ManifestWork", func() {
 				util.CreateManagedCluster(ctx, k8sClient, clusterName)
-				util.CreatePlacement(ctx, k8sClient, testPlacement, testNs)
-				util.CreatePlacementDecision(ctx, k8sClient, testPlacement, testNs, clusterName)
+				createPlacementWithDecision(testPlacement, testNs, clusterName)
 				mesh := util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testPlacement)
 
 				expectMeshReady(meshName, testNs)
@@ -679,7 +736,8 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 
 				latest := &meshv1alpha1.MultiClusterMesh{}
 				Expect(k8sClient.Get(ctx, key.Of(meshName, testNs), latest)).To(Succeed())
-				Expect(latest.Status.ClusterStatus).To(Equal([]meshv1alpha1.ClusterMeshStatus{{ClusterName: clusterName}}))
+				Expect(latest.Status.ClusterStatus).To(ContainElement(HaveField("ClusterName", clusterName)))
+				Expect(findClusterCondition(latest, clusterName, meshv1alpha1.ConditionTrustDistributed)).To(BeNil())
 			})
 		})
 	})
@@ -688,8 +746,7 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 		When("referencing a Placement with a cluster", func() {
 			BeforeEach(func() {
 				util.CreateManagedCluster(ctx, k8sClient, clusterName)
-				util.CreatePlacement(ctx, k8sClient, testPlacement, testNs)
-				util.CreatePlacementDecision(ctx, k8sClient, testPlacement, testNs, clusterName)
+				createPlacementWithDecision(testPlacement, testNs, clusterName)
 			})
 
 			It("should create ManagedServiceAccount with correct labels and default validity", func() {
@@ -719,7 +776,7 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 
 				cluster2 := util.UniqueName("cluster")
 				util.CreateManagedCluster(ctx, k8sClient, cluster2)
-				util.UpdatePlacementDecision(ctx, k8sClient, testPlacement, testNs, clusterName, cluster2)
+				updatePlacementWithDecision(testPlacement, testNs, clusterName, cluster2)
 				expectManagedServiceAccount(mesh, cluster2)
 			})
 
@@ -753,7 +810,7 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 
 				cluster2 := util.UniqueName("cluster")
 				util.CreateManagedCluster(ctx, k8sClient, cluster2)
-				util.UpdatePlacementDecision(ctx, k8sClient, testPlacement, testNs, clusterName, cluster2)
+				updatePlacementWithDecision(testPlacement, testNs, clusterName, cluster2)
 				expectIstioReaderManifestWork(mesh, cluster2)
 			})
 
@@ -776,7 +833,7 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 				})
 
 				It("should cleanup ManagedServiceAccount when cluster is removed from PlacementDecision", func() {
-					util.UpdatePlacementDecision(ctx, k8sClient, testPlacement, testNs)
+					updatePlacementWithDecision(testPlacement, testNs)
 					util.ExpectResourceDeleted(ctx, k8sClient, &msav1beta1.ManagedServiceAccount{},
 						meshcontroller.EndpointDiscoveryName(mesh), clusterName)
 				})
@@ -791,14 +848,14 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 					}).Should(Succeed())
 
 					By("simulating Placement controller removing the cluster from PlacementDecision")
-					util.UpdatePlacementDecision(ctx, k8sClient, testPlacement, testNs)
+					updatePlacementWithDecision(testPlacement, testNs)
 					util.ExpectResourceDeleted(ctx, k8sClient, &msav1beta1.ManagedServiceAccount{},
 						meshcontroller.EndpointDiscoveryName(mesh), clusterName)
 				})
 
 				It("should cleanup istio-reader ManifestWork when cluster is removed from PlacementDecision", func() {
 					expectIstioReaderManifestWork(mesh, clusterName)
-					util.UpdatePlacementDecision(ctx, k8sClient, testPlacement, testNs)
+					updatePlacementWithDecision(testPlacement, testNs)
 					util.ExpectResourceDeleted(ctx, k8sClient, &workv1.ManifestWork{},
 						meshcontroller.IstioReaderManifestWorkName(mesh), clusterName)
 				})
@@ -810,8 +867,7 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 
 			BeforeEach(func() {
 				util.CreateManagedCluster(ctx, k8sClient, clusterName)
-				util.CreatePlacement(ctx, k8sClient, testPlacement, testNs)
-				util.CreatePlacementDecision(ctx, k8sClient, testPlacement, testNs, clusterName)
+				createPlacementWithDecision(testPlacement, testNs, clusterName)
 				mesh = util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testPlacement)
 				setupMsaTokenSecret(mesh, clusterName)
 			})
@@ -834,7 +890,7 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 			It("should update ManifestWorkReplicaSet for newly added cluster", func() {
 				cluster2Name := util.UniqueName("cluster")
 				util.CreateManagedCluster(ctx, k8sClient, cluster2Name)
-				util.UpdatePlacementDecision(ctx, k8sClient, testPlacement, testNs, clusterName, cluster2Name)
+				updatePlacementWithDecision(testPlacement, testNs, clusterName, cluster2Name)
 				setupMsaTokenSecret(mesh, cluster2Name)
 
 				expectManifestWorkReplicaSetContent(meshName, testNs, func(g Gomega, mwrset *workv1alpha1.ManifestWorkReplicaSet) {
@@ -884,7 +940,7 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 
 				By("removing the secret when the missing cluster leaves the PlacementDecision")
 				util.DeleteResource(ctx, k8sClient, &clusterv1.ManagedCluster{}, clusterName, "")
-				util.UpdatePlacementDecision(ctx, k8sClient, testPlacement, testNs)
+				updatePlacementWithDecision(testPlacement, testNs)
 				expectManifestWorkReplicaSetContent(meshName, testNs, func(g Gomega, mwrset *workv1alpha1.ManifestWorkReplicaSet) {
 					g.Expect(mwrset.Spec.ManifestWorkTemplate.Workload.Manifests).To(BeEmpty())
 				})
@@ -893,10 +949,10 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 			It("should drop one ManifestWorkReplicaSet manifest when removing one cluster from the PlacementDecision", func() {
 				cluster2Name := util.UniqueName("cluster")
 				util.CreateManagedCluster(ctx, k8sClient, cluster2Name)
-				util.UpdatePlacementDecision(ctx, k8sClient, testPlacement, testNs, clusterName, cluster2Name)
+				updatePlacementWithDecision(testPlacement, testNs, clusterName, cluster2Name)
 				setupMsaTokenSecret(mesh, cluster2Name)
 
-				util.UpdatePlacementDecision(ctx, k8sClient, testPlacement, testNs, cluster2Name)
+				updatePlacementWithDecision(testPlacement, testNs, cluster2Name)
 
 				expectManifestWorkReplicaSetContent(meshName, testNs, func(g Gomega, mwrset *workv1alpha1.ManifestWorkReplicaSet) {
 					g.Expect(mwrset.Spec.ManifestWorkTemplate.Workload.Manifests).To(HaveLen(1))
@@ -905,7 +961,7 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 			})
 
 			It("should cleanup ManifestWorkReplicaSet Manifests when removing all clusters from the PlacementDecision", func() {
-				util.UpdatePlacementDecision(ctx, k8sClient, testPlacement, testNs)
+				updatePlacementWithDecision(testPlacement, testNs)
 				Eventually(func(g Gomega) {
 					mwrset := &workv1alpha1.ManifestWorkReplicaSet{}
 					g.Expect(k8sClient.Get(ctx, key.Of(meshName, testNs), mwrset)).To(Succeed())
@@ -948,8 +1004,7 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 			var mesh *meshv1alpha1.MultiClusterMesh
 
 			BeforeEach(func() {
-				util.CreatePlacement(ctx, k8sClient, testPlacement, testNs)
-				util.CreatePlacementDecision(ctx, k8sClient, testPlacement, testNs)
+				createPlacementWithDecision(testPlacement, testNs)
 				mesh = util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testPlacement)
 			})
 
@@ -959,7 +1014,7 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 
 			It("should create ManagedServiceAccount when cluster is added", func() {
 				util.CreateManagedCluster(ctx, k8sClient, clusterName)
-				util.UpdatePlacementDecision(ctx, k8sClient, testPlacement, testNs, clusterName)
+				updatePlacementWithDecision(testPlacement, testNs, clusterName)
 				expectManagedServiceAccount(mesh, clusterName)
 			})
 		})
@@ -969,8 +1024,7 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 
 			BeforeEach(func() {
 				util.CreateManagedCluster(ctx, k8sClient, clusterName)
-				util.CreatePlacement(ctx, k8sClient, testPlacement, testNs)
-				util.CreatePlacementDecision(ctx, k8sClient, testPlacement, testNs, clusterName)
+				createPlacementWithDecision(testPlacement, testNs, clusterName)
 				mesh = util.CreateMultiClusterMesh(ctx, k8sClient, meshName, testNs, testPlacement)
 				expectMeshReady(meshName, testNs)
 
@@ -1017,6 +1071,26 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 		})
 	})
 })
+
+func createPlacementWithDecision(placement, namespace string, clusterNames ...string) {
+	util.CreatePlacement(ctx, k8sClient, placement, namespace)
+	util.CreatePlacementDecision(ctx, k8sClient, placement+"-decision-1", placement, namespace, clusterNames...)
+	util.UpdatePlacementSelectedCount(ctx, k8sClient, placement, namespace, int32(len(clusterNames)))
+}
+
+func updatePlacementWithDecision(placement, namespace string, clusterNames ...string) {
+	util.UpdatePlacementDecision(ctx, k8sClient, placement+"-decision-1", namespace, clusterNames...)
+	util.UpdatePlacementSelectedCount(ctx, k8sClient, placement, namespace, int32(len(clusterNames)))
+}
+
+func expectPlacementSelected(meshName, namespace, clusterName, reason string) {
+	status := metav1.ConditionFalse
+	if reason == meshv1alpha1.ReasonSelected {
+		status = metav1.ConditionTrue
+	}
+
+	expectClusterCondition(meshName, namespace, clusterName, meshv1alpha1.ConditionPlacementSelected, reason, status)
+}
 
 func cpNamespaceFor(meshName, meshNS string) string {
 	return (&meshv1alpha1.MultiClusterMesh{

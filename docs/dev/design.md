@@ -192,9 +192,34 @@ Multiple meshes can target overlapping clusters. Their certificates, discovery t
 
 Plumbing resources (ManifestWorks, ManagedServiceAccounts, Certificates) use a deterministic naming strategy scoped to the owning mesh, so that multiple meshes on the same cluster don't collide.
 
-The controller lists decisions by Placement-name label in the mesh namespace and sorts their cluster names. It compares the raw entry count with `Placement.status.numberOfSelectedClusters`; a mismatch requeues after 2 seconds without creating, updating, or deleting mesh resources. 
+The controller lists decisions by Placement-name label in the mesh namespace, deduplicates their cluster names, and sorts them.
+It compares the deduplicated set size with `Placement.status.numberOfSelectedClusters`.
+A mismatch means OCM is still writing the `PlacementDecision` objects, because it updates the count only after every object is written.
+The reconcile returns without changes, and the `PlacementDecision` and `Placement` watches re-trigger once the counts converge.
 
-Selected names and resolved ManagedCluster objects are tracked separately. Resource creation and remote-secret updates use resolved objects. Existing remote-secret manifests are retained for selected clusters until replacements can be built, including when their ManagedCluster objects, API endpoints, or discovery tokens are not yet available. If no manifest exists yet, creation waits until these prerequisites are available. Cleanup and status pruning use the selected names, preserving resources for a missing ManagedCluster until its name leaves the decisions. Readiness uses the resolved objects, so a partially missing selection is not currently reflected as an unready member.
+A deduplicated set that matches the count can still be a mixed snapshot.
+While OCM redistributes decisions, a cluster moving between `PlacementDecision` objects is temporarily absent from the observed set, and a cluster added in the same transition can keep the set size equal to the stale count.
+Deletion is therefore deferred.
+A cluster that leaves the observed set gets the per-cluster `PlacementSelected=False` condition with reason `RemovalPending`, keeps its resources, and stays in the effective membership passed to cleanup for the removal grace period (30 seconds by default).
+If it reappears, the condition clears and the removal is cancelled.
+If it stays missing past the grace period, the controller deletes its resources and prunes its `clusterStatus` entry.
+The reconcile requeues at the earliest pending deadline, so deletions fire without further events.
+Mesh deletion bypasses the grace period.
+The finalizer deletes labeled resources directly.
+
+Residual: the grace window lives in the persisted `status.clusterStatus`, so a cluster whose entry is missing is not protected.
+The entry can be missing because the cluster joined within informer cache lag of the status write, because the status write failed, or because the Placement was deleted and recreated, which clears the status.
+If the Placement controller stalls mid-write for longer than the grace period, a mixed snapshot can still delete a valid member's resources.
+The grace period narrows the upstream window.
+It does not eliminate it.
+The real fix belongs in OCM, tracked in [ocm#1346]: a decision revision on `Placement.status` stamped on every `PlacementDecision`, with consumers waiting for all objects to match it.
+
+Selected names and resolved ManagedCluster objects are tracked separately.
+Resource creation and remote-secret updates use resolved objects.
+Existing remote-secret manifests are retained for selected clusters until replacements can be built, including when their ManagedCluster objects, API endpoints, or discovery tokens are not yet available.
+If no manifest exists yet, creation waits until these prerequisites are available.
+Cleanup and status pruning use the effective membership, observed names plus clusters pending removal inside the grace period, preserving resources for a missing ManagedCluster until its name leaves the decisions and the grace period expires.
+Readiness uses the resolved objects, so a partially missing selection is not currently reflected as an unready member.
 
 Placement and PlacementDecision events enqueue meshes using a namespace-scoped field index on `spec.placementRef.name`. ManagedCluster events find affected meshes from their labeled ManifestWorks. The addon also watches mesh-labeled Secrets and ManagedServiceAccounts, addon-managed ManifestWorks, and generation changes to owned Certificates. It does not watch ManifestWorkReplicaSets directly.
 
@@ -297,8 +322,14 @@ For multi-primary mesh topologies, each control plane needs API access to its pe
 ## Lifecycle Events
 
 - **Scale Up**: When a new cluster is selected by the Placement, the controller provisions the mesh plumbing for it: the control plane namespace, an intermediate CA Certificate when an issuer is set, istio-reader RBAC, a ManagedServiceAccount, and remote secrets for the current members. This is the same process as the initial mesh bootstrap, applied to the new cluster.
-- **Scale Down**: When a cluster leaves the decisions and the raw decision-entry count matches `status.numberOfSelectedClusters`, reconciliation requests deletion of its mesh ManifestWorks, intermediate CA Certificate, and ManagedServiceAccount, and rebuilds the ReplicaSet without its remote secret. OCM applies those changes asynchronously.
-- **Empty selection**: When the Placement exists and `status.numberOfSelectedClusters` agrees with the PlacementDecisions that zero clusters are selected, the same cleanup runs for every cluster. Control plane namespaces, intermediate CA Certificates, cacerts, ManagedServiceAccounts, and remote secrets are deleted. A transient mismatch between the decision list and `status.numberOfSelectedClusters` does not trigger this cleanup.
+- **Scale Down**: When a cluster leaves the decisions and the deduplicated set matches `status.numberOfSelectedClusters`, the cluster is marked `RemovalPending` and its resources are preserved for the removal grace period (30 seconds by default).
+  After the grace period, reconciliation requests deletion of its mesh ManifestWorks, intermediate CA Certificate, and ManagedServiceAccount, and rebuilds the ReplicaSet without its remote secret.
+  A cluster that reappears within the window, for example while moving between `PlacementDecision` objects during redistribution, has its mark cleared and the removal is cancelled.
+  OCM applies those changes asynchronously.
+- **Empty selection**: When the Placement exists and `status.numberOfSelectedClusters` agrees with the PlacementDecisions that zero clusters are selected, the same cleanup runs for every cluster after the removal grace period.
+  The grace period applies only while `status.clusterStatus` still tracks the clusters: a Placement that was deleted and recreated starts with no entries and cleans up immediately.
+  Control plane namespaces, intermediate CA Certificates, cacerts, ManagedServiceAccounts, and remote secrets are deleted.
+  A transient mismatch between the decision list and `status.numberOfSelectedClusters` does not trigger this cleanup.
 - **Missing Placement**: If the referenced Placement does not exist, the controller reports `PlacementNotFound` and does not run cleanup. Existing plumbing stays until the Placement is created or the reference is fixed. `status.clusterStatus` is cleared while the Placement is missing.
 - **Missing ManagedClusters**: Resources for names still present in decisions are retained, including their Certificates when trust remains configured. If all selected objects are missing, the mesh reports `NoClustersSelected`; this does not mean its desired membership is empty.
 - **Mesh deletion**: The finalizer requests deletion of labeled ManifestWorks and ManagedServiceAccounts and is removed after those API calls succeed. It does not wait for remote cleanup. Garbage collection removes owned Certificates and the ReplicaSet, and OCM removes the ReplicaSet's remote-secret works. User-created Placements, bindings, issuers, operators, and cluster-scoped Istio resources remain outside addon ownership.
@@ -332,6 +363,7 @@ Potential additions include observability stack management and full addon framew
 [ManifestWorkReplicaSet]: https://open-cluster-management.io/docs/concepts/work-distribution/manifestworkreplicaset/
 [Multi-Primary Multi-Network]: https://istio.io/latest/docs/setup/install/multicluster/multi-primary_multi-network/
 [OCM]: https://open-cluster-management.io/
+[ocm#1346]: https://github.com/open-cluster-management-io/ocm/issues/1346
 [OperatorPolicy]: https://open-cluster-management.io/docs/getting-started/integration/policy-controllers/operator-policy/
 [Placement]: https://open-cluster-management.io/docs/concepts/content-placement/placement/
 [PlacementDecision]: https://open-cluster-management.io/docs/concepts/content-placement/placement/#placementdecisions

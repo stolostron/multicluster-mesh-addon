@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"maps"
+	"slices"
 
 	meshv1alpha1 "github.com/stolostron/multicluster-mesh-addon/pkg/apis/mesh/v1alpha1"
 	"github.com/stolostron/multicluster-mesh-addon/pkg/key"
@@ -95,10 +96,8 @@ func (r *Reconciler) ensureManagedServiceAccount(ctx context.Context, mesh *mesh
 	return nil
 }
 
-// cleanupManagedServiceAccounts deletes ManagedServiceAccounts for clusters no longer in the PlacementDecision.
-func (r *Reconciler) cleanupManagedServiceAccounts(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, desiredClusters []string) error {
-	clusterNames := clusterNameSet(desiredClusters)
-
+// cleanupManagedServiceAccounts deletes ManagedServiceAccounts for clusters outside the effective membership.
+func (r *Reconciler) cleanupManagedServiceAccounts(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, clusters map[string]*clusterv1.ManagedCluster) error {
 	msaList := &msav1beta1.ManagedServiceAccountList{}
 	if err := r.List(ctx, msaList,
 		client.MatchingLabels{MeshNameLabel: mesh.Name, MeshNamespaceLabel: mesh.Namespace}); err != nil {
@@ -107,7 +106,7 @@ func (r *Reconciler) cleanupManagedServiceAccounts(ctx context.Context, mesh *me
 
 	for _, msa := range msaList.Items {
 		clusterName := msa.Namespace
-		if clusterNames[clusterName] {
+		if isMember(clusters, clusterName) {
 			continue
 		}
 
@@ -157,13 +156,19 @@ func (r *Reconciler) ensureManagedServiceAccountUpdated(ctx context.Context, mes
 }
 
 // ensureRemoteSecretDistribution builds Istio remote discovery secrets from ManagedServiceAccount tokens and distributes them via ManifestWorkReplicaSet.
-func (r *Reconciler) ensureRemoteSecretDistribution(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, clusters []clusterv1.ManagedCluster, desiredClusters []string) error {
-	manifestsByCluster := make(map[string]workv1.Manifest, len(desiredClusters))
-	secretsToPreserve := make(map[string]string, len(desiredClusters))
-	for _, name := range desiredClusters {
+func (r *Reconciler) ensureRemoteSecretDistribution(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, clusters map[string]*clusterv1.ManagedCluster) error {
+	manifestsByCluster := make(map[string]workv1.Manifest, len(clusters))
+	secretsToPreserve := make(map[string]string, len(clusters))
+
+	// Sorted names keep the manifest list in the ReplicaSet spec stable across reconciles.
+	names := slices.Sorted(maps.Keys(clusters))
+	for _, name := range names {
 		secretsToPreserve["istio-remote-secret-"+name] = name
 	}
 	for _, cluster := range clusters {
+		if cluster == nil {
+			continue
+		}
 		if len(cluster.Spec.ManagedClusterClientConfigs) == 0 {
 			klog.V(4).Infof("no API endpoint found, skipping secret distribution for cluster %s", cluster.Name)
 			continue
@@ -215,8 +220,8 @@ func (r *Reconciler) ensureRemoteSecretDistribution(ctx context.Context, mesh *m
 				}
 			}
 		}
-		manifests := make([]workv1.Manifest, 0, len(desiredClusters))
-		for _, name := range desiredClusters {
+		manifests := make([]workv1.Manifest, 0, len(clusters))
+		for _, name := range names {
 			if manifest, ok := manifestsByCluster[name]; ok {
 				manifests = append(manifests, manifest)
 			}
