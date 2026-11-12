@@ -1,0 +1,40 @@
+# PolicyGenerator wraps the Istio manifests (with hub templates) into
+# Policy + ConfigurationPolicy + PlacementBinding objects.
+#
+# Before building:
+#   1. Set policyDefaults.namespace below to your mesh namespace.
+#   2. Set placement.placementName below to your mesh's Placement name
+#      (spec.placementRef.name on the MultiClusterMesh).
+#   3. Replace <MESH_NAME> and <MESH_NAMESPACE> in the istio-manifests/ files.
+#   4. Install the PolicyGenerator Kustomize plugin.
+#      See docs/istio-policygenerator.md#prerequisites for installation instructions.
+#
+# The Istio manifests create the cluster-scoped Istio/default resource.
+# This sample is intended for one mesh per spoke. If multiple meshes share a hub
+# namespace, set policies[].name and placementBindingDefaults.name below to be
+# unique per mesh so their placements remain independent.
+#
+# IstioCNI (OpenShift/ambient) is a cluster-level prerequisite and should be
+# managed separately. See samples/policy-istiocni.yaml.
+#
+# Build and apply:
+#   kustomize build --enable-alpha-plugins samples/policygenerator/ \
+#     | kubectl apply -n <mesh-namespace> -f -
+apiVersion: policy.open-cluster-management.io/v1
+kind: PolicyGenerator
+metadata:
+  name: istio-control-plane
+placementBindingDefaults:
+  name: binding-istio
+policyDefaults:
+  namespace: <mesh-system>
+  remediationAction: enforce
+  severity: medium
+  pruneObjectBehavior: DeleteIfCreated
+  placement:
+    placementName: <mesh-placement>
+policies:
+  - name: policy-istio
+    manifests:
+      - path: istio-manifests/istio.yaml
+      - path: istio-manifests/eastwest-gateway.yaml

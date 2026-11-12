@@ -317,7 +317,7 @@ The user is responsible for:
 - Labeling application namespaces to match discovery selector configuration
 - Creating and managing Placement resources for cluster selection
 
-ArgoCD with ApplicationSets is the recommended approach for managing Istio configuration across clusters.
+ACM policies with hub templates are the recommended approach for managing Istio configuration across clusters. See the [user guide](../user-guide.md#step-8-configure-istio) for the policy-based workflow. ArgoCD ApplicationSets are an alternative for teams already using ArgoCD.
 
 **Phase 2 (Future)**: "Full" approach - the add-on also manages Istio custom resources centrally, automating topology configuration and enforcing consistency.
 
