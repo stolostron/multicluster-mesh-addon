@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	certmanagerv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
+	meshv1alpha1 "github.com/stolostron/multicluster-mesh-addon/pkg/apis/mesh/v1alpha1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -18,8 +19,7 @@ import (
 	msav1beta1 "open-cluster-management.io/managed-serviceaccount/apis/authentication/v1beta1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
-
-	meshv1alpha1 "github.com/stolostron/multicluster-mesh-addon/pkg/apis/mesh/v1alpha1"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 )
 
 func TestCheckPrerequisiteCRDs(t *testing.T) {
@@ -940,4 +940,88 @@ func placementDecision(placementName, namespace string, clusterNames ...string) 
 		},
 		Status: clusterv1beta1.PlacementDecisionStatus{Decisions: decisions},
 	}
+}
+
+func TestManagedClusterPredicate(t *testing.T) {
+	base := &clusterv1.ManagedCluster{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:       "cluster-a",
+			Generation: 1,
+			Labels:     map[string]string{"env": "prod"},
+		},
+	}
+
+	tests := []struct {
+		name   string
+		mutate func(*clusterv1.ManagedCluster)
+		expect bool
+	}{
+		{
+			name: "status-only update is filtered",
+			mutate: func(c *clusterv1.ManagedCluster) {
+				c.Status.Conditions = []metav1.Condition{{
+					Type: "Available", Status: metav1.ConditionTrue,
+					Reason: "Available", LastTransitionTime: metav1.Now(),
+				}}
+			},
+			expect: false,
+		},
+		{
+			name: "annotation-only update is filtered",
+			mutate: func(c *clusterv1.ManagedCluster) {
+				c.Annotations = map[string]string{"description": "updated"}
+			},
+			expect: false,
+		},
+		{
+			name: "label change passes",
+			mutate: func(c *clusterv1.ManagedCluster) {
+				c.Labels[IstioNetworkLabel] = "network-east"
+			},
+			expect: true,
+		},
+		{
+			name: "generation change passes",
+			mutate: func(c *clusterv1.ManagedCluster) {
+				c.Generation = 2
+			},
+			expect: true,
+		},
+		{
+			name: "label and generation change passes",
+			mutate: func(c *clusterv1.ManagedCluster) {
+				c.Generation = 2
+				c.Labels["new-label"] = "value"
+			},
+			expect: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			oldObj := base.DeepCopy()
+			newObj := base.DeepCopy()
+			tc.mutate(newObj)
+
+			got := managedClusterPredicate.Update(event.UpdateEvent{
+				ObjectOld: oldObj,
+				ObjectNew: newObj,
+			})
+			if got != tc.expect {
+				t.Errorf("expected %v, got %v", tc.expect, got)
+			}
+		})
+	}
+
+	t.Run("create event passes", func(t *testing.T) {
+		if !managedClusterPredicate.Create(event.CreateEvent{Object: base.DeepCopy()}) {
+			t.Error("expected create to pass")
+		}
+	})
+
+	t.Run("delete event passes", func(t *testing.T) {
+		if !managedClusterPredicate.Delete(event.DeleteEvent{Object: base.DeepCopy()}) {
+			t.Error("expected delete to pass")
+		}
+	})
 }
