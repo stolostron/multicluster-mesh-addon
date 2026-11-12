@@ -4,20 +4,30 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	certmanagerv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
+	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
+	workfake "open-cluster-management.io/api/client/work/clientset/versioned/fake"
+	workinformers "open-cluster-management.io/api/client/work/informers/externalversions"
 	clusterv1 "open-cluster-management.io/api/cluster/v1"
 	clusterv1beta1 "open-cluster-management.io/api/cluster/v1beta1"
 	workv1 "open-cluster-management.io/api/work/v1"
+	workv1alpha1 "open-cluster-management.io/api/work/v1alpha1"
 	msav1beta1 "open-cluster-management.io/managed-serviceaccount/apis/authentication/v1beta1"
+	"open-cluster-management.io/sdk-go/pkg/apis/work/v1/applier"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	meshv1alpha1 "github.com/stolostron/multicluster-mesh-addon/pkg/apis/mesh/v1alpha1"
 )
@@ -659,6 +669,339 @@ func TestGetClustersFromPlacementAllMissing(t *testing.T) {
 	}
 }
 
+func TestGetClustersFromPlacementErrorPaths(t *testing.T) {
+	// test fixture objects needed for full recovery reconciliation
+	placementWithSelected := func(count int32) *clusterv1beta1.Placement {
+		return &clusterv1beta1.Placement{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "test-placement",
+				Namespace: "default",
+			},
+			Status: clusterv1beta1.PlacementStatus{
+				NumberOfSelectedClusters: count,
+			},
+		}
+	}
+
+	// The single decision entry catches up with the Placement, clearing the mismatch
+	recoverDecisionCount := func(ctx context.Context, t *testing.T, c client.Client, _ *atomic.Bool) {
+		placement := &clusterv1beta1.Placement{}
+		placementKey := types.NamespacedName{Name: "test-placement", Namespace: "default"}
+		if err := c.Get(ctx, placementKey, placement); err != nil {
+			t.Fatalf("failed to get Placement during recovery: %v", err)
+		}
+		placement.Status.NumberOfSelectedClusters = 1
+		if err := c.Status().Update(ctx, placement); err != nil {
+			t.Fatalf("failed to update Placement status during recovery: %v", err)
+		}
+	}
+
+	baseDecision := &clusterv1beta1.PlacementDecision{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-placement-decision-1",
+			Namespace: "default",
+			Labels:    map[string]string{PlacementLabel: "test-placement"},
+		},
+		Status: clusterv1beta1.PlacementDecisionStatus{
+			Decisions: []clusterv1beta1.ClusterDecision{
+				{ClusterName: "cluster-a"},
+			},
+		},
+	}
+
+	baseManagedCluster := &clusterv1.ManagedCluster{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "cluster-a",
+		},
+	}
+
+	tests := []struct {
+		name               string
+		initObjs           []client.Object
+		seedReady          bool
+		interceptorFuncs   func(failToggle *atomic.Bool) interceptor.Funcs
+		expectErr          bool
+		expectRequeueAfter time.Duration
+		expectReadyStatus  metav1.ConditionStatus
+		expectReason       string
+		expectMessage      string
+		recover            func(ctx context.Context, t *testing.T, c client.Client, failToggle *atomic.Bool)
+	}{
+		{
+			name: "Placement Get API Failure - flips a Ready mesh to ReconcileError",
+			// include decision and cluster so recovery succeeds down to AllClustersReady
+			initObjs:  []client.Object{placementWithSelected(1), baseDecision, baseManagedCluster},
+			seedReady: true,
+			interceptorFuncs: func(failToggle *atomic.Bool) interceptor.Funcs {
+				return interceptor.Funcs{
+					Get: func(ctx context.Context, c client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+						if failToggle.Load() {
+							if _, ok := obj.(*clusterv1beta1.Placement); ok {
+								return errors.New("etcd connection timeout")
+							}
+						}
+						return c.Get(ctx, key, obj, opts...)
+					},
+				}
+			},
+			expectErr:         true,
+			expectReadyStatus: metav1.ConditionFalse,
+			expectReason:      meshv1alpha1.ReasonReconcileError,
+			expectMessage:     "failed to get Placement test-placement",
+			recover: func(ctx context.Context, t *testing.T, c client.Client, failToggle *atomic.Bool) {
+				failToggle.Store(false)
+			},
+		},
+		{
+			name:      "PlacementDecision List API Failure - flips a Ready mesh to ReconcileError",
+			initObjs:  []client.Object{placementWithSelected(1), baseDecision, baseManagedCluster},
+			seedReady: true,
+			interceptorFuncs: func(failToggle *atomic.Bool) interceptor.Funcs {
+				return interceptor.Funcs{
+					List: func(ctx context.Context, c client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
+						if failToggle.Load() {
+							if _, ok := list.(*clusterv1beta1.PlacementDecisionList); ok {
+								return errors.New("failed to reach kube-apiserver")
+							}
+						}
+						return c.List(ctx, list, opts...)
+					},
+				}
+			},
+			expectErr:         true,
+			expectReadyStatus: metav1.ConditionFalse,
+			expectReason:      meshv1alpha1.ReasonReconcileError,
+			expectMessage:     "failed to list PlacementDecisions for Placement test-placement",
+			recover: func(ctx context.Context, t *testing.T, c client.Client, failToggle *atomic.Bool) {
+				failToggle.Store(false)
+			},
+		},
+		{
+			name:      "ManagedCluster Get API Failure - flips a Ready mesh to ReconcileError",
+			initObjs:  []client.Object{placementWithSelected(1), baseDecision, baseManagedCluster},
+			seedReady: true,
+			interceptorFuncs: func(failToggle *atomic.Bool) interceptor.Funcs {
+				return interceptor.Funcs{
+					Get: func(ctx context.Context, c client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+						if failToggle.Load() {
+							if _, ok := obj.(*clusterv1.ManagedCluster); ok {
+								return apierrors.NewInternalError(errors.New("etcd disk full"))
+							}
+						}
+						return c.Get(ctx, key, obj, opts...)
+					},
+				}
+			},
+			expectErr:         true,
+			expectReadyStatus: metav1.ConditionFalse,
+			expectReason:      meshv1alpha1.ReasonReconcileError,
+			expectMessage:     "failed to get ManagedCluster cluster-a",
+			recover: func(ctx context.Context, t *testing.T, c client.Client, failToggle *atomic.Bool) {
+				failToggle.Store(false)
+			},
+		},
+		{
+			name: "PlacementDecisions pending - requeues without error",
+			// Placement claims 2 selected clusters but only one decision entry exists, simulating decisions still being redistributed.
+			initObjs:           []client.Object{placementWithSelected(2), baseDecision, baseManagedCluster},
+			seedReady:          false,
+			expectErr:          false,
+			expectRequeueAfter: 2 * time.Second,
+			expectReadyStatus:  metav1.ConditionFalse,
+			expectReason:       meshv1alpha1.ReasonPlacementDecisionPending,
+			expectMessage:      "Waiting for PlacementDecisions for Placement test-placement",
+			recover:            recoverDecisionCount,
+		},
+		{
+			// Rescheduling briefly desyncs the decisions on a healthy mesh; that must not flap Ready,
+			// so the condition is left alone instead of reporting pending.
+			name:               "PlacementDecisions pending - keeps an already Ready mesh Ready",
+			initObjs:           []client.Object{placementWithSelected(2), baseDecision, baseManagedCluster},
+			seedReady:          true,
+			expectErr:          false,
+			expectRequeueAfter: 2 * time.Second,
+			expectReadyStatus:  metav1.ConditionTrue,
+			expectReason:       meshv1alpha1.ReasonAllClustersReady,
+			expectMessage:      "All clusters are ready",
+			recover:            recoverDecisionCount,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			scheme := newTestScheme()
+			failToggle := &atomic.Bool{}
+			failToggle.Store(true)
+
+			mesh := meshWithTrust(&meshv1alpha1.MultiClusterMesh{
+				ObjectMeta: metav1.ObjectMeta{Name: "test-mesh", Namespace: "default", Generation: 1},
+			})
+
+			mesh.Finalizers = []string{FinalizerName}
+			mesh.Spec.PlacementRef = meshv1alpha1.PlacementReference{Name: "test-placement"}
+			// defaulted by the CRD, set explicitly since there is no API server
+			mesh.Spec.Security.Discovery.TokenValidity = &metav1.Duration{Duration: 360 * time.Hour}
+
+			if tc.seedReady {
+				mesh.SetReadyCondition(metav1.ConditionTrue, meshv1alpha1.ReasonAllClustersReady, "All clusters are ready")
+			}
+
+			existingWork := &workv1.ManifestWork{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "mesh-work-cluster-a",
+					Namespace: "cluster-a",
+					Labels:    meshOwnedLabels(mesh, "cluster-a"),
+				},
+			}
+
+			// Owned by a cluster that is not in the PlacementDecision, so a completed reconcile cleans it up while a failed one must leave it alone.
+			staleWork := &workv1.ManifestWork{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "mesh-work-cluster-gone",
+					Namespace: "cluster-gone",
+					Labels:    meshOwnedLabels(mesh, "cluster-gone"),
+				},
+			}
+
+			// cert-manager has already issued the cacerts secret and the distributed cacerts ManifestWork is applied on cluster-a,
+			// so a successful reconcile reaches AllClustersReady.
+			cacertsSecret := &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      CacertsName(mesh, "cluster-a"),
+					Namespace: mesh.Namespace,
+				},
+				Data: map[string][]byte{"tls.crt": []byte("cert"), "tls.key": []byte("key"), "ca.crt": []byte("ca")},
+			}
+			cacertsWork := cacertsWorkWithConditions(mesh, "cluster-a", workApplied(metav1.ConditionTrue), workAvailable(metav1.ConditionTrue))
+
+			allInitObjs := append(tc.initObjs, mesh, existingWork, staleWork, cacertsSecret, &cacertsWork)
+			var funcs interceptor.Funcs
+			if tc.interceptorFuncs != nil {
+				funcs = tc.interceptorFuncs(failToggle)
+			}
+			c := fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithObjects(allInitObjs...).
+				WithStatusSubresource(&meshv1alpha1.MultiClusterMesh{}, &clusterv1beta1.Placement{}).
+				WithInterceptorFuncs(funcs).
+				Build()
+
+			workApplier, workClient := newTestWorkApplier(existingWork.DeepCopy(), staleWork.DeepCopy(), cacertsWork.DeepCopy())
+			r := &Reconciler{Client: c, Scheme: scheme, workApplier: workApplier}
+
+			req := reconcile.Request{
+				NamespacedName: types.NamespacedName{
+					Namespace: mesh.Namespace,
+					Name:      mesh.Name,
+				},
+			}
+
+			result, err := r.Reconcile(ctx, req)
+			if tc.expectErr && err == nil {
+				t.Fatal("expected error on failure path, got nil")
+			}
+			if !tc.expectErr && err != nil {
+				t.Fatalf("expected no error, got %v", err)
+			}
+			if result.RequeueAfter != tc.expectRequeueAfter {
+				t.Errorf("expected RequeueAfter=%v, got %v", tc.expectRequeueAfter, result.RequeueAfter)
+			}
+
+			updatedMesh := &meshv1alpha1.MultiClusterMesh{}
+			err = c.Get(ctx, req.NamespacedName, updatedMesh)
+			if err != nil {
+				t.Fatalf("unexpected error on getting the existing mesh: %v", err)
+			}
+
+			// Verify Ready Condition on failure
+			cond := meta.FindStatusCondition(updatedMesh.Status.Conditions, meshv1alpha1.ConditionReady)
+			if cond == nil {
+				t.Fatal("expected Ready condition to be set during failure")
+			}
+			if cond.Status != tc.expectReadyStatus {
+				t.Errorf("expected Ready=%s, got %s", tc.expectReadyStatus, cond.Status)
+			}
+			if cond.Reason != tc.expectReason {
+				t.Errorf("expected reason %s, got %s", tc.expectReason, cond.Reason)
+			}
+			if !strings.Contains(cond.Message, tc.expectMessage) {
+				t.Errorf("expected Ready message to contain %s, got %s", tc.expectMessage, cond.Message)
+			}
+
+			// Verify existing ManifestWork resources are preserved
+			work, err := workClient.WorkV1().ManifestWorks(existingWork.Namespace).Get(ctx, existingWork.Name, metav1.GetOptions{})
+			if err != nil {
+				t.Fatalf("expected mesh resource %s/%s to be preserved during failure, but failed to get: %v",
+					existingWork.Namespace, existingWork.Name, err)
+			}
+			if work.Labels[MeshNameLabel] != updatedMesh.Name {
+				t.Errorf("mesh resource %s/%s metadata altered during failure", existingWork.Namespace, existingWork.Name)
+			}
+
+			// When a cluster is no longer selected, its ManifestWork survives until a reconcile completes
+			if _, err := workClient.WorkV1().ManifestWorks(staleWork.Namespace).Get(ctx, staleWork.Name, metav1.GetOptions{}); err != nil {
+				t.Errorf("expected stale mesh resource %s/%s to be preserved during failure, but failed to get: %v",
+					staleWork.Namespace, staleWork.Name, err)
+			}
+
+			// When resolution is failing or decisions are pending, no cluster resources are applied
+			cpNsWorkName := ManifestWorkNameCPNSPrefix + mesh.GetControlPlaneNamespace()
+			if _, err := workClient.WorkV1().ManifestWorks("cluster-a").Get(ctx, cpNsWorkName, metav1.GetOptions{}); !apierrors.IsNotFound(err) {
+				t.Errorf("expected no control plane namespace ManifestWork during pending, but got unexpected error: %v", err)
+			}
+
+			// Trigger recovery and verify Readiness recovers
+			if tc.recover != nil {
+				tc.recover(ctx, t, c, failToggle)
+
+				recoveredResult, err := r.Reconcile(ctx, req)
+				if err != nil {
+					t.Fatalf("unexpected error during recovery reconciliation: %v", err)
+				}
+				if recoveredResult.RequeueAfter != 0 {
+					t.Errorf("recovered path: expected no requeue, got %v", recoveredResult.RequeueAfter)
+				}
+
+				updatedMesh := &meshv1alpha1.MultiClusterMesh{}
+				if err := c.Get(ctx, req.NamespacedName, updatedMesh); err != nil {
+					t.Fatalf("unexpected error on getting the existing mesh: %v", err)
+				}
+
+				recoveredCond := meta.FindStatusCondition(updatedMesh.Status.Conditions, meshv1alpha1.ConditionReady)
+				if recoveredCond == nil {
+					t.Fatal("expected Ready condition to be set after recovery")
+				}
+				if recoveredCond.Status != metav1.ConditionTrue {
+					t.Errorf("recovered path: expected Ready=%s, got %s (reason %s: %s)",
+						metav1.ConditionTrue, recoveredCond.Status, recoveredCond.Reason, recoveredCond.Message)
+				}
+				if recoveredCond.Reason != meshv1alpha1.ReasonAllClustersReady {
+					t.Errorf("recovered path: expected reason=%s, got %s", meshv1alpha1.ReasonAllClustersReady, recoveredCond.Reason)
+				}
+
+				// The recovered reconcile applied the cluster's resources
+				cpNsWorkName := ManifestWorkNameCPNSPrefix + mesh.GetControlPlaneNamespace()
+				if _, err := workClient.WorkV1().ManifestWorks("cluster-a").Get(ctx, cpNsWorkName, metav1.GetOptions{}); err != nil {
+					t.Errorf("expected control plane namespace ManifestWork to be applied after recovery: %v", err)
+				}
+
+				// Verify mesh resources remain intact post-recovery
+				if _, err := workClient.WorkV1().ManifestWorks(existingWork.Namespace).Get(ctx, existingWork.Name, metav1.GetOptions{}); err != nil {
+					t.Errorf("expected mesh resource %s/%s to persist after recovery: %v",
+						existingWork.Namespace, existingWork.Name, err)
+				}
+
+				// The recovered reconcile ran cleanup for the cluster that is no longer selected
+				if _, err := workClient.WorkV1().ManifestWorks(staleWork.Namespace).Get(ctx, staleWork.Name, metav1.GetOptions{}); !apierrors.IsNotFound(err) {
+					t.Errorf("expected stale mesh resource %s/%s to be deleted after recovery, got err %v",
+						staleWork.Namespace, staleWork.Name, err)
+				}
+			}
+		})
+	}
+}
+
 func TestFindMeshesForCluster(t *testing.T) {
 	scheme := newTestScheme()
 
@@ -906,11 +1249,23 @@ func TestPruneStaleClusterStatus(t *testing.T) {
 
 func newTestScheme() *runtime.Scheme {
 	scheme := runtime.NewScheme()
+	_ = corev1.AddToScheme(scheme)
 	_ = clusterv1.Install(scheme)
 	_ = clusterv1beta1.Install(scheme)
 	_ = meshv1alpha1.Install(scheme)
 	_ = workv1.Install(scheme)
+	_ = workv1alpha1.Install(scheme)
+	_ = certmanagerv1.AddToScheme(scheme)
+	_ = msav1beta1.AddToScheme(scheme)
 	return scheme
+}
+
+// newTestWorkApplier returns a WorkApplier backed by a fake work clientset so tests can drive a full Reconcile.
+// The lister is empty, so every Apply goes through create/patch against the returned clientset.
+func newTestWorkApplier(objects ...runtime.Object) (*applier.WorkApplier, *workfake.Clientset) {
+	workClient := workfake.NewSimpleClientset(objects...) //nolint:staticcheck // SA1019: no non-deprecated alternative exists
+	informers := workinformers.NewSharedInformerFactory(workClient, 0)
+	return applier.NewWorkApplierWithTypedClient(workClient, informers.Work().V1().ManifestWorks().Lister()), workClient
 }
 
 func meshOwnedWork(namespace, name, meshName, meshNamespace string) workv1.ManifestWork {

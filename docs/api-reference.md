@@ -44,6 +44,7 @@ Optional conditions affect `Ready` only when corresponding feature is configured
 | `AllClustersReady` | Mesh | All clusters are ready |
 | `ClustersNotReady` | Mesh | One or more clusters are not ready |
 | `PlacementNotFound` | Mesh | The referenced Placement does not exist. Existing mesh plumbing is left in place. |
+| `PlacementDecisionPending` | Mesh | The referenced Placement status does not match its PlacementDecision entries. Reported only while a mesh has not yet become ready; a ready mesh keeps `Ready=True` across the gap. |
 | `NoClustersSelected` | Mesh | The Placement exists. If it selected zero clusters, mesh plumbing is removed. If its decisions still name clusters but every corresponding ManagedCluster object is missing, namespace ManifestWorks and ManagedServiceAccounts for those names are kept. |
 | `ReconcileError` | Mesh | An error occurred during reconciliation |
 | `CertificatePending` | Per-cluster | Trust distribution is waiting for the CA certificate to be issued |

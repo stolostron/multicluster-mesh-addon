@@ -215,10 +215,16 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	oldStatus := mesh.Status.DeepCopy()
 
 	var reconcileErr error
+	var result reconcile.Result
 
 	clusters, desiredClusters, placementFound, err := r.getClustersFromPlacement(ctx, mesh)
 	if errors.Is(err, errDecisionsPending) {
-		return reconcile.Result{RequeueAfter: 2 * time.Second}, nil
+		if !meta.IsStatusConditionTrue(mesh.Status.Conditions, meshv1alpha1.ConditionReady) {
+			mesh.SetReadyCondition(metav1.ConditionFalse, meshv1alpha1.ReasonPlacementDecisionPending,
+				"Waiting for PlacementDecisions for Placement %s to be redistributed", mesh.Spec.PlacementRef.Name)
+		}
+		// Set the requeue result and continue down so the status update executes
+		result = reconcile.Result{RequeueAfter: 2 * time.Second}
 	} else if err != nil {
 		reconcileErr = err
 	} else if !placementFound {
@@ -234,11 +240,12 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 			r.pruneStaleClusterStatus(mesh, desiredClusters)
 			reconcileErr = r.determineStatus(ctx, mesh, clusters)
 		}
+	}
 
-		if reconcileErr != nil {
-			klog.Errorf("Encountered an error while reconciling MultiClusterMesh %s/%s: %v", mesh.Namespace, mesh.Name, reconcileErr)
-			mesh.SetReadyCondition(metav1.ConditionFalse, meshv1alpha1.ReasonReconcileError, "%v", reconcileErr)
-		}
+	// Single place that reports errors on the Ready condition
+	if reconcileErr != nil {
+		klog.Errorf("Encountered an error while reconciling MultiClusterMesh %s/%s: %v", mesh.Namespace, mesh.Name, reconcileErr)
+		mesh.SetReadyCondition(metav1.ConditionFalse, meshv1alpha1.ReasonReconcileError, "%v", reconcileErr)
 	}
 
 	mesh.Status.ControlPlaneNamespace = mesh.GetControlPlaneNamespace()
@@ -256,7 +263,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		})
 	}
 
-	return reconcile.Result{}, errors.Join(reconcileErr, statusErr)
+	return result, errors.Join(reconcileErr, statusErr)
 }
 
 // doReconcile creates resources for resolved clusters and cleans up resources
@@ -764,6 +771,9 @@ func meshOwnedLabels(mesh *meshv1alpha1.MultiClusterMesh, clusterName string) ma
 // deleting resources for clusters that are still in the PlacementDecision —
 // the Placement controller will remove them shortly, triggering a clean
 // reconciliation via the PlacementDecision watch.
+//
+// Error returns only wrap the error; Reconcile reports it on the Ready condition as ReconcileError.
+// Conditions are set here only for outcomes that return a nil error, such as a missing Placement or empty decisions.
 func (r *Reconciler) getClustersFromPlacement(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh) ([]clusterv1.ManagedCluster, []string, bool, error) {
 	placement := &clusterv1beta1.Placement{}
 	if err := r.Get(ctx, key.Of(mesh.Spec.PlacementRef.Name, mesh.Namespace), placement); err != nil {
