@@ -21,14 +21,11 @@ func CreatePlacement(ctx context.Context, k8sClient client.Client, name, namespa
 	})).To(Succeed())
 }
 
-// CreatePlacementDecision creates a PlacementDecision for the given Placement and
-// updates its status with the specified cluster decisions. Also updates the
-// Placement's NumberOfSelectedClusters to match, simulating what the real
-// Placement controller does.
-func CreatePlacementDecision(ctx context.Context, k8sClient client.Client, placementName, namespace string, clusterNames ...string) {
+// CreatePlacementDecision creates a PlacementDecision with the given name for the given Placement and sets its status decisions.
+func CreatePlacementDecision(ctx context.Context, k8sClient client.Client, name, placementName, namespace string, clusterNames ...string) {
 	pd := &clusterv1beta1.PlacementDecision{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      placementName + "-decision-1",
+			Name:      name,
 			Namespace: namespace,
 			Labels: map[string]string{
 				"cluster.open-cluster-management.io/placement": placementName,
@@ -37,21 +34,14 @@ func CreatePlacementDecision(ctx context.Context, k8sClient client.Client, place
 	}
 	Expect(k8sClient.Create(ctx, pd)).To(Succeed())
 
-	decisions := make([]clusterv1beta1.ClusterDecision, len(clusterNames))
-	for i, name := range clusterNames {
-		decisions[i] = clusterv1beta1.ClusterDecision{ClusterName: name}
-	}
-	pd.Status.Decisions = decisions
-	Expect(k8sClient.Status().Update(ctx, pd)).To(Succeed())
-
-	updatePlacementSelectedCount(ctx, k8sClient, placementName, namespace, int32(len(clusterNames)))
+	// Update after creation since the API won't accept the status as part of the create operation.
+	UpdatePlacementDecision(ctx, k8sClient, name, namespace, clusterNames...)
 }
 
-// UpdatePlacementDecision updates an existing PlacementDecision's status with new cluster decisions.
-// Also updates the Placement's NumberOfSelectedClusters to match.
-func UpdatePlacementDecision(ctx context.Context, k8sClient client.Client, placementName, namespace string, clusterNames ...string) {
+// UpdatePlacementDecision rewrites the PlacementDecision's status decisions.
+func UpdatePlacementDecision(ctx context.Context, k8sClient client.Client, name, namespace string, clusterNames ...string) {
 	pd := &clusterv1beta1.PlacementDecision{}
-	Expect(k8sClient.Get(ctx, key.Of(placementName+"-decision-1", namespace), pd)).To(Succeed())
+	Expect(k8sClient.Get(ctx, key.Of(name, namespace), pd)).To(Succeed())
 
 	decisions := make([]clusterv1beta1.ClusterDecision, len(clusterNames))
 	for i, name := range clusterNames {
@@ -59,11 +49,10 @@ func UpdatePlacementDecision(ctx context.Context, k8sClient client.Client, place
 	}
 	pd.Status.Decisions = decisions
 	Expect(k8sClient.Status().Update(ctx, pd)).To(Succeed())
-
-	updatePlacementSelectedCount(ctx, k8sClient, placementName, namespace, int32(len(clusterNames)))
 }
 
-func updatePlacementSelectedCount(ctx context.Context, k8sClient client.Client, name, namespace string, count int32) {
+// UpdatePlacementSelectedCount sets the Placement's NumberOfSelectedClusters.
+func UpdatePlacementSelectedCount(ctx context.Context, k8sClient client.Client, name, namespace string, count int32) {
 	placement := &clusterv1beta1.Placement{}
 	Expect(k8sClient.Get(ctx, key.Of(name, namespace), placement)).To(Succeed())
 	placement.Status.NumberOfSelectedClusters = count

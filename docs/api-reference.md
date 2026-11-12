@@ -25,16 +25,18 @@ API group: `mesh.open-cluster-management.io/v1alpha1`
 |-------|-------------|
 | `status.controlPlaneNamespace` | Auto-derived control plane namespace: `istio-system-{mesh name truncated to 39 characters}-{first 10 hex characters of SHA-256(namespace/name)}` |
 | `status.conditions` | Mesh-level conditions (see below) |
-| `status.clusterStatus` | Entries are created for resolved clusters, including when no issuer is configured. Existing entries are retained while their names remain selected, even if their ManagedCluster objects are missing. `TrustDistributed` is present only while an issuer is configured; removing issuer clears existing trust conditions. |
+| `status.clusterStatus` | Entries are created for every selected cluster name, including when no issuer is configured or the `ManagedCluster` object is missing. Entries are retained while their names remain selected and for the removal grace period after a cluster leaves the selection. `PlacementSelected` is present on every entry. `TrustDistributed` is present only while an issuer is configured; removing issuer clears existing trust conditions. |
 
 ### Status Conditions
 
-Mesh-level `Ready` requires all applicable per-cluster conditions to be True.
+Mesh-level `Ready` requires all applicable per-cluster conditions of resolved clusters to be True.
+`PlacementSelected=False` does not affect `Ready`; a pending removal is a normal transition, not an error.
 Optional conditions affect `Ready` only when corresponding feature is configured.
 
 | Condition | Scope | Meaning |
 |-----------|-------|---------|
 | `Ready` | Mesh | All clusters are ready. When trust is configured, every resolved cluster must report `TrustDistributed=True`. |
+| `PlacementSelected` | Per-cluster | The cluster is currently selected by the mesh's `Placement`. `False` with reason `RemovalPending` means the cluster left the selection and its resources are preserved for the removal grace period before deletion. |
 | `TrustDistributed` | Per-cluster | Latest trust material has been distributed to this cluster and remains available. Present only when `spec.security.trust` is configured. |
 
 **Reason values** (appear in a condition's `.reason`):
@@ -44,8 +46,10 @@ Optional conditions affect `Ready` only when corresponding feature is configured
 | `AllClustersReady` | Mesh | All clusters are ready |
 | `ClustersNotReady` | Mesh | One or more clusters are not ready |
 | `PlacementNotFound` | Mesh | The referenced Placement does not exist. Existing mesh plumbing is left in place. |
-| `NoClustersSelected` | Mesh | The Placement exists. If it selected zero clusters, mesh plumbing is removed. If its decisions still name clusters but every corresponding ManagedCluster object is missing, namespace ManifestWorks and ManagedServiceAccounts for those names are kept. |
+| `NoClustersSelected` | Mesh | The Placement exists but the mesh has no members, either because the Placement selected zero clusters or because every selected ManagedCluster object is missing. An empty selection removes mesh plumbing after the removal grace period, which covers only clusters that still have `clusterStatus` entries; names still present in the decisions keep their plumbing until the names leave the decisions and the grace period expires. |
 | `ReconcileError` | Mesh | An error occurred during reconciliation |
+| `Selected` | Per-cluster | The cluster is present in the Placement selection |
+| `RemovalPending` | Per-cluster | The cluster left the Placement selection and is removed once the grace period expires |
 | `CertificatePending` | Per-cluster | Trust distribution is waiting for the CA certificate to be issued |
 | `DistributionPending` | Per-cluster | Trust distribution is in progress |
 | `Distributed` | Per-cluster | Trust has been distributed to the cluster |

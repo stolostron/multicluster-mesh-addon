@@ -138,9 +138,12 @@ func TestEnsureRemoteSecretDistributionPreservesSelectedClusters(t *testing.T) {
 				}
 				objects = append(objects, mwrs)
 			}
-			var clusters []clusterv1.ManagedCluster
+			desired := make(map[string]*clusterv1.ManagedCluster, len(tc.desired))
+			for _, name := range tc.desired {
+				desired[name] = nil
+			}
 			for _, name := range tc.resolved {
-				cluster := clusterv1.ManagedCluster{
+				cluster := &clusterv1.ManagedCluster{
 					ObjectMeta: metav1.ObjectMeta{Name: name},
 					Spec: clusterv1.ManagedClusterSpec{
 						ManagedClusterClientConfigs: []clusterv1.ClientConfig{{URL: "https://new-" + name + ":6443"}},
@@ -149,7 +152,7 @@ func TestEnsureRemoteSecretDistributionPreservesSelectedClusters(t *testing.T) {
 				if name == tc.missingEndpoint {
 					cluster.Spec.ManagedClusterClientConfigs = nil
 				}
-				clusters = append(clusters, cluster)
+				desired[name] = cluster
 				msa := &msav1beta1.ManagedServiceAccount{
 					ObjectMeta: metav1.ObjectMeta{Name: EndpointDiscoveryName(mesh), Namespace: name},
 					Status:     msav1beta1.ManagedServiceAccountStatus{TokenSecretRef: &msav1beta1.SecretRef{Name: "token"}},
@@ -169,7 +172,7 @@ func TestEnsureRemoteSecretDistributionPreservesSelectedClusters(t *testing.T) {
 			}
 			c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(objects...).Build()
 			r := &Reconciler{Client: c, Scheme: scheme}
-			if err := r.ensureRemoteSecretDistribution(ctx, mesh, clusters, tc.desired); err != nil {
+			if err := r.ensureRemoteSecretDistribution(ctx, mesh, desired); err != nil {
 				t.Fatal(err)
 			}
 			mwrs := &workv1alpha1.ManifestWorkReplicaSet{}
