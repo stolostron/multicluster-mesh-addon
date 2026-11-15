@@ -196,12 +196,8 @@ setup_test_issuer() {
         return
     fi
 
-    log "Waiting for cert-manager-cainjector to be ready..."
-    on "${HUB}" kubectl wait --for=condition=Available deployment/cert-manager-cainjector \
-        -n cert-manager --timeout=10m
-
     log "Creating test ClusterIssuer trust chain"
-    on "${HUB}" kubectl apply -f "${SCRIPT_DIR}/hack/kind/cert-manager-test-issuer.yaml"
+    on "${HUB}" retry kubectl apply -f "${SCRIPT_DIR}/hack/kind/cert-manager-test-issuer.yaml"
 
     log "Waiting for bootstrap ClusterIssuer to be ready..."
     on "${HUB}" retry kubectl wait clusterissuer/mesh-test-selfsigned \
@@ -225,6 +221,11 @@ init_ocm() {
     log "Waiting for OCM hub components to be ready..."
     on "${HUB}" kubectl wait --for=condition=Available \
         deployment/cluster-manager -n open-cluster-management --timeout=10m
+
+    # Joining and accepting clusters is admission-checked by the registration webhook, so wait for it explicitly.
+    on "${HUB}" kubectl wait --for=create --for=condition=Available \
+        deployment/cluster-manager-registration-webhook deployment/cluster-manager-work-webhook \
+        -n open-cluster-management-hub --timeout=10m
 }
 
 join_clusters() {
@@ -246,7 +247,7 @@ join_clusters() {
         fi
 
         log "Joining ${cluster} to hub..."
-        on "${cluster}" "${CLUSTERADM}" join \
+        on "${cluster}" retry "${CLUSTERADM}" join \
             --hub-token "${hub_token}" \
             --hub-apiserver "${hub_apiserver}" \
             --cluster-name "${cluster}" \
@@ -254,7 +255,7 @@ join_clusters() {
     done
 
     log "Accepting managed clusters on hub..."
-    on "${HUB}" "${CLUSTERADM}" accept \
+    on "${HUB}" retry "${CLUSTERADM}" accept \
         --clusters="$(join_by_comma "${SPOKE_CLUSTERS[@]}")" \
         --skip-approve-check \
         --wait
@@ -313,8 +314,9 @@ install_managed_serviceaccount() {
 
     log "Waiting for managed-serviceaccount addon on spokes..."
     for cluster in "${SPOKE_CLUSTERS[@]}"; do
-        on "${HUB}" kubectl wait managedclusteraddon/managed-serviceaccount \
-            -n "${cluster}" --for=condition=Available --timeout=10m
+        on "${HUB}" kubectl wait --for=create --for=condition=Available \
+            managedclusteraddon/managed-serviceaccount \
+            -n "${cluster}" --timeout=10m
     done
 
     log "managed-serviceaccount addon installed on hub"
@@ -357,12 +359,12 @@ install_governance_policy_framework() {
 
     for cluster in "${SPOKE_CLUSTERS[@]}"; do
         log "Waiting for governance-policy-framework addon on ${cluster}..."
-        on "${HUB}" kubectl wait managedclusteraddon/governance-policy-framework \
-            -n "${cluster}" --for=condition=Available --timeout=10m
+        on "${HUB}" kubectl wait --for=create --for=condition=Available \
+            managedclusteraddon/governance-policy-framework -n "${cluster}" --timeout=10m
 
         log "Waiting for config-policy-controller addon on ${cluster}..."
-        on "${HUB}" kubectl wait managedclusteraddon/config-policy-controller \
-            -n "${cluster}" --for=condition=Available --timeout=10m
+        on "${HUB}" kubectl wait --for=create --for=condition=Available \
+            managedclusteraddon/config-policy-controller -n "${cluster}" --timeout=10m
 
         log "Enabling OperatorPolicy on ${cluster}..."
         on "${HUB}" kubectl annotate managedclusteraddon/config-policy-controller \
