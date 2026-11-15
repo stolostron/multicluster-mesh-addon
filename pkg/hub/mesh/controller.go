@@ -26,6 +26,7 @@ import (
 	clusterv1 "open-cluster-management.io/api/cluster/v1"
 	clusterv1beta1 "open-cluster-management.io/api/cluster/v1beta1"
 	workv1 "open-cluster-management.io/api/work/v1"
+	workv1alpha1 "open-cluster-management.io/api/work/v1alpha1"
 	"open-cluster-management.io/sdk-go/pkg/apis/work/v1/applier"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
@@ -77,6 +78,8 @@ type Reconciler struct {
 var prerequisiteCRDs = map[string]schema.GroupVersionKind{
 	"cert-manager (Certificate)":                     certmanagerv1.SchemeGroupVersion.WithKind("Certificate"),
 	"managed-serviceaccount (ManagedServiceAccount)": msav1beta1.GroupVersion.WithKind("ManagedServiceAccount"),
+	// work/v1alpha1 has a deprecated schema.GroupVersion, so compose it directly from the package's group and version.
+	"work (ManifestWorkReplicaSet)": schema.GroupVersion{Group: workv1alpha1.GroupName, Version: workv1alpha1.GroupVersion.Version}.WithKind("ManifestWorkReplicaSet"),
 }
 
 func checkPrerequisiteCRDs(mapper meta.RESTMapper) error {
@@ -141,6 +144,7 @@ func RegisterController(mgr manager.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&meshv1alpha1.MultiClusterMesh{}).
 		Owns(&certmanagerv1.Certificate{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
+		Owns(&workv1alpha1.ManifestWorkReplicaSet{}).
 		Watches(
 			&clusterv1.ManagedCluster{},
 			handler.EnqueueRequestsFromMapFunc(reconciler.findMeshesForCluster),

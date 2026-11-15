@@ -15,6 +15,7 @@ import (
 	clusterv1 "open-cluster-management.io/api/cluster/v1"
 	clusterv1beta1 "open-cluster-management.io/api/cluster/v1beta1"
 	workv1 "open-cluster-management.io/api/work/v1"
+	workv1alpha1 "open-cluster-management.io/api/work/v1alpha1"
 	msav1beta1 "open-cluster-management.io/managed-serviceaccount/apis/authentication/v1beta1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -25,6 +26,7 @@ import (
 func TestCheckPrerequisiteCRDs(t *testing.T) {
 	certGVK := certmanagerv1.SchemeGroupVersion.WithKind("Certificate")
 	msaGVK := msav1beta1.GroupVersion.WithKind("ManagedServiceAccount")
+	mwrsGVK := schema.GroupVersion{Group: workv1alpha1.GroupName, Version: workv1alpha1.GroupVersion.Version}.WithKind("ManifestWorkReplicaSet")
 
 	tests := []struct {
 		name        string
@@ -34,26 +36,32 @@ func TestCheckPrerequisiteCRDs(t *testing.T) {
 	}{
 		{
 			name:        "all present",
-			gvks:        []schema.GroupVersionKind{certGVK, msaGVK},
+			gvks:        []schema.GroupVersionKind{certGVK, msaGVK, mwrsGVK},
 			expectError: false,
 		},
 		{
 			name:        "cert-manager missing",
-			gvks:        []schema.GroupVersionKind{msaGVK},
+			gvks:        []schema.GroupVersionKind{msaGVK, mwrsGVK},
 			expectError: true,
 			contains:    []string{"cert-manager"},
 		},
 		{
 			name:        "managed-serviceaccount missing",
-			gvks:        []schema.GroupVersionKind{certGVK},
+			gvks:        []schema.GroupVersionKind{certGVK, mwrsGVK},
 			expectError: true,
 			contains:    []string{"managed-serviceaccount"},
 		},
 		{
-			name:        "both missing",
+			name:        "work missing",
+			gvks:        []schema.GroupVersionKind{certGVK, msaGVK},
+			expectError: true,
+			contains:    []string{"work"},
+		},
+		{
+			name:        "all missing",
 			gvks:        nil,
 			expectError: true,
-			contains:    []string{"cert-manager", "managed-serviceaccount"},
+			contains:    []string{"cert-manager", "managed-serviceaccount", "work"},
 		},
 	}
 
