@@ -106,6 +106,11 @@ export MESH_NAME=openshift-mesh
 ### 1. Prepare the hub and gateways
 
 Begin with the three managed clusters registered with your hub.
+
+> **Note:** The walkthrough expects OLM and the `governance-policy-framework` and `config-policy-controller` add-ons on every managed cluster, with OperatorPolicy enabled through the `operator-policy-disabled=false` annotation on each `config-policy-controller` ManagedClusterAddOn.
+> `make demo-dev-env` prepares them for the local kind environment.
+> See [Step 5 of the user guide](user-guide.md#step-5-install-the-service-mesh-operator) for how to enable OperatorPolicy on OpenShift.
+
 List them to see the starting topology:
 
 ~~~bash
@@ -374,9 +379,11 @@ oc --context "$SPOKE_A_CONTEXT" apply \
 
 oc --context "$SPOKE_A_CONTEXT" set env \
   deployment/reviews-v1 CLUSTER_NAME="$CLUSTER_A" -n bookinfo
+oc --context "$SPOKE_A_CONTEXT" rollout status \
+  deployment/reviews-v1 -n bookinfo --timeout=5m
 oc --context "$SPOKE_A_CONTEXT" wait \
   --for=condition=Available \
-  deployment/reviews-v1 deployment/ratings-v1 \
+  deployment/ratings-v1 \
   -n bookinfo --timeout=5m
 ~~~
 
@@ -402,10 +409,8 @@ oc --context "$SPOKE_B_CONTEXT" apply \
   -l 'app=reviews,version=v2'
 oc --context "$SPOKE_B_CONTEXT" set env \
   deployment/reviews-v2 CLUSTER_NAME="$CLUSTER_B" -n bookinfo
-oc --context "$SPOKE_B_CONTEXT" wait \
-  --for=condition=Available \
-  deployment/reviews-v2 \
-  -n bookinfo --timeout=5m
+oc --context "$SPOKE_B_CONTEXT" rollout status \
+  deployment/reviews-v2 -n bookinfo --timeout=5m
 ~~~
 
 #### 8.3. See which clusters answer
@@ -468,11 +473,12 @@ oc --context "$HUB_CONTEXT" get \
   -o yaml
 ~~~
 
-Wait for cluster3 to report `TrustDistributed=True` before starting Istio there:
+Wait for the controller to add cluster3 to the mesh status and for the mesh to report `Ready=True` again:
 
 ~~~bash
 oc --context "$HUB_CONTEXT" wait \
-  --for="jsonpath={.status.clusterStatus[?(@.clusterName==\"${CLUSTER_C}\")].conditions[?(@.type==\"TrustDistributed\")].status}=True" \
+  --for="jsonpath={.status.clusterStatus[?(@.clusterName==\"${CLUSTER_C}\")].clusterName}=${CLUSTER_C}" \
+  --for=condition=Ready=True \
   "multiclustermesh/$MESH_NAME" \
   -n "$MESH_NAMESPACE" \
   --timeout=5m
@@ -544,9 +550,8 @@ oc --context "$SPOKE_C_CONTEXT" apply \
   -l 'app=reviews,version=v3'
 oc --context "$SPOKE_C_CONTEXT" set env \
   deployment/reviews-v3 CLUSTER_NAME="$CLUSTER_C" -n bookinfo
-oc --context "$SPOKE_C_CONTEXT" wait \
-  --for=condition=Available deployment/reviews-v3 \
-  -n bookinfo --timeout=5m
+oc --context "$SPOKE_C_CONTEXT" rollout status \
+  deployment/reviews-v3 -n bookinfo --timeout=5m
 ~~~
 
 Call the reviews service a few more times from the client on cluster2:

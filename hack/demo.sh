@@ -22,7 +22,7 @@ CM_NAME=ACM
 OPERATOR_NAME=OSSM
 ISTIO_VERSION="${ISTIO_VERSION:-1.30.4}"
 BOOKINFO_REF="${BOOKINFO_REF:-release-${ISTIO_VERSION%.*}}"
-DEMO_TIMEOUT=5m
+DEMO_TIMEOUT="${DEMO_TIMEOUT:-5m}"
 DEMO_COMMAND_PAUSE=${DEMO_COMMAND_PAUSE:-3}
 TYPEWRITER_DELAY=${TYPEWRITER_DELAY:-0.03}
 HELM="${HELM:-helm}"
@@ -215,7 +215,6 @@ deploy_bookinfo_version() {
     local bookinfo_base
     local bookinfo_manifest
     local workload_selector
-    local -a ready_workloads
 
     if [[ "${PLATFORM}" == "openshift" ]]; then
         bookinfo_base="https://raw.githubusercontent.com/openshift-service-mesh/istio/${BOOKINFO_REF}"
@@ -227,15 +226,12 @@ deploy_bookinfo_version() {
     case "${version}" in
         v1)
             workload_selector="'app in (ratings,reviews),version=v1'"
-            ready_workloads=(deployment/reviews-v1 deployment/ratings-v1)
             ;;
         v2)
             workload_selector="'app=reviews,version=v2'"
-            ready_workloads=(deployment/reviews-v2)
             ;;
         v3)
             workload_selector="'app=reviews,version=v3'"
-            ready_workloads=(deployment/reviews-v3)
             ;;
         *)
             fail "unsupported Bookinfo version: ${version}"
@@ -252,8 +248,12 @@ deploy_bookinfo_version() {
     demo_comment "Mark reviews-${version} with ${cluster}'s name so each response shows where it came from."
     run_kubectl "${cluster}" set env "deployment/reviews-${version}" "CLUSTER_NAME=${cluster}" -n bookinfo
     demo_comment "Wait for the Bookinfo workloads to finish deploying on ${cluster}."
-    run_kubectl "${cluster}" wait --for=condition=Available "${ready_workloads[@]}" \
+    run_kubectl "${cluster}" rollout status "deployment/reviews-${version}" \
         -n bookinfo --timeout="${DEMO_TIMEOUT}"
+    if [[ "${version}" == "v1" ]]; then
+        run_kubectl "${cluster}" wait --for=condition=Available "deployment/ratings-v1" \
+            -n bookinfo --timeout="${DEMO_TIMEOUT}"
+    fi
 }
 
 show_bookinfo_traffic() {
@@ -526,10 +526,10 @@ demo_wait
 demo_comment "Check the MultiClusterMesh status while ${SPOKE_CLUSTERS[2]} joins the mesh."
 demo_run "${KUBECTL} --kubeconfig ${KUBECONFIGS[hub]} get multiclustermesh/${MESH_NAME} -n ${MESH_NAMESPACE} -o yaml | yq -C .status | bat"
 demo_wait
-demo_comment "Let's wait for the add-on to finish bootstrapping ${SPOKE_CLUSTERS[2]}."
-run_kubectl hub wait --for="'jsonpath={.status.clusterStatus[?(@.clusterName==\"${SPOKE_CLUSTERS[2]}\")].conditions[?(@.type==\"TrustDistributed\")].status}=True'" \
-    "multiclustermesh/${MESH_NAME}" \
-    -n "${MESH_NAMESPACE}" --timeout="${DEMO_TIMEOUT}"
+demo_comment "Let's wait for the add-on to add ${SPOKE_CLUSTERS[2]} to the mesh status and report the mesh ready."
+run_kubectl hub wait --for="'jsonpath={.status.clusterStatus[?(@.clusterName==\"${SPOKE_CLUSTERS[2]}\")].clusterName}=${SPOKE_CLUSTERS[2]}'" \
+    --for=condition=Ready=True \
+    "multiclustermesh/${MESH_NAME}" -n "${MESH_NAMESPACE}" --timeout="${DEMO_TIMEOUT}"
 demo_comment "The operator policy will ensure the operator is installed on ${SPOKE_CLUSTERS[2]}."
 run_kubectl hub wait --for="'jsonpath={.status.status[?(@.clustername==\"${SPOKE_CLUSTERS[2]}\")].compliant}=Compliant'" \
     "policy/${OPERATOR_POLICY_NAME}" -n "${MESH_NAMESPACE}" --timeout=15m
