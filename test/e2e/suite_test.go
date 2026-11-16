@@ -38,8 +38,6 @@ import (
 const controllerNamespace = "multicluster-mesh-system"
 
 var (
-	clusters = []string{"cluster1", "cluster2"}
-
 	hubClient    *util.E2EClient
 	spokeClients map[string]*util.E2EClient
 
