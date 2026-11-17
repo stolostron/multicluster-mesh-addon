@@ -17,6 +17,7 @@ import (
 	msav1beta1 "open-cluster-management.io/managed-serviceaccount/apis/authentication/v1beta1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 )
 
 func TestEnsureRemoteSecretDistributionPreservesSelectedClusters(t *testing.T) {
@@ -167,7 +168,22 @@ func TestEnsureRemoteSecretDistributionPreservesSelectedClusters(t *testing.T) {
 					})
 				}
 			}
-			c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(objects...).Build()
+			// Count requests because a no-op API update can leave resourceVersion unchanged.
+			writeCalls := 0
+			c := fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithObjects(objects...).
+				WithInterceptorFuncs(interceptor.Funcs{
+					Update: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.UpdateOption) error {
+						writeCalls++
+						return c.Update(ctx, obj, opts...)
+					},
+					Patch: func(ctx context.Context, c client.WithWatch, obj client.Object, patch client.Patch, opts ...client.PatchOption) error {
+						writeCalls++
+						return c.Patch(ctx, obj, patch, opts...)
+					},
+				}).
+				Build()
 			r := &Reconciler{Client: c, Scheme: scheme}
 			if err := r.ensureRemoteSecretDistribution(ctx, mesh, clusters, tc.desired); err != nil {
 				t.Fatal(err)
@@ -204,6 +220,14 @@ func TestEnsureRemoteSecretDistributionPreservesSelectedClusters(t *testing.T) {
 				if config.Clusters[name].Server != "https://"+prefix+name+":6443" {
 					t.Errorf("unexpected API endpoint for %s: %s", name, config.Clusters[name].Server)
 				}
+			}
+
+			writeCalls = 0
+			if err := r.ensureRemoteSecretDistribution(ctx, mesh, clusters, tc.desired); err != nil {
+				t.Fatalf("failed to reconcile unchanged inputs: %v", err)
+			}
+			if writeCalls != 0 {
+				t.Errorf("expected no writes for unchanged inputs, got %d", writeCalls)
 			}
 		})
 	}

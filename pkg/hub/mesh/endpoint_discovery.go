@@ -197,7 +197,8 @@ func (r *Reconciler) ensureRemoteSecretDistribution(ctx context.Context, mesh *m
 		ObjectMeta: metav1.ObjectMeta{Name: mesh.Name, Namespace: mesh.Namespace},
 	}
 
-	result, err := controllerutil.CreateOrUpdate(ctx, r.Client, mwrset, func() error {
+	// CreateOrPatch compares decoded content, so fetched Raw manifests and generated Object manifests compare equally.
+	result, err := controllerutil.CreateOrPatch(ctx, r.Client, mwrset, func() error {
 		// During re-import, the ManagedCluster may return before its endpoint or
 		// token is ready. Preserve selected clusters' credentials until replaced.
 		if len(secretsToPreserve) > 0 {
