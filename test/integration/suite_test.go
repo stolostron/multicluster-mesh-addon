@@ -49,6 +49,10 @@ var _ = BeforeSuite(func() {
 	SetDefaultConsistentlyDuration(2 * time.Second)
 	SetDefaultConsistentlyPollingInterval(250 * time.Millisecond)
 
+	// Shorten the removal grace period so cluster-removal tests settle quickly.
+	// Condition timestamps serialize with second precision, so we need to make sure it's not too short.
+	meshcontroller.RemovalGracePeriod = 2 * time.Second
+
 	testEnv = &envtest.Environment{
 		CRDDirectoryPaths: []string{
 			filepath.Join("..", "..", "chart", "crds"),                               // Custom MultiClusterMesh CRD

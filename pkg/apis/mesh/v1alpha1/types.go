@@ -68,11 +68,6 @@ func (m *MultiClusterMesh) SetReadyCondition(status metav1.ConditionStatus, reas
 	})
 }
 
-// EnsureClusterStatus records a resolved cluster. Trust conditions are optional.
-func (m *MultiClusterMesh) EnsureClusterStatus(clusterName string) {
-	m.getOrCreateClusterStatus(clusterName)
-}
-
 // SetClusterCondition sets a per-cluster condition, creating the cluster status entry if needed.
 func (m *MultiClusterMesh) SetClusterCondition(clusterName string, conditionType string, status metav1.ConditionStatus, reason string, messageFmt string, args ...any) {
 	cs := m.getOrCreateClusterStatus(clusterName)
@@ -205,6 +200,15 @@ const (
 
 	// ReasonDistributionPending indicates trust distribution is in progress
 	ReasonDistributionPending = "DistributionPending"
+
+	// ConditionPlacementSelected indicates whether the cluster is currently selected by the mesh's Placement (per-cluster condition)
+	ConditionPlacementSelected = "PlacementSelected"
+
+	// ReasonSelected indicates the cluster is present in the Placement selection
+	ReasonSelected = "Selected"
+
+	// ReasonRemovalPending indicates the cluster left the Placement selection and will be removed once the grace period expires
+	ReasonRemovalPending = "RemovalPending"
 )
 
 // MultiClusterMeshStatus defines the observed state of MultiClusterMesh

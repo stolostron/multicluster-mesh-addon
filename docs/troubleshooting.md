@@ -79,7 +79,9 @@ kubectl get placementdecision -n <mesh-namespace> -l cluster.open-cluster-manage
 ```
 
 If the Placement doesn't exist, the mesh reports `PlacementNotFound` and leaves existing plumbing in place.
-If the Placement exists and has selected zero clusters, the mesh reports `NoClustersSelected` and removes that plumbing. The same reason is also set when PlacementDecisions still name clusters but every corresponding ManagedCluster object is missing; namespace ManifestWorks and ManagedServiceAccounts for those names stay. See [Mesh shows NoClustersSelected](#mesh-shows-noclustersselected).
+If the Placement exists and has selected zero clusters, the mesh reports `NoClustersSelected` and removes that plumbing after the removal grace period.
+The same reason is set when `PlacementDecision` objects still name clusters but every corresponding `ManagedCluster` object is missing; namespace ManifestWorks and ManagedServiceAccounts for those names stay until the names leave the decisions and the removal grace period expires.
+See [Mesh shows NoClustersSelected](#mesh-shows-noclustersselected).
 
 ### Mesh shows ClustersNotReady
 
@@ -153,11 +155,19 @@ Create the Placement or fix the reference.
 
 ### Mesh shows NoClustersSelected
 
-The Placement exists. This reason has two causes. Read the condition message to tell them apart.
+The Placement exists but the mesh has no members.
+This has two underlying situations, and the controller reports both the same way.
 
-The Placement selected zero clusters. `status.numberOfSelectedClusters` is 0 and the PlacementDecisions agree. The condition message is `Placement <name> has not selected any clusters`. Reconciliation requests cleanup of all mesh plumbing, including namespace ManifestWorks, istio-reader RBAC, intermediate CA Certificates, cacerts works, and ManagedServiceAccounts. The ReplicaSet remains with an empty manifest list; OCM removes its remote-secret resources asynchronously. The MultiClusterMesh remains. The same cleanup can occur before a new or recreated Placement has produced its first scheduling result.
+The Placement selected zero clusters: `status.numberOfSelectedClusters` is 0 and the `PlacementDecision` objects agree.
+Reconciliation removes all mesh plumbing after the removal grace period, including namespace ManifestWorks, istio-reader RBAC, intermediate CA Certificates, cacerts works, and ManagedServiceAccounts.
+The ReplicaSet remains with an empty manifest list; OCM removes its remote-secret resources asynchronously.
+The MultiClusterMesh remains.
+The same cleanup can occur before a new or recreated Placement has produced its first scheduling result, and without the grace period, because the mesh status no longer tracks the clusters.
 
-PlacementDecisions still name clusters, but every corresponding ManagedCluster object is gone. The condition message is `Placement <name> has decisions but none of the selected ManagedClusters exist`. Those names stay in desired membership, preserving their ManifestWorks and ManagedServiceAccounts, plus their Certificates while an issuer remains configured. The remote-secret template omits unresolved clusters. Cleanup runs after the Placement controller removes their names from decisions.
+`PlacementDecision` objects still name clusters, but every corresponding `ManagedCluster` object is gone.
+Those names stay in desired membership, preserving their ManifestWorks and ManagedServiceAccounts, plus their Certificates while an issuer remains configured.
+The remote-secret template omits unresolved clusters.
+Cleanup runs after the Placement controller removes their names from decisions and the removal grace period expires.
 
 Common causes of an empty selection:
 
@@ -169,6 +179,28 @@ Common causes of an empty selection:
 2. **Clusters not in a ClusterSet** - each cluster needs the `cluster.open-cluster-management.io/clusterset` label
    to be a member of the bound ClusterSet.
 3. **Predicate mismatch** - the Placement's label selector doesn't match any clusters.
+
+### Cluster shows PlacementSelected=False with RemovalPending
+
+The cluster left the `Placement` selection.
+Its resources are preserved for the removal grace period (30 seconds by default) and then deleted: namespace ManifestWork, istio-reader ManifestWork, intermediate CA Certificate, cacerts work, and ManagedServiceAccount, plus the cluster's remote-secret manifest in the ReplicaSet.
+The spoke-side remote secret is not preserved: the ReplicaSet selects clusters through the mesh's Placement, and OCM deletes the spoke work as soon as the Placement stops selecting the cluster.
+Only the hub-side ReplicaSet template survives the grace period.
+The `clusterStatus` entry is pruned after the deletion.
+
+This state is expected for about 30 seconds after removing a cluster from the `Placement`.
+It also appears briefly when OCM redistributes `PlacementDecision` objects, for example when the selection grows past the 100-cluster page boundary and a cluster moves between `PlacementDecision` objects; the cluster then reappears in the decisions, the condition clears, and the removal is cancelled.
+
+Check the selection:
+
+```bash
+kubectl get placementdecision -n <mesh-namespace> -l cluster.open-cluster-management.io/placement=<placement-name>
+```
+
+If the cluster is still listed in a `PlacementDecision` but keeps reporting `RemovalPending`, the deduplicated decision set does not match `status.numberOfSelectedClusters`, which means the Placement controller has not finished writing the `PlacementDecision` objects.
+The mesh reconciles once the counts agree.
+
+Deleting the `MultiClusterMesh` does not wait for the grace period; the finalizer removes labeled resources directly.
 
 ### No remote secrets on spoke clusters
 
