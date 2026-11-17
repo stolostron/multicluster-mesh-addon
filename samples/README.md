@@ -2,6 +2,8 @@
 
 Example manifests for common configurations.
 
+The Istio installation samples configure sidecar mode only. For ambient mode, see [Customize Istio](../docs/user-guide.md#customize-istio).
+
 ## Hub (MultiClusterMesh)
 
 | Manifest | Use when |
@@ -42,7 +44,7 @@ Pre-built ACM policies that configure the Istio control plane on managed cluster
 | Manifest | Purpose |
 |----------|---------|
 | [policy-istio-control-plane.yaml](policy-istio-control-plane.yaml) | Istio CR + east-west Gateway (hub templates resolve per-cluster values) |
-| [policy-istiocni.yaml](policy-istiocni.yaml) | IstioCNI namespace + CR (cluster-level prerequisite for OpenShift and ambient; apply once, not per mesh) |
+| [policy-istiocni.yaml](policy-istiocni.yaml) | IstioCNI namespace + CR + readiness check (cluster-level prerequisite for OpenShift and ambient; apply once, not per mesh) |
 
 Replace `<MESH_NAME>`, `<MESH_NAMESPACE>`, and `<PLACEMENT_NAME>` in the sample with your values, then apply on the hub:
 
@@ -85,6 +87,7 @@ Raw Istio manifests with `${VARIABLE}` placeholders for use with `envsubst` on e
 |----------|---------|
 | [istio/istio.yaml](istio/istio.yaml) | Istio control plane (`MESH_NAME`, `CLUSTER_NAME`, `NETWORK`, `CP_NAMESPACE`) |
 | [istio/eastwest-gateway.yaml](istio/eastwest-gateway.yaml) | East-west Gateway API gateway (`NETWORK`, `CP_NAMESPACE`) |
+| [istio/istiocni-namespace.yaml](istio/istiocni-namespace.yaml) | Namespace for IstioCNI (apply before `istio/istiocni.yaml`) |
 | [istio/istiocni.yaml](istio/istiocni.yaml) | IstioCNI (required on OpenShift and ambient) |
 
 Apply spoke samples on each managed cluster.

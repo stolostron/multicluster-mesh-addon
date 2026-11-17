@@ -1,6 +1,9 @@
 # Installs the Istio control plane and east-west gateway on clusters selected
 # by the mesh Placement, using hub templates for per-cluster values.
 #
+# This sample configures sidecar mode only. For ambient mode, see
+# docs/user-guide.md#customize-istio.
+#
 # Before applying:
 #   1. Replace <MESH_NAME> and <MESH_NAMESPACE> with your mesh name and namespace.
 #   2. Replace <PLACEMENT_NAME> with your mesh's Placement name

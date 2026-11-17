@@ -353,7 +353,7 @@ MESH_NAME is already `openshift-mesh`, which matches the sample and is the trust
 ~~~bash
 export CLUSTER_NAME="$CLUSTER_A"
 export NETWORK=network-a
-kubectl --context "$SPOKE_A_CONTEXT" apply -f hack/demo/istiocni-namespace.yaml
+kubectl --context "$SPOKE_A_CONTEXT" apply -f samples/istio/istiocni-namespace.yaml
 kubectl --context "$SPOKE_A_CONTEXT" apply -f samples/istio/istiocni.yaml
 envsubst < samples/istio/istio.yaml | \
   kubectl --context "$SPOKE_A_CONTEXT" apply -f -
@@ -372,7 +372,7 @@ envsubst < samples/istio/eastwest-gateway.yaml | \
 ~~~bash
 export CLUSTER_NAME="$CLUSTER_B"
 export NETWORK=network-b
-kubectl --context "$SPOKE_B_CONTEXT" apply -f hack/demo/istiocni-namespace.yaml
+kubectl --context "$SPOKE_B_CONTEXT" apply -f samples/istio/istiocni-namespace.yaml
 kubectl --context "$SPOKE_B_CONTEXT" apply -f samples/istio/istiocni.yaml
 envsubst < samples/istio/istio.yaml | \
   kubectl --context "$SPOKE_B_CONTEXT" apply -f -
@@ -579,7 +579,7 @@ Configure Istio on cluster3:
 ~~~bash
 export CLUSTER_NAME="$CLUSTER_C"
 export NETWORK=network-c
-kubectl --context "$SPOKE_C_CONTEXT" apply -f hack/demo/istiocni-namespace.yaml
+kubectl --context "$SPOKE_C_CONTEXT" apply -f samples/istio/istiocni-namespace.yaml
 kubectl --context "$SPOKE_C_CONTEXT" apply -f samples/istio/istiocni.yaml
 envsubst < samples/istio/istio.yaml | \
   kubectl --context "$SPOKE_C_CONTEXT" apply -f -

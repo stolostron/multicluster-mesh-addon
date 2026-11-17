@@ -7,20 +7,22 @@
 # The operator Placement (e.g. mesh-operator-placement) is a good default
 # if all operator clusters need CNI.
 #
-# Apply this before the Istio control plane policy so the CNI DaemonSet is
-# ready when istiod starts.
+# Wait for this policy to report Compliant before deploying mesh workloads.
+# Compliance includes the IstioCNI Ready condition.
 #
 # Before applying, replace <CNI_PLACEMENT_NAME> with the Placement that
 # selects the clusters needing IstioCNI.
 #
 # Apply on the hub:
 #   kubectl apply -n <namespace> -f samples/policy-istiocni.yaml
+#   kubectl wait --for=jsonpath='{.status.compliant}'=Compliant \
+#     policy/policy-istiocni -n <namespace> --timeout=10m
 apiVersion: policy.open-cluster-management.io/v1
 kind: Policy
 metadata:
   name: policy-istiocni
 spec:
-  remediationAction: enforce
+  # Set remediationAction per template so the readiness check stays in inform mode.
   disabled: false
   policy-templates:
     - objectDefinition:
@@ -57,6 +59,25 @@ spec:
                   name: default
                 spec:
                   namespace: istio-cni
+    - objectDefinition:
+        apiVersion: policy.open-cluster-management.io/v1
+        kind: ConfigurationPolicy
+        metadata:
+          name: istiocni-ready
+        spec:
+          remediationAction: inform
+          severity: medium
+          object-templates:
+            - complianceType: musthave
+              objectDefinition:
+                apiVersion: sailoperator.io/v1
+                kind: IstioCNI
+                metadata:
+                  name: default
+                status:
+                  conditions:
+                    - type: Ready
+                      status: "True"
 ---
 apiVersion: policy.open-cluster-management.io/v1
 kind: PlacementBinding

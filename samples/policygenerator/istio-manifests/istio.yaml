@@ -1,6 +1,9 @@
 # Istio control plane with hub template placeholders.
 # Replace <MESH_NAME> and <MESH_NAMESPACE> before building with PolicyGenerator.
 #
+# This sample configures sidecar mode only. For ambient mode, see
+# docs/user-guide.md#customize-istio.
+#
 # This is a minimal template. Add fields under spec.values to match your mesh
 # requirements (e.g. meshConfig.discoverySelectors, pilot settings, proxy
 # resource limits). See the Sail operator API reference for all available fields.

@@ -162,7 +162,7 @@ configure_istio_spoke() {
 
     if [[ "${PLATFORM}" == "openshift" ]]; then
         demo_comment "Create istio-cni namespace and install Istio CNI on $1."
-        run_kubectl_apply "$1" hack/demo/istiocni-namespace.yaml
+        run_kubectl_apply "$1" samples/istio/istiocni-namespace.yaml
         run_kubectl_apply "$1" samples/istio/istiocni.yaml
     fi
     demo_comment "Create the Istio control plane in ${CP_NAMESPACE} with $1's mesh and network identity."

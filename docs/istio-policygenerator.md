@@ -2,6 +2,8 @@
 
 Use the PolicyGenerator Kustomize plugin to manage Istio configuration as code.
 
+The samples configure sidecar mode only. For ambient mode, see [Customize Istio](user-guide.md#customize-istio).
+
 This page covers the [PolicyGenerator] + Kustomize approach for users who manage configuration in Git and want to generate ACM policies from plain Kubernetes manifests. If you want a ready-to-apply policy without build tools, see [Step 8 of the user guide](user-guide.md#step-8-configure-istio) instead.
 
 ## Prerequisites
@@ -40,6 +42,10 @@ samples/policygenerator/
 ```
 
 > **Note:** IstioCNI (required on OpenShift and for ambient mode) is a cluster-level prerequisite, not a per-mesh resource. Manage it separately using the pre-built [policy-istiocni.yaml](../samples/policy-istiocni.yaml) sample with a Placement covering all clusters that need CNI.
+
+When CNI is used, wait for the CNI policy to report `Compliant` before deploying mesh workloads.
+This includes checking that `IstioCNI/default` reports `Ready=True`.
+See [Step 8 of the user guide](user-guide.md#step-8-configure-istio) for the apply and wait commands.
 
 ## Build and apply
 

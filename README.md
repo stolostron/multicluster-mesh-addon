@@ -4,7 +4,7 @@ Automates [multi-cluster Istio service mesh][sail] setup on [Open Cluster Manage
 
 The addon creates the control plane namespace, distributes CA certificates for mTLS trust, and exchanges endpoint-discovery credentials.
 Registered managed clusters and a service mesh operator are prerequisites. OperatorPolicy is the supported way to install the operator.
-Istio itself must be installed manually on each managed cluster for now. Automating that installation will be addressed in a future PR.
+The addon does not install Istio itself. Use ACM policies to configure Istio on managed clusters from the hub, as described in [Step 8 of the User Guide](docs/user-guide.md#step-8-configure-istio).
 
 ## Documentation
 
@@ -13,6 +13,9 @@ Istio itself must be installed manually on each managed cluster for now. Automat
 - [Quick Start](#quick-start) - Get up and running in minutes
 - [Architecture](docs/architecture.md) - How the addon works
 - [User Guide](docs/user-guide.md) - Detailed setup walkthrough with explanations
+- [Install the Service Mesh Operator](docs/operator-installation.md) - Install Sail or OSSM using OperatorPolicy
+- [Configure Istio (Manual)](docs/istio-manual.md) - Configure Istio using direct spoke access
+- [Configure Istio with PolicyGenerator](docs/istio-policygenerator.md) - Generate ACM policies from Istio manifests with Kustomize
 - [OCP ACM and OSSM Demo](docs/demo.md) - Manual customer demo walkthrough
 - [API Reference](docs/api-reference.md) - `MultiClusterMesh` CRD fields and examples
 - [Troubleshooting](docs/troubleshooting.md) - Common issues and resolutions

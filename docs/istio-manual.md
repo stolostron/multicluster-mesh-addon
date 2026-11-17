@@ -27,20 +27,23 @@ CLUSTER_CONTEXTS=("context-for-cluster1" "context-for-cluster2")
 
 ## Variable reference
 
-The sample manifests use four variables that must be set per cluster:
+The sample manifests use four variables. Set `MESH_NAME` and `CP_NAMESPACE` once per mesh, and set `CLUSTER_NAME` and `NETWORK` for each cluster:
 
 * `MESH_NAME` -- the `MultiClusterMesh` name. This is also the CA trust domain.
 * `CP_NAMESPACE` -- `status.controlPlaneNamespace` from the MultiClusterMesh. The Istio samples substitute it into the control plane namespace.
 * `CLUSTER_NAME` -- the ManagedCluster name.
-* `NETWORK` -- the `topology.istio.io/network` label on the control plane namespace (defaults to the cluster name).
+* `NETWORK` -- the `topology.istio.io/network` label value on the ManagedCluster (defaults to the cluster name).
 
 ## Install IstioCNI (OpenShift / ambient)
 
-IstioCNI is required on OpenShift and for ambient mode. Create its namespace and apply the sample on those clusters before installing Istio. It can be skipped for sidecar mode on vanilla Kubernetes.
+IstioCNI is required on OpenShift and for ambient mode. Create its namespace and apply the sample on those clusters. It can be skipped for sidecar mode on vanilla Kubernetes.
+
+The samples on this page configure sidecar mode only.
+See [Customize Istio](user-guide.md#customize-istio) for the additional ambient profile, ztunnel, and gateway configuration.
 
 ```bash
 for CONTEXT in "${CLUSTER_CONTEXTS[@]}"; do
-  kubectl --context "$CONTEXT" apply -f hack/demo/istiocni-namespace.yaml
+  kubectl --context "$CONTEXT" apply -f samples/istio/istiocni-namespace.yaml
   kubectl --context "$CONTEXT" apply -f samples/istio/istiocni.yaml
 done
 ```

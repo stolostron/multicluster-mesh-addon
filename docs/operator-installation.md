@@ -8,6 +8,12 @@ The service mesh operator is a prerequisite for the addon. The addon creates the
 
 OperatorPolicy creates OLM Subscriptions to install the operator. On non-OpenShift managed clusters, such as kind, install Operator Lifecycle Manager (OLM) if it is not already present. OpenShift includes OLM by default.
 
+Each managed cluster needs a LoadBalancer implementation that provides an east-west gateway address reachable from the other mesh clusters.
+
+A Placement and a ManagedClusterSetBinding must exist in the namespace where you apply the policy.
+The Placement must select clusters from a ClusterSet bound to that namespace.
+Follow [Step 4 of the user guide](user-guide.md#step-4-create-a-placement) to set up ClusterSet membership, the binding, and the Placement.
+
 Before applying an OperatorPolicy, set up the governance framework on the hub and on each managed cluster that will run the operator.
 
 ### Install Gateway API CRDs
@@ -27,6 +33,19 @@ for CONTEXT in "${CLUSTER_CONTEXTS[@]}"; do
   fi
 done
 ```
+
+The samples require `gateway.networking.k8s.io/v1`. An existing Gateway CRD might only serve older versions, so check the served versions on every spoke before continuing:
+
+```bash
+for CONTEXT in "${CLUSTER_CONTEXTS[@]}"; do
+  echo "$CONTEXT:"
+  kubectl --context "$CONTEXT" get crd gateways.gateway.networking.k8s.io \
+    -o jsonpath='{.spec.versions[?(@.served==true)].name}{"\n"}'
+done
+```
+
+The output for every spoke must include `v1`; `v1beta1` or `v1alpha2` alone is not sufficient.
+If `v1` is missing, stop and upgrade the Gateway API CRDs to a version supported by your Istio/operator release, then repeat this check before applying the Istio samples.
 
 ### Install the governance hub add-on
 
@@ -75,7 +94,8 @@ done
 
 ## Apply the OperatorPolicy
 
-The samples bind to a Placement named `mesh-operator-placement`. If you are using the same Placement as the mesh (for example, `mesh-placement` from the [user guide](user-guide.md#step-4-create-a-placement)), rename the binding before applying.
+The samples bind to a Placement named `mesh-operator-placement`.
+The commands below update the PlacementBinding's `placementRef.name` to use `mesh-placement` from Step 4 and apply the policy in the same namespace, `mesh-system`.
 
 ### Kubernetes (Sail)
 
@@ -145,7 +165,10 @@ With `upgradeApproval: None`, the operator stays on the listed versions until yo
 
 ## Adding clusters later
 
-When new clusters join the mesh, enable the policy add-ons and the OperatorPolicy annotation on them:
+Before adding a cluster to the mesh, complete the [prerequisites](#prerequisites) on it.
+This includes OLM on non-OpenShift clusters and compatible [Gateway API CRDs](#install-gateway-api-crds) for the Istio policies.
+
+Then enable the policy add-ons and the OperatorPolicy annotation on the new cluster:
 
 ```bash
 NEW_CLUSTER=cluster3
@@ -168,7 +191,9 @@ kubectl annotate managedclusteraddon/config-policy-controller \
   -n "$NEW_CLUSTER" operator-policy-disabled=false --overwrite
 ```
 
-If the new cluster matches the Placement used by the OperatorPolicy, the existing policy propagates to it automatically. No changes to the Policy or PlacementBinding are needed.
+The new cluster must belong to a ClusterSet considered by the Placement used by the OperatorPolicy.
+That ClusterSet must be bound to the Placement's namespace, and the cluster must match the Placement's selectors. See [Step 4 of the user guide](user-guide.md#step-4-create-a-placement) for setup.
+Once the Placement selects the new cluster, the existing policy propagates to it automatically. No changes to the Policy or PlacementBinding are needed.
 
 ## Alternative methods
 

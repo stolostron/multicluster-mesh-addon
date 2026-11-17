@@ -12,7 +12,7 @@
 # The Istio manifests create the cluster-scoped Istio/default resource.
 # This sample is intended for one mesh per spoke. If multiple meshes share a hub
 # namespace, set policies[].name and placementBindingDefaults.name below to be
-# unique per mesh so their placements remain independent.
+# unique per mesh so the hub resources do not collide.
 #
 # IstioCNI (OpenShift/ambient) is a cluster-level prerequisite and should be
 # managed separately. See samples/policy-istiocni.yaml.

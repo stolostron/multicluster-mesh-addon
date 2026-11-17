@@ -212,7 +212,9 @@ The addon creates the control plane namespace, distributes trust, and handles en
 Both OSSM 3.x and upstream Sail use the `sailoperator.io` API group.
 See the [Sail operator multicluster docs][sail-multicluster] for the full procedure.
 
-The recommended approach uses ACM policies to configure all clusters from the hub. No direct spoke access is needed. The policy samples read the control plane namespace from the MultiClusterMesh status using the `lookup` hub template function.
+The recommended approach uses ACM policies to configure all clusters from the hub. No direct spoke access is needed to apply the policies. The policy samples read the control plane namespace from the MultiClusterMesh status using the `lookup` hub template function.
+
+The samples configure sidecar mode only. For ambient mode, see [Customize Istio](#customize-istio).
 
 > **Note:** The east-west gateway uses Gateway API CRDs, which your clusters may already provide. If they are not already present, see [Install Gateway API CRDs](operator-installation.md#install-gateway-api-crds) for compatibility guidance and installation instructions.
 
@@ -223,9 +225,10 @@ For OpenShift or ambient mode, install IstioCNI before applying the control plan
 ```bash
 sed 's/<CNI_PLACEMENT_NAME>/mesh-placement/g' samples/policy-istiocni.yaml \
   | kubectl apply -n mesh-system -f -
-kubectl wait --for=jsonpath='{.status.compliant}'=Compliant \
-  policy/policy-istiocni -n mesh-system --timeout=10m
 ```
+
+The CNI policy checks that `IstioCNI/default` reports `Ready=True`, in addition to creating the namespace and IstioCNI resource.
+Wait for the policy to report `Compliant` before applying the control plane policy.
 
 Then apply the control plane policy. Replace the placeholders with your values before applying:
 
@@ -235,7 +238,7 @@ sed -e 's/<MESH_NAMESPACE>/mesh-system/g' -e 's/<MESH_NAME>/basic-mesh/g' \
   samples/policy-istio-control-plane.yaml \
   | kubectl apply -n mesh-system -f -
 kubectl wait --for=jsonpath='{.status.compliant}'=Compliant \
-  policy/policy-istio-basic-mesh -n mesh-system --timeout=15m
+  policy/policy-istio-basic-mesh -n mesh-system --timeout=15m || exit 1
 ```
 
 Verify per-cluster compliance:
@@ -244,16 +247,46 @@ Verify per-cluster compliance:
 for CLUSTER_NAME in cluster1 cluster2; do
   kubectl wait \
     --for="jsonpath={.status.status[?(@.clustername==\"${CLUSTER_NAME}\")].compliant}=Compliant" \
-    policy/policy-istio-basic-mesh -n mesh-system --timeout=15m
+    policy/policy-istio-basic-mesh -n mesh-system --timeout=15m || exit 1
 done
 ```
 
 When new clusters are added to the Placement, the policies propagate to them automatically.
 
+When CNI is used, wait for its policy to report `Compliant` before deploying mesh workloads. This checks that `IstioCNI/default` reports `Ready=True`.
+
+```bash
+kubectl wait --for=jsonpath='{.status.compliant}'=Compliant \
+  policy/policy-istiocni -n mesh-system --timeout=10m || exit 1
+```
+
+Policy compliance confirms the desired resources are present. Before using the mesh, verify runtime readiness on each spoke. These checks require spoke access; replace the example kubeconfig context names below.
+
+```bash
+CP_NAMESPACE="$(kubectl get multiclustermesh basic-mesh -n mesh-system -o jsonpath='{.status.controlPlaneNamespace}')"
+test -n "$CP_NAMESPACE" || { echo "Mesh control plane namespace is not available yet" >&2; exit 1; }
+CLUSTER_CONTEXTS=("context-for-cluster1" "context-for-cluster2")
+
+for CONTEXT in "${CLUSTER_CONTEXTS[@]}"; do
+  kubectl --context "$CONTEXT" wait --for=condition=Ready \
+    istio.sailoperator.io/default --timeout=15m || exit 1
+  kubectl --context "$CONTEXT" wait --for=condition=Available \
+    deployment/istiod -n "$CP_NAMESPACE" --timeout=15m || exit 1
+  kubectl --context "$CONTEXT" wait --for=create \
+    service/eastwestgateway-istio -n "$CP_NAMESPACE" --timeout=15m || exit 1
+  kubectl --context "$CONTEXT" wait --for=jsonpath='{.status.loadBalancer.ingress}' \
+    service/eastwestgateway-istio -n "$CP_NAMESPACE" --timeout=15m || exit 1
+done
+```
+
 For direct spoke-cluster access without ACM policies, see [Configure Istio (Manual)](istio-manual.md).
 For GitOps workflows with Kustomize, see [Configure Istio with PolicyGenerator](istio-policygenerator.md).
 
 ### Customize Istio
+
+The manual, ACM policy, and PolicyGenerator samples use the default sidecar profile and do not deploy ztunnel.
+Ambient mode requires `spec.profile: ambient` on the Istio and IstioCNI resources, a ZTunnel deployment, and additional multicluster gateway configuration.
+See the [Sail operator ambient multicluster guide][sail-ambient-multicluster] for the full configuration.
 
 The samples are minimal starting points. To configure additional Istio fields, such as discovery selectors, pilot settings, or proxy resource limits, edit `spec.values` in the Istio resource. See the [Sail operator API reference][sail-api] for all available fields.
 
@@ -288,11 +321,14 @@ The sample policies set `pruneObjectBehavior: DeleteIfCreated`, so deleting them
 
 > **Note:** The IstioCNI policy from Step 8 is shared across meshes on the selected clusters. Delete it only when no remaining mesh needs CNI on those clusters. Deleting it removes the `IstioCNI` CR and the `istio-cni` namespace it created, affecting all meshes that use them.
 
-If you used the [manual approach](istio-manual.md), delete the Istio CR on each spoke directly:
+If you used the [manual approach](istio-manual.md), delete the Istio CR on each spoke directly.
+Replace the example context names below with the spoke kubeconfig contexts used during installation. They can differ from the ManagedCluster names.
 
 ```bash
-for CLUSTER_NAME in cluster1 cluster2; do
-  kubectl --context "$CLUSTER_NAME" delete istio.sailoperator.io default --ignore-not-found
+CLUSTER_CONTEXTS=("context-for-cluster1" "context-for-cluster2")
+
+for CONTEXT in "${CLUSTER_CONTEXTS[@]}"; do
+  kubectl --context "$CONTEXT" delete istio.sailoperator.io default --ignore-not-found
 done
 ```
 
@@ -319,4 +355,5 @@ kubectl delete multiclustermesh -n mesh-system <mesh-name>
 [ocm-concepts]: https://open-cluster-management.io/docs/concepts/
 [Plug-in CA]: https://istio.io/latest/docs/tasks/security/cert-management/plugin-ca-cert/
 [sail-api]: https://docs.sailoperator.io/docs/api-reference/sailoperator.io/
+[sail-ambient-multicluster]: https://github.com/istio-ecosystem/sail-operator/blob/main/docs/deployment-models/multicluster.adoc#multi-primary---multi-network-ambient-mode
 [sail-multicluster]: https://github.com/istio-ecosystem/sail-operator/blob/main/docs/deployment-models/multicluster.adoc#multi-primary---multi-network
