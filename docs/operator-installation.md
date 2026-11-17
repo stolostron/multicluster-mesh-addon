@@ -94,21 +94,18 @@ done
 
 ## Apply the OperatorPolicy
 
-The samples bind to a Placement named `mesh-operator-placement`.
-The commands below update the PlacementBinding's `placementRef.name` to use `mesh-placement` from Step 4 and apply the policy in the same namespace, `mesh-system`.
+The samples use `mesh-placement` from Step 4. Apply the policy in the same namespace as the Placement and the mesh, `mesh-system`.
 
 ### Kubernetes (Sail)
 
 ```bash
-sed 's/name: mesh-operator-placement/name: mesh-placement/' samples/operator-policy-sail.yaml \
-  | kubectl apply -n mesh-system -f -
+kubectl apply -n mesh-system -f samples/operator-policy-sail.yaml
 ```
 
 ### OpenShift (OSSM)
 
 ```bash
-sed 's/name: mesh-operator-placement/name: mesh-placement/' samples/operator-policy-ossm.yaml \
-  | kubectl apply -n mesh-system -f -
+kubectl apply -n mesh-system -f samples/operator-policy-ossm.yaml
 ```
 
 ## Verify the operator
@@ -120,7 +117,7 @@ kubectl wait --for=jsonpath='{.status.compliant}'=Compliant \
   policy/policy-sail-operator -n mesh-system --timeout=15m
 ```
 
-Verify per-cluster compliance to make sure every cluster (not just the first) is ready:
+Verify that the Placement selects the intended clusters and each has a compliant policy entry before creating the mesh. An aggregate result alone can describe earlier membership:
 
 ```bash
 for CLUSTER_NAME in cluster1 cluster2; do

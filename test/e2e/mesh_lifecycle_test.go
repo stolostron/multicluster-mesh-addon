@@ -30,8 +30,6 @@ import (
 const (
 	controllerName = "multicluster-mesh-controller"
 
-	msaSpokeNamespace = "open-cluster-management-agent-addon"
-
 	testIssuerName       = "mesh-test-root-ca"
 	testIssuerKind       = "ClusterIssuer"
 	testIssuerSecretName = "mesh-test-root-ca-secret"
@@ -179,6 +177,12 @@ var _ = Describe("MultiClusterMesh lifecycle", Ordered, func() {
 		Expect(rootPool.AppendCertsFromPEM(hubRootCert)).To(BeTrue(), "failed to parse hub root CA")
 
 		for cluster, spokeClient := range spokeClients {
+			cs := findClusterStatus(mesh, cluster)
+			Expect(cs).NotTo(BeNil(), "missing cluster status for %s", cluster)
+			Step("Verifying TrustDistributed condition for %s", cluster)
+			Expect(meta.IsStatusConditionTrue(cs.Conditions, meshv1alpha1.ConditionTrustDistributed)).To(BeTrue(),
+				"expected TrustDistributed=True for %s", cluster)
+
 			Step("Verifying cacerts secret and certificate chain on %s", cluster)
 			secret := &corev1.Secret{}
 			var cert *x509.Certificate
@@ -222,8 +226,8 @@ var _ = Describe("MultiClusterMesh lifecycle", Ordered, func() {
 
 				msa := msaList.Items[0]
 				sa := &corev1.ServiceAccount{}
-				g.Expect(spokeClient.Get(ctx, key.Of(msa.Name, msaSpokeNamespace), sa)).To(Succeed(),
-					"ServiceAccount %s/%s should exist on spoke %s", msaSpokeNamespace, msa.Name, cluster)
+				g.Expect(spokeClient.Get(ctx, key.Of(msa.Name, meshcontroller.MSANamespace), sa)).To(Succeed(),
+					"ServiceAccount %s/%s should exist on spoke %s", meshcontroller.MSANamespace, msa.Name, cluster)
 				track(cluster, spokeClient, sa)
 
 				g.Expect(msa.Status.TokenSecretRef).NotTo(BeNil(),
@@ -260,7 +264,7 @@ var _ = Describe("MultiClusterMesh lifecycle", Ordered, func() {
 				g.Expect(crb.Subjects).To(HaveLen(1))
 				g.Expect(crb.Subjects[0].Kind).To(Equal("ServiceAccount"))
 				g.Expect(crb.Subjects[0].Name).To(Equal(msaList.Items[0].Name))
-				g.Expect(crb.Subjects[0].Namespace).To(Equal(msaSpokeNamespace))
+				g.Expect(crb.Subjects[0].Namespace).To(Equal(meshcontroller.MSANamespace))
 				track(cluster, spokeClient, crb)
 			}).Should(Succeed())
 		}
@@ -279,6 +283,15 @@ var _ = Describe("MultiClusterMesh lifecycle", Ordered, func() {
 
 func getMesh(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh) error {
 	return hubClient.Get(ctx, key.For(mesh), mesh)
+}
+
+func findClusterStatus(mesh *meshv1alpha1.MultiClusterMesh, clusterName string) *meshv1alpha1.ClusterMeshStatus {
+	for _, cs := range mesh.Status.ClusterStatus {
+		if cs.ClusterName == clusterName {
+			return &cs
+		}
+	}
+	return nil
 }
 
 func listMeshMSAs(g Gomega, ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, opts ...client.ListOption) *msav1beta1.ManagedServiceAccountList {

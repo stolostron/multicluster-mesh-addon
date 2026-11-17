@@ -4,7 +4,7 @@
 # IstioCNI is a cluster-level prerequisite, not a per-mesh resource. Apply
 # this policy once with a Placement that covers all clusters needing CNI.
 # Do not re-apply it per mesh; the binding would overwrite the previous one.
-# The operator Placement (e.g. mesh-operator-placement) is a good default
+# The operator Placement (e.g. mesh-placement) is a good default
 # if all operator clusters need CNI.
 #
 # Wait for this policy to report Compliant before deploying mesh workloads.
