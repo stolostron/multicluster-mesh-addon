@@ -65,14 +65,7 @@ spec: {}
 EOF
 
 # Install the mesh operator before creating the mesh.
-# The Sail sample binds to a Placement named mesh-operator-placement.
-kubectl apply -n mesh-system -f - <<EOF
-apiVersion: cluster.open-cluster-management.io/v1beta1
-kind: Placement
-metadata:
-  name: mesh-operator-placement
-spec: {}
-EOF
+# The policy and mesh share mesh-placement.
 kubectl apply -n mesh-system -f samples/operator-policy-sail.yaml
 kubectl wait --for=jsonpath='{.status.compliant}'=Compliant \
   policy/policy-sail-operator -n mesh-system --timeout=15m
