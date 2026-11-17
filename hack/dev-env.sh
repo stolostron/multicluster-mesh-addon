@@ -537,10 +537,14 @@ install_metallb() {
     log "Waiting for MetalLB speaker to be ready on ${cluster}..."
     on "${cluster}" kubectl rollout status daemonset/speaker -n metallb-system --timeout=120s
 
+    # The pool is admission-checked by the MetalLB webhook, which can lag the controller rollout, so we retry until we succeed.
     log "Configuring MetalLB IP pool ${range_start}-${range_end} on ${cluster}..."
+    local pool_file
+    pool_file="$(mktemp)"
     sed "s|__ADDRESS_RANGE__|${range_start}-${range_end}|" \
-        "${SCRIPT_DIR}/hack/kind/metallb-pool.yaml" \
-        | on "${cluster}" kubectl apply -f -
+        "${SCRIPT_DIR}/hack/kind/metallb-pool.yaml" > "${pool_file}"
+    on "${cluster}" retry kubectl apply -f "${pool_file}"
+    rm -f "${pool_file}"
     log "MetalLB configured on ${cluster}"
 }
 
