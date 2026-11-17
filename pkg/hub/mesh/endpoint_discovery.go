@@ -20,6 +20,7 @@ import (
 	"k8s.io/client-go/tools/clientcmd/api/latest"
 	"k8s.io/klog/v2"
 	clusterv1 "open-cluster-management.io/api/cluster/v1"
+	clusterv1alpha1 "open-cluster-management.io/api/cluster/v1alpha1"
 	workv1 "open-cluster-management.io/api/work/v1"
 	workv1alpha1 "open-cluster-management.io/api/work/v1alpha1"
 	msav1beta1 "open-cluster-management.io/managed-serviceaccount/apis/authentication/v1beta1"
@@ -227,7 +228,13 @@ func (r *Reconciler) ensureRemoteSecretDistribution(ctx context.Context, mesh *m
 		mwrset.Labels[ManagedByLabel] = ManagedByValue
 		mwrset.Labels[MeshNameLabel] = mesh.Name
 		mwrset.Labels[MeshNamespaceLabel] = mesh.Namespace
-		mwrset.Spec.PlacementRefs = []workv1alpha1.LocalPlacementReference{{Name: mesh.Spec.PlacementRef.Name}}
+		mwrset.Spec.PlacementRefs = []workv1alpha1.LocalPlacementReference{{
+			Name: mesh.Spec.PlacementRef.Name,
+
+			// Match the stored rollout strategy: the API server defaults type to All and leaves the all field unset.
+			// Leaving the strategy unset makes every reconcile send an update that changes nothing.
+			RolloutStrategy: clusterv1alpha1.RolloutStrategy{Type: clusterv1alpha1.All},
+		}}
 		mwrset.Spec.ManifestWorkTemplate = workv1.ManifestWorkSpec{Workload: workv1.ManifestsTemplate{Manifests: manifests}}
 		return controllerutil.SetControllerReference(mesh, mwrset, r.Scheme)
 	})

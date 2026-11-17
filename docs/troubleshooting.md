@@ -60,13 +60,13 @@ kubectl logs -n multicluster-mesh-system deploy/multicluster-mesh-controller -f
 
 ### Controller does not start
 
-The controller requires the Certificate and ManagedServiceAccount CRDs on the hub even when no mesh uses cert-manager trust. Missing ones produce `prerequisite CRDs not installed on the hub` in the controller logs. Install the prerequisite controllers and CRDs before deploying the addon:
+The controller requires the Certificate, ManagedServiceAccount, and ManifestWorkReplicaSet CRDs on the hub even when no mesh uses cert-manager trust. Missing ones produce `prerequisite CRDs not installed on the hub` in the controller logs. Install the prerequisite controllers and CRDs before deploying the addon:
 
 ```bash
-kubectl get crd certificates.cert-manager.io managedserviceaccounts.authentication.open-cluster-management.io
+kubectl get crd certificates.cert-manager.io managedserviceaccounts.authentication.open-cluster-management.io manifestworkreplicasets.work.open-cluster-management.io
 ```
 
-OCM's Placement, PlacementDecision, ManifestWork, and ManifestWorkReplicaSet APIs must also be available. Enable the ManifestWorkReplicaSet feature on the ClusterManager and ensure the ManagedServiceAccount addon is available on each selected spoke.
+The ManifestWorkReplicaSet CRD ships with OCM. The work controller that rolls out ManifestWorkReplicaSets runs only when the ManifestWorkReplicaSet feature is enabled on the ClusterManager. Without the gate, the addon creates the ReplicaSet but OCM creates no ManifestWorks from it, so remote secrets never reach the selected clusters. OCM's Placement, PlacementDecision, and ManifestWork APIs must also be available, and the ManagedServiceAccount addon must be available on each selected spoke.
 
 ### Nothing happens after creating a mesh
 

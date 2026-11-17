@@ -817,17 +817,13 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 			})
 
 			It("should create ManifestWorkReplicaSet referencing the user-managed Placement", func() {
-				expectManifestWorkReplicaSetContent(meshName, testNs, func(g Gomega, mwrset *workv1alpha1.ManifestWorkReplicaSet) {
-					g.Expect(mwrset.Spec.ManifestWorkTemplate.Workload.Manifests).To(HaveLen(1))
-				})
-				mwrset := expectManifestWorkReplicaSet(meshName, testNs)
+				mwrset := expectManifestWorkReplicaSet(meshName, testNs, expectManifestWorkReplicaSetToHaveOneManifest)
 				Expect(mwrset.OwnerReferences).To(HaveLen(1))
 				Expect(mwrset.OwnerReferences[0].Name).To(Equal(meshName))
 				Expect(mwrset.Labels[meshcontroller.ManagedByLabel]).To(Equal(meshcontroller.ManagedByValue))
 				Expect(mwrset.Labels[meshcontroller.MeshNameLabel]).To(Equal(meshName))
 				Expect(mwrset.Labels[meshcontroller.MeshNamespaceLabel]).To(Equal(testNs))
 				Expect(mwrset.Spec.PlacementRefs[0].Name).To(Equal(testPlacement))
-				Expect(mwrset.Spec.ManifestWorkTemplate.Workload.Manifests).To(HaveLen(1))
 				expectRemoteSecret(mwrset.Spec.ManifestWorkTemplate.Workload.Manifests[0], clusterName, mesh.GetControlPlaneNamespace())
 			})
 
@@ -837,7 +833,7 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 				util.UpdatePlacementDecision(ctx, k8sClient, testPlacement, testNs, clusterName, cluster2Name)
 				setupMsaTokenSecret(mesh, cluster2Name)
 
-				expectManifestWorkReplicaSetContent(meshName, testNs, func(g Gomega, mwrset *workv1alpha1.ManifestWorkReplicaSet) {
+				expectManifestWorkReplicaSet(meshName, testNs, func(g Gomega, mwrset *workv1alpha1.ManifestWorkReplicaSet) {
 					g.Expect(mwrset.Spec.ManifestWorkTemplate.Workload.Manifests).To(HaveLen(2))
 					for _, cluster := range []string{clusterName, cluster2Name} {
 						found := false
@@ -856,7 +852,7 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 
 			It("should preserve remote secrets while all selected ManagedClusters are missing and refresh them after restoration", func() {
 				var originalManifests []workv1.Manifest
-				expectManifestWorkReplicaSetContent(meshName, testNs, func(g Gomega, mwrset *workv1alpha1.ManifestWorkReplicaSet) {
+				expectManifestWorkReplicaSet(meshName, testNs, func(g Gomega, mwrset *workv1alpha1.ManifestWorkReplicaSet) {
 					g.Expect(mwrset.Spec.ManifestWorkTemplate.Workload.Manifests).To(HaveLen(1))
 					originalManifests = mwrset.Spec.ManifestWorkTemplate.Workload.Manifests
 				})
@@ -874,7 +870,7 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 				By("restoring the ManagedCluster and refreshing its discovery credentials")
 				util.CreateManagedCluster(ctx, k8sClient, clusterName)
 				simulateMsaTokenSecretRotation(mesh, clusterName)
-				expectManifestWorkReplicaSetContent(meshName, testNs, func(g Gomega, mwrset *workv1alpha1.ManifestWorkReplicaSet) {
+				expectManifestWorkReplicaSet(meshName, testNs, func(g Gomega, mwrset *workv1alpha1.ManifestWorkReplicaSet) {
 					manifests := mwrset.Spec.ManifestWorkTemplate.Workload.Manifests
 					g.Expect(manifests).To(HaveLen(1))
 					secret := &corev1.Secret{}
@@ -885,7 +881,7 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 				By("removing the secret when the missing cluster leaves the PlacementDecision")
 				util.DeleteResource(ctx, k8sClient, &clusterv1.ManagedCluster{}, clusterName, "")
 				util.UpdatePlacementDecision(ctx, k8sClient, testPlacement, testNs)
-				expectManifestWorkReplicaSetContent(meshName, testNs, func(g Gomega, mwrset *workv1alpha1.ManifestWorkReplicaSet) {
+				expectManifestWorkReplicaSet(meshName, testNs, func(g Gomega, mwrset *workv1alpha1.ManifestWorkReplicaSet) {
 					g.Expect(mwrset.Spec.ManifestWorkTemplate.Workload.Manifests).To(BeEmpty())
 				})
 			})
@@ -898,7 +894,7 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 
 				util.UpdatePlacementDecision(ctx, k8sClient, testPlacement, testNs, cluster2Name)
 
-				expectManifestWorkReplicaSetContent(meshName, testNs, func(g Gomega, mwrset *workv1alpha1.ManifestWorkReplicaSet) {
+				expectManifestWorkReplicaSet(meshName, testNs, func(g Gomega, mwrset *workv1alpha1.ManifestWorkReplicaSet) {
 					g.Expect(mwrset.Spec.ManifestWorkTemplate.Workload.Manifests).To(HaveLen(1))
 					expectRemoteSecret(mwrset.Spec.ManifestWorkTemplate.Workload.Manifests[0], cluster2Name, mesh.GetControlPlaneNamespace())
 				})
@@ -919,8 +915,8 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 				oldTime := msa.Status.TokenSecretRef.LastRefreshTimestamp
 				oldSec := &corev1.Secret{}
 
-				expectManifestWorkReplicaSetContent(meshName, testNs, func(g Gomega, mwrset *workv1alpha1.ManifestWorkReplicaSet) {
-					g.Expect(mwrset.Spec.ManifestWorkTemplate.Workload.Manifests).NotTo(BeEmpty())
+				expectManifestWorkReplicaSet(meshName, testNs, func(g Gomega, mwrset *workv1alpha1.ManifestWorkReplicaSet) {
+					expectManifestWorkReplicaSetToHaveOneManifest(g, mwrset)
 					manifests := mwrset.Spec.ManifestWorkTemplate.Workload.Manifests
 					g.Expect(unmarshalManifest(manifests[0], oldSec)).To(Succeed())
 				})
@@ -934,12 +930,43 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 					g.Expect(msa.Status.TokenSecretRef.LastRefreshTimestamp).NotTo(Equal(oldTime))
 				}).Should(Succeed())
 
-				expectManifestWorkReplicaSetContent(meshName, testNs, func(g Gomega, mwrset *workv1alpha1.ManifestWorkReplicaSet) {
+				expectManifestWorkReplicaSet(meshName, testNs, func(g Gomega, mwrset *workv1alpha1.ManifestWorkReplicaSet) {
+					expectManifestWorkReplicaSetToHaveOneManifest(g, mwrset)
 					manifests := mwrset.Spec.ManifestWorkTemplate.Workload.Manifests
 					newSec := &corev1.Secret{}
 					g.Expect(unmarshalManifest(manifests[0], newSec)).To(Succeed())
 					newData := newSec.Data[clusterName]
 					g.Expect(newData).NotTo(Equal(oldData))
+				})
+			})
+
+			It("should restore an externally modified ManifestWorkReplicaSet", func() {
+				mwrset := expectManifestWorkReplicaSet(meshName, testNs, expectManifestWorkReplicaSetToHaveOneManifest)
+				expected := mwrset.DeepCopy()
+
+				// Do this inside an Eventually since the controller also writes to ManifestWorkReplicaSet.
+				Eventually(func() error {
+					current := &workv1alpha1.ManifestWorkReplicaSet{}
+					if err := k8sClient.Get(ctx, key.Of(meshName, testNs), current); err != nil {
+						return err
+					}
+					current.Spec.ManifestWorkTemplate.Workload.Manifests = nil
+					return k8sClient.Update(ctx, current)
+				}).Should(Succeed())
+
+				expectManifestWorkReplicaSet(meshName, testNs, func(g Gomega, mwrset *workv1alpha1.ManifestWorkReplicaSet) {
+					expectManifestWorkReplicaSetToMatch(g, expected, mwrset)
+				})
+			})
+
+			It("should recreate a deleted ManifestWorkReplicaSet", func() {
+				mwrset := expectManifestWorkReplicaSet(meshName, testNs, expectManifestWorkReplicaSetToHaveOneManifest)
+				originalMwrset := mwrset.DeepCopy()
+				Expect(k8sClient.Delete(ctx, mwrset)).To(Succeed())
+
+				expectManifestWorkReplicaSet(meshName, testNs, func(g Gomega, mwrset *workv1alpha1.ManifestWorkReplicaSet) {
+					g.Expect(mwrset.UID).NotTo(Equal(originalMwrset.UID))
+					expectManifestWorkReplicaSetToMatch(g, originalMwrset, mwrset)
 				})
 			})
 		})
@@ -1192,20 +1219,24 @@ func expectNoManagedServiceAccount(mesh *meshv1alpha1.MultiClusterMesh, clusterN
 	}).Should(BeTrue())
 }
 
-func expectManifestWorkReplicaSet(meshName, meshNamespace string) *workv1alpha1.ManifestWorkReplicaSet {
-	mwrset := &workv1alpha1.ManifestWorkReplicaSet{}
-	Eventually(func() error {
-		return k8sClient.Get(ctx, key.Of(meshName, meshNamespace), mwrset)
+func expectManifestWorkReplicaSet(meshName, meshNamespace string, assert func(Gomega, *workv1alpha1.ManifestWorkReplicaSet)) *workv1alpha1.ManifestWorkReplicaSet {
+	var mwrset *workv1alpha1.ManifestWorkReplicaSet
+	Eventually(func(g Gomega) {
+		mwrset = &workv1alpha1.ManifestWorkReplicaSet{}
+		g.Expect(k8sClient.Get(ctx, key.Of(meshName, meshNamespace), mwrset)).To(Succeed())
+		assert(g, mwrset)
 	}).Should(Succeed())
 	return mwrset
 }
 
-func expectManifestWorkReplicaSetContent(meshName, meshNamespace string, assert func(Gomega, *workv1alpha1.ManifestWorkReplicaSet)) {
-	Eventually(func(g Gomega) {
-		mwrset := &workv1alpha1.ManifestWorkReplicaSet{}
-		g.Expect(k8sClient.Get(ctx, key.Of(meshName, meshNamespace), mwrset)).To(Succeed())
-		assert(g, mwrset)
-	}).Should(Succeed())
+func expectManifestWorkReplicaSetToHaveOneManifest(g Gomega, mwrset *workv1alpha1.ManifestWorkReplicaSet) {
+	g.Expect(mwrset.Spec.ManifestWorkTemplate.Workload.Manifests).To(HaveLen(1))
+}
+
+func expectManifestWorkReplicaSetToMatch(g Gomega, expected, actual *workv1alpha1.ManifestWorkReplicaSet) {
+	g.Expect(actual.Labels).To(Equal(expected.Labels))
+	g.Expect(actual.OwnerReferences).To(Equal(expected.OwnerReferences))
+	g.Expect(actual.Spec).To(Equal(expected.Spec))
 }
 
 func expectRemoteSecret(manifest workv1.Manifest, clusterName, expectedNamespace string) {
