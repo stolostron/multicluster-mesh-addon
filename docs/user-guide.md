@@ -244,14 +244,14 @@ To get started quickly, use the provided sample manifests from [samples/istio/](
 The following commands run against the spoke clusters (not the hub).
 Make sure your kubeconfig has the contexts for each managed cluster.
 
-The east-west gateway sample uses [Gateway API]. Check the CRDs on each spoke, and install a version supported by your Istio/operator release when they are absent. The demo uses v1.2.1:
+The east-west gateway sample uses [Gateway API]. Check the CRDs on each spoke, and install a version supported by your Istio/operator release when they are absent. The demo uses v1.6.0:
 
 ```bash
 for CLUSTER_NAME in cluster1 cluster2; do
   if ! kubectl --context "$CLUSTER_NAME" get crd \
     gateways.gateway.networking.k8s.io gatewayclasses.gateway.networking.k8s.io >/dev/null 2>&1; then
     kubectl --context "$CLUSTER_NAME" apply --server-side \
-      -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.2.1/standard-install.yaml
+      -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.6.0/standard-install.yaml
   fi
 done
 ```

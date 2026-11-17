@@ -133,7 +133,7 @@ If your spokes do not already provide Gateway API, install its CRDs:
 ~~~bash
 for CONTEXT in "$SPOKE_A_CONTEXT" "$SPOKE_B_CONTEXT" "$SPOKE_C_CONTEXT"; do
   oc --context "$CONTEXT" apply --server-side \
-    -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.2.1/standard-install.yaml
+    -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.6.0/standard-install.yaml
 done
 ~~~
 
@@ -350,14 +350,14 @@ A client can then call one address and receive responses from either cluster.
 
 #### 8.1. Deploy reviews v1 and ratings on cluster1
 
-The examples use Istio 1.30.4 and fetch Bookinfo from the matching release branch.
+The examples use Istio 1.31.4 and fetch Bookinfo from the matching release branch.
 Set `ISTIO_VERSION` to the version supported by your OSSM installation, and use a matching `istioctl` version.
 Start with reviews v1 and the ratings service on cluster1.
 The other reviews versions will call this ratings service to retrieve star ratings.
 Create the reviews and ratings Services and ServiceAccounts on each cluster so the calls can cross the mesh.
 
 ~~~bash
-export ISTIO_VERSION=1.30.4
+export ISTIO_VERSION=1.31.4
 export BOOKINFO_REF="release-${ISTIO_VERSION%.*}"
 export BOOKINFO_MANIFEST="https://raw.githubusercontent.com/openshift-service-mesh/istio/$BOOKINFO_REF/samples/bookinfo/platform/kube/bookinfo.yaml"
 

@@ -28,14 +28,14 @@ CONTROLLER_GEN = $(call gotool,tools,controller-gen)
 
 # Test variables
 CONTROLLER_RUNTIME_BRANCH ?= release-0.23
-ENVTEST_K8S_VERSION ?= 1.35
+ENVTEST_K8S_VERSION ?= 1.37
 ENVTEST ?= $(BIN_DIR)/setup-envtest
 TEST_CRD_DIR := $(CURDIR)/test/integration/crds
 
 $(ENVTEST): $(BIN_DIR)
 	@test -s $(ENVTEST) || GOBIN=$(BIN_DIR) go install sigs.k8s.io/controller-runtime/tools/setup-envtest@$(CONTROLLER_RUNTIME_BRANCH)
 
-HELM_VERSION ?= v4.2.2
+HELM_VERSION ?= v4.3.2
 HELM_BIN := $(BIN_DIR)/helm
 HELM ?= $(shell which helm 2>/dev/null || echo $(HELM_BIN))
 CHART_DIR := $(CURDIR)/chart
@@ -45,10 +45,10 @@ ADDON_NAMESPACE ?= multicluster-mesh-system
 OS := $(shell go env GOOS)
 ARCH := $(shell go env GOARCH)
 
+# Mark phony to ensure we have the desired version
+.PHONY: $(HELM_BIN)
 $(HELM_BIN): $(BIN_DIR)
-	@if test -x $(HELM_BIN) && $(HELM_BIN) version --short 2>/dev/null | grep -q $(HELM_VERSION); then \
-		echo "helm $(HELM_VERSION) already installed"; \
-	else \
+	@if ! test -x $(HELM_BIN) || ! $(HELM_BIN) version --short 2>/dev/null | grep -q $(HELM_VERSION); then \
 		echo "Installing helm $(HELM_VERSION)..."; \
 		tmp_dir=$$(mktemp -d); \
 		curl -sSL https://get.helm.sh/helm-$(HELM_VERSION)-$(OS)-$(ARCH).tar.gz -o $$tmp_dir/helm.tar.gz; \
@@ -251,14 +251,14 @@ help: ## Display this help
 	@grep -E '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
 
 # Dev Environment (local Kind + OCM clusters)
-KIND_VERSION ?= v0.31.0
-CLUSTERADM_VERSION ?= v1.3.1
-K8S_VERSION ?= v1.35.0
-OLM_VERSION ?= v0.43.0
-CERT_MANAGER_VERSION ?= v1.20.2
-MSA_VERSION ?= 0.10.0
-METALLB_VERSION ?= v0.14.9
-GATEWAY_API_VERSION ?= v1.2.1
+KIND_VERSION ?= v0.33.0
+CLUSTERADM_VERSION ?= v1.4.0
+K8S_VERSION ?= v1.37.0
+OLM_VERSION ?= v0.46.0
+CERT_MANAGER_VERSION ?= v1.21.3
+MSA_VERSION ?= 0.12.0
+METALLB_VERSION ?= v0.16.2
+GATEWAY_API_VERSION ?= v1.6.0
 
 DEV_KUBE_DIR := $(CURDIR)/.kube
 HUB_KUBECONFIG := $(DEV_KUBE_DIR)/hub.config
@@ -268,19 +268,19 @@ CLUSTERS := hub $(SPOKE_CLUSTERS)
 KIND := $(BIN_DIR)/kind
 CLUSTERADM := $(BIN_DIR)/clusteradm
 
+# Mark phony to ensure we have the desired version
+.PHONY: $(KIND)
 $(KIND): | $(BIN_DIR)
-	@if test -x $(KIND) && $(KIND) version 2>/dev/null | grep -q $(KIND_VERSION); then \
-		echo "kind $(KIND_VERSION) already installed"; \
-	else \
+	@if ! test -x $(KIND) || ! $(KIND) version 2>/dev/null | grep -q $(KIND_VERSION); then \
 		echo "Installing kind $(KIND_VERSION)..."; \
 		curl -sSL https://github.com/kubernetes-sigs/kind/releases/download/$(KIND_VERSION)/kind-$(OS)-$(ARCH) -o $(KIND); \
 		chmod +x $(KIND); \
 	fi
 
+# Mark phony to ensure we have the desired version
+.PHONY: $(CLUSTERADM)
 $(CLUSTERADM): | $(BIN_DIR)
-	@if test -x $(CLUSTERADM) && $(CLUSTERADM) version 2>/dev/null | grep -q $(CLUSTERADM_VERSION); then \
-		echo "clusteradm $(CLUSTERADM_VERSION) already installed"; \
-	else \
+	@if ! test -x $(CLUSTERADM) || ! $(CLUSTERADM) version 2>/dev/null | grep -q $(CLUSTERADM_VERSION); then \
 		echo "Installing clusteradm $(CLUSTERADM_VERSION)..."; \
 		tmp_dir=$$(mktemp -d); \
 		curl -sSL https://github.com/open-cluster-management-io/clusteradm/releases/download/$(CLUSTERADM_VERSION)/clusteradm_$(OS)_$(ARCH).tar.gz -o $$tmp_dir/clusteradm.tar.gz; \
@@ -294,7 +294,7 @@ DEV_ENV_SCRIPT := $(CURDIR)/hack/dev-env.sh
 DEMO_SCRIPT := $(CURDIR)/hack/demo.sh
 DEMO_DRY_RUN ?=
 DEMO_KUBECONFIG ?=
-ISTIO_VERSION ?= 1.30.4
+ISTIO_VERSION ?= 1.31.4
 ISTIOCTL_BIN := $(BIN_DIR)/istioctl
 ISTIOCTL ?= $(shell which istioctl 2>/dev/null || echo $(ISTIOCTL_BIN))
 
@@ -314,10 +314,10 @@ endif
 
 log = @echo "==> $(1)"
 
+# Mark phony to ensure we have the desired version
+.PHONY: $(ISTIOCTL_BIN)
 $(ISTIOCTL_BIN): $(BIN_DIR)
-	@if test -x $(ISTIOCTL_BIN) && $(ISTIOCTL_BIN) version --remote=false 2>/dev/null | grep -q $(ISTIO_VERSION); then \
-		echo "istioctl $(ISTIO_VERSION) already installed"; \
-	else \
+	@if ! test -x $(ISTIOCTL_BIN) || ! $(ISTIOCTL_BIN) version --remote=false 2>/dev/null | grep -q $(ISTIO_VERSION); then \
 		echo "Installing istioctl $(ISTIO_VERSION)..."; \
 		tmp_dir=$$(mktemp -d); \
 		curl -sSL https://github.com/istio/istio/releases/download/$(ISTIO_VERSION)/istio-$(ISTIO_VERSION)-$(OS)-$(ARCH).tar.gz -o $$tmp_dir/istio.tar.gz; \
