@@ -12,6 +12,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
+# We use kubectl wait with combined --for flags, which need kubectl 1.36+
+MIN_KUBECTL_VERSION=1.36
 HUB="hub"
 read -r -a SPOKE_CLUSTERS <<< "${SPOKE_CLUSTERS:-cluster1 cluster2}"
 declare -A SPOKE_CLUSTER_INDEX=()
@@ -89,6 +91,23 @@ check_kernel_keyring_limits() {
         if [[ -n "${msg}" ]]; then
             warn "${msg}. Rootless podman with 3 Kind clusters may fail with 'could not create session key: disk quota exceeded'. See https://github.com/kubernetes-sigs/kind/issues/3806"
         fi
+    fi
+}
+
+check_kubectl_version() {
+    local version_json major minor
+    if ! version_json="$(kubectl version --client -o json 2>/dev/null)"; then
+        err "kubectl not found or failed to run; kubectl ${MIN_KUBECTL_VERSION}+ is required"
+    fi
+    major="$(echo "${version_json}" | jq -r '.clientVersion.major // empty')"
+    minor="$(echo "${version_json}" | jq -r '.clientVersion.minor // empty')"
+    minor="${minor%+}"
+    if [[ -z "${major}" || -z "${minor}" ]]; then
+        err "Failed to parse kubectl version from: ${version_json}"
+    fi
+    local min_major="${MIN_KUBECTL_VERSION%%.*}" min_minor="${MIN_KUBECTL_VERSION#*.}"
+    if (( major < min_major )) || { (( major == min_major )) && (( minor < min_minor )); }; then
+        err "kubectl ${MIN_KUBECTL_VERSION}+ is required, found ${major}.${minor}"
     fi
 }
 
@@ -577,6 +596,8 @@ setup_mesh() {
     log "Mesh setup complete. The controller will now reconcile the mesh."
     log "Monitor progress: $(on "${HUB}" echo kubectl get multiclustermesh -n mesh-system)"
 }
+
+check_kubectl_version
 
 ACTION="${1:-}"
 case "${ACTION}" in
