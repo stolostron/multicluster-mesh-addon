@@ -57,3 +57,14 @@ jobs:
 
       - name: Run multicluster e2e tests
         run: make test-e2e-multicluster PLATFORM=kind
+        env:
+          ARTIFACT_DIR: ${{ github.workspace }}/_artifacts
+
+      - name: Upload test artifacts
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: e2e-multicluster-artifacts
+          path: _artifacts/
+          if-no-files-found: ignore
+          retention-days: 14
