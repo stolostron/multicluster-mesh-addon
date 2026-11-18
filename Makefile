@@ -284,6 +284,8 @@ DEMO_KUBECONFIG ?=
 ISTIO_VERSION ?= 1.31.4
 ISTIOCTL_BIN := $(BIN_DIR)/istioctl
 ISTIOCTL ?= $(shell which istioctl 2>/dev/null || echo $(ISTIOCTL_BIN))
+# Istio names its macOS archives "osx" instead of "darwin".
+ISTIO_OS := $(subst darwin,osx,$(OS))
 
 export DEV_KUBE_DIR K8S_VERSION OLM_VERSION CERT_MANAGER_VERSION MSA_VERSION
 export METALLB_VERSION GATEWAY_API_VERSION
@@ -305,7 +307,7 @@ log = @echo "==> $(1)"
 .PHONY: $(ISTIOCTL_BIN)
 $(ISTIOCTL_BIN): | $(BIN_DIR)
 	@hack/install-bin.sh "$(ISTIOCTL_BIN)" "$(ISTIO_VERSION)" "version --remote=false" \
-		"https://github.com/istio/istio/releases/download/$(ISTIO_VERSION)/istio-$(ISTIO_VERSION)-$(OS)-$(ARCH).tar.gz" "istio-$(ISTIO_VERSION)/bin/istioctl"
+		"https://github.com/istio/istio/releases/download/$(ISTIO_VERSION)/istio-$(ISTIO_VERSION)-$(ISTIO_OS)-$(ARCH).tar.gz" "istio-$(ISTIO_VERSION)/bin/istioctl"
 
 .PHONY: dev-env-base
 dev-env-base:
