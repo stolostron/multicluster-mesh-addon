@@ -140,6 +140,10 @@ golangci-lint: ## Run golangci-lint
 test: ## Run unit tests
 	go test -short ./pkg/...
 
+.PHONY: test-scripts
+test-scripts: ## Run shell script tests
+	./test/scripts/install-bin_test.sh
+
 .PHONY: update-test-crds
 update-test-crds: deps ## Update test CRDs from OCM API, managed-serviceaccount and cert-manager dependencies
 	@echo "Updating test CRDs from open-cluster-management.io/api..."
