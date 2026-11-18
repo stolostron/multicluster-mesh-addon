@@ -47,16 +47,9 @@ ARCH := $(shell go env GOARCH)
 
 # Mark phony to ensure we have the desired version
 .PHONY: $(HELM_BIN)
-$(HELM_BIN): $(BIN_DIR)
-	@if ! test -x $(HELM_BIN) || ! $(HELM_BIN) version --short 2>/dev/null | grep -q $(HELM_VERSION); then \
-		echo "Installing helm $(HELM_VERSION)..."; \
-		tmp_dir=$$(mktemp -d); \
-		curl -sSL https://get.helm.sh/helm-$(HELM_VERSION)-$(OS)-$(ARCH).tar.gz -o $$tmp_dir/helm.tar.gz; \
-		tar xzf $$tmp_dir/helm.tar.gz -C $$tmp_dir; \
-		mv $$tmp_dir/$(OS)-$(ARCH)/helm $(HELM_BIN); \
-		chmod +x $(HELM_BIN); \
-		rm -rf $$tmp_dir; \
-	fi
+$(HELM_BIN): | $(BIN_DIR)
+	@hack/install-bin.sh "$(HELM_BIN)" "$(HELM_VERSION)" "version --short" \
+		"https://get.helm.sh/helm-$(HELM_VERSION)-$(OS)-$(ARCH).tar.gz" "$(OS)-$(ARCH)/helm"
 # Image registry and name
 # TODO: Change HUB back to quay.io/stolostron when we have access to that registry
 HUB ?= quay.io/sail-dev
@@ -271,24 +264,14 @@ CLUSTERADM := $(BIN_DIR)/clusteradm
 # Mark phony to ensure we have the desired version
 .PHONY: $(KIND)
 $(KIND): | $(BIN_DIR)
-	@if ! test -x $(KIND) || ! $(KIND) version 2>/dev/null | grep -q $(KIND_VERSION); then \
-		echo "Installing kind $(KIND_VERSION)..."; \
-		curl -sSL https://github.com/kubernetes-sigs/kind/releases/download/$(KIND_VERSION)/kind-$(OS)-$(ARCH) -o $(KIND); \
-		chmod +x $(KIND); \
-	fi
+	@hack/install-bin.sh "$(KIND)" "$(KIND_VERSION)" "version" \
+		"https://github.com/kubernetes-sigs/kind/releases/download/$(KIND_VERSION)/kind-$(OS)-$(ARCH)"
 
 # Mark phony to ensure we have the desired version
 .PHONY: $(CLUSTERADM)
 $(CLUSTERADM): | $(BIN_DIR)
-	@if ! test -x $(CLUSTERADM) || ! $(CLUSTERADM) version 2>/dev/null | grep -q $(CLUSTERADM_VERSION); then \
-		echo "Installing clusteradm $(CLUSTERADM_VERSION)..."; \
-		tmp_dir=$$(mktemp -d); \
-		curl -sSL https://github.com/open-cluster-management-io/clusteradm/releases/download/$(CLUSTERADM_VERSION)/clusteradm_$(OS)_$(ARCH).tar.gz -o $$tmp_dir/clusteradm.tar.gz; \
-		tar xzf $$tmp_dir/clusteradm.tar.gz -C $$tmp_dir; \
-		mv $$tmp_dir/clusteradm $(CLUSTERADM); \
-		chmod +x $(CLUSTERADM); \
-		rm -rf $$tmp_dir; \
-	fi
+	@hack/install-bin.sh "$(CLUSTERADM)" "$(CLUSTERADM_VERSION)" "version" \
+		"https://github.com/open-cluster-management-io/clusteradm/releases/download/$(CLUSTERADM_VERSION)/clusteradm_$(OS)_$(ARCH).tar.gz" "clusteradm"
 
 DEV_ENV_SCRIPT := $(CURDIR)/hack/dev-env.sh
 DEMO_SCRIPT := $(CURDIR)/hack/demo.sh
@@ -316,16 +299,9 @@ log = @echo "==> $(1)"
 
 # Mark phony to ensure we have the desired version
 .PHONY: $(ISTIOCTL_BIN)
-$(ISTIOCTL_BIN): $(BIN_DIR)
-	@if ! test -x $(ISTIOCTL_BIN) || ! $(ISTIOCTL_BIN) version --remote=false 2>/dev/null | grep -q $(ISTIO_VERSION); then \
-		echo "Installing istioctl $(ISTIO_VERSION)..."; \
-		tmp_dir=$$(mktemp -d); \
-		curl -sSL https://github.com/istio/istio/releases/download/$(ISTIO_VERSION)/istio-$(ISTIO_VERSION)-$(OS)-$(ARCH).tar.gz -o $$tmp_dir/istio.tar.gz; \
-		tar xzf $$tmp_dir/istio.tar.gz -C $$tmp_dir; \
-		mv $$tmp_dir/istio-$(ISTIO_VERSION)/bin/istioctl $(ISTIOCTL_BIN); \
-		chmod +x $(ISTIOCTL_BIN); \
-		rm -rf $$tmp_dir; \
-	fi
+$(ISTIOCTL_BIN): | $(BIN_DIR)
+	@hack/install-bin.sh "$(ISTIOCTL_BIN)" "$(ISTIO_VERSION)" "version --remote=false" \
+		"https://github.com/istio/istio/releases/download/$(ISTIO_VERSION)/istio-$(ISTIO_VERSION)-$(OS)-$(ARCH).tar.gz" "istio-$(ISTIO_VERSION)/bin/istioctl"
 
 .PHONY: dev-env-base
 dev-env-base:
