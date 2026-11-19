@@ -196,7 +196,7 @@ The controller lists decisions by Placement-name label in the mesh namespace and
 
 Selected names and resolved ManagedCluster objects are tracked separately. Resource creation and remote-secret updates use resolved objects. Existing remote-secret manifests are retained for selected clusters until replacements can be built, including when their ManagedCluster objects, API endpoints, or discovery tokens are not yet available. If no manifest exists yet, creation waits until these prerequisites are available. Cleanup and status pruning use the selected names, preserving resources for a missing ManagedCluster until its name leaves the decisions. Readiness uses the resolved objects, so a partially missing selection is not currently reflected as an unready member.
 
-Placement and PlacementDecision events enqueue meshes using a namespace-scoped field index on `spec.placementRef.name`. ManagedCluster events find affected meshes from their labeled ManifestWorks. The addon also watches mesh-labeled Secrets and ManagedServiceAccounts, addon-managed ManifestWorks, owned ManifestWorkReplicaSets, and generation changes to owned Certificates.
+Placement and PlacementDecision events enqueue meshes using a namespace-scoped field index on `spec.placementRef.name`. ManagedCluster events find affected meshes from their labeled ManifestWorks. The addon also watches mesh-labeled Secrets and ManagedServiceAccounts, addon-managed ManifestWorks, generation changes to owned Certificates, and all changes to owned ManifestWorkReplicaSets, so external edits and deletions are repaired promptly.
 
 ## Operator Lifecycle
 

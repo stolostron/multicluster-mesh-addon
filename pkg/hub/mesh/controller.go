@@ -78,6 +78,8 @@ type Reconciler struct {
 var prerequisiteCRDs = map[string]schema.GroupVersionKind{
 	"cert-manager (Certificate)":                     certmanagerv1.SchemeGroupVersion.WithKind("Certificate"),
 	"managed-serviceaccount (ManagedServiceAccount)": msav1beta1.GroupVersion.WithKind("ManagedServiceAccount"),
+	// work/v1alpha1 has a deprecated schema.GroupVersion, so compose it directly from the package's group and version.
+	"work (ManifestWorkReplicaSet)": schema.GroupVersion{Group: workv1alpha1.GroupName, Version: workv1alpha1.GroupVersion.Version}.WithKind("ManifestWorkReplicaSet"),
 }
 
 func checkPrerequisiteCRDs(mapper meta.RESTMapper) error {

@@ -24,9 +24,12 @@ import (
 	meshv1alpha1 "github.com/stolostron/multicluster-mesh-addon/pkg/apis/mesh/v1alpha1"
 )
 
+const testClusterName = "cluster-a"
+
 func TestCheckPrerequisiteCRDs(t *testing.T) {
 	certGVK := certmanagerv1.SchemeGroupVersion.WithKind("Certificate")
 	msaGVK := msav1beta1.GroupVersion.WithKind("ManagedServiceAccount")
+	mwrsGVK := schema.GroupVersion{Group: workv1alpha1.GroupName, Version: workv1alpha1.GroupVersion.Version}.WithKind("ManifestWorkReplicaSet")
 
 	tests := []struct {
 		name        string
@@ -36,26 +39,32 @@ func TestCheckPrerequisiteCRDs(t *testing.T) {
 	}{
 		{
 			name:        "all present",
-			gvks:        []schema.GroupVersionKind{certGVK, msaGVK},
+			gvks:        []schema.GroupVersionKind{certGVK, msaGVK, mwrsGVK},
 			expectError: false,
 		},
 		{
 			name:        "cert-manager missing",
-			gvks:        []schema.GroupVersionKind{msaGVK},
+			gvks:        []schema.GroupVersionKind{msaGVK, mwrsGVK},
 			expectError: true,
 			contains:    []string{"cert-manager"},
 		},
 		{
 			name:        "managed-serviceaccount missing",
-			gvks:        []schema.GroupVersionKind{certGVK},
+			gvks:        []schema.GroupVersionKind{certGVK, mwrsGVK},
 			expectError: true,
 			contains:    []string{"managed-serviceaccount"},
 		},
 		{
-			name:        "both missing",
+			name:        "work missing",
+			gvks:        []schema.GroupVersionKind{certGVK, msaGVK},
+			expectError: true,
+			contains:    []string{"work"},
+		},
+		{
+			name:        "all missing",
 			gvks:        nil,
 			expectError: true,
-			contains:    []string{"cert-manager", "managed-serviceaccount"},
+			contains:    []string{"cert-manager", "managed-serviceaccount", "work"},
 		},
 	}
 
@@ -900,7 +909,7 @@ func TestFindMeshesForCluster(t *testing.T) {
 		{
 			name: "finds mesh from labeled ManifestWork",
 			works: []workv1.ManifestWork{
-				meshOwnedWork("cluster-a", "some-work", "mesh-a", "ns-a"),
+				meshOwnedWork("some-work", "mesh-a", "ns-a"),
 			},
 			expected: []types.NamespacedName{{Name: "mesh-a", Namespace: "ns-a"}},
 		},
@@ -908,7 +917,7 @@ func TestFindMeshesForCluster(t *testing.T) {
 			name: "skips ManifestWorks without mesh labels",
 			works: []workv1.ManifestWork{{
 				ObjectMeta: metav1.ObjectMeta{
-					Name: "unlabeled-work", Namespace: "cluster-a",
+					Name: "unlabeled-work", Namespace: testClusterName,
 					Labels: map[string]string{ManagedByLabel: ManagedByValue},
 				},
 			}},
@@ -917,16 +926,16 @@ func TestFindMeshesForCluster(t *testing.T) {
 		{
 			name: "deduplicates multiple ManifestWorks for same mesh",
 			works: []workv1.ManifestWork{
-				meshOwnedWork("cluster-a", "work-1", "mesh-a", "ns-a"),
-				meshOwnedWork("cluster-a", "work-2", "mesh-a", "ns-a"),
+				meshOwnedWork("work-1", "mesh-a", "ns-a"),
+				meshOwnedWork("work-2", "mesh-a", "ns-a"),
 			},
 			expected: []types.NamespacedName{{Name: "mesh-a", Namespace: "ns-a"}},
 		},
 		{
 			name: "returns multiple meshes from different ManifestWorks",
 			works: []workv1.ManifestWork{
-				meshOwnedWork("cluster-a", "work-1", "mesh-a", "ns-a"),
-				meshOwnedWork("cluster-a", "work-2", "mesh-b", "ns-b"),
+				meshOwnedWork("work-1", "mesh-a", "ns-a"),
+				meshOwnedWork("work-2", "mesh-b", "ns-b"),
 			},
 			expected: []types.NamespacedName{
 				{Name: "mesh-a", Namespace: "ns-a"},
@@ -949,7 +958,7 @@ func TestFindMeshesForCluster(t *testing.T) {
 			c := fake.NewClientBuilder().WithScheme(scheme).WithRuntimeObjects(objs...).Build()
 			r := &Reconciler{Client: c, Scheme: scheme}
 
-			cluster := &clusterv1.ManagedCluster{ObjectMeta: metav1.ObjectMeta{Name: "cluster-a"}}
+			cluster := &clusterv1.ManagedCluster{ObjectMeta: metav1.ObjectMeta{Name: testClusterName}}
 			requests := r.findMeshesForCluster(context.Background(), cluster)
 
 			if len(requests) != len(tc.expected) {
@@ -969,28 +978,19 @@ func TestFindMeshesForManifestWork(t *testing.T) {
 
 	tests := []struct {
 		name     string
-		work     *workv1.ManifestWork
+		work     workv1.ManifestWork
 		expected []types.NamespacedName
 	}{
 		{
-			name: "mesh-owned ManifestWork returns owning mesh directly",
-			work: &workv1.ManifestWork{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "some-mesh-work", Namespace: "cluster-a",
-					Labels: map[string]string{
-						ManagedByLabel:     ManagedByValue,
-						MeshNameLabel:      "my-mesh",
-						MeshNamespaceLabel: "my-ns",
-					},
-				},
-			},
+			name:     "mesh-owned ManifestWork returns owning mesh directly",
+			work:     meshOwnedWork("some-mesh-work", "my-mesh", "my-ns"),
 			expected: []types.NamespacedName{{Name: "my-mesh", Namespace: "my-ns"}},
 		},
 		{
 			name: "ManifestWork without mesh labels returns empty",
-			work: &workv1.ManifestWork{
+			work: workv1.ManifestWork{
 				ObjectMeta: metav1.ObjectMeta{
-					Name: "unlabeled-work", Namespace: "cluster-a",
+					Name: "unlabeled-work", Namespace: testClusterName,
 					Labels: map[string]string{ManagedByLabel: ManagedByValue},
 				},
 			},
@@ -1000,10 +1000,10 @@ func TestFindMeshesForManifestWork(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			c := fake.NewClientBuilder().WithScheme(scheme).WithRuntimeObjects(tc.work).Build()
+			c := fake.NewClientBuilder().WithScheme(scheme).WithRuntimeObjects(&tc.work).Build()
 			r := &Reconciler{Client: c, Scheme: scheme}
 
-			requests := r.findMeshesForManifestWork(context.Background(), tc.work)
+			requests := r.findMeshesForManifestWork(context.Background(), &tc.work)
 
 			if len(requests) != len(tc.expected) {
 				t.Fatalf("expected %d requests, got %d", len(tc.expected), len(requests))
@@ -1144,11 +1144,11 @@ func newTestScheme() *runtime.Scheme {
 	return scheme
 }
 
-func meshOwnedWork(namespace, name, meshName, meshNamespace string) workv1.ManifestWork {
+func meshOwnedWork(name, meshName, meshNamespace string) workv1.ManifestWork {
 	return workv1.ManifestWork{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
-			Namespace: namespace,
+			Namespace: testClusterName,
 			Labels: map[string]string{
 				ManagedByLabel:     ManagedByValue,
 				MeshNameLabel:      meshName,

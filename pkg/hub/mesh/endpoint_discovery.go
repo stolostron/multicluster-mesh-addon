@@ -250,10 +250,11 @@ func (r *Reconciler) ensureRemoteSecretDistribution(ctx context.Context, mesh *m
 		mwrset.Labels[ManagedByLabel] = ManagedByValue
 		mwrset.Labels[MeshNameLabel] = mesh.Name
 		mwrset.Labels[MeshNamespaceLabel] = mesh.Namespace
-
-		// Keep the API-defaulted rollout type to avoid reconcile loops.
 		mwrset.Spec.PlacementRefs = []workv1alpha1.LocalPlacementReference{{
-			Name:            mesh.Spec.PlacementRef.Name,
+			Name: mesh.Spec.PlacementRef.Name,
+
+			// Match the stored rollout strategy: the API server defaults type to All and leaves the all field unset.
+			// Leaving the strategy unset makes every reconcile send an update that changes nothing.
 			RolloutStrategy: clusterv1alpha1.RolloutStrategy{Type: clusterv1alpha1.All},
 		}}
 		mwrset.Spec.ManifestWorkTemplate = workv1.ManifestWorkSpec{
