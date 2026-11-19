@@ -26,13 +26,13 @@ printf '#!/bin/sh\necho v2.0.0\n' > "${work}/pkg/bin/tool"
 tar czf "${srv}/tool-v2.tar.gz" -C "${work}/pkg" bin/tool
 
 port=$((10000 + RANDOM % 50000))
-python3 -m http.server "${port}" --directory "${srv}" >/dev/null 2>&1 &
+python3 -m http.server "${port}" --bind 127.0.0.1 --directory "${srv}" >/dev/null 2>&1 &
 server_pid=$!
 base="http://127.0.0.1:${port}"
 
 wait_for_server() {
     for _ in {1..50}; do
-        curl -fsS "${base}/tool-v1" >/dev/null 2>&1 && return 0
+        curl -fsS --max-time 1 "${base}/tool-v1" >/dev/null 2>&1 && return 0
         sleep 0.1
     done
     echo "test server did not come up on ${base}" >&2
@@ -52,6 +52,8 @@ assert() {
 }
 # shellcheck disable=SC2329 # Invoked only as an assert condition word.
 tmp_is_empty() { [ -z "$(ls -A "${tmp}")" ]; }
+# stat -c is GNU, stat -f is BSD/macOS; GNU must go first because its -f means file-system status.
+file_inode() { stat -c %i "$1" 2>/dev/null || stat -f %i "$1" 2>/dev/null; }
 
 # 1. install missing target, direct binary
 "${SCRIPT}" "${bin}/tool" v1.0.0 version "${base}/tool-v1" >/dev/null
@@ -60,10 +62,12 @@ assert "direct install prints the wanted version" [ "$("${bin}/tool" version)" =
 assert "direct install cleans its temp dir" tmp_is_empty
 
 # 2. same version is a silent no-op that does not touch the binary
-inode_before="$(stat -c %i "${bin}/tool")"
+inode_before="$(file_inode "${bin}/tool")"
+assert "inode lookup succeeds" test -n "${inode_before}"
 out="$("${SCRIPT}" "${bin}/tool" v1.0.0 version "${base}/tool-v1" 2>&1)"
+assert "same version exits zero" test "$?" -eq 0
 assert "same version is silent" [ -z "${out}" ]
-assert "same version does not touch the binary" [ "$(stat -c %i "${bin}/tool")" = "${inode_before}" ]
+assert "same version does not touch the binary" [ "$(file_inode "${bin}/tool")" = "${inode_before}" ]
 
 # 3. wrong version is replaced, from a tarball with a nested inner path
 "${SCRIPT}" "${bin}/tool" v2.0.0 version "${base}/tool-v2.tar.gz" bin/tool >/dev/null
@@ -87,6 +91,7 @@ assert "failed install cleans its temp dir" tmp_is_empty
 printf '#!/bin/sh\n[ "$#" -eq 2 ] && echo v1.0.0\n' > "${bin}/strict"
 chmod +x "${bin}/strict"
 out="$("${SCRIPT}" "${bin}/strict" v1.0.0 "version --remote=false" "${base}/missing" 2>&1)"
+assert "multi-word no-op exits zero" test "$?" -eq 0
 assert "multi-word check args are split and matched" [ -z "${out}" ]
 
 echo "passed: ${pass}, failed: ${failures}"
