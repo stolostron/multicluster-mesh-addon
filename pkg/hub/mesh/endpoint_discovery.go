@@ -227,13 +227,15 @@ func (r *Reconciler) ensureRemoteSecretDistribution(ctx context.Context, mesh *m
 				// Use MWRS rollout status to distinguish rotated credentials from still-available old Secrets.
 				// Secrets need no rollout after application, so we use a simple Progressing=False condition here.
 				// This lets MWRS report PlacementRolledOut=True once the latest Secrets are applied on all selected clusters.
+				// The constant rule needs no Watch re-evaluation, so Poll scraping suffices.
+				// Set the API-defaulted type explicitly to avoid reconcile loops.
 				manifestConfigs = append(manifestConfigs, workv1.ManifestConfigOption{
 					ResourceIdentifier: workv1.ResourceIdentifier{
 						Resource:  "secrets",
 						Name:      RemoteSecretName(name),
 						Namespace: mesh.GetControlPlaneNamespace(),
 					},
-					FeedbackScrapeType: workv1.FeedbackWatchType,
+					FeedbackScrapeType: workv1.FeedbackPollType,
 					ConditionRules: []workv1.ConditionRule{{
 						Condition:      workv1.WorkProgressing,
 						Type:           workv1.CelConditionExpressionsType,

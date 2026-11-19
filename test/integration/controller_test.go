@@ -903,7 +903,7 @@ var _ = Describe("MultiClusterMesh Controller", func() {
 						for _, m := range mwrset.Spec.ManifestWorkTemplate.Workload.Manifests {
 							secret := &corev1.Secret{}
 							g.Expect(unmarshalManifest(m, secret)).To(Succeed())
-							if secret.Name == "istio-remote-secret-"+cluster {
+							if secret.Name == meshcontroller.RemoteSecretName(cluster) {
 								found = true
 								break
 							}
@@ -1310,7 +1310,7 @@ func assertRotatedRemoteSecret(g Gomega, mwrset *workv1alpha1.ManifestWorkReplic
 func expectRemoteSecret(manifest workv1.Manifest, clusterName, expectedNamespace string) {
 	secret := &corev1.Secret{}
 	Expect(unmarshalManifest(manifest, secret)).To(Succeed())
-	Expect(secret.Name).To(Equal("istio-remote-secret-" + clusterName))
+	Expect(secret.Name).To(Equal(meshcontroller.RemoteSecretName(clusterName)))
 	Expect(secret.Namespace).To(Equal(expectedNamespace))
 	Expect(secret.Labels["istio/multiCluster"]).To(Equal("true"))
 	Expect(secret.Annotations["networking.istio.io/cluster"]).To(Equal(clusterName))

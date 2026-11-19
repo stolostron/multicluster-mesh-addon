@@ -186,7 +186,7 @@ The status can lag briefly while OCM reconciles distribution.
 * A `TokenPending` reason means the managed-serviceaccount addon has not created the cluster's token secret yet.
 * A `DistributionPending` reason means discovery RBAC or remote-secret distribution is pending or unavailable.
 * The istio-reader `ManifestWork` should have conditions `Applied=True` and `Available=True`.
-* The secrets `ManifestWorkReplicaSet` should have `PlacementRolledOut=True` and `ManifestworkApplied=True`.
+* The remote-secret `ManifestWorkReplicaSet` should have `PlacementRolledOut=True` and `ManifestworkApplied=True`.
 
 Check each step:
 

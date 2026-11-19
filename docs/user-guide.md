@@ -228,8 +228,7 @@ kubectl wait --for=condition=Ready=True multiclustermesh/basic-mesh \
 kubectl get multiclustermesh -n mesh-system -o yaml
 ```
 
-When trust distribution is complete on every resolved cluster, the mesh shows `Ready=True` with reason `AllClustersReady`.
-With no issuer configured, successful hub reconciliation for at least one resolved cluster is enough; no spoke application is checked on that path.
+When every resolved cluster reports `DiscoveryDistributed=True`, and `TrustDistributed=True` when trust is configured, the mesh shows `Ready=True` with reason `AllClustersReady`.
 The auto-derived control plane namespace is reported in `status.controlPlaneNamespace`.
 See the [API reference](api-reference.md#status-conditions) for all reported conditions.
 
