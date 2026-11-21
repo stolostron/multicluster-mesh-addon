@@ -179,7 +179,7 @@ run_helm() {
 configure_istio_spoke() {
     if [[ "${PLATFORM}" == "openshift" ]]; then
         demo_comment "Create the istio-cni namespace and install Istio CNI on $1."
-        run_kubectl_apply "$1" hack/demo/istiocni-namespace.yaml
+        run_kubectl_apply "$1" samples/istio/istiocni-namespace.yaml
         run_kubectl_apply "$1" samples/istio/istiocni.yaml
         demo_wait
     fi
