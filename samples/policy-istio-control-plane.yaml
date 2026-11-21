@@ -5,7 +5,7 @@
 # docs/user-guide.md#customize-istio.
 #
 # Before applying:
-#   1. Replace <MESH_NAME> and <MESH_NAMESPACE> with your mesh name and namespace.
+#   1. Replace <MESH_NAME> with your mesh name.
 #   2. Replace <PLACEMENT_NAME> with your mesh's Placement name
 #      (spec.placementRef.name on the MultiClusterMesh).
 #   3. The addon must have created the MultiClusterMesh and populated
@@ -20,7 +20,7 @@
 # propagator restricts hub template lookups to the policy namespace by default.
 #
 # The hub template variables are resolved per cluster at propagation time:
-#   - controlPlaneNamespace: read from the MultiClusterMesh status via lookup
+#   - controlPlaneNamespace: read from the MultiClusterMesh status in the policy namespace
 #   - meshName, trustDomain: literals supplied below (the trust domain is the mesh name)
 #   - ManagedClusterName: built-in, resolves to the cluster name
 #   - topology.istio.io/network label: falls back to the cluster name
@@ -59,7 +59,7 @@ spec:
                 metadata:
                   name: default
                 spec:
-                  namespace: '{{hub (lookup "mesh.open-cluster-management.io/v1alpha1" "MultiClusterMesh" "<MESH_NAMESPACE>" "<MESH_NAME>").status.controlPlaneNamespace hub}}'
+                  namespace: '{{hub (lookup "mesh.open-cluster-management.io/v1alpha1" "MultiClusterMesh" .PolicyMetadata.namespace "<MESH_NAME>").status.controlPlaneNamespace hub}}'
                   values:
                     meshConfig:
                       trustDomain: '<MESH_NAME>'
@@ -84,7 +84,7 @@ spec:
                 kind: Gateway
                 metadata:
                   name: eastwestgateway
-                  namespace: '{{hub (lookup "mesh.open-cluster-management.io/v1alpha1" "MultiClusterMesh" "<MESH_NAMESPACE>" "<MESH_NAME>").status.controlPlaneNamespace hub}}'
+                  namespace: '{{hub (lookup "mesh.open-cluster-management.io/v1alpha1" "MultiClusterMesh" .PolicyMetadata.namespace "<MESH_NAME>").status.controlPlaneNamespace hub}}'
                   labels:
                     topology.istio.io/network: '{{hub (index .ManagedClusterLabels "topology.istio.io/network") | default .ManagedClusterName hub}}'
                 spec:

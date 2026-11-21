@@ -5,7 +5,8 @@
 #   1. Set policyDefaults.namespace below to your mesh namespace.
 #   2. Set placement.placementName below to your mesh's Placement name
 #      (spec.placementRef.name on the MultiClusterMesh).
-#   3. Replace <MESH_NAME> and <MESH_NAMESPACE> in the istio-manifests/ files.
+#   3. Set the mesh.open-cluster-management.io/mesh-name label under
+#      policyDefaults.policyLabels below to your MultiClusterMesh name.
 #   4. Install the PolicyGenerator Kustomize plugin.
 #      See docs/istio-policygenerator.md#prerequisites for installation instructions.
 #
@@ -28,6 +29,8 @@ placementBindingDefaults:
   name: binding-istio
 policyDefaults:
   namespace: <mesh-system>
+  policyLabels:
+    mesh.open-cluster-management.io/mesh-name: <MESH_NAME>
   remediationAction: enforce
   severity: medium
   pruneObjectBehavior: DeleteIfCreated

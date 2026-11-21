@@ -231,7 +231,7 @@ The CNI policy checks that `IstioCNI/default` reports `Ready=True`, in addition 
 Apply the control plane policy. Replace the placeholders with your values before applying:
 
 ```bash
-sed -e 's/<MESH_NAMESPACE>/mesh-system/g' -e 's/<MESH_NAME>/basic-mesh/g' \
+sed -e 's/<MESH_NAME>/basic-mesh/g' \
   -e 's/<PLACEMENT_NAME>/mesh-placement/g' \
   samples/policy-istio-control-plane.yaml \
   | kubectl apply -n mesh-system -f -

@@ -1,10 +1,10 @@
-# East-west gateway with hub template placeholders.
-# Replace <MESH_NAME> and <MESH_NAMESPACE> before building with PolicyGenerator.
+# East-west gateway with hub templates.
+# Set the mesh namespace and mesh-name policy label in policygenerator.yaml.
 apiVersion: gateway.networking.k8s.io/v1
 kind: Gateway
 metadata:
   name: eastwestgateway
-  namespace: '{{hub (lookup "mesh.open-cluster-management.io/v1alpha1" "MultiClusterMesh" "<MESH_NAMESPACE>" "<MESH_NAME>").status.controlPlaneNamespace hub}}'
+  namespace: '{{hub (lookup "mesh.open-cluster-management.io/v1alpha1" "MultiClusterMesh" .PolicyMetadata.namespace (index .PolicyMetadata.labels "mesh.open-cluster-management.io/mesh-name")).status.controlPlaneNamespace hub}}'
   labels:
     topology.istio.io/network: '{{hub (index .ManagedClusterLabels "topology.istio.io/network") | default .ManagedClusterName hub}}'
 spec:

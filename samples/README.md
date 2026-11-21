@@ -46,10 +46,10 @@ Pre-built ACM policies that configure the Istio control plane on managed cluster
 | [policy-istio-control-plane.yaml](policy-istio-control-plane.yaml) | Istio CR + east-west Gateway (hub templates resolve per-cluster values) |
 | [policy-istiocni.yaml](policy-istiocni.yaml) | IstioCNI namespace + CR + readiness check (cluster-level prerequisite for OpenShift and ambient; apply once, not per mesh) |
 
-Replace `<MESH_NAME>`, `<MESH_NAMESPACE>`, and `<PLACEMENT_NAME>` in the sample with your values, then apply on the hub:
+Replace `<MESH_NAME>` and `<PLACEMENT_NAME>` in the sample with your values, then apply on the hub in the same namespace as the mesh:
 
 ```bash
-sed -e 's/<MESH_NAMESPACE>/mesh-system/g' -e 's/<MESH_NAME>/basic-mesh/g' \
+sed -e 's/<MESH_NAME>/basic-mesh/g' \
   -e 's/<PLACEMENT_NAME>/mesh-placement/g' \
   samples/policy-istio-control-plane.yaml \
   | kubectl apply -n mesh-system -f -
@@ -70,7 +70,7 @@ Decomposed manifests with hub templates for use with the [PolicyGenerator Kustom
 
 IstioCNI (OpenShift/ambient) is a cluster-level prerequisite. Manage it separately using [policy-istiocni.yaml](policy-istiocni.yaml).
 
-Build and apply:
+Set the mesh namespace, Placement name, and mesh-name policy label in `policygenerator/policygenerator.yaml`, then build and apply:
 
 ```bash
 kustomize build --enable-alpha-plugins samples/policygenerator/ \

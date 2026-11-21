@@ -21,12 +21,12 @@ The Istio manifests use hub templates to read the control plane namespace from t
 
 | Variable | Hub template |
 |---|---|
-| Control plane namespace | `{{hub (lookup "mesh.open-cluster-management.io/v1alpha1" "MultiClusterMesh" "<MESH_NAMESPACE>" "<MESH_NAME>").status.controlPlaneNamespace hub}}` |
-| Mesh name / trust domain | `<MESH_NAME>` (literal; the trust domain is the mesh name) |
+| Control plane namespace | `{{hub (lookup "mesh.open-cluster-management.io/v1alpha1" "MultiClusterMesh" .PolicyMetadata.namespace (index .PolicyMetadata.labels "mesh.open-cluster-management.io/mesh-name")).status.controlPlaneNamespace hub}}` |
+| Mesh name / trust domain | `{{hub (index .PolicyMetadata.labels "mesh.open-cluster-management.io/mesh-name") hub}}` |
 | Cluster name | `{{hub .ManagedClusterName hub}}` |
 | Network | `{{hub (index .ManagedClusterLabels "topology.istio.io/network") \| default .ManagedClusterName hub}}` |
 
-The Policy must be in the same namespace as the MultiClusterMesh, because the default hub-template resolver restricts `lookup` to the policy namespace.
+The templates use the root Policy's namespace and mesh-name label. The Policy must be in the same namespace as the MultiClusterMesh, because the default hub-template resolver restricts `lookup` to the policy namespace.
 
 ## Sample directory structure
 
@@ -49,7 +49,7 @@ See [Step 8 of the user guide](user-guide.md#step-8-configure-istio) for the app
 
 ## Build and apply
 
-Set `policyDefaults.namespace` and `placement.placementName` in `policygenerator.yaml` to your mesh namespace and Placement name. Replace `<MESH_NAME>` and `<MESH_NAMESPACE>` in the `istio-manifests/` files with your mesh name and namespace. Set `MESH_NAMESPACE` to the same namespace as `policyDefaults.namespace`, then build and apply:
+In `policygenerator.yaml`, set `policyDefaults.namespace`, `policyDefaults.placement.placementName`, and the `mesh.open-cluster-management.io/mesh-name` label under `policyDefaults.policyLabels` to your mesh namespace, Placement name, and mesh name. Set `MESH_NAMESPACE` to the same namespace as `policyDefaults.namespace`, then build and apply:
 
 ```bash
 MESH_NAMESPACE=mesh-system
@@ -75,8 +75,7 @@ kubectl wait --for=jsonpath='{.status.compliant}'=Compliant \
 ## Per-environment customization
 
 PolicyGenerator requires all manifest paths to be within the build directory tree.
-The Istio manifests also contain literal mesh-specific values inside hub template expressions.
-These are not rewritten by changing `policyDefaults.namespace`, so each environment needs its own directory with the values filled in.
+Set each environment's namespace, Placement, and mesh-name label in its `policygenerator.yaml`. The Istio manifests read the namespace and mesh name from the generated policy's metadata.
 
 If multiple meshes share a hub namespace, set `policies[].name` and `placementBindingDefaults.name` to unique values for each mesh.
 For example, use `policy-istio-basic-mesh` and `binding-istio-basic-mesh`.
@@ -84,21 +83,21 @@ Renaming only the policy leaves the meshes sharing the same PlacementBinding.
 Unique policy and binding names only separate hub resources.
 If meshes select the same spoke, additional Istio configuration is required as described in [Step 8 of the user guide](user-guide.md#step-8-configure-istio).
 
-Copy the `samples/policygenerator/` directory for each environment and set the values:
+Copy the `samples/policygenerator/` directory for each environment and set the values in `policygenerator.yaml`:
 
 ```
 my-mesh-config/
   production/
     kustomization.yaml
-    policygenerator.yaml         # namespace: prod-mesh, placementName: prod-placement
+    policygenerator.yaml         # production namespace, Placement, and mesh-name label
     istio-manifests/
-      istio.yaml                 # <MESH_NAME> and <MESH_NAMESPACE> replaced with prod values
+      istio.yaml
       eastwest-gateway.yaml
   staging/
     kustomization.yaml
-    policygenerator.yaml         # namespace: staging-mesh, placementName: staging-placement
+    policygenerator.yaml         # staging namespace, Placement, and mesh-name label
     istio-manifests/
-      istio.yaml                 # <MESH_NAME> and <MESH_NAMESPACE> replaced with staging values
+      istio.yaml
       eastwest-gateway.yaml
 ```
 
