@@ -55,26 +55,31 @@ Export the mesh-level variables, then loop over each cluster:
 ```bash
 export MESH_NAME=basic-mesh
 export CP_NAMESPACE="$(kubectl get multiclustermesh "$MESH_NAME" -n mesh-system -o jsonpath='{.status.controlPlaneNamespace}')"
-test -n "$CP_NAMESPACE" || { echo "Mesh control plane namespace is not available yet" >&2; exit 1; }
 
-for i in "${!CLUSTER_NAMES[@]}"; do
-  CLUSTER_NAME="${CLUSTER_NAMES[$i]}"
-  CONTEXT="${CLUSTER_CONTEXTS[$i]}"
-  export CLUSTER_NAME
-  NETWORK="$(kubectl get managedcluster "$CLUSTER_NAME" -o jsonpath='{.metadata.labels.topology\.istio\.io/network}')" || {
-    echo "Failed to read network label for ManagedCluster $CLUSTER_NAME" >&2
-    exit 1
-  }
-  export NETWORK="${NETWORK:-$CLUSTER_NAME}"
+if [[ -n "$CP_NAMESPACE" ]]; then
+  for i in "${!CLUSTER_NAMES[@]}"; do
+    CLUSTER_NAME="${CLUSTER_NAMES[$i]}"
+    CONTEXT="${CLUSTER_CONTEXTS[$i]}"
+    export CLUSTER_NAME
+    if ! NETWORK="$(kubectl get managedcluster "$CLUSTER_NAME" -o jsonpath='{.metadata.labels.topology\.istio\.io/network}')"; then
+      echo "Failed to read network label for ManagedCluster $CLUSTER_NAME" >&2
+      break
+    fi
+    export NETWORK="${NETWORK:-$CLUSTER_NAME}"
 
-  envsubst < samples/istio/istio.yaml | kubectl apply --context "$CONTEXT" -f -
-  kubectl --context "$CONTEXT" wait --for=create \
-    deployment/istiod -n "$CP_NAMESPACE" --timeout=15m
-  kubectl --context "$CONTEXT" wait --for=condition=Available \
-    deployment/istiod -n "$CP_NAMESPACE" --timeout=15m
-  envsubst < samples/istio/eastwest-gateway.yaml | kubectl apply --context "$CONTEXT" -f -
-done
+    envsubst < samples/istio/istio.yaml | kubectl apply --context "$CONTEXT" -f -
+    kubectl --context "$CONTEXT" wait --for=create \
+      deployment/istiod -n "$CP_NAMESPACE" --timeout=15m || break
+    kubectl --context "$CONTEXT" wait --for=condition=Available \
+      deployment/istiod -n "$CP_NAMESPACE" --timeout=15m || break
+    envsubst < samples/istio/eastwest-gateway.yaml | kubectl apply --context "$CONTEXT" -f -
+  done
+else
+  echo "Mesh control plane namespace is not available yet" >&2
+fi
 ```
+
+Before using the mesh, follow the [runtime-readiness checks](user-guide.md#verify-runtime-readiness) in Step 8 to verify Istio readiness and the east-west gateway's LoadBalancer address.
 
 For additional Istio settings and the sample file to edit, see [Customize Istio](user-guide.md#customize-istio).
 

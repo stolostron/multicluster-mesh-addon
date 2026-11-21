@@ -13,7 +13,6 @@ For production, use your own configurations (e.g., your organization's CA instea
 
 - An OCM hub cluster with managed clusters registered
 - [cert-manager] installed on the hub cluster (mints per-cluster intermediate CAs for mTLS trust)
-- A service mesh operator installed on the managed clusters. This guide uses [OperatorPolicy] from the [governance-policy-framework][gpf]; any other installation method is fine.
 - [`ManifestWorkReplicaSet`][mwrs] feature gate enabled on the hub's `ClusterManager`
 
 ## Step 1: Install the Addon
@@ -159,7 +158,7 @@ kubectl get placementdecision -n mesh-system -l cluster.open-cluster-management.
 ## Step 5: Install the Service Mesh Operator
 
 The service mesh operator must be installed on managed clusters before creating a mesh.
-The recommended approach uses [OperatorPolicy] from the governance-policy-framework to distribute the operator using Placement-based targeting.
+The recommended approach uses [OperatorPolicy] from the [governance-policy-framework][gpf] to distribute the operator using Placement-based targeting.
 
 Follow [Install the Service Mesh Operator](operator-installation.md) to set up the prerequisites, install Sail or OSSM using `mesh-placement` from Step 4, and verify the operator on each cluster. Once verification is complete, continue with [Step 6](#step-6-create-a-multiclustermesh).
 
@@ -220,7 +219,7 @@ The samples configure sidecar mode only. For ambient mode, see [Customize Istio]
 
 > **Warning:** The policy sample creates the cluster-scoped `Istio/default` resource. This means one mesh per spoke cluster. Running two meshes on the same cluster requires distinct Istio resource names plus revision, injection, discovery-selector, and gateway ownership configuration.
 
-For OpenShift or ambient mode, install IstioCNI before applying the control plane policy. IstioCNI is a cluster-level prerequisite (like the operator), not a per-mesh resource. Apply it once with a Placement covering all clusters that need CNI, typically the same Placement used for the operator:
+For OpenShift or ambient mode, install IstioCNI. IstioCNI is a cluster-level prerequisite (like the operator), not a per-mesh resource. Apply it once with a Placement covering all clusters that need CNI, typically the same Placement used for the operator:
 
 ```bash
 sed 's/<CNI_PLACEMENT_NAME>/mesh-placement/g' samples/policy-istiocni.yaml \
@@ -228,9 +227,8 @@ sed 's/<CNI_PLACEMENT_NAME>/mesh-placement/g' samples/policy-istiocni.yaml \
 ```
 
 The CNI policy checks that `IstioCNI/default` reports `Ready=True`, in addition to creating the namespace and IstioCNI resource.
-Wait for the policy to report `Compliant` before applying the control plane policy.
 
-Then apply the control plane policy. Replace the placeholders with your values before applying:
+Apply the control plane policy. Replace the placeholders with your values before applying:
 
 ```bash
 sed -e 's/<MESH_NAMESPACE>/mesh-system/g' -e 's/<MESH_NAME>/basic-mesh/g' \
@@ -238,7 +236,7 @@ sed -e 's/<MESH_NAMESPACE>/mesh-system/g' -e 's/<MESH_NAME>/basic-mesh/g' \
   samples/policy-istio-control-plane.yaml \
   | kubectl apply -n mesh-system -f -
 kubectl wait --for=jsonpath='{.status.compliant}'=Compliant \
-  policy/policy-istio-basic-mesh -n mesh-system --timeout=15m || exit 1
+  policy/policy-istio-basic-mesh -n mesh-system --timeout=15m
 ```
 
 Verify per-cluster compliance:
@@ -247,7 +245,7 @@ Verify per-cluster compliance:
 for CLUSTER_NAME in cluster1 cluster2; do
   kubectl wait \
     --for="jsonpath={.status.status[?(@.clustername==\"${CLUSTER_NAME}\")].compliant}=Compliant" \
-    policy/policy-istio-basic-mesh -n mesh-system --timeout=15m || exit 1
+    policy/policy-istio-basic-mesh -n mesh-system --timeout=15m || break
 done
 ```
 
@@ -257,26 +255,31 @@ When CNI is used, wait for its policy to report `Compliant` before deploying mes
 
 ```bash
 kubectl wait --for=jsonpath='{.status.compliant}'=Compliant \
-  policy/policy-istiocni -n mesh-system --timeout=10m || exit 1
+  policy/policy-istiocni -n mesh-system --timeout=10m
 ```
+
+### Verify runtime readiness
 
 Policy compliance confirms the desired resources are present. Before using the mesh, verify runtime readiness on each spoke. These checks require spoke access; replace the example kubeconfig context names below.
 
 ```bash
 CP_NAMESPACE="$(kubectl get multiclustermesh basic-mesh -n mesh-system -o jsonpath='{.status.controlPlaneNamespace}')"
-test -n "$CP_NAMESPACE" || { echo "Mesh control plane namespace is not available yet" >&2; exit 1; }
 CLUSTER_CONTEXTS=("context-for-cluster1" "context-for-cluster2")
 
-for CONTEXT in "${CLUSTER_CONTEXTS[@]}"; do
-  kubectl --context "$CONTEXT" wait --for=condition=Ready \
-    istio.sailoperator.io/default --timeout=15m || exit 1
-  kubectl --context "$CONTEXT" wait --for=condition=Available \
-    deployment/istiod -n "$CP_NAMESPACE" --timeout=15m || exit 1
-  kubectl --context "$CONTEXT" wait --for=create \
-    service/eastwestgateway-istio -n "$CP_NAMESPACE" --timeout=15m || exit 1
-  kubectl --context "$CONTEXT" wait --for=jsonpath='{.status.loadBalancer.ingress}' \
-    service/eastwestgateway-istio -n "$CP_NAMESPACE" --timeout=15m || exit 1
-done
+if [[ -n "$CP_NAMESPACE" ]]; then
+  for CONTEXT in "${CLUSTER_CONTEXTS[@]}"; do
+    kubectl --context "$CONTEXT" wait --for=condition=Ready \
+      istio.sailoperator.io/default --timeout=15m || break
+    kubectl --context "$CONTEXT" wait --for=condition=Available \
+      deployment/istiod -n "$CP_NAMESPACE" --timeout=15m || break
+    kubectl --context "$CONTEXT" wait --for=create \
+      service/eastwestgateway-istio -n "$CP_NAMESPACE" --timeout=15m || break
+    kubectl --context "$CONTEXT" wait --for=jsonpath='{.status.loadBalancer.ingress}' \
+      service/eastwestgateway-istio -n "$CP_NAMESPACE" --timeout=15m || break
+  done
+else
+  echo "Mesh control plane namespace is not available yet" >&2
+fi
 ```
 
 For direct spoke-cluster access without ACM policies, see [Configure Istio (Manual)](istio-manual.md).
