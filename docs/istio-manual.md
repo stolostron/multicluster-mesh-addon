@@ -87,4 +87,4 @@ For additional Istio settings and the sample file to edit, see [Customize Istio]
 
 `NETWORK` is read from the `topology.istio.io/network` label on the ManagedCluster. If the label is absent, the cluster name is used as the network identity. Each cluster on a separate network needs a unique value.
 
-[sail-multicluster]: https://docs.sailoperator.io/docs/multicluster/multi-primary-multi-network
+[sail-multicluster]: https://github.com/istio-ecosystem/sail-operator/blob/main/docs/deployment-models/multicluster.adoc#multi-primary---multi-network

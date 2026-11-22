@@ -140,5 +140,5 @@ Then continue with the MultiClusterMesh deletion in [Step 9 of the user guide](u
 [PolicyGenerator]: https://docs.redhat.com/en/documentation/red_hat_advanced_cluster_management_for_kubernetes/2.15/html/governance/policy-deployment
 [policygenerator-download]: https://access.redhat.com/articles/7049658
 [policygenerator-install]: https://github.com/open-cluster-management-io/policy-generator-plugin#install-the-policy-generator
-[hub-templates]: https://open-cluster-management.io/concepts/policy/#hub-cluster-templates
+[hub-templates]: https://open-cluster-management.io/docs/getting-started/integration/policy-controllers/policy/#hub-cluster-templating-in-configuration-policies
 [ZTP]: https://docs.openshift.com/container-platform/latest/scalability_and_performance/ztp-deploying-disconnected.html

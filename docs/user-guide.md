@@ -357,6 +357,6 @@ kubectl delete multiclustermesh -n mesh-system <mesh-name>
 [Placement]: https://open-cluster-management.io/docs/concepts/content-placement/placement/
 [ocm-concepts]: https://open-cluster-management.io/docs/concepts/
 [Plug-in CA]: https://istio.io/latest/docs/tasks/security/cert-management/plugin-ca-cert/
-[sail-api]: https://docs.sailoperator.io/docs/api-reference/sailoperator.io/
+[sail-api]: https://github.com/istio-ecosystem/sail-operator/blob/main/docs/api-reference/sailoperator.io.md
 [sail-ambient-multicluster]: https://github.com/istio-ecosystem/sail-operator/blob/main/docs/deployment-models/multicluster.adoc#multi-primary---multi-network-ambient-mode
 [sail-multicluster]: https://github.com/istio-ecosystem/sail-operator/blob/main/docs/deployment-models/multicluster.adoc#multi-primary---multi-network
