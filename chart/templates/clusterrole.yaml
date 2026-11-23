@@ -82,7 +82,6 @@ rules:
   - get
   - list
   - patch
-  - update
   - watch
 - apiGroups:
   - work.open-cluster-management.io

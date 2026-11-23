@@ -268,6 +268,7 @@ oc --context "$HUB_CONTEXT" get \
 ~~~
 
 When the mesh reports `Ready=True`, shared trust is in place for the initial members.
+Endpoint discovery is also distributed and available on every member.
 Next, you'll start Istio and verify that the control planes can discover one another.
 See [readiness limits](api-reference.md#readiness-limits) for what this condition covers.
 
