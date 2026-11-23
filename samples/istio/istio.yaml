@@ -1,4 +1,6 @@
 # Istio control plane for multi-primary multi-network mesh.
+# This sample configures sidecar mode only. For ambient mode, see
+# docs/user-guide.md#customize-istio.
 # Adjust the values per cluster:
 #   MESH_NAME: use the MultiClusterMesh CR name (used as CA trust domain)
 #   CLUSTER_NAME: the managed cluster name
