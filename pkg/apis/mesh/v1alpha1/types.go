@@ -188,6 +188,9 @@ const (
 	// ReasonPlacementNotFound indicates the referenced Placement does not exist
 	ReasonPlacementNotFound = "PlacementNotFound"
 
+	// ReasonPlacementDecisionPending indicates PlacementDecision entries do not match Placement status
+	ReasonPlacementDecisionPending = "PlacementDecisionPending"
+
 	// ReasonNoClustersSelected indicates the Placement selected zero clusters
 	ReasonNoClustersSelected = "NoClustersSelected"
 
