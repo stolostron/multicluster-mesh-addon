@@ -161,16 +161,15 @@ kubectl get placementdecision -n mesh-system -l cluster.open-cluster-management.
 The service mesh operator must be installed on managed clusters before creating a mesh.
 The recommended approach uses [OperatorPolicy] from the governance-policy-framework, which distributes the operator to managed clusters using the same Placement-based targeting.
 
-The samples bind to a Placement named `mesh-operator-placement`.
-Point that binding at `mesh-placement` from Step 4 before applying the sample.
+Samples use `mesh-placement` from Step 4.
+Apply the policy in the same namespace as the Placement and the mesh.
 Enable OperatorPolicy on each cluster's config-policy-controller ManagedClusterAddOn with the `operator-policy-disabled=false` annotation.
 Verify that the Placement selects the intended clusters and each has a compliant policy entry before creating the mesh; an aggregate result alone can describe earlier membership.
 
 Kubernetes (Sail):
 
 ```bash
-sed 's/name: mesh-operator-placement/name: mesh-placement/' samples/operator-policy-sail.yaml \
-  | kubectl apply -n mesh-system -f -
+kubectl apply -n mesh-system -f samples/operator-policy-sail.yaml
 kubectl wait --for=jsonpath='{.status.compliant}'=Compliant \
   policy/policy-sail-operator -n mesh-system --timeout=15m
 for CLUSTER_NAME in cluster1 cluster2; do
@@ -182,8 +181,7 @@ done
 OpenShift (OSSM):
 
 ```bash
-sed 's/name: mesh-operator-placement/name: mesh-placement/' samples/operator-policy-ossm.yaml \
-  | kubectl apply -n mesh-system -f -
+kubectl apply -n mesh-system -f samples/operator-policy-ossm.yaml
 kubectl wait --for=jsonpath='{.status.compliant}'=Compliant \
   policy/policy-ossm-operator -n mesh-system --timeout=15m
 for CLUSTER_NAME in cluster1 cluster2; do
@@ -228,8 +226,7 @@ kubectl wait --for=condition=Ready=True multiclustermesh/basic-mesh \
 kubectl get multiclustermesh -n mesh-system -o yaml
 ```
 
-When trust distribution is complete on every resolved cluster, the mesh shows `Ready=True` with reason `AllClustersReady`.
-With no issuer configured, successful hub reconciliation for at least one resolved cluster is enough; no spoke application is checked on that path.
+When every resolved cluster reports `DiscoveryDistributed=True`, and `TrustDistributed=True` when trust is configured, the mesh shows `Ready=True` with reason `AllClustersReady`.
 The auto-derived control plane namespace is reported in `status.controlPlaneNamespace`.
 See the [API reference](api-reference.md#status-conditions) for all reported conditions.
 
