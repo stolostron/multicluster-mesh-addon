@@ -15,7 +15,7 @@
 ## Running Tests
 
 ```bash
-make verify                  # gofmt, modules, vet, istio-reader RBAC drift check
+make verify                  # gofmt, modules, generated files, vet, istio-reader RBAC drift, script syntax
 make test                    # unit tests
 make test-integration        # integration tests (envtest - K8s cluster API running in memory)
 make test-e2e                # e2e tests (requires a running development environment)
@@ -28,7 +28,7 @@ See [test/integration/README.md](../../test/integration/README.md) for test stru
 
 Envtest starts the mesh controller against a real API server and etcd, but does not run the Placement scheduler, cert-manager, ManagedServiceAccount agents, OCM work/ReplicaSet controllers, or garbage collector. Tests simulate those controllers' outputs. Assertions on hub resources do not establish spoke application or remote cleanup; the e2e suites exercise those integrations.
 
-`make verify` can regenerate artifacts through `verify-gen` and runs a targeted RBAC drift test. `make test-integration` also prepares CRDs and dependencies. Neither target is a read-only documentation check.
+`make verify` regenerates code, CRDs, RBAC, and chart metadata before checking them against `HEAD`; it also checks RBAC drift and demo/dev-env script syntax. `make test-integration` prepares CRDs and dependencies.
 
 `make verify` includes `make verify-istio-reader-rbac`, which fetches the upstream
 Istio Helm templates and checks the embedded `pkg/hub/mesh/manifests/istio-reader-*.yaml`
