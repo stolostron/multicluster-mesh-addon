@@ -349,7 +349,7 @@ Potential additions include observability stack management and full addon framew
 <!-- Reference links -->
 [cert-manager]: https://cert-manager.io/
 [cert-secret-cleanup]: https://cert-manager.io/docs/usage/certificate/#cleaning-up-secrets-when-certificates-are-deleted
-[ClusterManagementAddOn]: https://open-cluster-management.io/docs/concepts/addon/#clustermanagementaddon
+[ClusterManagementAddOn]: https://open-cluster-management.io/docs/developer-guides/addon/#clustermanagementaddon
 [ManagedServiceAccount]: https://open-cluster-management.io/docs/getting-started/integration/managed-serviceaccount/
 [ManifestWork]: https://open-cluster-management.io/docs/concepts/work-distribution/manifestwork/
 [ManifestWorkReplicaSet]: https://open-cluster-management.io/docs/concepts/work-distribution/manifestworkreplicaset/

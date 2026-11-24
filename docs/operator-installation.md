@@ -202,5 +202,5 @@ OperatorPolicy is not the only way to install the operator. The addon only requi
 
 If you use a different method, check the [Gateway API prerequisites](#install-gateway-api-crds), then proceed to the next step in the [user guide](user-guide.md#step-6-create-a-multiclustermesh).
 
-[OperatorPolicy]: https://open-cluster-management.io/concepts/policy/
+[OperatorPolicy]: https://open-cluster-management.io/docs/getting-started/integration/policy-controllers/operator-policy/
 [Gateway API]: https://gateway-api.sigs.k8s.io/

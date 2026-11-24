@@ -241,5 +241,4 @@ Reapply the Istio CR and east-west gateway with the matching `NETWORK` value.
 
 <!-- Reference links -->
 [istio-mc-troubleshoot]: https://istio.io/latest/docs/ops/diagnostic-tools/multicluster/
-[kind]: https://kind.sigs.k8s.io/
 [msa-addon]: https://open-cluster-management.io/docs/getting-started/integration/managed-serviceaccount/
