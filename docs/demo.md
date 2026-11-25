@@ -226,6 +226,7 @@ oc --context "$HUB_CONTEXT" apply \
 Each mesh member needs the OSSM operator to run Istio.
 Apply an OperatorPolicy on the hub to install it on cluster1 and cluster2.
 The policy uses `mesh-placement`, so it will also install the operator when you select cluster3 later.
+See [Install the Service Mesh Operator](operator-installation.md) for governance framework setup, version pinning, and adding clusters later.
 
 Wait for the policy to report `Compliant` for both initial clusters before creating the mesh:
 
@@ -268,6 +269,7 @@ oc --context "$HUB_CONTEXT" get \
 ~~~
 
 When the mesh reports `Ready=True`, shared trust is in place for the initial members.
+Endpoint discovery is also distributed and available on every member.
 Next, you'll start Istio and verify that the control planes can discover one another.
 See [readiness limits](api-reference.md#readiness-limits) for what this condition covers.
 
@@ -289,6 +291,8 @@ Use the samples to deploy [Istio CNI](../samples/istio/istiocni.yaml), an [Istio
 Both control planes use `openshift-mesh` as their mesh name and trust domain, and the namespace saved in `CP_NAMESPACE`.
 Give each control plane its own cluster name and network identity as shown below.
 
+To configure Istio from the hub using ACM policies, see [Step 8 of the user guide](user-guide.md#step-8-configure-istio) or the [PolicyGenerator guide](istio-policygenerator.md).
+
 #### 7.1. Start Istio on cluster1
 
 Configure the first control plane for cluster1 on network-a:
@@ -296,7 +300,7 @@ Configure the first control plane for cluster1 on network-a:
 ~~~bash
 export CLUSTER_NAME="$CLUSTER_A"
 export NETWORK=network-a
-oc --context "$SPOKE_A_CONTEXT" apply -f hack/demo/istiocni-namespace.yaml
+oc --context "$SPOKE_A_CONTEXT" apply -f samples/istio/istiocni-namespace.yaml
 oc --context "$SPOKE_A_CONTEXT" apply -f samples/istio/istiocni.yaml
 envsubst < samples/istio/istio.yaml | \
   oc --context "$SPOKE_A_CONTEXT" apply -f -
@@ -311,7 +315,7 @@ Repeat the setup on cluster2, using its own cluster name and network-b:
 ~~~bash
 export CLUSTER_NAME="$CLUSTER_B"
 export NETWORK=network-b
-oc --context "$SPOKE_B_CONTEXT" apply -f hack/demo/istiocni-namespace.yaml
+oc --context "$SPOKE_B_CONTEXT" apply -f samples/istio/istiocni-namespace.yaml
 oc --context "$SPOKE_B_CONTEXT" apply -f samples/istio/istiocni.yaml
 envsubst < samples/istio/istio.yaml | \
   oc --context "$SPOKE_B_CONTEXT" apply -f -
@@ -507,7 +511,7 @@ Use the same Istio setup as the first two clusters:
 ~~~bash
 export CLUSTER_NAME="$CLUSTER_C"
 export NETWORK=network-c
-oc --context "$SPOKE_C_CONTEXT" apply -f hack/demo/istiocni-namespace.yaml
+oc --context "$SPOKE_C_CONTEXT" apply -f samples/istio/istiocni-namespace.yaml
 oc --context "$SPOKE_C_CONTEXT" apply -f samples/istio/istiocni.yaml
 envsubst < samples/istio/istio.yaml | \
   oc --context "$SPOKE_C_CONTEXT" apply -f -
