@@ -56,7 +56,7 @@ tmp_is_empty() { [ -z "$(ls -A "${tmp}")" ]; }
 file_inode() { stat -c %i "$1" 2>/dev/null || stat -f %i "$1" 2>/dev/null; }
 
 # 1. install missing target, direct binary
-"${SCRIPT}" "${bin}/tool" v1.0.0 version "${base}/tool-v1" >/dev/null
+assert "direct install succeeds" "${SCRIPT}" "${bin}/tool" v1.0.0 version "${base}/tool-v1"
 assert "direct install creates an executable binary" test -x "${bin}/tool"
 assert "direct install prints the wanted version" [ "$("${bin}/tool" version)" = "v1.0.0" ]
 assert "direct install cleans its temp dir" tmp_is_empty
@@ -70,14 +70,14 @@ assert "same version is silent" [ -z "${out}" ]
 assert "same version does not touch the binary" [ "$(file_inode "${bin}/tool")" = "${inode_before}" ]
 
 # 3. wrong version is replaced, from a tarball with a nested inner path
-"${SCRIPT}" "${bin}/tool" v2.0.0 version "${base}/tool-v2.tar.gz" bin/tool >/dev/null
+assert "tarball replacement succeeds" "${SCRIPT}" "${bin}/tool" v2.0.0 version "${base}/tool-v2.tar.gz" bin/tool
 assert "wrong version replaced from tarball" [ "$("${bin}/tool" version)" = "v2.0.0" ]
 
 # 4. the pin is authoritative: a newer installed version is downgraded
 # The newer version is pre-created so the scenario owns its starting state.
 cp "${work}/pkg/bin/tool" "${bin}/tool"
 chmod +x "${bin}/tool"
-"${SCRIPT}" "${bin}/tool" v1.0.0 version "${base}/tool-v1" >/dev/null
+assert "downgrade succeeds" "${SCRIPT}" "${bin}/tool" v1.0.0 version "${base}/tool-v1"
 assert "pin downgrades a newer binary" [ "$("${bin}/tool" version)" = "v1.0.0" ]
 
 # 5. an HTTP error fails the install and preserves the working binary

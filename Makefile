@@ -36,8 +36,7 @@ $(ENVTEST): $(BIN_DIR)
 	@test -s $(ENVTEST) || GOBIN=$(BIN_DIR) go install sigs.k8s.io/controller-runtime/tools/setup-envtest@$(CONTROLLER_RUNTIME_BRANCH)
 
 HELM_VERSION ?= v4.3.2
-HELM_BIN := $(BIN_DIR)/helm
-HELM ?= $(shell which helm 2>/dev/null || echo $(HELM_BIN))
+HELM := $(BIN_DIR)/helm
 CHART_DIR := $(CURDIR)/chart
 HELM_RELEASE_NAME ?= multicluster-mesh-addon
 ADDON_NAMESPACE ?= multicluster-mesh-system
@@ -46,9 +45,9 @@ OS := $(shell go env GOOS)
 ARCH := $(shell go env GOARCH)
 
 # Mark phony to ensure we have the desired version
-.PHONY: $(HELM_BIN)
-$(HELM_BIN): | $(BIN_DIR)
-	@hack/install-bin.sh "$(HELM_BIN)" "$(HELM_VERSION)" "version --short" \
+.PHONY: $(HELM)
+$(HELM): | $(BIN_DIR)
+	@hack/install-bin.sh "$(HELM)" "$(HELM_VERSION)" "version --short" \
 		"https://get.helm.sh/helm-$(HELM_VERSION)-$(OS)-$(ARCH).tar.gz" "$(OS)-$(ARCH)/helm"
 # Image registry and name
 # TODO: Change HUB back to quay.io/stolostron when we have access to that registry
@@ -223,7 +222,7 @@ push: images ## Push the container image
 	$(CONTAINER_ENGINE) push $(IMG)
 
 .PHONY: deploy
-deploy: gen push $(HELM_BIN) ## Deploy the controller using Helm (PLATFORM=openshift|kind)
+deploy: gen push $(HELM) ## Deploy the controller using Helm (PLATFORM=openshift|kind)
 	$(HELM) upgrade --install $(HELM_RELEASE_NAME) $(CHART_DIR) \
 		--create-namespace \
 		--namespace $(ADDON_NAMESPACE) \
@@ -233,13 +232,13 @@ deploy: gen push $(HELM_BIN) ## Deploy the controller using Helm (PLATFORM=opens
 		--wait --timeout 180s
 
 .PHONY: undeploy
-undeploy: $(HELM_BIN) ## Remove the controller using Helm
+undeploy: $(HELM) ## Remove the controller using Helm
 	kubectl delete multiclustermeshes.mesh.open-cluster-management.io --all --all-namespaces --ignore-not-found=true || true
 	$(HELM) uninstall $(HELM_RELEASE_NAME) --namespace $(ADDON_NAMESPACE) || true
 	kubectl delete crd multiclustermeshes.mesh.open-cluster-management.io --ignore-not-found=true
 
 .PHONY: helm-lint
-helm-lint: $(HELM_BIN) ## Lint Helm chart
+helm-lint: $(HELM) ## Lint Helm chart
 	$(HELM) lint $(CHART_DIR)
 
 
@@ -282,8 +281,7 @@ DEMO_SCRIPT := $(CURDIR)/hack/demo.sh
 DEMO_DRY_RUN ?=
 DEMO_KUBECONFIG ?=
 ISTIO_VERSION ?= 1.31.4
-ISTIOCTL_BIN := $(BIN_DIR)/istioctl
-ISTIOCTL ?= $(shell which istioctl 2>/dev/null || echo $(ISTIOCTL_BIN))
+ISTIOCTL := $(BIN_DIR)/istioctl
 # Istio names its macOS archives "osx" instead of "darwin".
 ISTIO_OS := $(subst darwin,osx,$(OS))
 
@@ -304,9 +302,9 @@ endif
 log = @echo "==> $(1)"
 
 # Mark phony to ensure we have the desired version
-.PHONY: $(ISTIOCTL_BIN)
-$(ISTIOCTL_BIN): | $(BIN_DIR)
-	@hack/install-bin.sh "$(ISTIOCTL_BIN)" "$(ISTIO_VERSION)" "version --remote=false" \
+.PHONY: $(ISTIOCTL)
+$(ISTIOCTL): | $(BIN_DIR)
+	@hack/install-bin.sh "$(ISTIOCTL)" "$(ISTIO_VERSION)" "version --remote=false" \
 		"https://github.com/istio/istio/releases/download/$(ISTIO_VERSION)/istio-$(ISTIO_VERSION)-$(ISTIO_OS)-$(ARCH).tar.gz" "istio-$(ISTIO_VERSION)/bin/istioctl"
 
 .PHONY: dev-env-base
@@ -332,7 +330,7 @@ demo-dev-clean: ## Destroy the local 3-spoke demo environment
 	$(MAKE) --no-print-directory SPOKE_CLUSTERS="cluster1 cluster2 cluster3" dev-clean
 
 .PHONY: demo
-demo: $(HELM_BIN) $(ISTIOCTL_BIN)
+demo: $(HELM) $(ISTIOCTL)
 demo: ## Run the interactive OpenShift ACM and OSSM demo
 	@if [ -z "$(DEMO_KUBECONFIG)" ]; then \
 		echo "ERROR: DEMO_KUBECONFIG is required (hub:spoke1:spoke2:spoke3 kubeconfig paths)"; exit 1; \
@@ -343,7 +341,7 @@ demo: ## Run the interactive OpenShift ACM and OSSM demo
 	@$(DEMO_SCRIPT)
 
 .PHONY: demo-sail
-demo-sail: $(HELM_BIN) $(ISTIOCTL_BIN)
+demo-sail: $(HELM) $(ISTIOCTL)
 demo-sail: export PLATFORM=kind
 demo-sail: export SPOKE_CLUSTERS=cluster1 cluster2 cluster3
 demo-sail: export DEMO_KUBECONFIG=.kube/hub.config:.kube/cluster1.config:.kube/cluster2.config:.kube/cluster3.config
@@ -406,7 +404,7 @@ install-operator: create-clusterset install-governance-policy-framework install-
 	$(DEV_ENV_SCRIPT) install-operator
 
 .PHONY: install-managed-serviceaccount
-install-managed-serviceaccount: $(HELM_BIN) join-clusters ## Install managed-serviceaccount addon to the hub cluster
+install-managed-serviceaccount: $(HELM) join-clusters ## Install managed-serviceaccount addon to the hub cluster
 	$(call log,Installing managed-serviceaccount: hub)
 	$(DEV_ENV_SCRIPT) install-managed-serviceaccount
 
@@ -435,7 +433,7 @@ load-addon-image: $(KIND) gen images join-clusters ## Build and load the addon i
 	rm -f $(DEV_KUBE_DIR)/.addon-image.tar
 
 .PHONY: deploy-addon
-deploy-addon: $(HELM_BIN) load-addon-image install-cert-manager ## Deploy addon to the hub Kind cluster
+deploy-addon: $(HELM) load-addon-image install-cert-manager ## Deploy addon to the hub Kind cluster
 	$(HELM) upgrade --install $(HELM_RELEASE_NAME) $(CHART_DIR) \
 		--kubeconfig=$(HUB_KUBECONFIG) \
 		--create-namespace \

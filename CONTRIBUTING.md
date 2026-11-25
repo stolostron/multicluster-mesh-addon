@@ -92,7 +92,7 @@ See [Developer Certificate of Origin (DCO)][DCO].
 4. **Make your changes** following project conventions
 5. **Run verification and tests**
    ```bash
-   make verify && make test && make test-integration
+   make verify && make test && make test-scripts && make test-integration
    make dev-env && make test-e2e && make dev-clean # optional
    ```
    `make verify` fetches upstream Istio templates to check for any drift in istio-reader RBAC.
