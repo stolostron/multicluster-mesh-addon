@@ -13,6 +13,11 @@ metadata:
 spec:
   namespace: ${CP_NAMESPACE}
   values:
+    # When the addon is used to manage trust distribution, uncomment on Istio 1.32
+    # See docs/user-guide.md#prevent-self-signed-ca-fallback.
+    # pilot:
+    #   env:
+    #     PILOT_DISABLE_SELF_SIGNED_CA: "true"
     meshConfig:
       trustDomain: ${MESH_NAME}
     global:

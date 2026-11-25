@@ -149,6 +149,12 @@ Common causes:
 - cert-manager failed to issue the certificate (check cert-manager controller logs for details).
 - The cacerts ManifestWork exists but hasn't been applied on the spoke (e.g., the control plane namespace doesn't exist on the spoke cluster).
 
+### Istiod fails startup with self-signed CA disabled
+
+With `PILOT_DISABLE_SELF_SIGNED_CA=true`, istiod fails startup if no plugged-in CA bundle is available. Check [cacerts distribution](#no-cacerts-secret-on-spoke-clusters-trustdistributedfalse) and verify that the Secret is mounted in the istiod pod. Once a valid bundle is mounted, a subsequent startup can succeed.
+
+The flag does not repair certificates already issued by an unintended CA. See [Prevent self-signed CA fallback](user-guide.md#prevent-self-signed-ca-fallback) for configuration and version requirements.
+
 ### Mesh shows PlacementNotFound
 
 The Placement referenced by `spec.placementRef.name` does not exist in the mesh's namespace.
