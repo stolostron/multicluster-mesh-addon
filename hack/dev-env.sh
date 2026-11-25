@@ -540,11 +540,13 @@ install_metallb() {
     # The pool is admission-checked by the MetalLB webhook, which can lag the controller rollout, so we retry until we succeed.
     log "Configuring MetalLB IP pool ${range_start}-${range_end} on ${cluster}..."
     local pool_file
-    pool_file="$(mktemp)"
-    sed "s|__ADDRESS_RANGE__|${range_start}-${range_end}|" \
-        "${SCRIPT_DIR}/hack/kind/metallb-pool.yaml" > "${pool_file}"
-    on "${cluster}" retry kubectl apply -f "${pool_file}"
-    rm -f "${pool_file}"
+    (
+        pool_file="$(mktemp)"
+        trap 'rm -f "${pool_file}"' EXIT
+        sed "s|__ADDRESS_RANGE__|${range_start}-${range_end}|" \
+            "${SCRIPT_DIR}/hack/kind/metallb-pool.yaml" > "${pool_file}"
+        on "${cluster}" retry kubectl apply -f "${pool_file}"
+    )
     log "MetalLB configured on ${cluster}"
 }
 
