@@ -12,6 +12,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
+# We use kubectl wait with combined --for flags, which need kubectl 1.36+
+MIN_KUBECTL_VERSION=1.36
 HUB="hub"
 read -r -a SPOKE_CLUSTERS <<< "${SPOKE_CLUSTERS:-cluster1 cluster2}"
 declare -A SPOKE_CLUSTER_INDEX=()
@@ -89,6 +91,23 @@ check_kernel_keyring_limits() {
         if [[ -n "${msg}" ]]; then
             warn "${msg}. Rootless podman with 3 Kind clusters may fail with 'could not create session key: disk quota exceeded'. See https://github.com/kubernetes-sigs/kind/issues/3806"
         fi
+    fi
+}
+
+check_kubectl_version() {
+    local version_json major minor
+    if ! version_json="$(kubectl version --client -o json 2>/dev/null)"; then
+        err "kubectl not found or failed to run; kubectl ${MIN_KUBECTL_VERSION}+ is required"
+    fi
+    major="$(echo "${version_json}" | jq -r '.clientVersion.major // empty')"
+    minor="$(echo "${version_json}" | jq -r '.clientVersion.minor // empty')"
+    minor="${minor%+}"
+    if [[ -z "${major}" || -z "${minor}" ]]; then
+        err "Failed to parse kubectl version from: ${version_json}"
+    fi
+    local min_major="${MIN_KUBECTL_VERSION%%.*}" min_minor="${MIN_KUBECTL_VERSION#*.}"
+    if (( major < min_major )) || { (( major == min_major )) && (( minor < min_minor )); }; then
+        err "kubectl ${MIN_KUBECTL_VERSION}+ is required, found ${major}.${minor}"
     fi
 }
 
@@ -196,12 +215,8 @@ setup_test_issuer() {
         return
     fi
 
-    log "Waiting for cert-manager-cainjector to be ready..."
-    on "${HUB}" kubectl wait --for=condition=Available deployment/cert-manager-cainjector \
-        -n cert-manager --timeout=10m
-
     log "Creating test ClusterIssuer trust chain"
-    on "${HUB}" kubectl apply -f "${SCRIPT_DIR}/hack/kind/cert-manager-test-issuer.yaml"
+    on "${HUB}" retry kubectl apply -f "${SCRIPT_DIR}/hack/kind/cert-manager-test-issuer.yaml"
 
     log "Waiting for bootstrap ClusterIssuer to be ready..."
     on "${HUB}" retry kubectl wait clusterissuer/mesh-test-selfsigned \
@@ -225,6 +240,11 @@ init_ocm() {
     log "Waiting for OCM hub components to be ready..."
     on "${HUB}" kubectl wait --for=condition=Available \
         deployment/cluster-manager -n open-cluster-management --timeout=10m
+
+    # Joining and accepting clusters is admission-checked by the registration webhook, so wait for it explicitly.
+    on "${HUB}" kubectl wait --for=create --for=condition=Available \
+        deployment/cluster-manager-registration-webhook deployment/cluster-manager-work-webhook \
+        -n open-cluster-management-hub --timeout=10m
 }
 
 join_clusters() {
@@ -246,7 +266,7 @@ join_clusters() {
         fi
 
         log "Joining ${cluster} to hub..."
-        on "${cluster}" "${CLUSTERADM}" join \
+        on "${cluster}" retry "${CLUSTERADM}" join \
             --hub-token "${hub_token}" \
             --hub-apiserver "${hub_apiserver}" \
             --cluster-name "${cluster}" \
@@ -254,7 +274,7 @@ join_clusters() {
     done
 
     log "Accepting managed clusters on hub..."
-    on "${HUB}" "${CLUSTERADM}" accept \
+    on "${HUB}" retry "${CLUSTERADM}" accept \
         --clusters="$(join_by_comma "${SPOKE_CLUSTERS[@]}")" \
         --skip-approve-check \
         --wait
@@ -313,8 +333,9 @@ install_managed_serviceaccount() {
 
     log "Waiting for managed-serviceaccount addon on spokes..."
     for cluster in "${SPOKE_CLUSTERS[@]}"; do
-        on "${HUB}" kubectl wait managedclusteraddon/managed-serviceaccount \
-            -n "${cluster}" --for=condition=Available --timeout=10m
+        on "${HUB}" kubectl wait --for=create --for=condition=Available \
+            managedclusteraddon/managed-serviceaccount \
+            -n "${cluster}" --timeout=10m
     done
 
     log "managed-serviceaccount addon installed on hub"
@@ -357,12 +378,12 @@ install_governance_policy_framework() {
 
     for cluster in "${SPOKE_CLUSTERS[@]}"; do
         log "Waiting for governance-policy-framework addon on ${cluster}..."
-        on "${HUB}" kubectl wait managedclusteraddon/governance-policy-framework \
-            -n "${cluster}" --for=condition=Available --timeout=10m
+        on "${HUB}" kubectl wait --for=create --for=condition=Available \
+            managedclusteraddon/governance-policy-framework -n "${cluster}" --timeout=10m
 
         log "Waiting for config-policy-controller addon on ${cluster}..."
-        on "${HUB}" kubectl wait managedclusteraddon/config-policy-controller \
-            -n "${cluster}" --for=condition=Available --timeout=10m
+        on "${HUB}" kubectl wait --for=create --for=condition=Available \
+            managedclusteraddon/config-policy-controller -n "${cluster}" --timeout=10m
 
         log "Enabling OperatorPolicy on ${cluster}..."
         on "${HUB}" kubectl annotate managedclusteraddon/config-policy-controller \
@@ -516,10 +537,16 @@ install_metallb() {
     log "Waiting for MetalLB speaker to be ready on ${cluster}..."
     on "${cluster}" kubectl rollout status daemonset/speaker -n metallb-system --timeout=120s
 
+    # The pool is admission-checked by the MetalLB webhook, which can lag the controller rollout, so we retry until we succeed.
     log "Configuring MetalLB IP pool ${range_start}-${range_end} on ${cluster}..."
-    sed "s|__ADDRESS_RANGE__|${range_start}-${range_end}|" \
-        "${SCRIPT_DIR}/hack/kind/metallb-pool.yaml" \
-        | on "${cluster}" kubectl apply -f -
+    local pool_file
+    (
+        pool_file="$(mktemp)"
+        trap 'rm -f "${pool_file}"' EXIT
+        sed "s|__ADDRESS_RANGE__|${range_start}-${range_end}|" \
+            "${SCRIPT_DIR}/hack/kind/metallb-pool.yaml" > "${pool_file}"
+        on "${cluster}" retry kubectl apply -f "${pool_file}"
+    )
     log "MetalLB configured on ${cluster}"
 }
 
@@ -575,6 +602,8 @@ setup_mesh() {
     log "Mesh setup complete. The controller will now reconcile the mesh."
     log "Monitor progress: $(on "${HUB}" echo kubectl get multiclustermesh -n "${MESH_NAMESPACE}")"
 }
+
+check_kubectl_version
 
 ACTION="${1:-}"
 case "${ACTION}" in
