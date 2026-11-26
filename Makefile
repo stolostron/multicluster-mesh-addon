@@ -36,7 +36,7 @@ $(ENVTEST): $(BIN_DIR)
 	@test -s $(ENVTEST) || GOBIN=$(BIN_DIR) go install sigs.k8s.io/controller-runtime/tools/setup-envtest@$(CONTROLLER_RUNTIME_BRANCH)
 
 HELM_VERSION ?= v4.3.2
-HELM := $(BIN_DIR)/helm
+override HELM := $(BIN_DIR)/helm
 CHART_DIR := $(CURDIR)/chart
 HELM_RELEASE_NAME ?= multicluster-mesh-addon
 ADDON_NAMESPACE ?= multicluster-mesh-system
@@ -261,8 +261,8 @@ HUB_KUBECONFIG := $(DEV_KUBE_DIR)/hub.config
 SPOKE_CLUSTERS := cluster1 cluster2
 CLUSTERS := hub $(SPOKE_CLUSTERS)
 
-KIND := $(BIN_DIR)/kind
-CLUSTERADM := $(BIN_DIR)/clusteradm
+override KIND := $(BIN_DIR)/kind
+override CLUSTERADM := $(BIN_DIR)/clusteradm
 
 # Mark phony to ensure we have the desired version
 .PHONY: $(KIND)
@@ -281,7 +281,7 @@ DEMO_SCRIPT := $(CURDIR)/hack/demo.sh
 DEMO_DRY_RUN ?=
 DEMO_KUBECONFIG ?=
 ISTIO_VERSION ?= 1.31.4
-ISTIOCTL := $(BIN_DIR)/istioctl
+override ISTIOCTL := $(BIN_DIR)/istioctl
 # Istio names its macOS archives "osx" instead of "darwin".
 ISTIO_OS := $(subst darwin,osx,$(OS))
 
