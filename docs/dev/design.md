@@ -221,7 +221,7 @@ If no manifest exists yet, creation waits until these prerequisites are availabl
 Cleanup and status pruning use the effective membership, observed names plus clusters pending removal inside the grace period, preserving resources for a missing ManagedCluster until its name leaves the decisions and the grace period expires.
 Readiness uses the resolved objects, so a partially missing selection is not currently reflected as an unready member.
 
-Placement and PlacementDecision events enqueue meshes using a namespace-scoped field index on `spec.placementRef.name`. ManagedCluster events find affected meshes from their labeled ManifestWorks. The addon also watches mesh-labeled Secrets and ManagedServiceAccounts, addon-managed ManifestWorks, and generation changes to owned Certificates. It does not watch ManifestWorkReplicaSets directly.
+Placement and PlacementDecision events enqueue meshes using a namespace-scoped field index on `spec.placementRef.name`. ManagedCluster events find affected meshes from their labeled ManifestWorks. The addon also watches mesh-labeled Secrets and ManagedServiceAccounts, addon-managed ManifestWorks, generation changes to owned Certificates, and all changes to owned ManifestWorkReplicaSets, so external edits and deletions are repaired promptly.
 
 ## Operator Lifecycle
 
@@ -300,7 +300,7 @@ When trust is configured (`spec.security.trust`), controller reports per-cluster
 | False | `DistributionPending` | Latest trust material has not yet been distributed to cluster or is unavailable |
 | True | `Distributed` | Latest trust material is distributed and available on cluster |
 
-Mesh-level `Ready` requires `TrustDistributed=True` for every resolved cluster when trust is configured.
+Mesh-level `Ready` requires `DiscoveryDistributed=True` for every resolved cluster, and `TrustDistributed=True` for every cluster when trust is configured.
 This lets users wait for intermediate CA distribution before starting istiod, which otherwise can fall back to self-signed CA and break cross-cluster mTLS.
 During certificate rotation, affected cluster reports `DistributionPending` until updated trust material is distributed and available.
 Mesh reports `Ready=False` while any cluster is pending.
@@ -317,7 +317,30 @@ For multi-primary mesh topologies, each control plane needs API access to its pe
 3. Constructs kubeconfig-style remote secrets from these tokens
 4. Distributes remote secrets to all peer clusters in the mesh via [ManifestWorkReplicaSet], using the same Placement referenced by the mesh
 5. Token rotation is handled automatically by the OCM platform
-6. When a cluster is removed from the mesh, its MSA is deleted and its remote secrets are removed from all peers
+6. When a cluster is removed from the mesh, its MSA is deleted and its remote secrets are removed from all peers after the removal grace period
+
+### Discovery Status
+
+Controller reports per-cluster `DiscoveryDistributed` condition that tracks the distribution of endpoint discovery resources:
+
+| Status | Reason | When |
+|---|---|---|
+| False | `NoAPIEndpoint` | The cluster has no API endpoint configured |
+| False | `TokenPending` | The managed-serviceaccount addon has not created the cluster's token secret yet |
+| False | `DistributionPending` | Discovery resources are pending distribution or unavailable |
+| True | `Distributed` | Discovery resources are distributed and available |
+
+Distribution covers all clusters selected by the mesh's `Placement`.
+A cluster must have an API endpoint and its remote secret included in the `ManifestWorkReplicaSet` template.
+Until the managed-serviceaccount addon creates the cluster's token secret, no remote secret is built and the condition reports `TokenPending`.
+During token rotation, discovery status is reported as pending until updated credentials reach every selected cluster.
+The status can briefly lag while OCM reconciles distribution.
+
+Its istio-reader `ManifestWork` must report `Applied=True` for the current generation and `Available=True`.
+Remote-secret distribution requires the `ManifestWorkReplicaSet` to report both `PlacementRolledOut=True` and `ManifestworkApplied=True`.
+
+Each remote secret has a CEL rule reporting `Progressing=False` because secrets need no rollout after application.
+This lets OCM verify current-generation application through its rollout condition, while `ManifestworkApplied` tracks availability.
 
 ## Lifecycle Events
 
@@ -348,7 +371,7 @@ The user is responsible for:
 - Labeling application namespaces to match discovery selector configuration
 - Creating and managing Placement resources for cluster selection
 
-ArgoCD with ApplicationSets is the recommended approach for managing Istio configuration across clusters.
+ACM policies with hub templates are the recommended approach for managing Istio configuration across clusters. See the [user guide](../user-guide.md#step-8-configure-istio) for the policy-based workflow. ArgoCD ApplicationSets are an alternative for teams already using ArgoCD.
 
 **Phase 2 (Future)**: "Full" approach - the add-on also manages Istio custom resources centrally, automating topology configuration and enforcing consistency.
 

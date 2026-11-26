@@ -44,11 +44,13 @@ It creates resources for selected clusters whose ManagedCluster objects can be r
 It compares the deduplicated decision names with the Placement's `status.numberOfSelectedClusters`, and a mismatch delays reconciliation until the Placement controller finishes writing the decisions.
 A cluster that leaves the selection keeps its resources for the removal grace period before cleanup deletes them.
 
-Each mesh has its own Certificates, ManagedServiceAccounts, namespace ManifestWorks, istio-reader RBAC, and ManifestWorkReplicaSet. The ReplicaSet contains the available remote secrets and references the user's Placement; OCM distributes its template to the selected clusters, including each source cluster itself. Existing remote secrets remain in the template while their source clusters are still selected and replacements cannot yet be built because their ManagedCluster objects, API endpoints, or discovery tokens are unavailable. Updates for clusters with available prerequisites continue during this gap.
+Each mesh has its own Certificates, ManagedServiceAccounts, namespace ManifestWorks, istio-reader RBAC, and ManifestWorkReplicaSet. The ReplicaSet contains the available remote secrets and references the user's Placement; OCM distributes its template to the selected clusters, including each source cluster itself. The addon watches the owned ManifestWorkReplicaSet, restoring externally edited specs and recreating deleted objects. Existing remote secrets remain in the template while their source clusters are still selected and replacements cannot yet be built because their ManagedCluster objects, API endpoints, or discovery tokens are unavailable. Updates for clusters with available prerequisites continue during this gap.
 
 ## Readiness and Cleanup
 
-Mesh `Ready` reports successful hub reconciliation and, when an issuer is configured, the last observed cacerts ManifestWork conditions. Operator health, Istio readiness, discovery rollout, and connectivity require separate checks. See the [API reference](api-reference.md#readiness-limits) for current status limitations.
+Mesh `Ready` requires `DiscoveryDistributed=True` for every resolved cluster and `TrustDistributed=True` when trust is configured.
+Operator health, Istio readiness, token validity, and connectivity require separate checks.
+See [API reference](api-reference.md#readiness-limits) for current status limitations.
 
 Removing a cluster from the decisions marks it `PlacementSelected=False` with reason `RemovalPending` and keeps its resources and its remote secret in the ManifestWorkReplicaSet template for the removal grace period, after which cleanup deletes them.
 An empty selection removes every cluster in the mesh status after the same window.

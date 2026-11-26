@@ -11,6 +11,7 @@ import (
 	clusterv1beta1 "open-cluster-management.io/api/cluster/v1beta1"
 	clusterv1beta2 "open-cluster-management.io/api/cluster/v1beta2"
 	workv1 "open-cluster-management.io/api/work/v1"
+	workv1alpha1 "open-cluster-management.io/api/work/v1alpha1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -93,33 +94,6 @@ func CreateManagedCluster(ctx context.Context, k8sClient client.Client, name str
 	})).To(Succeed())
 }
 
-// SetManifestWorkFeedback updates a ManifestWork's status to include a string feedback value,
-// simulating what the OCM work agent does on a real spoke cluster.
-func SetManifestWorkFeedback(ctx context.Context, k8sClient client.Client, workName, namespace, feedbackName, feedbackValue string) {
-	work := &workv1.ManifestWork{}
-	Expect(k8sClient.Get(ctx, key.Of(workName, namespace), work)).To(Succeed())
-	work.Status.ResourceStatus = workv1.ManifestResourceStatus{
-		Manifests: []workv1.ManifestCondition{{
-			Conditions: []metav1.Condition{{
-				Type:               workv1.ManifestApplied,
-				Status:             metav1.ConditionTrue,
-				Reason:             "Applied",
-				LastTransitionTime: metav1.Now(),
-			}},
-			StatusFeedbacks: workv1.StatusFeedbackResult{
-				Values: []workv1.FeedbackValue{{
-					Name: feedbackName,
-					Value: workv1.FieldValue{
-						Type:   workv1.String,
-						String: &feedbackValue,
-					},
-				}},
-			},
-		}},
-	}
-	Expect(k8sClient.Status().Update(ctx, work)).To(Succeed())
-}
-
 // SetManifestWorkCondition simulates a work agent condition for the work's current generation.
 func SetManifestWorkCondition(ctx context.Context, k8sClient client.Client, work *workv1.ManifestWork, conditionType string, status metav1.ConditionStatus) {
 	patch := client.MergeFrom(work.DeepCopy())
@@ -130,4 +104,13 @@ func SetManifestWorkCondition(ctx context.Context, k8sClient client.Client, work
 		ObservedGeneration: work.Generation,
 	})
 	Expect(k8sClient.Status().Patch(ctx, work, patch)).To(Succeed())
+}
+
+// SetManifestWorkReplicaSetCondition simulates a condition reported by the ReplicaSet controller.
+func SetManifestWorkReplicaSetCondition(ctx context.Context, k8sClient client.Client, mwrset *workv1alpha1.ManifestWorkReplicaSet, conditionType string, status metav1.ConditionStatus) {
+	patch := client.MergeFrom(mwrset.DeepCopy())
+	meta.SetStatusCondition(&mwrset.Status.Conditions, metav1.Condition{
+		Type: conditionType, Status: status, Reason: "ReportedByTest",
+	})
+	Expect(k8sClient.Status().Patch(ctx, mwrset, patch)).To(Succeed())
 }
