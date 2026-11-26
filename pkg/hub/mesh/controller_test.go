@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	certmanagerv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -23,8 +24,6 @@ import (
 
 	meshv1alpha1 "github.com/stolostron/multicluster-mesh-addon/pkg/apis/mesh/v1alpha1"
 )
-
-const testClusterName = "cluster-a"
 
 func TestCheckPrerequisiteCRDs(t *testing.T) {
 	certGVK := certmanagerv1.SchemeGroupVersion.WithKind("Certificate")
@@ -108,7 +107,7 @@ func TestCheckPrerequisiteCRDsUnexpectedError(t *testing.T) {
 	}
 }
 
-func TestGetClustersFromPlacementReturnsSortedClusters(t *testing.T) {
+func TestGetClustersFromPlacementResolvesClusters(t *testing.T) {
 	scheme := newTestScheme()
 
 	placement := &clusterv1beta1.Placement{
@@ -116,15 +115,9 @@ func TestGetClustersFromPlacementReturnsSortedClusters(t *testing.T) {
 		Status:     clusterv1beta1.PlacementStatus{NumberOfSelectedClusters: 3},
 	}
 
-	pd := &clusterv1beta1.PlacementDecision{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "test-placement-decision-1",
-			Namespace: "default",
-			Labels:    map[string]string{PlacementLabel: "test-placement"},
-		},
-	}
+	pd := placementDecision("test-placement", "default", "cluster-c", "cluster-a", "cluster-b")
 
-	clusters := []clusterv1.ManagedCluster{
+	expectedClusters := []clusterv1.ManagedCluster{
 		{ObjectMeta: metav1.ObjectMeta{Name: "cluster-c"}},
 		{ObjectMeta: metav1.ObjectMeta{Name: "cluster-a"}},
 		{ObjectMeta: metav1.ObjectMeta{Name: "cluster-b"}},
@@ -132,56 +125,68 @@ func TestGetClustersFromPlacementReturnsSortedClusters(t *testing.T) {
 
 	c := fake.NewClientBuilder().
 		WithScheme(scheme).
-		WithObjects(placement, pd, &clusters[0], &clusters[1], &clusters[2]).
-		WithStatusSubresource(&clusterv1beta1.PlacementDecision{}).
+		WithObjects(pd, &expectedClusters[0], &expectedClusters[1], &expectedClusters[2]).
 		Build()
-
-	// Fake client doesn't handle status subresources via WithObjects, so update status separately
-	pd.Status = clusterv1beta1.PlacementDecisionStatus{
-		Decisions: []clusterv1beta1.ClusterDecision{
-			{ClusterName: "cluster-c"},
-			{ClusterName: "cluster-a"},
-			{ClusterName: "cluster-b"},
-		},
-	}
-	if err := c.Status().Update(context.Background(), pd); err != nil {
-		t.Fatalf("failed to update PlacementDecision status: %v", err)
-	}
-
-	mesh := &meshv1alpha1.MultiClusterMesh{
-		ObjectMeta: metav1.ObjectMeta{Name: "test-mesh", Namespace: "default"},
-		Spec: meshv1alpha1.MultiClusterMeshSpec{
-			PlacementRef: meshv1alpha1.PlacementReference{Name: "test-placement"},
-		},
-	}
 
 	r := &Reconciler{Client: c, Scheme: scheme}
 
-	result, desiredClusters, found, err := r.getClustersFromPlacement(context.Background(), mesh)
+	clusters, err := r.getClustersFromPlacement(context.Background(), placement)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !found {
-		t.Fatal("expected placementFound=true")
-	}
 
-	if len(result) != 3 {
-		t.Fatalf("expected 3 clusters, got %d", len(result))
+	if len(clusters) != 3 {
+		t.Fatalf("expected 3 clusters, got %d", len(clusters))
 	}
-
-	expected := []string{"cluster-a", "cluster-b", "cluster-c"}
-	for i, name := range expected {
-		if result[i].Name != name {
-			t.Errorf("expected cluster[%d] = %s, got %s", i, name, result[i].Name)
+	for _, name := range []string{"cluster-a", "cluster-b", "cluster-c"} {
+		cluster, ok := clusters[name]
+		if !ok {
+			t.Errorf("expected %s in clusters", name)
+			continue
+		}
+		if cluster == nil {
+			t.Errorf("expected clusters object for %s", name)
 		}
 	}
+}
 
-	if len(desiredClusters) != 3 {
-		t.Fatalf("expected 3 desiredClusters, got %d", len(desiredClusters))
+func TestGetClustersFromPlacementDeduplicatesDecisions(t *testing.T) {
+	scheme := newTestScheme()
+
+	placement := &clusterv1beta1.Placement{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-placement", Namespace: "default"},
+		Status:     clusterv1beta1.PlacementStatus{NumberOfSelectedClusters: 3},
 	}
-	for i, name := range expected {
-		if desiredClusters[i] != name {
-			t.Errorf("expected desiredClusters[%d] = %s, got %s", i, name, desiredClusters[i])
+
+	// cluster-b is listed in both PlacementDecisions, as happens while OCM redistributes decisions one object at a time.
+	pd1 := placementDecision("test-placement", "default", "cluster-a", "cluster-b")
+	pd2 := placementDecision("test-placement", "default", "cluster-b", "cluster-c")
+	pd2.Name = "test-placement-decision-2"
+
+	expectedClusters := []clusterv1.ManagedCluster{
+		{ObjectMeta: metav1.ObjectMeta{Name: "cluster-a"}},
+		{ObjectMeta: metav1.ObjectMeta{Name: "cluster-b"}},
+		{ObjectMeta: metav1.ObjectMeta{Name: "cluster-c"}},
+	}
+
+	c := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(pd1, pd2, &expectedClusters[0], &expectedClusters[1], &expectedClusters[2]).
+		Build()
+
+	r := &Reconciler{Client: c, Scheme: scheme}
+
+	clusters, err := r.getClustersFromPlacement(context.Background(), placement)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(clusters) != 3 {
+		t.Fatalf("expected 3 clusters, got %d: %v", len(clusters), clusters)
+	}
+	for _, name := range []string{"cluster-a", "cluster-b", "cluster-c"} {
+		if clusters[name] == nil {
+			t.Errorf("expected cluster object for %s", name)
 		}
 	}
 }
@@ -195,12 +200,26 @@ func TestDetermineStatus(t *testing.T) {
 		name                string
 		mesh                *meshv1alpha1.MultiClusterMesh
 		clusters            []clusterv1.ManagedCluster
+		placementMissing    bool
 		mwrsets             []workv1alpha1.ManifestWorkReplicaSet
 		works               []workv1.ManifestWork
 		expectReadyStatus   metav1.ConditionStatus
 		expectReason        string
 		expectClusterStatus map[string]map[string]metav1.ConditionStatus
 	}{
+		{
+			name:              "sets PlacementNotFound when the Placement is missing",
+			mesh:              mesh.DeepCopy(),
+			placementMissing:  true,
+			expectReadyStatus: metav1.ConditionFalse,
+			expectReason:      meshv1alpha1.ReasonPlacementNotFound,
+		},
+		{
+			name:              "reports NoClustersSelected when the selection is empty",
+			mesh:              mesh.DeepCopy(),
+			expectReadyStatus: metav1.ConditionFalse,
+			expectReason:      meshv1alpha1.ReasonNoClustersSelected,
+		},
 		{
 			name:     "sets Ready when discovery is distributed without trust configured",
 			mesh:     mesh.DeepCopy(),
@@ -214,7 +233,10 @@ func TestDetermineStatus(t *testing.T) {
 			expectReadyStatus: metav1.ConditionTrue,
 			expectReason:      meshv1alpha1.ReasonAllClustersReady,
 			expectClusterStatus: map[string]map[string]metav1.ConditionStatus{
-				"cluster-a": {meshv1alpha1.ConditionDiscoveryDistributed: metav1.ConditionTrue},
+				"cluster-a": {
+					meshv1alpha1.ConditionPlacementSelected:    metav1.ConditionTrue,
+					meshv1alpha1.ConditionDiscoveryDistributed: metav1.ConditionTrue,
+				},
 			},
 		},
 		{
@@ -230,14 +252,15 @@ func TestDetermineStatus(t *testing.T) {
 			expectReadyStatus: metav1.ConditionFalse,
 			expectReason:      meshv1alpha1.ReasonClustersNotReady,
 			expectClusterStatus: map[string]map[string]metav1.ConditionStatus{
-				"cluster-a": {meshv1alpha1.ConditionDiscoveryDistributed: metav1.ConditionTrue},
-				"cluster-b": {meshv1alpha1.ConditionDiscoveryDistributed: metav1.ConditionFalse},
+				"cluster-a": {
+					meshv1alpha1.ConditionPlacementSelected:    metav1.ConditionTrue,
+					meshv1alpha1.ConditionDiscoveryDistributed: metav1.ConditionTrue,
+				},
+				"cluster-b": {
+					meshv1alpha1.ConditionPlacementSelected:    metav1.ConditionTrue,
+					meshv1alpha1.ConditionDiscoveryDistributed: metav1.ConditionFalse,
+				},
 			},
-		},
-		{
-			name:     "does not set Ready when no clusters",
-			mesh:     mesh.DeepCopy(),
-			clusters: nil,
 		},
 		{
 			name:     "sets Ready when all clusters have trust and discovery distributed",
@@ -254,6 +277,7 @@ func TestDetermineStatus(t *testing.T) {
 			expectReason:      meshv1alpha1.ReasonAllClustersReady,
 			expectClusterStatus: map[string]map[string]metav1.ConditionStatus{
 				"cluster-a": {
+					meshv1alpha1.ConditionPlacementSelected:    metav1.ConditionTrue,
 					meshv1alpha1.ConditionTrustDistributed:     metav1.ConditionTrue,
 					meshv1alpha1.ConditionDiscoveryDistributed: metav1.ConditionTrue,
 				},
@@ -273,6 +297,7 @@ func TestDetermineStatus(t *testing.T) {
 			expectReason:      meshv1alpha1.ReasonClustersNotReady,
 			expectClusterStatus: map[string]map[string]metav1.ConditionStatus{
 				"cluster-a": {
+					meshv1alpha1.ConditionPlacementSelected:    metav1.ConditionTrue,
 					meshv1alpha1.ConditionTrustDistributed:     metav1.ConditionFalse,
 					meshv1alpha1.ConditionDiscoveryDistributed: metav1.ConditionTrue,
 				},
@@ -294,10 +319,12 @@ func TestDetermineStatus(t *testing.T) {
 			expectReason:      meshv1alpha1.ReasonClustersNotReady,
 			expectClusterStatus: map[string]map[string]metav1.ConditionStatus{
 				"cluster-a": {
+					meshv1alpha1.ConditionPlacementSelected:    metav1.ConditionTrue,
 					meshv1alpha1.ConditionTrustDistributed:     metav1.ConditionTrue,
 					meshv1alpha1.ConditionDiscoveryDistributed: metav1.ConditionTrue,
 				},
 				"cluster-b": {
+					meshv1alpha1.ConditionPlacementSelected:    metav1.ConditionTrue,
 					meshv1alpha1.ConditionTrustDistributed:     metav1.ConditionFalse,
 					meshv1alpha1.ConditionDiscoveryDistributed: metav1.ConditionTrue,
 				},
@@ -318,26 +345,30 @@ func TestDetermineStatus(t *testing.T) {
 			c := fake.NewClientBuilder().WithScheme(scheme).WithRuntimeObjects(objs...).Build()
 			r := &Reconciler{Client: c, Scheme: scheme}
 
-			err := r.determineStatus(context.Background(), tc.mesh, tc.clusters)
+			clusters := make(map[string]*clusterv1.ManagedCluster, len(tc.clusters))
+			for i := range tc.clusters {
+				clusters[tc.clusters[i].Name] = &tc.clusters[i]
+			}
+
+			placement := &clusterv1beta1.Placement{}
+			if tc.placementMissing {
+				placement = nil
+			}
+
+			err := r.determineStatus(context.Background(), tc.mesh, clusters, placement)
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
 
 			cond := meta.FindStatusCondition(tc.mesh.Status.Conditions, meshv1alpha1.ConditionReady)
-			if tc.expectReadyStatus == "" {
-				if cond != nil {
-					t.Errorf("expected no Ready condition, got %v", cond)
-				}
-			} else {
-				if cond == nil {
-					t.Fatal("expected Ready condition to be set")
-				}
-				if cond.Status != tc.expectReadyStatus {
-					t.Errorf("expected Ready=%s, got %s", tc.expectReadyStatus, cond.Status)
-				}
-				if cond.Reason != tc.expectReason {
-					t.Errorf("expected reason %s, got %s", tc.expectReason, cond.Reason)
-				}
+			if cond == nil {
+				t.Fatal("expected Ready condition to be set")
+			}
+			if cond.Status != tc.expectReadyStatus {
+				t.Errorf("expected Ready=%s, got %s", tc.expectReadyStatus, cond.Status)
+			}
+			if cond.Reason != tc.expectReason {
+				t.Errorf("expected reason %s, got %s", tc.expectReason, cond.Reason)
 			}
 
 			if len(tc.mesh.Status.ClusterStatus) != len(tc.expectClusterStatus) {
@@ -364,6 +395,96 @@ func TestDetermineStatus(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestDetermineStatusResetsPendingWindow(t *testing.T) {
+	scheme := newTestScheme()
+	c := fake.NewClientBuilder().WithScheme(scheme).Build()
+	r := &Reconciler{Client: c, Scheme: scheme}
+
+	// A RemovalPending mark from long before the cluster reappeared.
+	staleMark := time.Now().Add(-time.Hour)
+	mesh := &meshv1alpha1.MultiClusterMesh{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-mesh", Namespace: "default", Generation: 1},
+		Status: meshv1alpha1.MultiClusterMeshStatus{
+			ClusterStatus: []meshv1alpha1.ClusterMeshStatus{
+				clusterPendingRemoval("cluster-a", staleMark),
+			},
+		},
+	}
+
+	// The cluster reappears, then leaves again.
+	if err := r.determineStatus(context.Background(), mesh, clusterMap("cluster-a"), &clusterv1beta1.Placement{}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if err := r.determineStatus(context.Background(), mesh, clusterMap(), &clusterv1beta1.Placement{}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	cond := findClusterCondition(mesh, "cluster-a", meshv1alpha1.ConditionPlacementSelected)
+	if cond == nil || cond.Status != metav1.ConditionFalse || cond.Reason != meshv1alpha1.ReasonRemovalPending {
+		t.Fatalf("expected False/RemovalPending, got %+v", cond)
+	}
+	if !cond.LastTransitionTime.After(staleMark) {
+		t.Errorf("expected a fresh window, got stale LastTransitionTime %v", cond.LastTransitionTime)
+	}
+}
+
+func TestDetermineStatusMarksPendingRemoval(t *testing.T) {
+	scheme := newTestScheme()
+	c := fake.NewClientBuilder().WithScheme(scheme).Build()
+	r := &Reconciler{Client: c, Scheme: scheme}
+
+	mesh := &meshv1alpha1.MultiClusterMesh{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-mesh", Namespace: "default", Generation: 1},
+		Status: meshv1alpha1.MultiClusterMeshStatus{
+			ClusterStatus: []meshv1alpha1.ClusterMeshStatus{
+				{ClusterName: "cluster-a"},
+				{ClusterName: "cluster-b"},
+			},
+		},
+	}
+
+	// cluster-b left the Placement decisions, so it has no key in clusters.
+	clusters := clusterMap("cluster-a")
+
+	if err := r.determineStatus(context.Background(), mesh, clusters, &clusterv1beta1.Placement{}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	selected := findClusterCondition(mesh, "cluster-a", meshv1alpha1.ConditionPlacementSelected)
+	if selected == nil || selected.Status != metav1.ConditionTrue || selected.Reason != meshv1alpha1.ReasonSelected {
+		t.Errorf("expected cluster-a True/Selected, got %+v", selected)
+	}
+
+	pending := findClusterCondition(mesh, "cluster-b", meshv1alpha1.ConditionPlacementSelected)
+	if pending == nil || pending.Status != metav1.ConditionFalse || pending.Reason != meshv1alpha1.ReasonRemovalPending {
+		t.Errorf("expected cluster-b False/RemovalPending, got %+v", pending)
+	}
+}
+
+func TestDetermineStatusAllUnresolved(t *testing.T) {
+	scheme := newTestScheme()
+	c := fake.NewClientBuilder().WithScheme(scheme).Build()
+	r := &Reconciler{Client: c, Scheme: scheme}
+
+	mesh := &meshv1alpha1.MultiClusterMesh{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-mesh", Namespace: "default", Generation: 1},
+	}
+	clusters := map[string]*clusterv1.ManagedCluster{"cluster-a": nil}
+
+	if err := r.determineStatus(context.Background(), mesh, clusters, &clusterv1beta1.Placement{}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	cond := meta.FindStatusCondition(mesh.Status.Conditions, meshv1alpha1.ConditionReady)
+	if cond == nil {
+		t.Fatal("expected Ready condition to be set")
+		return
+	}
+	if cond.Status != metav1.ConditionFalse || cond.Reason != meshv1alpha1.ReasonNoClustersSelected {
+		t.Errorf("expected False/%s, got %s/%s", meshv1alpha1.ReasonNoClustersSelected, cond.Status, cond.Reason)
 	}
 }
 
@@ -466,7 +587,7 @@ func TestUpdateTrustStatusCondition(t *testing.T) {
 			if len(mesh.Status.ClusterStatus) != 1 {
 				t.Fatalf("expected one cluster status, got %v", mesh.Status.ClusterStatus)
 			}
-			condition := meta.FindStatusCondition(mesh.Status.ClusterStatus[0].Conditions, meshv1alpha1.ConditionTrustDistributed)
+			condition := findClusterCondition(mesh, "cluster-a", meshv1alpha1.ConditionTrustDistributed)
 			if condition == nil {
 				t.Fatal("expected TrustDistributed condition")
 			}
@@ -642,6 +763,31 @@ func mwrsetWithConditions(mesh *meshv1alpha1.MultiClusterMesh, clusterNames []st
 	return mwrset
 }
 
+func mwrsApplied(status metav1.ConditionStatus) metav1.Condition {
+	return metav1.Condition{Type: workv1alpha1.ManifestWorkReplicaSetConditionManifestworkApplied, Status: status}
+}
+
+func mwrsRolledOut(status metav1.ConditionStatus) metav1.Condition {
+	return metav1.Condition{Type: workv1alpha1.ManifestWorkReplicaSetConditionPlacementRolledOut, Status: status}
+}
+
+func clusterMap(names ...string) map[string]*clusterv1.ManagedCluster {
+	m := make(map[string]*clusterv1.ManagedCluster, len(names))
+	for _, name := range names {
+		m[name] = &clusterv1.ManagedCluster{ObjectMeta: metav1.ObjectMeta{Name: name}}
+	}
+	return m
+}
+
+func findClusterCondition(mesh *meshv1alpha1.MultiClusterMesh, clusterName, conditionType string) *metav1.Condition {
+	for _, cs := range mesh.Status.ClusterStatus {
+		if cs.ClusterName == clusterName {
+			return meta.FindStatusCondition(cs.Conditions, conditionType)
+		}
+	}
+	return nil
+}
+
 func meshWithTrust(mesh *meshv1alpha1.MultiClusterMesh) *meshv1alpha1.MultiClusterMesh {
 	trustedMesh := mesh.DeepCopy()
 	trustedMesh.Spec.Security.Trust.CertManager.IssuerRef.Name = "test-issuer"
@@ -680,48 +826,27 @@ func workAvailable(status metav1.ConditionStatus) metav1.Condition {
 	return metav1.Condition{Type: workv1.WorkAvailable, Status: status}
 }
 
-func mwrsApplied(status metav1.ConditionStatus) metav1.Condition {
-	return metav1.Condition{Type: workv1alpha1.ManifestWorkReplicaSetConditionManifestworkApplied, Status: status}
+func clusterWithPlacementSelected(name string, status metav1.ConditionStatus, reason string, transitionTime time.Time) meshv1alpha1.ClusterMeshStatus {
+	return meshv1alpha1.ClusterMeshStatus{
+		ClusterName: name,
+		Conditions: []metav1.Condition{{
+			Type:               meshv1alpha1.ConditionPlacementSelected,
+			Status:             status,
+			Reason:             reason,
+			LastTransitionTime: metav1.NewTime(transitionTime),
+		}},
+	}
 }
 
-func mwrsRolledOut(status metav1.ConditionStatus) metav1.Condition {
-	return metav1.Condition{Type: workv1alpha1.ManifestWorkReplicaSetConditionPlacementRolledOut, Status: status}
+func clusterPendingRemoval(name string, markedAt time.Time) meshv1alpha1.ClusterMeshStatus {
+	return clusterWithPlacementSelected(name, metav1.ConditionFalse, meshv1alpha1.ReasonRemovalPending, markedAt)
 }
 
-func TestGetClustersFromPlacementNotFound(t *testing.T) {
-	scheme := newTestScheme()
-
-	mesh := &meshv1alpha1.MultiClusterMesh{
-		ObjectMeta: metav1.ObjectMeta{Name: "test-mesh", Namespace: "default"},
-		Spec: meshv1alpha1.MultiClusterMeshSpec{
-			PlacementRef: meshv1alpha1.PlacementReference{Name: "missing-placement"},
-		},
-	}
-
-	c := fake.NewClientBuilder().WithScheme(scheme).Build()
-	r := &Reconciler{Client: c, Scheme: scheme}
-
-	result, desiredClusters, found, err := r.getClustersFromPlacement(context.Background(), mesh)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if found {
-		t.Fatal("expected placementFound=false")
-	}
-	if len(result) != 0 {
-		t.Fatalf("expected 0 clusters, got %d", len(result))
-	}
-	if desiredClusters != nil {
-		t.Fatalf("expected nil desiredClusters, got %v", desiredClusters)
-	}
-
-	cond := meta.FindStatusCondition(mesh.Status.Conditions, meshv1alpha1.ConditionReady)
-	if cond == nil {
-		t.Fatal("expected Ready condition to be set")
-		return
-	}
-	if cond.Reason != meshv1alpha1.ReasonPlacementNotFound {
-		t.Errorf("expected reason %s, got %s", meshv1alpha1.ReasonPlacementNotFound, cond.Reason)
+// The rounding absorbs the time between a test capturing now and effectiveMembership reading it again.
+func assertRequeueAfter(t *testing.T, expected, requeueAfter time.Duration) {
+	t.Helper()
+	if requeueAfter.Round(time.Second) != expected {
+		t.Errorf("expected requeueAfter of %v, got %v", expected, requeueAfter)
 	}
 }
 
@@ -732,37 +857,15 @@ func TestGetClustersFromPlacementNoClustersSelected(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "test-placement", Namespace: "default"},
 	}
 
-	mesh := &meshv1alpha1.MultiClusterMesh{
-		ObjectMeta: metav1.ObjectMeta{Name: "test-mesh", Namespace: "default"},
-		Spec: meshv1alpha1.MultiClusterMeshSpec{
-			PlacementRef: meshv1alpha1.PlacementReference{Name: "test-placement"},
-		},
-	}
-
-	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(placement).Build()
+	c := fake.NewClientBuilder().WithScheme(scheme).Build()
 	r := &Reconciler{Client: c, Scheme: scheme}
 
-	result, desiredClusters, found, err := r.getClustersFromPlacement(context.Background(), mesh)
+	clusters, err := r.getClustersFromPlacement(context.Background(), placement)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !found {
-		t.Fatal("expected placementFound=true")
-	}
-	if len(result) != 0 {
-		t.Fatalf("expected 0 clusters, got %d", len(result))
-	}
-	if desiredClusters != nil {
-		t.Fatalf("expected nil desiredClusters, got %v", desiredClusters)
-	}
-
-	cond := meta.FindStatusCondition(mesh.Status.Conditions, meshv1alpha1.ConditionReady)
-	if cond == nil {
-		t.Fatal("expected Ready condition to be set")
-		return
-	}
-	if cond.Reason != meshv1alpha1.ReasonNoClustersSelected {
-		t.Errorf("expected reason %s, got %s", meshv1alpha1.ReasonNoClustersSelected, cond.Reason)
+	if len(clusters) != 0 {
+		t.Fatalf("expected 0 clusters, got %d", len(clusters))
 	}
 }
 
@@ -780,53 +883,28 @@ func TestGetClustersFromPlacementSkipsMissingCluster(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "cluster-exists"},
 	}
 
-	mesh := &meshv1alpha1.MultiClusterMesh{
-		ObjectMeta: metav1.ObjectMeta{Name: "test-mesh", Namespace: "default"},
-		Spec: meshv1alpha1.MultiClusterMeshSpec{
-			PlacementRef: meshv1alpha1.PlacementReference{Name: "test-placement"},
-		},
-	}
-
 	c := fake.NewClientBuilder().
 		WithScheme(scheme).
-		WithObjects(placement, pd, cluster).
-		WithStatusSubresource(&clusterv1beta1.PlacementDecision{}).
+		WithObjects(pd, cluster).
 		Build()
-	pd.Status.Decisions = []clusterv1beta1.ClusterDecision{
-		{ClusterName: "cluster-exists"},
-		{ClusterName: "cluster-missing"},
-	}
-	if err := c.Status().Update(context.Background(), pd); err != nil {
-		t.Fatalf("failed to update PlacementDecision status: %v", err)
-	}
 
 	r := &Reconciler{Client: c, Scheme: scheme}
 
-	result, desiredClusters, found, err := r.getClustersFromPlacement(context.Background(), mesh)
+	clusters, err := r.getClustersFromPlacement(context.Background(), placement)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !found {
-		t.Fatal("expected placementFound=true")
-	}
-	if len(result) != 1 {
-		t.Fatalf("expected 1 cluster, got %d", len(result))
-	}
-	if result[0].Name != "cluster-exists" {
-		t.Errorf("expected cluster-exists, got %s", result[0].Name)
+	if clusters["cluster-exists"] == nil {
+		t.Error("expected cluster object for cluster-exists")
 	}
 
-	// desiredClusters includes ALL PlacementDecision entries, even the missing
-	// cluster. This prevents cleanup functions from prematurely deleting
-	// resources for clusters whose ManagedCluster is temporarily unavailable.
-	if len(desiredClusters) != 2 {
-		t.Fatalf("expected 2 desiredClusters, got %d: %v", len(desiredClusters), desiredClusters)
+	// clusters includes ALL PlacementDecision entries, even the missing cluster.
+	// This prevents cleanup functions from prematurely deleting resources for clusters whose ManagedCluster is temporarily unavailable.
+	if _, ok := clusters["cluster-missing"]; !ok {
+		t.Error("expected cluster-missing in clusters")
 	}
-	expectedNames := []string{"cluster-exists", "cluster-missing"}
-	for i, name := range expectedNames {
-		if desiredClusters[i] != name {
-			t.Errorf("expected desiredClusters[%d] = %s, got %s", i, name, desiredClusters[i])
-		}
+	if clusters["cluster-missing"] != nil {
+		t.Error("expected nil object for cluster-missing")
 	}
 }
 
@@ -840,61 +918,26 @@ func TestGetClustersFromPlacementAllMissing(t *testing.T) {
 
 	pd := placementDecision("test-placement", "default", "gone-cluster-1", "gone-cluster-2")
 
-	mesh := &meshv1alpha1.MultiClusterMesh{
-		ObjectMeta: metav1.ObjectMeta{Name: "test-mesh", Namespace: "default"},
-		Spec: meshv1alpha1.MultiClusterMeshSpec{
-			PlacementRef: meshv1alpha1.PlacementReference{Name: "test-placement"},
-		},
-	}
-
 	c := fake.NewClientBuilder().
 		WithScheme(scheme).
-		WithObjects(placement, pd).
-		WithStatusSubresource(&clusterv1beta1.PlacementDecision{}).
+		WithObjects(pd).
 		Build()
-	pd.Status.Decisions = []clusterv1beta1.ClusterDecision{
-		{ClusterName: "gone-cluster-1"},
-		{ClusterName: "gone-cluster-2"},
-	}
-	if err := c.Status().Update(context.Background(), pd); err != nil {
-		t.Fatalf("failed to update PlacementDecision status: %v", err)
-	}
 
 	r := &Reconciler{Client: c, Scheme: scheme}
 
-	result, desiredClusters, found, err := r.getClustersFromPlacement(context.Background(), mesh)
+	clusters, err := r.getClustersFromPlacement(context.Background(), placement)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !found {
-		t.Fatal("expected placementFound=true")
-	}
-	if len(result) != 0 {
-		t.Fatalf("expected 0 clusters, got %d", len(result))
-	}
 
-	// desiredClusters includes the PlacementDecision entries even though all
-	// ManagedClusters are gone, preventing premature cleanup.
-	if len(desiredClusters) != 2 {
-		t.Fatalf("expected 2 desiredClusters, got %d: %v", len(desiredClusters), desiredClusters)
+	// clusters includes the PlacementDecision entries even though all ManagedClusters are gone, preventing premature cleanup.
+	if len(clusters) != 2 {
+		t.Fatalf("expected 2 clusters, got %d: %v", len(clusters), clusters)
 	}
-	expectedNames := []string{"gone-cluster-1", "gone-cluster-2"}
-	for i, name := range expectedNames {
-		if desiredClusters[i] != name {
-			t.Errorf("expected desiredClusters[%d] = %s, got %s", i, name, desiredClusters[i])
+	for _, name := range []string{"gone-cluster-1", "gone-cluster-2"} {
+		if clusters[name] != nil {
+			t.Errorf("expected nil object for %s", name)
 		}
-	}
-
-	cond := meta.FindStatusCondition(mesh.Status.Conditions, meshv1alpha1.ConditionReady)
-	if cond == nil {
-		t.Fatal("expected Ready condition to be set")
-		return
-	}
-	if cond.Reason != meshv1alpha1.ReasonNoClustersSelected {
-		t.Errorf("expected reason %s, got %s", meshv1alpha1.ReasonNoClustersSelected, cond.Reason)
-	}
-	if !strings.Contains(cond.Message, "none of the selected ManagedClusters exist") {
-		t.Errorf("expected message about missing ManagedClusters, got: %s", cond.Message)
 	}
 }
 
@@ -909,7 +952,7 @@ func TestFindMeshesForCluster(t *testing.T) {
 		{
 			name: "finds mesh from labeled ManifestWork",
 			works: []workv1.ManifestWork{
-				meshOwnedWork("some-work", "mesh-a", "ns-a"),
+				meshOwnedWork("cluster-a", "some-work", "mesh-a", "ns-a"),
 			},
 			expected: []types.NamespacedName{{Name: "mesh-a", Namespace: "ns-a"}},
 		},
@@ -917,7 +960,7 @@ func TestFindMeshesForCluster(t *testing.T) {
 			name: "skips ManifestWorks without mesh labels",
 			works: []workv1.ManifestWork{{
 				ObjectMeta: metav1.ObjectMeta{
-					Name: "unlabeled-work", Namespace: testClusterName,
+					Name: "unlabeled-work", Namespace: "cluster-a",
 					Labels: map[string]string{ManagedByLabel: ManagedByValue},
 				},
 			}},
@@ -926,16 +969,16 @@ func TestFindMeshesForCluster(t *testing.T) {
 		{
 			name: "deduplicates multiple ManifestWorks for same mesh",
 			works: []workv1.ManifestWork{
-				meshOwnedWork("work-1", "mesh-a", "ns-a"),
-				meshOwnedWork("work-2", "mesh-a", "ns-a"),
+				meshOwnedWork("cluster-a", "work-1", "mesh-a", "ns-a"),
+				meshOwnedWork("cluster-a", "work-2", "mesh-a", "ns-a"),
 			},
 			expected: []types.NamespacedName{{Name: "mesh-a", Namespace: "ns-a"}},
 		},
 		{
 			name: "returns multiple meshes from different ManifestWorks",
 			works: []workv1.ManifestWork{
-				meshOwnedWork("work-1", "mesh-a", "ns-a"),
-				meshOwnedWork("work-2", "mesh-b", "ns-b"),
+				meshOwnedWork("cluster-a", "work-1", "mesh-a", "ns-a"),
+				meshOwnedWork("cluster-a", "work-2", "mesh-b", "ns-b"),
 			},
 			expected: []types.NamespacedName{
 				{Name: "mesh-a", Namespace: "ns-a"},
@@ -958,7 +1001,7 @@ func TestFindMeshesForCluster(t *testing.T) {
 			c := fake.NewClientBuilder().WithScheme(scheme).WithRuntimeObjects(objs...).Build()
 			r := &Reconciler{Client: c, Scheme: scheme}
 
-			cluster := &clusterv1.ManagedCluster{ObjectMeta: metav1.ObjectMeta{Name: testClusterName}}
+			cluster := &clusterv1.ManagedCluster{ObjectMeta: metav1.ObjectMeta{Name: "cluster-a"}}
 			requests := r.findMeshesForCluster(context.Background(), cluster)
 
 			if len(requests) != len(tc.expected) {
@@ -978,19 +1021,28 @@ func TestFindMeshesForManifestWork(t *testing.T) {
 
 	tests := []struct {
 		name     string
-		work     workv1.ManifestWork
+		work     *workv1.ManifestWork
 		expected []types.NamespacedName
 	}{
 		{
-			name:     "mesh-owned ManifestWork returns owning mesh directly",
-			work:     meshOwnedWork("some-mesh-work", "my-mesh", "my-ns"),
+			name: "mesh-owned ManifestWork returns owning mesh directly",
+			work: &workv1.ManifestWork{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "some-mesh-work", Namespace: "cluster-a",
+					Labels: map[string]string{
+						ManagedByLabel:     ManagedByValue,
+						MeshNameLabel:      "my-mesh",
+						MeshNamespaceLabel: "my-ns",
+					},
+				},
+			},
 			expected: []types.NamespacedName{{Name: "my-mesh", Namespace: "my-ns"}},
 		},
 		{
 			name: "ManifestWork without mesh labels returns empty",
-			work: workv1.ManifestWork{
+			work: &workv1.ManifestWork{
 				ObjectMeta: metav1.ObjectMeta{
-					Name: "unlabeled-work", Namespace: testClusterName,
+					Name: "unlabeled-work", Namespace: "cluster-a",
 					Labels: map[string]string{ManagedByLabel: ManagedByValue},
 				},
 			},
@@ -1000,10 +1052,10 @@ func TestFindMeshesForManifestWork(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			c := fake.NewClientBuilder().WithScheme(scheme).WithRuntimeObjects(&tc.work).Build()
+			c := fake.NewClientBuilder().WithScheme(scheme).WithRuntimeObjects(tc.work).Build()
 			r := &Reconciler{Client: c, Scheme: scheme}
 
-			requests := r.findMeshesForManifestWork(context.Background(), &tc.work)
+			requests := r.findMeshesForManifestWork(context.Background(), tc.work)
 
 			if len(requests) != len(tc.expected) {
 				t.Fatalf("expected %d requests, got %d", len(tc.expected), len(requests))
@@ -1076,62 +1128,77 @@ func TestFindMeshesForPlacementDecision(t *testing.T) {
 	}
 }
 
-func TestPruneStaleClusterStatus(t *testing.T) {
-	tests := []struct {
-		name     string
-		initial  []string
-		active   []string
-		expected []string
-	}{
-		{
-			name:     "prunes removed cluster",
-			initial:  []string{"cluster-a", "cluster-b"},
-			active:   []string{"cluster-a"},
-			expected: []string{"cluster-a"},
-		},
-		{
-			name:     "prunes all when no active clusters",
-			initial:  []string{"cluster-a", "cluster-b"},
-			active:   nil,
-			expected: nil,
-		},
-		{
-			name:     "preserves all when all active",
-			initial:  []string{"cluster-a", "cluster-b"},
-			active:   []string{"cluster-a", "cluster-b"},
-			expected: []string{"cluster-a", "cluster-b"},
-		},
-		{
-			name:     "noop when already empty",
-			initial:  nil,
-			active:   []string{"cluster-a"},
-			expected: nil,
+func TestEffectiveMembership(t *testing.T) {
+	now := time.Now()
+
+	mesh := &meshv1alpha1.MultiClusterMesh{
+		Status: meshv1alpha1.MultiClusterMeshStatus{
+			ClusterStatus: []meshv1alpha1.ClusterMeshStatus{
+				{ClusterName: "observed-a"},
+				{ClusterName: "observed-b"},
+				clusterPendingRemoval("pending-fresh", now),
+				clusterPendingRemoval("pending-recent", now.Add(-RemovalGracePeriod/2)),
+				clusterPendingRemoval("pending-expired", now.Add(-RemovalGracePeriod-time.Second)),
+				{ClusterName: "missing-unmarked"},
+			},
 		},
 	}
 
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			status := make([]meshv1alpha1.ClusterMeshStatus, len(tc.initial))
-			for i, name := range tc.initial {
-				status[i] = meshv1alpha1.ClusterMeshStatus{ClusterName: name}
-			}
-			mesh := &meshv1alpha1.MultiClusterMesh{
-				Status: meshv1alpha1.MultiClusterMeshStatus{ClusterStatus: status},
-			}
+	effective, requeueAfter := effectiveMembership(mesh, clusterMap("observed-a", "observed-b"))
 
-			r := &Reconciler{}
-			r.pruneStaleClusterStatus(mesh, tc.active)
-
-			if len(mesh.Status.ClusterStatus) != len(tc.expected) {
-				t.Fatalf("expected %d cluster statuses, got %d", len(tc.expected), len(mesh.Status.ClusterStatus))
-			}
-			for i, exp := range tc.expected {
-				if mesh.Status.ClusterStatus[i].ClusterName != exp {
-					t.Errorf("status[%d] = %s, want %s", i, mesh.Status.ClusterStatus[i].ClusterName, exp)
-				}
-			}
-		})
+	expected := []string{"missing-unmarked", "observed-a", "observed-b", "pending-fresh", "pending-recent"}
+	if len(effective) != len(expected) {
+		t.Fatalf("expected %d effective clusters, got %d: %v", len(expected), len(effective), effective)
 	}
+	for _, name := range expected {
+		if _, ok := effective[name]; !ok {
+			t.Errorf("expected %s in effective", name)
+		}
+	}
+	if _, ok := effective["pending-expired"]; ok {
+		t.Error("expected pending-expired to be dropped")
+	}
+
+	assertRequeueAfter(t, RemovalGracePeriod/2, requeueAfter)
+}
+
+func TestEffectiveMembershipNothingPending(t *testing.T) {
+	mesh := &meshv1alpha1.MultiClusterMesh{
+		Status: meshv1alpha1.MultiClusterMeshStatus{
+			ClusterStatus: []meshv1alpha1.ClusterMeshStatus{{ClusterName: "observed-a"}},
+		},
+	}
+
+	effective, requeueAfter := effectiveMembership(mesh, clusterMap("observed-a"))
+
+	if len(effective) != 1 || effective["observed-a"] == nil {
+		t.Errorf("expected only observed-a with its object, got %v", effective)
+	}
+	if requeueAfter != 0 {
+		t.Errorf("expected zero requeueAfter, got %v", requeueAfter)
+	}
+}
+
+func TestEffectiveMembershipNewlyMissing(t *testing.T) {
+	// A cluster selected long ago with no RemovalPending mark is newly missing:
+	// its window starts now, not at the True condition's LastTransitionTime.
+	mesh := &meshv1alpha1.MultiClusterMesh{
+		Status: meshv1alpha1.MultiClusterMeshStatus{
+			ClusterStatus: []meshv1alpha1.ClusterMeshStatus{
+				clusterWithPlacementSelected("selected-stale", metav1.ConditionTrue, meshv1alpha1.ReasonSelected, time.Now().Add(-RemovalGracePeriod*2)),
+			},
+		},
+	}
+
+	effective, requeueAfter := effectiveMembership(mesh, nil)
+
+	if _, ok := effective["selected-stale"]; !ok {
+		t.Fatal("expected newly missing cluster to stay in the effective membership")
+	}
+	if effective["selected-stale"] != nil {
+		t.Error("expected newly missing cluster to map to nil")
+	}
+	assertRequeueAfter(t, RemovalGracePeriod, requeueAfter)
 }
 
 func newTestScheme() *runtime.Scheme {
@@ -1144,11 +1211,11 @@ func newTestScheme() *runtime.Scheme {
 	return scheme
 }
 
-func meshOwnedWork(name, meshName, meshNamespace string) workv1.ManifestWork {
+func meshOwnedWork(namespace, name, meshName, meshNamespace string) workv1.ManifestWork {
 	return workv1.ManifestWork{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
-			Namespace: testClusterName,
+			Namespace: namespace,
 			Labels: map[string]string{
 				ManagedByLabel:     ManagedByValue,
 				MeshNameLabel:      meshName,
