@@ -200,7 +200,7 @@ The reconcile returns without changes, and the `PlacementDecision` and `Placemen
 A deduplicated set that matches the count can still be a mixed snapshot.
 While OCM redistributes decisions, a cluster moving between `PlacementDecision` objects is temporarily absent from the observed set, and a cluster added in the same transition can keep the set size equal to the stale count.
 Deletion is therefore deferred.
-A cluster that leaves the observed set gets the per-cluster `PlacementSelected=False` condition with reason `RemovalPending`, keeps its resources, and stays in the effective membership passed to cleanup for the removal grace period (30 seconds by default).
+A cluster that leaves the observed set gets the per-cluster `PlacementSelected=False` condition with reason `RemovalPending`, keeps its resources, and stays in the effective membership passed to cleanup for a fixed removal grace period of 30 seconds.
 If it reappears, the condition clears and the removal is cancelled.
 If it stays missing past the grace period, the controller deletes its resources and prunes its `clusterStatus` entry.
 The reconcile requeues at the earliest pending deadline, so deletions fire without further events.
@@ -322,7 +322,7 @@ For multi-primary mesh topologies, each control plane needs API access to its pe
 ## Lifecycle Events
 
 - **Scale Up**: When a new cluster is selected by the Placement, the controller provisions the mesh plumbing for it: the control plane namespace, an intermediate CA Certificate when an issuer is set, istio-reader RBAC, a ManagedServiceAccount, and remote secrets for the current members. This is the same process as the initial mesh bootstrap, applied to the new cluster.
-- **Scale Down**: When a cluster leaves the decisions and the deduplicated set matches `status.numberOfSelectedClusters`, the cluster is marked `RemovalPending` and its resources are preserved for the removal grace period (30 seconds by default).
+- **Scale Down**: When a cluster leaves the decisions and the deduplicated set matches `status.numberOfSelectedClusters`, the cluster is marked `RemovalPending` and its resources are preserved for a fixed removal grace period of 30 seconds.
   After the grace period, reconciliation requests deletion of its mesh ManifestWorks, intermediate CA Certificate, and ManagedServiceAccount, and rebuilds the ReplicaSet without its remote secret.
   A cluster that reappears within the window, for example while moving between `PlacementDecision` objects during redistribution, has its mark cleared and the removal is cancelled.
   OCM applies those changes asynchronously.

@@ -192,31 +192,34 @@ func RegisterController(mgr manager.Manager) error {
 //+kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
 
 // Reconcile implements the reconcile loop for MultiClusterMesh resources
-func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (result reconcile.Result, reconcileErr error) {
+func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
 	klog.Infof("Reconciling MultiClusterMesh: %s/%s", req.Namespace, req.Name)
 
 	// Fetch the MultiClusterMesh resource
 	mesh := &meshv1alpha1.MultiClusterMesh{}
 	if err := r.Get(ctx, req.NamespacedName, mesh); err != nil {
 		klog.V(4).Infof("MultiClusterMesh not found, may have been deleted: %s/%s", req.Namespace, req.Name)
-		return result, client.IgnoreNotFound(err)
+		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
 
 	if !mesh.DeletionTimestamp.IsZero() {
 		klog.Infof("MultiClusterMesh being deleted: %s/%s", req.Namespace, req.Name)
-		return result, r.handleDeletion(ctx, mesh)
+		return reconcile.Result{}, r.handleDeletion(ctx, mesh)
 	}
 
 	if !controllerutil.ContainsFinalizer(mesh, FinalizerName) {
 		klog.Infof("Adding finalizer to MultiClusterMesh %s/%s", mesh.Namespace, mesh.Name)
 		controllerutil.AddFinalizer(mesh, FinalizerName)
 		if err := r.Update(ctx, mesh); err != nil {
-			return result, fmt.Errorf("failed to add finalizer: %w", err)
+			return reconcile.Result{}, fmt.Errorf("failed to add finalizer: %w", err)
 		}
-		return
+		return reconcile.Result{}, nil
 	}
 
 	oldStatus := mesh.Status.DeepCopy()
+
+	var reconcileErr error
+	var requeueAfter time.Duration
 
 	placement := &clusterv1beta1.Placement{}
 	if err := r.Get(ctx, key.Of(mesh.Spec.PlacementRef.Name, mesh.Namespace), placement); err != nil {
@@ -228,15 +231,14 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (resu
 
 	if reconcileErr == nil {
 		var clusters, effectiveClusters map[string]*clusterv1.ManagedCluster
-		var requeueAfter time.Duration
 
 		// When the Placement is missing, doReconcile must not run because its cleanup functions would tear down all infrastructure.
 		// The Placement might be created later or the reference might be fixed, and clusterStatus is cleared while it is missing.
 		if placement != nil {
 			clusters, reconcileErr = r.getClustersFromPlacement(ctx, placement)
 			if errors.Is(reconcileErr, errDecisionsPending) {
-				klog.Warningf("Placement %s is still reconciling, waiting for it to finish", placement.Name)
-				return result, nil
+				klog.Infof("%v", reconcileErr)
+				return reconcile.Result{}, nil
 			}
 
 			if reconcileErr == nil {
@@ -251,9 +253,6 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (resu
 				return !isMember(effectiveClusters, cs.ClusterName)
 			})
 			reconcileErr = r.determineStatus(ctx, mesh, clusters, placement)
-			if reconcileErr == nil && requeueAfter != 0 {
-				result.RequeueAfter = requeueAfter
-			}
 		}
 	}
 
@@ -277,7 +276,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (resu
 		})
 	}
 
-	return result, errors.Join(reconcileErr, statusErr)
+	return reconcile.Result{RequeueAfter: requeueAfter}, errors.Join(reconcileErr, statusErr)
 }
 
 // doReconcile creates resources for clusters with a resolved object and cleans up resources for clusters outside the effective membership.
@@ -285,7 +284,8 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (resu
 // A nil value means no object is available: the cluster is pending removal or its ManagedCluster object does not exist.
 // Cleanup functions use the keys, the install loop uses the non-nil values.
 func (r *Reconciler) doReconcile(ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, clusters map[string]*clusterv1.ManagedCluster) error {
-	for _, cluster := range clusters {
+	for _, name := range slices.Sorted(maps.Keys(clusters)) {
+		cluster := clusters[name]
 		if cluster == nil {
 			continue
 		}
@@ -518,8 +518,8 @@ func (r *Reconciler) cleanupMeshOwnedManifestWorks(ctx context.Context, mesh *me
 	return nil
 }
 
-// hasSelectedCluster reports whether any observed cluster has a ManagedCluster object.
-func hasSelectedCluster(clusters map[string]*clusterv1.ManagedCluster) bool {
+// hasResolvedCluster reports whether any observed cluster has a ManagedCluster object.
+func hasResolvedCluster(clusters map[string]*clusterv1.ManagedCluster) bool {
 	for _, cluster := range clusters {
 		if cluster != nil {
 			return true
@@ -537,11 +537,12 @@ func isMember(clusters map[string]*clusterv1.ManagedCluster, name string) bool {
 // effectiveMembership returns the cluster names whose resources must be preserved: every observed name,
 // plus clusters whose PlacementSelected condition is False (pending removal) and whose grace period has not expired yet.
 // The result maps each name to its ManagedCluster object, or to nil when no object is available.
-// requeueAfter is the time until the earliest pending expiry, or zero when nothing is pending.
+// The returned duration is the time until the earliest pending expiry, or zero when nothing is pending.
 // A cluster missing from the observed set without a False PlacementSelected condition is newly missing, so its grace period starts now.
-func effectiveMembership(mesh *meshv1alpha1.MultiClusterMesh, clusters map[string]*clusterv1.ManagedCluster) (effectiveClusters map[string]*clusterv1.ManagedCluster, requeueAfter time.Duration) {
+func effectiveMembership(mesh *meshv1alpha1.MultiClusterMesh, clusters map[string]*clusterv1.ManagedCluster) (map[string]*clusterv1.ManagedCluster, time.Duration) {
+	var requeueAfter time.Duration
 	now := time.Now()
-	effectiveClusters = make(map[string]*clusterv1.ManagedCluster, len(clusters)+len(mesh.Status.ClusterStatus))
+	effectiveClusters := make(map[string]*clusterv1.ManagedCluster, len(clusters)+len(mesh.Status.ClusterStatus))
 	maps.Copy(effectiveClusters, clusters)
 
 	for _, cs := range mesh.Status.ClusterStatus {
@@ -554,9 +555,9 @@ func effectiveMembership(mesh *meshv1alpha1.MultiClusterMesh, clusters map[strin
 			deadline = c.LastTransitionTime.Time
 		}
 		expiry := deadline.Add(RemovalGracePeriod)
-		if now.Before(expiry) {
+		if until := time.Until(expiry); until > 0 {
 			effectiveClusters[cs.ClusterName] = nil
-			if until := expiry.Sub(now); requeueAfter == 0 || until < requeueAfter {
+			if requeueAfter == 0 || until < requeueAfter {
 				requeueAfter = until
 			}
 		}
@@ -604,7 +605,7 @@ func (r *Reconciler) determineStatus(ctx context.Context, mesh *meshv1alpha1.Mul
 			metav1.ConditionFalse, meshv1alpha1.ReasonRemovalPending, "Cluster left the Placement selection, removal pending")
 	}
 
-	if !hasSelectedCluster(clusters) {
+	if !hasResolvedCluster(clusters) {
 		mesh.SetReadyCondition(metav1.ConditionFalse, meshv1alpha1.ReasonNoClustersSelected,
 			"Placement %s has not selected any clusters", mesh.Spec.PlacementRef.Name)
 	} else if !allReady {
@@ -845,7 +846,8 @@ func (r *Reconciler) getClustersFromPlacement(ctx context.Context, placement *cl
 	// OCM writes PlacementDecision objects one at a time and updates NumberOfSelectedClusters only after every object is written.
 	// A mismatch means the decisions are still being redistributed, so the observed names are not a complete membership snapshot.
 	if int32(len(clusters)) != placement.Status.NumberOfSelectedClusters {
-		return nil, errDecisionsPending
+		return nil, fmt.Errorf("%w: Placement %s/%s reports %d clusters, but %d are selected by decisions",
+			errDecisionsPending, placement.Namespace, placement.Name, placement.Status.NumberOfSelectedClusters, len(clusters))
 	}
 
 	// The Placement controller only adds a cluster to the PlacementDecision after the ManagedCluster exists on the hub.

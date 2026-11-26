@@ -160,7 +160,7 @@ This has two underlying situations, and the controller reports both the same way
 
 The Placement selected zero clusters: `status.numberOfSelectedClusters` is 0 and the `PlacementDecision` objects agree.
 Reconciliation removes all mesh plumbing after the removal grace period, including namespace ManifestWorks, istio-reader RBAC, intermediate CA Certificates, cacerts works, and ManagedServiceAccounts.
-The ReplicaSet remains with an empty manifest list; OCM removes its remote-secret resources asynchronously.
+The ManifestWorkReplicaSet remains with an empty manifest list; OCM removes its remote-secret resources asynchronously.
 The MultiClusterMesh remains.
 The same cleanup can occur before a new or recreated Placement has produced its first scheduling result, and without the grace period, because the mesh status no longer tracks the clusters.
 
@@ -183,9 +183,9 @@ Common causes of an empty selection:
 ### Cluster shows PlacementSelected=False with RemovalPending
 
 The cluster left the `Placement` selection.
-Its resources are preserved for the removal grace period (30 seconds by default) and then deleted: namespace ManifestWork, istio-reader ManifestWork, intermediate CA Certificate, cacerts work, and ManagedServiceAccount, plus the cluster's remote-secret manifest in the ReplicaSet.
-The spoke-side remote secret is not preserved: the ReplicaSet selects clusters through the mesh's Placement, and OCM deletes the spoke work as soon as the Placement stops selecting the cluster.
-Only the hub-side ReplicaSet template survives the grace period.
+Its resources are preserved for the removal grace period (30 seconds) and then deleted: namespace ManifestWork, istio-reader ManifestWork, intermediate CA Certificate, cacerts work, and ManagedServiceAccount, plus the cluster's remote-secret manifest in the ManifestWorkReplicaSet.
+The spoke-side remote secret is not preserved: the ManifestWorkReplicaSet selects clusters through the mesh's Placement, and OCM deletes the spoke work as soon as the Placement stops selecting the cluster.
+Only the hub-side ManifestWorkReplicaSet template survives the grace period.
 The `clusterStatus` entry is pruned after the deletion.
 
 This state is expected for about 30 seconds after removing a cluster from the `Placement`.

@@ -149,7 +149,7 @@ kubectl get placementdecision -n mesh-system -l cluster.open-cluster-management.
 ```
 
 > **Warning:** An empty selection uninstalls the mesh. If the Placement exists and its PlacementDecisions agree that zero clusters are selected (`status.numberOfSelectedClusters` is 0), the addon deletes the plumbing for every cluster: control plane namespace ManifestWorks (and the namespaces they created, including any Istio you installed there), intermediate CA Certificates, cacerts, ManagedServiceAccounts, and remote secrets.
-> The deletion runs after the removal grace period (30 seconds by default), during which the clusters report `PlacementSelected=False` with reason `RemovalPending`.
+> The deletion runs after the removal grace period (30 seconds), during which the clusters report `PlacementSelected=False` with reason `RemovalPending`.
 > The grace period applies only while the mesh status still tracks the clusters.
 > Deleting the Placement clears the status, so a recreated Placement cleans up immediately instead of after the grace period.
 >

@@ -51,7 +51,7 @@ var _ = BeforeSuite(func() {
 
 	// Shorten the removal grace period so cluster-removal tests settle quickly.
 	// Condition timestamps serialize with second precision, so we need to make sure it's not too short.
-	meshcontroller.RemovalGracePeriod = 2 * time.Second
+	meshcontroller.RemovalGracePeriod = 5 * time.Second
 
 	testEnv = &envtest.Environment{
 		CRDDirectoryPaths: []string{
