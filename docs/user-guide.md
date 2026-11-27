@@ -348,10 +348,8 @@ kubectl delete multiclustermesh -n mesh-system <mesh-name>
 
 <!-- Reference links -->
 [cert-manager]: https://cert-manager.io/
-[clusteradm]: https://open-cluster-management.io/docs/getting-started/installation/start-the-control-plane/
 [fleet-mesh]: https://github.com/kiali/openshift-servicemesh-plugin/blob/main/docs/fleet-mesh/DEV-PREVIEW-GUIDE.md
 [gpf]: https://open-cluster-management.io/docs/getting-started/integration/policy-controllers/
-[kind]: https://kind.sigs.k8s.io/
 [mwrs]: https://open-cluster-management.io/docs/concepts/work-distribution/manifestworkreplicaset/
 [clusterset]: https://open-cluster-management.io/docs/concepts/cluster-inventory/managedclusterset/
 [ManagedClusterSet]: https://open-cluster-management.io/docs/concepts/cluster-inventory/managedclusterset/

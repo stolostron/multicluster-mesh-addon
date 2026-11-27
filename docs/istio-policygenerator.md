@@ -111,7 +111,7 @@ kustomize build --enable-alpha-plugins my-mesh-config/production/ \
 For larger setups, you can avoid duplicating manifests with a two-stage approach.
 Maintain shared base manifests under plain Kustomize and render them with `kustomize build`.
 Then feed the rendered output to PolicyGenerator.
-See the [ACM PolicyGenerator documentation][PolicyGenerator] and the [ZTP GitOps workflow][ZTP] for more on this pattern.
+See the [ACM PolicyGenerator documentation][PolicyGenerator] and [managing cluster policies with PolicyGenerator in GitOps ZTP][ZTP] for more on policy generation and customization.
 
 ## Cleanup
 
@@ -141,4 +141,4 @@ Then continue with the MultiClusterMesh deletion in [Step 9 of the user guide](u
 [policygenerator-download]: https://access.redhat.com/articles/7049658
 [policygenerator-install]: https://github.com/open-cluster-management-io/policy-generator-plugin#install-the-policy-generator
 [hub-templates]: https://open-cluster-management.io/docs/getting-started/integration/policy-controllers/policy/#hub-cluster-templating-in-configuration-policies
-[ZTP]: https://docs.openshift.com/container-platform/latest/scalability_and_performance/ztp-deploying-disconnected.html
+[ZTP]: https://docs.redhat.com/en/documentation/openshift_container_platform/4.20/html/edge_computing/managing-cluster-policies-with-policygenerator-resources

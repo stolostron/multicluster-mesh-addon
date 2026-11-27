@@ -89,7 +89,7 @@ See the [User Guide](docs/user-guide.md) for a complete walkthrough including pr
 <!-- Reference links -->
 [ACM]: https://www.redhat.com/en/technologies/management/advanced-cluster-management
 [cert-manager]: https://cert-manager.io/
-[gpf]: https://open-cluster-management.io/docs/governance/policy/policy-framework/
+[gpf]: https://open-cluster-management.io/docs/getting-started/integration/policy-controllers/policy-framework/
 [OCM]: https://open-cluster-management.io/
 [OLM]: https://olm.operatorframework.io/
 [fleet-mesh]: https://github.com/kiali/openshift-servicemesh-plugin/blob/main/docs/fleet-mesh/DEV-PREVIEW-GUIDE.md
