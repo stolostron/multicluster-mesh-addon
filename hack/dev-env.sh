@@ -6,7 +6,7 @@
 # Actions: check-host, create-cluster <name>, install-olm <name>, install-cert-manager,
 #          install-managed-serviceaccount, init-ocm, join-clusters, create-clusterset,
 #          install-governance-policy-framework, install-operator, setup-mesh,
-#          setup-test-issuer
+#          install-metallb <name>, install-gateway-api <name>, setup-test-issuer
 
 set -euo pipefail
 

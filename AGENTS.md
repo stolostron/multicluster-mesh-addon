@@ -20,16 +20,16 @@ The service mesh operator (Sail or OSSM) is a prerequisite. Install it separatel
 - `chart/crds/` - Generated CRD manifests (used by Helm)
 - `test/integration/` - Ginkgo/Gomega integration tests using envtest
 - `test/util/` - Shared test helpers (k8s resource creation/deletion, mesh helpers, OCM helpers)
-- `tools/` - Tool dependencies (golangci-lint, ginkgo, etc.)
+- `tools/` - Tool dependencies (golangci-lint and controller-gen); Ginkgo is a main-module dependency invoked with `go run`
 
 ## Build & Test
 
 - `make build` - Build the binary
-- `make verify` - Run all checks (gofmt, modules, vet) - run after every change
+- `make verify` - Check formatting, modules, generated files, vet, upstream Istio reader RBAC, and demo/dev-env script syntax - run after every change
 - `make test` - Run unit tests
 - `make test-scripts` - Run shell script tests
 - `make test-integration` - Run integration tests (requires envtest)
-- `make gen` - Regenerate deepcopy code and CRDs after changing types.go
+- `make gen` - Regenerate deepcopy code, CRDs, and RBAC; update chart versions and image tag in `chart/Chart.yaml` and `chart/values.yaml`
 
 ## Key Patterns
 
@@ -45,7 +45,7 @@ The service mesh operator (Sail or OSSM) is a prerequisite. Install it separatel
 ### Modifying the API (types.go)
 
 1. Edit `pkg/apis/mesh/v1alpha1/types.go`
-2. Run `make gen` to regenerate deepcopy code and CRD manifests
+2. Run `make gen` to regenerate deepcopy code, CRDs, and RBAC and update chart versions and image tag
 3. Update the controller logic in `pkg/hub/mesh/controller.go`
 4. Update docs per [CONTRIBUTING.md - Keeping Docs in Sync](CONTRIBUTING.md#keeping-docs-in-sync)
 5. Add/update integration tests

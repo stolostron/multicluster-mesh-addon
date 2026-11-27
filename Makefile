@@ -93,7 +93,7 @@ gen-chart: ## Update Chart.yaml and values.yaml with VERSION
 	@sed -i "s/^  tag:.*/  tag: $(TAG)/" $(CHART_DIR)/values.yaml
 
 .PHONY: gen
-gen: gen-code gen-crds gen-rbac gen-chart ## Generate code, CRDs, and RBAC
+gen: gen-code gen-crds gen-rbac gen-chart ## Generate code, CRDs, and RBAC; update chart versions and image tag
 
 .PHONY: verify-gen
 verify-gen: gen ## Verify generated files are up to date
