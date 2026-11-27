@@ -6,6 +6,7 @@ metadata:
   name: eastwestgateway
   namespace: '{{hub (lookup "mesh.open-cluster-management.io/v1alpha1" "MultiClusterMesh" .PolicyMetadata.namespace (index .PolicyMetadata.labels "mesh.open-cluster-management.io/mesh-name")).status.controlPlaneNamespace hub}}'
   labels:
+    # For shared spokes, also set istio.io/rev to the owning revision (e.g. mcm-team-a).
     topology.istio.io/network: '{{hub (index .ManagedClusterLabels "topology.istio.io/network") | default .ManagedClusterName hub}}'
 spec:
   gatewayClassName: istio

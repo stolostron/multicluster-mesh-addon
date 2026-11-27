@@ -12,6 +12,7 @@ The addon does not install Istio itself. Use ACM policies to configure Istio on 
 
 - [Quick Start](#quick-start) - Get up and running in minutes
 - [Architecture](docs/architecture.md) - How the addon works
+- [Multiple meshes on shared clusters](docs/multiple-meshes.md) - Run independent meshes on overlapping managed clusters with PolicyGenerator
 - [User Guide](docs/user-guide.md) - Detailed setup walkthrough with explanations
 - [Install the Service Mesh Operator](docs/operator-installation.md) - Install Sail or OSSM using OperatorPolicy
 - [Configure Istio (Manual)](docs/istio-manual.md) - Configure Istio using direct spoke access
