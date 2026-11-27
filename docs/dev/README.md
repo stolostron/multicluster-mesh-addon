@@ -17,6 +17,7 @@
 ```bash
 make verify                  # gofmt, modules, vet, istio-reader RBAC drift check
 make test                    # unit tests
+make test-scripts            # shell script tests
 make test-integration        # integration tests (envtest - K8s cluster API running in memory)
 make test-e2e                # e2e tests (requires a running development environment)
 make test-e2e-multicluster   # multi-primary e2e tests (requires make dev-env)

@@ -9,7 +9,7 @@ Integration tests for the multicluster-mesh-addon controller using [envtest].
 make test-integration
 
 # Run specific test
-KUBEBUILDER_ASSETS="$(bin/setup-envtest use 1.35 -p path)" \
+KUBEBUILDER_ASSETS="$(bin/setup-envtest use 1.37 -p path)" \
   go run github.com/onsi/ginkgo/v2/ginkgo -v --tags=integration \
   --focus="Basic Reconciliation" ./test/integration/
 ```

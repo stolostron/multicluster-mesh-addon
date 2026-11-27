@@ -27,6 +27,7 @@ The service mesh operator (Sail or OSSM) is a prerequisite. Install it separatel
 - `make build` - Build the binary
 - `make verify` - Run all checks (gofmt, modules, vet) - run after every change
 - `make test` - Run unit tests
+- `make test-scripts` - Run shell script tests
 - `make test-integration` - Run integration tests (requires envtest)
 - `make gen` - Regenerate deepcopy code and CRDs after changing types.go
 

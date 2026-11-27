@@ -318,7 +318,7 @@ install_managed_serviceaccount() {
         log "managed-serviceaccount addon already installed on hub"
     else
         log "Installing managed-serviceaccount addon on hub..."
-        ${HELM} repo add ocm "https://open-cluster-management.io/helm-charts/"
+        ${HELM} repo add ocm "https://open-cluster-management.io/helm-charts/" --force-update
         on "${HUB}" "${HELM}" upgrade --install managed-serviceaccount ocm/managed-serviceaccount \
             --version "${MSA_VERSION}" \
             --create-namespace \

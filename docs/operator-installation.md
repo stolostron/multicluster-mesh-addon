@@ -29,7 +29,7 @@ for CONTEXT in "${CLUSTER_CONTEXTS[@]}"; do
   if ! kubectl --context "$CONTEXT" get crd \
     gateways.gateway.networking.k8s.io gatewayclasses.gateway.networking.k8s.io >/dev/null 2>&1; then
     kubectl --context "$CONTEXT" apply --server-side \
-      -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.2.1/standard-install.yaml
+      -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.6.0/standard-install.yaml
   fi
 done
 ```

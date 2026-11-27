@@ -20,7 +20,6 @@ read -r -a SPOKE_CLUSTERS <<< "${SPOKE_CLUSTERS}"
 MESH_NAMESPACE=mesh-system
 CM_NAME=ACM
 OPERATOR_NAME=OSSM
-ISTIO_VERSION="${ISTIO_VERSION:-1.30.4}"
 BOOKINFO_REF="${BOOKINFO_REF:-release-${ISTIO_VERSION%.*}}"
 DEMO_TIMEOUT="${DEMO_TIMEOUT:-5m}"
 DEMO_COMMAND_PAUSE=${DEMO_COMMAND_PAUSE:-3}
@@ -333,7 +332,7 @@ for cluster in "${SPOKE_CLUSTERS[@]}"; do
     if [[ -n "${DEMO_DRY_RUN}" ]] || ! "${KUBECTL}" --kubeconfig "${KUBECONFIGS["${cluster}"]}" get crd \
         gateways.gateway.networking.k8s.io gatewayclasses.gateway.networking.k8s.io >/dev/null 2>&1; then
         DEMO_COMMAND_PAUSE=0 run_kubectl "${cluster}" apply --server-side \
-            -f "https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.2.1/standard-install.yaml"
+            -f "https://github.com/kubernetes-sigs/gateway-api/releases/download/${GATEWAY_API_VERSION}/standard-install.yaml"
     fi
 done
 demo_wait
