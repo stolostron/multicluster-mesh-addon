@@ -11,13 +11,13 @@ import (
 )
 
 // CreateMultiClusterMesh creates a MultiClusterMesh resource.
-// An optional MeshSpec can be passed to override fields beyond clusterSet.
-func CreateMultiClusterMesh(ctx context.Context, k8sClient client.Client, name, namespace, clusterSet string, spec ...meshv1alpha1.MultiClusterMeshSpec) *meshv1alpha1.MultiClusterMesh {
+// An optional MeshSpec can be passed to override fields beyond placementRef.
+func CreateMultiClusterMesh(ctx context.Context, k8sClient client.Client, name, namespace, placementName string, spec ...meshv1alpha1.MultiClusterMeshSpec) *meshv1alpha1.MultiClusterMesh {
 	var meshSpec meshv1alpha1.MultiClusterMeshSpec
 	if len(spec) > 0 {
 		meshSpec = spec[0]
 	}
-	meshSpec.ClusterSet = clusterSet
+	meshSpec.PlacementRef = meshv1alpha1.PlacementReference{Name: placementName}
 
 	mesh := &meshv1alpha1.MultiClusterMesh{
 		ObjectMeta: metav1.ObjectMeta{

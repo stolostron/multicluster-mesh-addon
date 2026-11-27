@@ -1,0 +1,23 @@
+# Istio control plane with hub templates.
+# Set the mesh namespace and mesh-name policy label in policygenerator.yaml.
+#
+# This sample configures sidecar mode only. For ambient mode, see
+# docs/user-guide.md#customize-istio.
+#
+# This is a minimal template. Add fields under spec.values to match your mesh
+# requirements (e.g. meshConfig.discoverySelectors, pilot settings, proxy
+# resource limits). See the Sail operator API reference for all available fields.
+apiVersion: sailoperator.io/v1
+kind: Istio
+metadata:
+  name: default
+spec:
+  namespace: '{{hub (lookup "mesh.open-cluster-management.io/v1alpha1" "MultiClusterMesh" .PolicyMetadata.namespace (index .PolicyMetadata.labels "mesh.open-cluster-management.io/mesh-name")).status.controlPlaneNamespace hub}}'
+  values:
+    meshConfig:
+      trustDomain: '{{hub (index .PolicyMetadata.labels "mesh.open-cluster-management.io/mesh-name") hub}}'
+    global:
+      meshID: '{{hub (index .PolicyMetadata.labels "mesh.open-cluster-management.io/mesh-name") hub}}'
+      multiCluster:
+        clusterName: '{{hub .ManagedClusterName hub}}'
+      network: '{{hub (index .ManagedClusterLabels "topology.istio.io/network") | default .ManagedClusterName hub}}'

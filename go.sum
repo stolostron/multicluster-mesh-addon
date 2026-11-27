@@ -185,8 +185,6 @@ github.com/openshift/client-go v0.0.0-20260317180604-743f664b82d1 h1:Hr/R38eg5ZJ
 github.com/openshift/client-go v0.0.0-20260317180604-743f664b82d1/go.mod h1:Za51LlH76ALiQ/aKGBYJXmyJNkA//IDJ+I///30CA2M=
 github.com/openshift/library-go v0.0.0-20260318142011-72bf34f474bc h1:a+rVRzEdFIwgDQLTbhiG3MEVuBXjLb/6HJRikTob+nY=
 github.com/openshift/library-go v0.0.0-20260318142011-72bf34f474bc/go.mod h1:3bi4pLpYRdVd1aEhsHfRTJkwxwPLfRZ+ZePn3RmJd2k=
-github.com/operator-framework/api v0.41.0 h1:B0nutndl95elbLXJGRlkFNTI8OuZIjSqvTEeORPhTKo=
-github.com/operator-framework/api v0.41.0/go.mod h1:Ouud+eqruzll9X3iv8wuAOTNAyyEncYXp4IVgbIlIdg=
 github.com/orisano/pixelmatch v0.0.0-20220722002657-fb0b55479cde/go.mod h1:nZgzbfBr3hhjoZnS66nKrHmduYNpc34ny7RK4z5/HM0=
 github.com/pkg/errors v0.9.1 h1:FEBLx1zS214owpjy7qsBeixbURkuhQAwrK5UwLGTwt4=
 github.com/pkg/errors v0.9.1/go.mod h1:bwawxfHBFNV+L2hUp1rHADufV3IMtnDRdf1r5NINEl0=

@@ -5,7 +5,7 @@ OCM Multi-Cluster Mesh Add-on for orchestrating Istio service mesh deployments a
 ## Prerequisites
 
 - Kubernetes cluster with [Open Cluster Management (OCM)][OCM] installed
-- Helm 3.x
+- Helm 4.x
 - At least one managed cluster registered with the hub
 
 ## Installation

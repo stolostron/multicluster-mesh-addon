@@ -12,8 +12,6 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	operatorsv1 "github.com/operator-framework/api/pkg/operators/v1"
-	operatorsv1alpha1 "github.com/operator-framework/api/pkg/operators/v1alpha1"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
@@ -30,10 +28,7 @@ import (
 )
 
 const (
-	controllerName     = "multicluster-mesh-controller"
-	testDefaultChannel = "stable"
-
-	msaSpokeNamespace = "open-cluster-management-agent-addon"
+	controllerName = "multicluster-mesh-controller"
 
 	testIssuerName       = "mesh-test-root-ca"
 	testIssuerKind       = "ClusterIssuer"
@@ -75,6 +70,11 @@ var _ = Describe("Controller health", func() {
 })
 
 var _ = Describe("MultiClusterMesh lifecycle", Ordered, func() {
+	const (
+		clusterSet    = "mesh-cluster-set"
+		placementName = "test-mesh-placement"
+	)
+
 	var (
 		mesh    *meshv1alpha1.MultiClusterMesh
 		ns      string
@@ -89,12 +89,22 @@ var _ = Describe("MultiClusterMesh lifecycle", Ordered, func() {
 	BeforeAll(func(ctx SpecContext) {
 		ns = util.UniqueName("test-ns")
 		util.CreateNamespace(ctx, hubClient, ns)
+
+		Step("Binding ManagedClusterSet %s to namespace %s", clusterSet, ns)
+		util.CreateManagedClusterSetBinding(ctx, hubClient, clusterSet, ns)
+
+		Step("Creating Placement %s in namespace %s", placementName, ns)
+		util.CreatePlacementForClusterSet(ctx, hubClient, placementName, ns, clusterSet)
 	})
 
 	AfterAll(func(ctx SpecContext) {
+		spokeNamespaces := []string{testOperatorNamespace}
+		if mesh != nil {
+			spokeNamespaces = append(spokeNamespaces, mesh.GetControlPlaneNamespace())
+		}
 		collectArtifacts(ctx, "mesh-lifecycle",
 			[]string{ns},
-			[]string{testOperatorNamespace, "istio-system"},
+			spokeNamespaces,
 		)
 
 		// Do not leave behind any resources to be able to reuse the same env.
@@ -112,14 +122,8 @@ var _ = Describe("MultiClusterMesh lifecycle", Ordered, func() {
 
 	It("should deploy the mesh", func(ctx SpecContext) {
 		Step("Creating test mesh")
-		mesh = util.CreateMultiClusterMesh(ctx, hubClient, util.UniqueName("test-mesh"), ns, "mesh-cluster-set",
+		mesh = util.CreateMultiClusterMesh(ctx, hubClient, util.UniqueName("test-mesh"), ns, placementName,
 			meshv1alpha1.MultiClusterMeshSpec{
-				Operator: meshv1alpha1.OperatorConfig{
-					Name:            testOperatorName,
-					Namespace:       testOperatorNamespace,
-					Source:          testCatalogSource,
-					SourceNamespace: testCatalogNamespace,
-				},
 				Security: meshv1alpha1.SecurityConfig{
 					Trust: meshv1alpha1.TrustConfig{
 						CertManager: meshv1alpha1.CertManagerConfig{
@@ -139,54 +143,23 @@ var _ = Describe("MultiClusterMesh lifecycle", Ordered, func() {
 		}).Should(Succeed())
 	})
 
-	It("should deploy operator resources to spoke clusters", func(ctx SpecContext) {
-		for cluster, spokeClient := range spokeClients {
-			Step("Verifying OperatorInstalled condition for %s", cluster)
-			cs := findClusterStatus(mesh, cluster)
-			Expect(cs).NotTo(BeNil(), "missing cluster status for %s", cluster)
-			Expect(meta.IsStatusConditionTrue(cs.Conditions, meshv1alpha1.ConditionOperatorInstalled)).To(BeTrue(),
-				"expected OperatorInstalled=True for %s", cluster)
+	It("should populate status.controlPlaneNamespace and create labeled spoke namespaces", func(ctx SpecContext) {
+		cpNamespace := mesh.GetControlPlaneNamespace()
 
-			Step("Verifying control plane namespace exists on %s", cluster)
+		Step("Verifying status.controlPlaneNamespace")
+		Expect(getMesh(ctx, mesh)).To(Succeed())
+		Expect(mesh.Status.ControlPlaneNamespace).To(Equal(cpNamespace))
+
+		for cluster, spokeClient := range spokeClients {
+			Step("Verifying control plane namespace %s on %s", cpNamespace, cluster)
 			cpns := &corev1.Namespace{}
 			Eventually(func(g Gomega) {
-				g.Expect(spokeClient.Get(ctx, key.Of("istio-system"), cpns)).To(Succeed())
+				g.Expect(spokeClient.Get(ctx, key.Of(cpNamespace), cpns)).To(Succeed())
 				g.Expect(cpns.Labels[meshcontroller.IstioNetworkLabel]).To(Equal(cluster))
+				g.Expect(cpns.Labels[meshcontroller.MeshNameLabel]).To(Equal(mesh.Name))
+				g.Expect(cpns.Labels[meshcontroller.MeshNamespaceLabel]).To(Equal(mesh.Namespace))
 			}).Should(Succeed())
 			track(cluster, spokeClient, cpns)
-
-			Step("Verifying operator namespace exists on %s", cluster)
-			ns := &corev1.Namespace{}
-			Expect(spokeClient.Get(ctx, key.Of(testOperatorNamespace), ns)).To(Succeed())
-			track(cluster, spokeClient, ns)
-
-			Step("Verifying OperatorGroup exists on %s", cluster)
-			ogList := &operatorsv1.OperatorGroupList{}
-			err := spokeClient.List(ctx, ogList, client.InNamespace(testOperatorNamespace))
-			Expect(err).NotTo(HaveOccurred())
-			Expect(ogList.Items).To(HaveLen(1))
-
-			Step("Verifying Subscription content on %s", cluster)
-			sub, err := getSubscription(ctx, spokeClient)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(sub.Spec.Package).To(Equal(testOperatorName))
-			Expect(sub.Spec.Channel).To(Equal(testDefaultChannel))
-			Expect(sub.Spec.CatalogSource).To(Equal(testCatalogSource))
-			Expect(sub.Spec.CatalogSourceNamespace).To(Equal(testCatalogNamespace))
-		}
-	})
-
-	It("should update spoke resources when operator config changes", func(ctx SpecContext) {
-		Step("Updating mesh operator channel")
-		Expect(getMesh(ctx, mesh)).To(Succeed())
-		mesh.Spec.Operator.Channel = "candidate"
-		Expect(hubClient.Update(ctx, mesh)).To(Succeed())
-
-		for cluster, spokeClient := range spokeClients {
-			Step("Verifying Subscription channel is updated on %s", cluster)
-			Eventually(func(g Gomega) {
-				g.Expect(getSubscription(ctx, spokeClient)).To(HaveField("Spec.Channel", "candidate"))
-			}).Should(Succeed())
 		}
 	})
 
@@ -204,30 +177,46 @@ var _ = Describe("MultiClusterMesh lifecycle", Ordered, func() {
 		Expect(rootPool.AppendCertsFromPEM(hubRootCert)).To(BeTrue(), "failed to parse hub root CA")
 
 		for cluster, spokeClient := range spokeClients {
-			Step("Verifying cacerts secret on %s", cluster)
+			cs := findClusterStatus(mesh, cluster)
+			Expect(cs).NotTo(BeNil(), "missing cluster status for %s", cluster)
+			Step("Verifying TrustDistributed condition for %s", cluster)
+			Expect(meta.IsStatusConditionTrue(cs.Conditions, meshv1alpha1.ConditionTrustDistributed)).To(BeTrue(),
+				"expected TrustDistributed=True for %s", cluster)
+
+			Step("Verifying DiscoveryDistributed condition for %s", cluster)
+			Expect(meta.IsStatusConditionTrue(cs.Conditions, meshv1alpha1.ConditionDiscoveryDistributed)).To(BeTrue(),
+				"expected DiscoveryDistributed=True for %s", cluster)
+
+			Step("Verifying cacerts secret and certificate chain on %s", cluster)
 			secret := &corev1.Secret{}
+			var cert *x509.Certificate
 			Eventually(func(g Gomega) {
 				g.Expect(spokeClient.Get(ctx, key.Of(meshcontroller.CacertsSecretName, cpNamespace), secret)).To(Succeed())
 				g.Expect(secret.Type).To(Equal(corev1.SecretTypeTLS))
 				g.Expect(secret.Data["tls.crt"]).NotTo(BeEmpty(), "tls.crt")
 				g.Expect(secret.Data["tls.key"]).NotTo(BeEmpty(), "tls.key")
 				g.Expect(secret.Data["ca.crt"]).To(Equal(hubRootCert), "ca.crt vs hub root CA")
-			}).WithTimeout(2 * time.Minute).Should(Succeed())
+
+				block, _ := pem.Decode(secret.Data["tls.crt"])
+				g.Expect(block).NotTo(BeNil(), "failed to decode tls.crt PEM")
+
+				var err error
+				cert, err = x509.ParseCertificate(block.Bytes)
+				g.Expect(err).NotTo(HaveOccurred())
+
+				// cert-manager stamps NotBefore from the hub clock without backdating, so a
+				// freshly issued intermediate can look not-yet-valid to a test runner whose
+				// clock lags the hub. Retrying lets the local clock catch up.
+				_, err = cert.Verify(x509.VerifyOptions{Roots: rootPool})
+				g.Expect(err).NotTo(HaveOccurred(), "intermediate CA verification failed")
+			}).WithTimeout(2 * time.Minute).WithPolling(time.Second).Should(Succeed())
 			track(cluster, spokeClient, secret)
 
-			Step("Verifying certificate chain and subject on %s", cluster)
-			block, _ := pem.Decode(secret.Data["tls.crt"])
-			Expect(block).NotTo(BeNil(), "failed to decode tls.crt PEM")
-			cert, err := x509.ParseCertificate(block.Bytes)
-			Expect(err).NotTo(HaveOccurred())
-
+			Step("Verifying certificate subject on %s", cluster)
 			Expect(cert.IsCA).To(BeTrue())
 			Expect(cert.Subject.CommonName).To(Equal("Istio CA"))
 			Expect(cert.Subject.Organization).To(ConsistOf(mesh.GetTrustDomain()))
 			Expect(cert.Subject.OrganizationalUnit).To(ConsistOf(cluster))
-
-			_, err = cert.Verify(x509.VerifyOptions{Roots: rootPool})
-			Expect(err).NotTo(HaveOccurred(), "intermediate CA not signed by hub root CA")
 		}
 	})
 
@@ -241,8 +230,8 @@ var _ = Describe("MultiClusterMesh lifecycle", Ordered, func() {
 
 				msa := msaList.Items[0]
 				sa := &corev1.ServiceAccount{}
-				g.Expect(spokeClient.Get(ctx, key.Of(msa.Name, msaSpokeNamespace), sa)).To(Succeed(),
-					"ServiceAccount %s/%s should exist on spoke %s", msaSpokeNamespace, msa.Name, cluster)
+				g.Expect(spokeClient.Get(ctx, key.Of(msa.Name, meshcontroller.MSANamespace), sa)).To(Succeed(),
+					"ServiceAccount %s/%s should exist on spoke %s", meshcontroller.MSANamespace, msa.Name, cluster)
 				track(cluster, spokeClient, sa)
 
 				g.Expect(msa.Status.TokenSecretRef).NotTo(BeNil(),
@@ -279,7 +268,7 @@ var _ = Describe("MultiClusterMesh lifecycle", Ordered, func() {
 				g.Expect(crb.Subjects).To(HaveLen(1))
 				g.Expect(crb.Subjects[0].Kind).To(Equal("ServiceAccount"))
 				g.Expect(crb.Subjects[0].Name).To(Equal(msaList.Items[0].Name))
-				g.Expect(crb.Subjects[0].Namespace).To(Equal(msaSpokeNamespace))
+				g.Expect(crb.Subjects[0].Namespace).To(Equal(meshcontroller.MSANamespace))
 				track(cluster, spokeClient, crb)
 			}).Should(Succeed())
 		}
@@ -307,12 +296,6 @@ func findClusterStatus(mesh *meshv1alpha1.MultiClusterMesh, clusterName string) 
 		}
 	}
 	return nil
-}
-
-func getSubscription(ctx context.Context, spokeClient client.Client) (*operatorsv1alpha1.Subscription, error) {
-	sub := &operatorsv1alpha1.Subscription{}
-	err := spokeClient.Get(ctx, key.Of(testOperatorName, testOperatorNamespace), sub)
-	return sub, err
 }
 
 func listMeshMSAs(g Gomega, ctx context.Context, mesh *meshv1alpha1.MultiClusterMesh, opts ...client.ListOption) *msav1beta1.ManagedServiceAccountList {

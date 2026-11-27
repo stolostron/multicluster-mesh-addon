@@ -13,35 +13,63 @@ API group: `mesh.open-cluster-management.io/v1alpha1`
 
 | Field | Required | Default | Description |
 |-------|----------|---------|-------------|
-| `metadata.name` | Yes | | Mesh name. Must be at most 63 characters (used in certificate subject fields and Kubernetes labels). |
-| `spec.clusterSet` | Yes | | Name of the ManagedClusterSet defining cluster membership. Must use `ExclusiveClusterSetLabel` selector. Immutable after creation. |
-| `spec.controlPlane.namespace` | No | `istio-system` | Namespace where Istio is installed on each cluster. Immutable after creation. Must differ from `spec.operator.namespace`. |
-| `spec.operator.name` | No | `servicemeshoperator3` | OLM package name |
-| `spec.operator.namespace` | No | `multicluster-mesh-operator` | Namespace where the operator is installed. Must not use `openshift-`, `kube-`, or `default`. |
-| `spec.operator.channel` | No | `stable` | OLM subscription channel |
-| `spec.operator.source` | No | `redhat-operators` | CatalogSource name |
-| `spec.operator.sourceNamespace` | No | `openshift-marketplace` | CatalogSource namespace |
-| `spec.operator.startingCSV` | No | | Pin to a specific operator version |
-| `spec.operator.installPlanApproval` | No | `Automatic` | `Automatic` or `Manual` |
+| `metadata.name` | Yes | | Mesh name. Must be a DNS label: lowercase alphanumeric characters or `-`, starting and ending with an alphanumeric character, at most 63 characters. The name is embedded in the control plane namespace (which cannot contain dots) and is used as the SPIFFE trust domain. |
+| `spec.placementRef.name` | Yes | | Name of the [Placement] defining cluster membership. The Placement must be in the same namespace as the mesh. |
 | `spec.security.trust.certManager.issuerRef.name` | No | | cert-manager Issuer name for Root CA |
 | `spec.security.trust.certManager.issuerRef.kind` | No | `Issuer` | `Issuer` or `ClusterIssuer` |
 | `spec.security.discovery.tokenValidity` | No | `360h` | ManagedServiceAccount token lifetime (minimum: `10m`) |
 
+### Status Fields
+
+| Field | Description |
+|-------|-------------|
+| `status.controlPlaneNamespace` | Auto-derived control plane namespace: `istio-system-{mesh name truncated to 39 characters}-{first 10 hex characters of SHA-256(namespace/name)}` |
+| `status.conditions` | Mesh-level conditions (see below) |
+| `status.clusterStatus` | Entries are created for every selected cluster name, including when no issuer is configured or the `ManagedCluster` object is missing. Entries are retained while their names remain selected and for the removal grace period after a cluster leaves the selection. `PlacementSelected` is present on every entry. `TrustDistributed` is present only while an issuer is configured; removing issuer clears existing trust conditions. |
+
 ### Status Conditions
+
+Mesh-level `Ready` requires all applicable per-cluster conditions of resolved clusters to be True.
+`PlacementSelected=False` does not affect `Ready`; a pending removal is a normal transition, not an error.
+Optional conditions affect `Ready` only when corresponding feature is configured.
 
 | Condition | Scope | Meaning |
 |-----------|-------|---------|
-| `Ready` | Mesh | All clusters have confirmed operator installation |
-| `OperatorInstalled` | Per-cluster | The service mesh operator CSV is installed on this cluster |
+| `Ready` | Mesh | Every resolved cluster reports `DiscoveryDistributed=True` and, when trust is configured, `TrustDistributed=True`. |
+| `PlacementSelected` | Per-cluster | The cluster is currently selected by the mesh's `Placement`. `False` with reason `RemovalPending` means the cluster left the selection and its resources are preserved for the removal grace period before deletion. |
+| `TrustDistributed` | Per-cluster | Latest trust material has been distributed to this cluster and remains available. Present only when `spec.security.trust` is configured. |
+| `DiscoveryDistributed` | Per-cluster | Cluster has an API endpoint, discovery RBAC is applied and available, and current remote secrets are distributed and available on all selected clusters. |
 
 **Reason values** (appear in a condition's `.reason`):
 
 | Reason | Scope | Description |
 |--------|-------|-------------|
 | `AllClustersReady` | Mesh | All clusters are ready |
-| `ClustersNotReady` | Mesh | One or more clusters have not confirmed operator installation |
+| `ClustersNotReady` | Mesh | One or more clusters are not ready |
+| `PlacementNotFound` | Mesh | The referenced Placement does not exist. Existing mesh plumbing is left in place. |
+| `NoClustersSelected` | Mesh | The Placement exists but the mesh has no members, either because the Placement selected zero clusters or because every selected ManagedCluster object is missing. An empty selection removes mesh plumbing after the removal grace period, which covers only clusters that still have `clusterStatus` entries; names still present in the decisions keep their plumbing until the names leave the decisions and the grace period expires. |
 | `ReconcileError` | Mesh | An error occurred during reconciliation |
-| `OperatorConfigConflict` | Mesh | Operator config conflicts with an older mesh on the same ClusterSet |
-| `NamespaceConflict` | Mesh | Control plane namespace conflicts with an older mesh or equals the operator namespace |
-| `InstallationPending` | Per-cluster | Operator installation has been requested but not yet confirmed |
-| `Installed` | Per-cluster | Operator is installed |
+| `Selected` | Per-cluster | The cluster is present in the Placement selection |
+| `RemovalPending` | Per-cluster | The cluster left the Placement selection and is removed once the grace period expires |
+| `CertificatePending` | Per-cluster | Trust distribution is waiting for the CA certificate to be issued |
+| `TokenPending` | Per-cluster | Discovery distribution is waiting for the MSA token to be available |
+| `DistributionPending` | Per-cluster | Trust or discovery distribution is pending or unavailable |
+| `Distributed` | Per-cluster | Trust or discovery resources are distributed and available |
+| `NoAPIEndpoint` | Per-cluster | Cluster has no API endpoint configured |
+
+During certificate rotation, `TrustDistributed=False` with reason `DistributionPending` and mesh `Ready=False` until updated trust material is distributed and available.
+Existing traffic can continue using valid older trust material while distribution is pending.
+
+During discovery-token rotation, `DiscoveryDistributed=False` with reason `DistributionPending` and mesh `Ready=False` until updated credentials are distributed and available on all selected clusters.
+The status updates can lag briefly while OCM reconciles distribution.
+
+### Readiness Limits
+
+Ready reports trust and discovery resource distribution. It does not verify operator or Istio health, authentication works with distributed credentials, or test cross-cluster connectivity.
+
+Controller checks only resolved ManagedCluster objects, so partially missing selection can still report `Ready=True`.
+
+Clearing the issuer name deletes Certificates but retains cacerts ManifestWorks on still-selected clusters and clears earlier `TrustDistributed` conditions. Certificate Secret retention depends on cert-manager configuration. See [lifecycle behavior](dev/design.md#lifecycle-events) and [troubleshooting](troubleshooting.md).
+
+<!-- Reference links -->
+[Placement]: https://open-cluster-management.io/docs/concepts/content-placement/placement/

@@ -1,23 +1,31 @@
 #!/usr/bin/env bash
-# Provisions and manages a local 3-cluster Kind/OCM development environment.
+# Provisions and manages a local Kind/OCM development environment.
 # This file is invoked by Makefile targets with an action argument.
 #
 # Usage: hack/dev-env.sh <action> [args...]
 # Actions: check-host, create-cluster <name>, install-olm <name>, install-cert-manager,
-#          install-managed-serviceaccount, init-ocm, join-clusters, setup-mesh,
+#          install-managed-serviceaccount, init-ocm, join-clusters, create-clusterset,
+#          install-governance-policy-framework, install-operator, setup-mesh,
 #          setup-test-issuer
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
+# We use kubectl wait with combined --for flags, which need kubectl 1.36+
+MIN_KUBECTL_VERSION=1.36
 HUB="hub"
-CLUSTER1="cluster1"
-CLUSTER2="cluster2"
+read -r -a SPOKE_CLUSTERS <<< "${SPOKE_CLUSTERS:-cluster1 cluster2}"
+declare -A SPOKE_CLUSTER_INDEX=()
+for index in "${!SPOKE_CLUSTERS[@]}"; do
+    SPOKE_CLUSTER_INDEX["${SPOKE_CLUSTERS[${index}]}"]="${index}"
+done
 
 log() { echo "==> $*"; }
 warn() { echo "WARNING: $*" >&2; }
 err() { echo "ERROR: $*" >&2; exit 1; }
+
+[[ ${#SPOKE_CLUSTERS[@]} -gt 0 ]] || err "SPOKE_CLUSTERS must contain at least one cluster"
 
 retry() {
     local attempts=3 delay=2 attempt=1
@@ -86,6 +94,23 @@ check_kernel_keyring_limits() {
     fi
 }
 
+check_kubectl_version() {
+    local version_json major minor
+    if ! version_json="$(kubectl version --client -o json 2>/dev/null)"; then
+        err "kubectl not found or failed to run; kubectl ${MIN_KUBECTL_VERSION}+ is required"
+    fi
+    major="$(echo "${version_json}" | jq -r '.clientVersion.major // empty')"
+    minor="$(echo "${version_json}" | jq -r '.clientVersion.minor // empty')"
+    minor="${minor%+}"
+    if [[ -z "${major}" || -z "${minor}" ]]; then
+        err "Failed to parse kubectl version from: ${version_json}"
+    fi
+    local min_major="${MIN_KUBECTL_VERSION%%.*}" min_minor="${MIN_KUBECTL_VERSION#*.}"
+    if (( major < min_major )) || { (( major == min_major )) && (( minor < min_minor )); }; then
+        err "kubectl ${MIN_KUBECTL_VERSION}+ is required, found ${major}.${minor}"
+    fi
+}
+
 on() {
     local cluster="${1}"
     shift
@@ -100,26 +125,30 @@ require_clusters() {
     done
 }
 
+join_by_comma() {
+    local IFS=,
+    printf '%s' "$*"
+}
+
 check_host() {
     check_inotify_limits
     check_kernel_keyring_limits
-
-    local existing
-    existing="$(${KIND} get clusters 2>/dev/null || true)"
-    local found=()
-    for cluster in "${HUB}" "${CLUSTER1}" "${CLUSTER2}"; do
-        if echo "${existing}" | grep -qx "${cluster}"; then
-            found+=("${cluster}")
-        fi
-    done
-    if [[ ${#found[@]} -gt 0 ]]; then
-        err "Kind clusters already exist: ${found[*]}. Run 'make dev-clean' to tear them down first."
-    fi
 }
 
 create_cluster() {
     local cluster="${1}"
     mkdir -p "${DEV_KUBE_DIR}"
+
+    local existing
+    existing="$(${KIND} get clusters 2>/dev/null || true)"
+    if echo "${existing}" | grep -qx "${cluster}"; then
+        log "Kind cluster ${cluster} already exists, skipping creation"
+        if [[ ! -f "${DEV_KUBE_DIR}/${cluster}.config" ]]; then
+            log "Exporting kubeconfig for existing cluster ${cluster}"
+            ${KIND} get kubeconfig --name "${cluster}" > "${DEV_KUBE_DIR}/${cluster}.config"
+        fi
+        return
+    fi
 
     log "Creating Kind cluster: ${cluster}"
     on "${cluster}" "${KIND}" create cluster \
@@ -134,46 +163,48 @@ create_cluster() {
 
 install_olm() {
     local cluster="${1}"
-    require_clusters "${cluster}"
     local olm_base_url="https://github.com/operator-framework/operator-lifecycle-manager/releases/download/${OLM_VERSION}"
 
-    if on "${cluster}" kubectl get deployment olm-operator -n olm &>/dev/null; then
-        log "OLM already installed on ${cluster}, skipping"
-        return
+    if on "${cluster}" kubectl get deployment olm-operator -n olm &>/dev/null &&
+        on "${cluster}" kubectl get deployment catalog-operator -n olm &>/dev/null; then
+        log "OLM already installed on ${cluster}"
+    else
+        log "Installing OLM ${OLM_VERSION} on ${cluster}..."
+
+        on "${cluster}" kubectl apply --server-side -f "${olm_base_url}/crds.yaml"
+        on "${cluster}" retry kubectl wait --for=condition=Established \
+            crd/catalogsources.operators.coreos.com \
+            crd/subscriptions.operators.coreos.com \
+            --timeout=60s
+
+        log "Applying OLM components on ${cluster}..."
+        on "${cluster}" kubectl apply -f "${olm_base_url}/olm.yaml"
     fi
 
-    log "Installing OLM ${OLM_VERSION} on ${cluster}..."
-
-    on "${cluster}" kubectl apply --server-side -f "${olm_base_url}/crds.yaml"
-    on "${cluster}" retry kubectl wait --for=condition=Established \
-        crd/catalogsources.operators.coreos.com \
-        crd/subscriptions.operators.coreos.com \
-        --timeout=60s
-
-    log "Applying OLM components on ${cluster}..."
-    on "${cluster}" kubectl apply -f "${olm_base_url}/olm.yaml"
-
     log "Waiting for OLM components to be ready on ${cluster}..."
-    on "${cluster}" kubectl rollout status deployment/olm-operator -n olm --timeout=180s
-    on "${cluster}" kubectl rollout status deployment/catalog-operator -n olm --timeout=180s
+    on "${cluster}" kubectl wait --for=condition=Available \
+        deployment/olm-operator deployment/catalog-operator \
+        -n olm --timeout=10m
 
     log "OLM ${OLM_VERSION} installed on ${cluster}"
 }
 
 install_cert_manager() {
     require_clusters "${HUB}"
-    if on "${HUB}" kubectl get deployment cert-manager -n cert-manager &>/dev/null; then
-        log "cert-manager already installed on hub, skipping"
-        return
+    if on "${HUB}" kubectl get deployment cert-manager -n cert-manager &>/dev/null &&
+        on "${HUB}" kubectl get deployment cert-manager-cainjector -n cert-manager &>/dev/null &&
+        on "${HUB}" kubectl get deployment cert-manager-webhook -n cert-manager &>/dev/null; then
+        log "cert-manager already installed on hub"
+    else
+        log "Installing cert-manager ${CERT_MANAGER_VERSION} on hub..."
+        on "${HUB}" kubectl apply -f \
+            "https://github.com/cert-manager/cert-manager/releases/download/${CERT_MANAGER_VERSION}/cert-manager.yaml"
     fi
 
-    log "Installing cert-manager ${CERT_MANAGER_VERSION} on hub..."
-    on "${HUB}" kubectl apply -f \
-        "https://github.com/cert-manager/cert-manager/releases/download/${CERT_MANAGER_VERSION}/cert-manager.yaml"
-
     log "Waiting for cert-manager to be ready..."
-    on "${HUB}" kubectl rollout status deployment/cert-manager -n cert-manager --timeout=120s
-    on "${HUB}" kubectl rollout status deployment/cert-manager-webhook -n cert-manager --timeout=120s
+    on "${HUB}" kubectl wait --for=condition=Available \
+        deployment/cert-manager deployment/cert-manager-cainjector deployment/cert-manager-webhook \
+        -n cert-manager --timeout=10m
 
     log "cert-manager ${CERT_MANAGER_VERSION} installed on hub"
 }
@@ -184,12 +215,8 @@ setup_test_issuer() {
         return
     fi
 
-    log "Waiting for cert-manager-cainjector to be ready..."
-    on "${HUB}" kubectl rollout status deployment/cert-manager-cainjector \
-        -n cert-manager --timeout=120s
-
     log "Creating test ClusterIssuer trust chain"
-    on "${HUB}" kubectl apply -f "${SCRIPT_DIR}/hack/kind/cert-manager-test-issuer.yaml"
+    on "${HUB}" retry kubectl apply -f "${SCRIPT_DIR}/hack/kind/cert-manager-test-issuer.yaml"
 
     log "Waiting for bootstrap ClusterIssuer to be ready..."
     on "${HUB}" retry kubectl wait clusterissuer/mesh-test-selfsigned \
@@ -207,17 +234,21 @@ setup_test_issuer() {
 }
 
 init_ocm() {
-    require_clusters "${HUB}"
     log "Initializing OCM hub on cluster: ${HUB}"
     on "${HUB}" "${CLUSTERADM}" init --feature-gates=ManifestWorkReplicaSet=true --wait
 
     log "Waiting for OCM hub components to be ready..."
-    on "${HUB}" retry kubectl wait --for=condition=Available \
-        deployment/cluster-manager -n open-cluster-management --timeout=120s
+    on "${HUB}" kubectl wait --for=condition=Available \
+        deployment/cluster-manager -n open-cluster-management --timeout=10m
+
+    # Joining and accepting clusters is admission-checked by the registration webhook, so wait for it explicitly.
+    on "${HUB}" kubectl wait --for=create --for=condition=Available \
+        deployment/cluster-manager-registration-webhook deployment/cluster-manager-work-webhook \
+        -n open-cluster-management-hub --timeout=10m
 }
 
 join_clusters() {
-    require_clusters "${HUB}" "${CLUSTER1}" "${CLUSTER2}"
+    require_clusters "${HUB}" "${SPOKE_CLUSTERS[@]}"
     log "Retrieving hub token..."
     local token_json hub_token hub_apiserver
     token_json="$(on "${HUB}" "${CLUSTERADM}" get token -o json)"
@@ -228,29 +259,28 @@ join_clusters() {
         err "Failed to extract hub token/apiserver from 'clusteradm get token'"
     fi
 
-    for cluster in "${CLUSTER1}" "${CLUSTER2}"; do
+    for cluster in "${SPOKE_CLUSTERS[@]}"; do
         if on "${HUB}" kubectl get managedcluster "${cluster}" &>/dev/null; then
             log "ManagedCluster ${cluster} already exists on hub, skipping join"
             continue
         fi
 
         log "Joining ${cluster} to hub..."
-        on "${cluster}" "${CLUSTERADM}" join \
+        on "${cluster}" retry "${CLUSTERADM}" join \
             --hub-token "${hub_token}" \
             --hub-apiserver "${hub_apiserver}" \
             --cluster-name "${cluster}" \
-            --force-internal-endpoint-lookup \
-            --wait
+            --force-internal-endpoint-lookup
     done
 
     log "Accepting managed clusters on hub..."
-    on "${HUB}" "${CLUSTERADM}" accept \
-        --clusters="${CLUSTER1},${CLUSTER2}" \
+    on "${HUB}" retry "${CLUSTERADM}" accept \
+        --clusters="$(join_by_comma "${SPOKE_CLUSTERS[@]}")" \
         --skip-approve-check \
         --wait
 
     log "Waiting for ManagedCluster conditions..."
-    for cluster in "${CLUSTER1}" "${CLUSTER2}"; do
+    for cluster in "${SPOKE_CLUSTERS[@]}"; do
         on "${HUB}" retry kubectl wait managedcluster/"${cluster}" \
             --for=condition=HubAcceptedManagedCluster=True \
             --timeout=120s
@@ -263,9 +293,19 @@ join_clusters() {
         log "Cluster ${cluster} joined, accepted, and available"
     done
 
+}
+
+create_clusterset() {
+    require_clusters "${HUB}" "${SPOKE_CLUSTERS[@]}"
+
+    if on "${HUB}" kubectl get managedclusterset mesh-cluster-set &>/dev/null; then
+        log "ManagedClusterSet mesh-cluster-set already exists, skipping creation"
+        return
+    fi
+
     log "Creating ManagedClusterSet: mesh-cluster-set"
     on "${HUB}" "${CLUSTERADM}" create clusterset mesh-cluster-set
-    on "${HUB}" "${CLUSTERADM}" clusterset set mesh-cluster-set --clusters "${CLUSTER1},${CLUSTER2}"
+    on "${HUB}" "${CLUSTERADM}" clusterset set mesh-cluster-set --clusters "$(join_by_comma "${SPOKE_CLUSTERS[@]}")"
 
     log "OCM topology ready"
     on "${HUB}" kubectl get managedclusters
@@ -273,33 +313,186 @@ join_clusters() {
 }
 
 install_managed_serviceaccount() {
-    require_clusters "${HUB}" "${CLUSTER1}" "${CLUSTER2}"
+    require_clusters "${HUB}" "${SPOKE_CLUSTERS[@]}"
     if on "${HUB}" kubectl get deployment managed-serviceaccount-addon-manager -n open-cluster-management-addon &>/dev/null; then
-        log "managed-serviceaccount addon already installed on hub, skipping"
-        return
+        log "managed-serviceaccount addon already installed on hub"
+    else
+        log "Installing managed-serviceaccount addon on hub..."
+        ${HELM} repo add ocm "https://open-cluster-management.io/helm-charts/" --force-update
+        on "${HUB}" "${HELM}" upgrade --install managed-serviceaccount ocm/managed-serviceaccount \
+            --version "${MSA_VERSION}" \
+            --create-namespace \
+            --namespace open-cluster-management-addon \
+            --wait --timeout 10m
     fi
 
-    log "Installing managed-serviceaccount addon on hub..."
-    ${HELM} repo add ocm "https://open-cluster-management.io/helm-charts/"
-    on "${HUB}" ${HELM} upgrade --install managed-serviceaccount ocm/managed-serviceaccount \
-        --version "${MSA_VERSION}" \
-        --create-namespace \
-        --namespace open-cluster-management-addon \
-        --wait --timeout 180s
+    log "Waiting for managed-serviceaccount addon manager to be ready..."
+    on "${HUB}" kubectl wait --for=condition=Available \
+        deployment/managed-serviceaccount-addon-manager \
+        -n open-cluster-management-addon --timeout=10m
 
-    log "Waiting for managed-serviceaccount addon to be ready..."
-    for cluster in "${CLUSTER1}" "${CLUSTER2}"; do
-        on "${HUB}" retry kubectl wait managedclusteraddon/managed-serviceaccount \
-            -n "${cluster}" --for=condition=Available --timeout=60s
+    log "Waiting for managed-serviceaccount addon on spokes..."
+    for cluster in "${SPOKE_CLUSTERS[@]}"; do
+        on "${HUB}" kubectl wait --for=create --for=condition=Available \
+            managedclusteraddon/managed-serviceaccount \
+            -n "${cluster}" --timeout=10m
     done
 
     log "managed-serviceaccount addon installed on hub"
     on "${HUB}" kubectl get managedclusteraddon -A
 }
 
+MESH_NAMESPACE="mesh-system"
+MESH_PLACEMENT_NAME="mesh-placement"
+CLUSTER_SET_NAME="mesh-cluster-set"
+
+install_governance_policy_framework() {
+    require_clusters "${HUB}" "${SPOKE_CLUSTERS[@]}"
+
+    if on "${HUB}" kubectl get deployment governance-policy-addon-controller -n open-cluster-management &>/dev/null; then
+        log "governance-policy-framework hub addon already installed"
+    else
+        log "Installing governance-policy-framework hub addon..."
+        on "${HUB}" "${CLUSTERADM}" install hub-addon --names governance-policy-framework
+    fi
+
+    log "Waiting for governance-policy-addon-controller to be ready..."
+    on "${HUB}" kubectl wait --for=condition=Available \
+        deployment/governance-policy-addon-controller \
+        -n open-cluster-management --timeout=10m
+
+    local clusters
+    clusters="$(join_by_comma "${SPOKE_CLUSTERS[@]}")"
+
+    log "Enabling governance-policy-framework on spokes: ${clusters}"
+    on "${HUB}" "${CLUSTERADM}" addon enable \
+        --names governance-policy-framework \
+        --namespace open-cluster-management-agent-addon \
+        --clusters "${clusters}"
+
+    log "Enabling config-policy-controller on spokes: ${clusters}"
+    on "${HUB}" "${CLUSTERADM}" addon enable \
+        --names config-policy-controller \
+        --namespace open-cluster-management-agent-addon \
+        --clusters "${clusters}"
+
+    for cluster in "${SPOKE_CLUSTERS[@]}"; do
+        log "Waiting for governance-policy-framework addon on ${cluster}..."
+        on "${HUB}" kubectl wait --for=create --for=condition=Available \
+            managedclusteraddon/governance-policy-framework -n "${cluster}" --timeout=10m
+
+        log "Waiting for config-policy-controller addon on ${cluster}..."
+        on "${HUB}" kubectl wait --for=create --for=condition=Available \
+            managedclusteraddon/config-policy-controller -n "${cluster}" --timeout=10m
+
+        log "Enabling OperatorPolicy on ${cluster}..."
+        on "${HUB}" kubectl annotate managedclusteraddon/config-policy-controller \
+            -n "${cluster}" operator-policy-disabled=false --overwrite
+
+        # Annotation restarts the addon pod; wait until Available again.
+        on "${HUB}" kubectl wait managedclusteraddon/config-policy-controller \
+            -n "${cluster}" --for=condition=Available --timeout=10m
+    done
+
+    log "governance-policy-framework and OperatorPolicy ready on all spokes"
+    on "${HUB}" kubectl get managedclusteraddon -A
+}
+
+wait_for_policy_compliant() {
+    local name="${1}"
+    local namespace="${2}"
+    local timeout_seconds="${3:-600}"
+    local deadline=$((SECONDS + timeout_seconds))
+    local state=""
+
+    log "Waiting for Policy ${namespace}/${name} to become Compliant (timeout ${timeout_seconds}s)..."
+    while (( SECONDS < deadline )); do
+        state="$(on "${HUB}" kubectl get policy "${name}" -n "${namespace}" \
+            -o jsonpath='{.status.compliant}' 2>/dev/null || true)"
+        if [[ "${state}" == "Compliant" ]]; then
+            log "Policy ${namespace}/${name} is Compliant"
+            return 0
+        fi
+        sleep 5
+    done
+
+    on "${HUB}" kubectl get policy "${name}" -n "${namespace}" -o yaml || true
+    err "Timed out waiting for Policy ${namespace}/${name} to become Compliant (last status: ${state:-unknown})"
+}
+
+install_operator() {
+    require_clusters "${HUB}" "${SPOKE_CLUSTERS[@]}"
+
+    # hack/dev-env.sh provisions Kind clusters; default to Sail. PLATFORM=openshift
+    # selects the OSSM sample when testing against OpenShift catalogs.
+    local platform="${PLATFORM:-kind}"
+    local sample policy_name
+    case "${platform}" in
+        kind)
+            sample="${SCRIPT_DIR}/samples/operator-policy-sail.yaml"
+            policy_name="policy-sail-operator"
+            ;;
+        openshift)
+            sample="${SCRIPT_DIR}/samples/operator-policy-ossm.yaml"
+            policy_name="policy-ossm-operator"
+            ;;
+        *)
+            err "PLATFORM must be 'kind' or 'openshift', got '${platform}'"
+            ;;
+    esac
+    [[ -f "${sample}" ]] || err "OperatorPolicy sample not found: ${sample}"
+
+    if on "${HUB}" kubectl get namespace "${MESH_NAMESPACE}" &>/dev/null; then
+        log "Namespace ${MESH_NAMESPACE} already exists"
+    else
+        log "Creating namespace ${MESH_NAMESPACE}"
+        on "${HUB}" kubectl create namespace "${MESH_NAMESPACE}"
+    fi
+
+    log "Binding ManagedClusterSet ${CLUSTER_SET_NAME} to ${MESH_NAMESPACE}"
+    cat <<EOF | on "${HUB}" kubectl apply -f -
+apiVersion: cluster.open-cluster-management.io/v1beta2
+kind: ManagedClusterSetBinding
+metadata:
+  name: ${CLUSTER_SET_NAME}
+  namespace: ${MESH_NAMESPACE}
+spec:
+  clusterSet: ${CLUSTER_SET_NAME}
+EOF
+
+    log "Creating Placement ${MESH_PLACEMENT_NAME} for operator install"
+    cat <<EOF | on "${HUB}" kubectl apply -f -
+apiVersion: cluster.open-cluster-management.io/v1beta1
+kind: Placement
+metadata:
+  name: ${MESH_PLACEMENT_NAME}
+  namespace: ${MESH_NAMESPACE}
+spec:
+  clusterSets:
+    - ${CLUSTER_SET_NAME}
+EOF
+
+    if on "${HUB}" kubectl get policy "${policy_name}" -n "${MESH_NAMESPACE}" &>/dev/null; then
+        local state
+        state="$(on "${HUB}" kubectl get policy "${policy_name}" -n "${MESH_NAMESPACE}" \
+            -o jsonpath='{.status.compliant}' 2>/dev/null || true)"
+        if [[ "${state}" == "Compliant" ]]; then
+            log "Policy ${policy_name} already Compliant, skipping apply"
+            return
+        fi
+    fi
+
+    log "Applying OperatorPolicy sample for platform=${platform}: ${sample}"
+    on "${HUB}" kubectl apply -n "${MESH_NAMESPACE}" -f "${sample}"
+
+    wait_for_policy_compliant "${policy_name}" "${MESH_NAMESPACE}" 900
+
+    log "Mesh operator installed via OperatorPolicy (${policy_name})"
+    on "${HUB}" kubectl get policy -n "${MESH_NAMESPACE}"
+}
+
 install_metallb() {
     local cluster="${1}"
-    require_clusters "${cluster}"
     local metallb_version="${METALLB_VERSION}"
 
     if on "${cluster}" kubectl get deployment controller -n metallb-system &>/dev/null; then
@@ -330,12 +523,7 @@ install_metallb() {
     local base_prefix
     base_prefix="$(echo "${kind_subnet}" | cut -d'/' -f1 | cut -d'.' -f1-3)"
 
-    local idx
-    case "${cluster}" in
-        "${CLUSTER1}") idx=0 ;;
-        "${CLUSTER2}") idx=1 ;;
-        *) err "Unknown cluster for MetalLB IP assignment: ${cluster}" ;;
-    esac
+    local idx="${SPOKE_CLUSTER_INDEX[${cluster}]}"
     local range_start="${base_prefix}.$((200 + idx * 10 + 1))"
     local range_end="${base_prefix}.$((200 + idx * 10 + 10))"
 
@@ -349,16 +537,21 @@ install_metallb() {
     log "Waiting for MetalLB speaker to be ready on ${cluster}..."
     on "${cluster}" kubectl rollout status daemonset/speaker -n metallb-system --timeout=120s
 
+    # The pool is admission-checked by the MetalLB webhook, which can lag the controller rollout, so we retry until we succeed.
     log "Configuring MetalLB IP pool ${range_start}-${range_end} on ${cluster}..."
-    sed "s|__ADDRESS_RANGE__|${range_start}-${range_end}|" \
-        "${SCRIPT_DIR}/hack/kind/metallb-pool.yaml" \
-        | on "${cluster}" kubectl apply -f -
+    local pool_file
+    (
+        pool_file="$(mktemp)"
+        trap 'rm -f "${pool_file}"' EXIT
+        sed "s|__ADDRESS_RANGE__|${range_start}-${range_end}|" \
+            "${SCRIPT_DIR}/hack/kind/metallb-pool.yaml" > "${pool_file}"
+        on "${cluster}" retry kubectl apply -f "${pool_file}"
+    )
     log "MetalLB configured on ${cluster}"
 }
 
 install_gateway_api() {
     local cluster="${1}"
-    require_clusters "${cluster}"
     local gw_api_version="${GATEWAY_API_VERSION}"
 
     if on "${cluster}" kubectl get crd gateways.gateway.networking.k8s.io &>/dev/null; then
@@ -377,12 +570,11 @@ install_gateway_api() {
 }
 
 setup_mesh() {
-    require_clusters "${HUB}"
-    if on "${HUB}" kubectl get namespace mesh-system &>/dev/null; then
-        log "Namespace mesh-system already exists, skipping"
+    if on "${HUB}" kubectl get namespace "${MESH_NAMESPACE}" &>/dev/null; then
+        log "Namespace ${MESH_NAMESPACE} already exists, skipping"
     else
-        log "Creating namespace mesh-system"
-        on "${HUB}" kubectl create namespace mesh-system
+        log "Creating namespace ${MESH_NAMESPACE}"
+        on "${HUB}" kubectl create namespace "${MESH_NAMESPACE}"
     fi
 
     log "Waiting for cert-manager-cainjector to be ready..."
@@ -390,40 +582,45 @@ setup_mesh() {
         -n cert-manager --timeout=120s
 
     log "Applying cert-manager trust chain (self-signed Issuer, root CA Certificate, CA-backed Issuer)"
-    on "${HUB}" kubectl apply -n mesh-system -f "${SCRIPT_DIR}/samples/cert-manager-issuer.yaml"
+    on "${HUB}" kubectl apply -n "${MESH_NAMESPACE}" -f "${SCRIPT_DIR}/samples/cert-manager-issuer.yaml"
 
     log "Waiting for bootstrap Issuer to be ready..."
     on "${HUB}" retry kubectl wait issuer/mesh-selfsigned-issuer \
-        -n mesh-system --for=condition=Ready --timeout=60s
+        -n "${MESH_NAMESPACE}" --for=condition=Ready --timeout=60s
 
     log "Waiting for root CA Certificate to be issued..."
     on "${HUB}" retry kubectl wait certificate/mesh-root-ca \
-        -n mesh-system --for=condition=Ready --timeout=120s
+        -n "${MESH_NAMESPACE}" --for=condition=Ready --timeout=120s
 
     log "Waiting for CA-backed Issuer to be ready..."
     on "${HUB}" retry kubectl wait issuer/mesh-root-ca \
-        -n mesh-system --for=condition=Ready --timeout=60s
+        -n "${MESH_NAMESPACE}" --for=condition=Ready --timeout=60s
 
     log "Creating MultiClusterMesh CR"
-    on "${HUB}" kubectl apply -n mesh-system -f "${SCRIPT_DIR}/samples/basic.yaml"
+    on "${HUB}" kubectl apply -n "${MESH_NAMESPACE}" -f "${SCRIPT_DIR}/samples/basic.yaml"
 
     log "Mesh setup complete. The controller will now reconcile the mesh."
-    log "Monitor progress: $(on "${HUB}" echo kubectl get multiclustermesh -n mesh-system)"
+    log "Monitor progress: $(on "${HUB}" echo kubectl get multiclustermesh -n "${MESH_NAMESPACE}")"
 }
+
+check_kubectl_version
 
 ACTION="${1:-}"
 case "${ACTION}" in
-    check-host)                      check_host ;;
-    create-cluster)                  create_cluster "${2}" ;;
-    install-olm)                     install_olm "${2}" ;;
-    install-cert-manager)            install_cert_manager ;;
-    install-managed-serviceaccount)  install_managed_serviceaccount ;;
-    init-ocm)                        init_ocm ;;
-    join-clusters)                   join_clusters ;;
-    setup-mesh)                      setup_mesh ;;
-    install-metallb)                 install_metallb "${2}" ;;
-    install-gateway-api)             install_gateway_api "${2}" ;;
-    setup-test-issuer)               setup_test_issuer ;;
+    check-host)                            check_host ;;
+    create-cluster)                        create_cluster "${2}" ;;
+    install-olm)                           install_olm "${2}" ;;
+    install-cert-manager)                  install_cert_manager ;;
+    install-managed-serviceaccount)        install_managed_serviceaccount ;;
+    init-ocm)                              init_ocm ;;
+    join-clusters)                         join_clusters ;;
+    create-clusterset)                     create_clusterset ;;
+    install-governance-policy-framework)   install_governance_policy_framework ;;
+    install-operator)                      install_operator ;;
+    setup-mesh)                            setup_mesh ;;
+    install-metallb)                       install_metallb "${2}" ;;
+    install-gateway-api)                   install_gateway_api "${2}" ;;
+    setup-test-issuer)                     setup_test_issuer ;;
     *)
-        err "Unknown action: '${ACTION}'. Valid: check-host, create-cluster, install-olm, install-cert-manager, install-managed-serviceaccount, init-ocm, join-clusters, setup-mesh, install-metallb, install-gateway-api, setup-test-issuer" ;;
+        err "Unknown action: '${ACTION}'. Valid: check-host, create-cluster, install-olm, install-cert-manager, install-managed-serviceaccount, init-ocm, join-clusters, create-clusterset, install-governance-policy-framework, install-operator, setup-mesh, install-metallb, install-gateway-api, setup-test-issuer" ;;
 esac

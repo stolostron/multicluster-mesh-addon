@@ -1,8 +1,13 @@
 # Istio reader ClusterRole for multi-cluster endpoint discovery.
 #
-# This file is maintained as a standalone YAML so that a future automation/script can
-# diff it against the upstream Istio template and flag any drift:
+# This file is maintained as a standalone YAML so it can be diffed against the
+# upstream Istio template to detect drift:
 # https://github.com/istio/istio/blob/master/manifests/charts/istio-control/istio-discovery/templates/reader-clusterrole.yaml
+#
+# `make verify-istio-reader-rbac` (part of `make verify`) checks the rules above
+# against upstream Istio automatically. Override the ref it compares against with
+# ISTIO_READER_REF (default: master), or skip the check with ISTIO_READER_SKIP=1.
+# See pkg/hub/mesh/istio_reader_drift_test.go for the comparison logic.
 #
 # The metadata.name is a placeholder; it is overridden at runtime with the
 # per-mesh istio-reader name.
@@ -32,6 +37,10 @@ rules:
     verbs: ["get", "list", "watch"]
   - apiGroups: ["apiextensions.k8s.io"]
     resources: ["customresourcedefinitions"]
+    verbs: ["get", "list", "watch"]
+  # OpenShift: read SecurityContextConstraints to discover the injected proxy's UID/GID.
+  - apiGroups: ["security.openshift.io"]
+    resources: ["securitycontextconstraints"]
     verbs: ["get", "list", "watch"]
   - apiGroups: ["discovery.k8s.io"]
     resources: ["endpointslices"]

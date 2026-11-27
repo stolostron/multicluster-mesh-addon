@@ -9,8 +9,6 @@ import (
 
 	certmanagerv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
 	"github.com/openshift/library-go/pkg/controller/controllercmd"
-	operatorsv1 "github.com/operator-framework/api/pkg/operators/v1"
-	operatorsv1alpha1 "github.com/operator-framework/api/pkg/operators/v1alpha1"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -48,8 +46,6 @@ func init() {
 	utilruntime.Must(clusterv1beta2.Install(runtimeScheme))
 	utilruntime.Must(workv1.Install(runtimeScheme))
 	utilruntime.Must(workv1alpha1.Install(runtimeScheme))
-	utilruntime.Must(operatorsv1.AddToScheme(runtimeScheme))
-	utilruntime.Must(operatorsv1alpha1.AddToScheme(runtimeScheme))
 	utilruntime.Must(certmanagerv1.AddToScheme(runtimeScheme))
 	utilruntime.Must(msav1beta1.AddToScheme(runtimeScheme))
 }

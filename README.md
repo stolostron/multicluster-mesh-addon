@@ -2,8 +2,9 @@
 
 Automates [multi-cluster Istio service mesh][sail] setup on [Open Cluster Management (OCM)][OCM] (or [Red Hat Advanced Cluster Management][ACM], which includes OCM).
 
-The addon installs service mesh operators on managed clusters and distributes CA certificates for mTLS trust.
-You bring the clusters and configure Istio; the addon handles the rest.
+The addon creates the control plane namespace, distributes CA certificates for mTLS trust, and exchanges endpoint-discovery credentials.
+Registered managed clusters and a service mesh operator are prerequisites. OperatorPolicy is the supported way to install the operator.
+The addon does not install Istio itself. Use ACM policies to configure Istio on managed clusters from the hub, as described in [Step 8 of the User Guide](docs/user-guide.md#step-8-configure-istio).
 
 ## Documentation
 
@@ -13,6 +14,10 @@ You bring the clusters and configure Istio; the addon handles the rest.
 - [Architecture](docs/architecture.md) - How the addon works
 - [Multi-Tenancy Guide](docs/multi-tenancy.md) - Running multiple meshes on the same ClusterSet
 - [User Guide](docs/user-guide.md) - Detailed setup walkthrough with explanations
+- [Install the Service Mesh Operator](docs/operator-installation.md) - Install Sail or OSSM using OperatorPolicy
+- [Configure Istio (Manual)](docs/istio-manual.md) - Configure Istio using direct spoke access
+- [Configure Istio with PolicyGenerator](docs/istio-policygenerator.md) - Generate ACM policies from Istio manifests with Kustomize
+- [OCP ACM and OSSM Demo](docs/demo.md) - Manual customer demo walkthrough
 - [API Reference](docs/api-reference.md) - `MultiClusterMesh` CRD fields and examples
 - [Troubleshooting](docs/troubleshooting.md) - Common issues and resolutions
 - [Fleet Service Mesh (Dev Preview)][fleet-mesh] - Multi-cluster mesh observability
@@ -26,7 +31,7 @@ You bring the clusters and configure Istio; the addon handles the rest.
 
 ## Quick Start
 
-> **Note:** Requires an OCM hub with [cert-manager] and managed clusters with [OLM]. See [prerequisites](docs/user-guide.md#prerequisites) for details.
+> **Note:** Requires an OCM hub with [cert-manager] and the [governance-policy-framework][gpf], plus [OLM] on the managed clusters. OperatorPolicy must be enabled on each spoke (`operator-policy-disabled=false` on the config-policy-controller add-on) or the policy wait below does not succeed. See [prerequisites](docs/user-guide.md#prerequisites) for details.
 
 > **Note:** Commands use `kubectl`; on OpenShift, `oc` is a drop-in replacement for the `kubectl` commands.
 
@@ -38,23 +43,54 @@ helm install multicluster-mesh-addon multicluster-mesh-addon/multicluster-mesh-a
   --namespace multicluster-mesh-system \
   --create-namespace
 
-# Create a ClusterSet and assign clusters
-clusteradm create clusterset mesh-cluster-set
-clusteradm clusterset set mesh-cluster-set --clusters cluster1,cluster2
-
-# Set up trust chain and create a mesh
+# Set up trust chain
 kubectl create namespace mesh-system
 kubectl apply -n mesh-system -f samples/cert-manager-issuer.yaml
+
+# Bind a ClusterSet to the mesh namespace so the Placement can select clusters.
+# This example uses the ACM "global" set for simplicity; for production, create
+# a dedicated ManagedClusterSet (see user guide).
+kubectl apply -n mesh-system -f - <<EOF
+apiVersion: cluster.open-cluster-management.io/v1beta2
+kind: ManagedClusterSetBinding
+metadata:
+  name: global
+spec:
+  clusterSet: global
+EOF
+
+# Create a Placement that selects all clusters in the bound ClusterSet
+kubectl apply -n mesh-system -f - <<EOF
+apiVersion: cluster.open-cluster-management.io/v1beta1
+kind: Placement
+metadata:
+  name: mesh-placement
+spec: {}
+EOF
+
+# Install the mesh operator before creating the mesh.
+# The policy and mesh share mesh-placement.
+kubectl apply -n mesh-system -f samples/operator-policy-sail.yaml
+kubectl wait --for=jsonpath='{.status.compliant}'=Compliant \
+  policy/policy-sail-operator -n mesh-system --timeout=15m
+
+# Create the mesh (uses mesh-placement to determine target clusters)
 kubectl apply -n mesh-system -f samples/basic.yaml
 ```
 
-> **Note:** For OpenShift, use `samples/openshift.yaml` instead of `samples/basic.yaml`.
+> **Note:** For OpenShift, use `samples/operator-policy-ossm.yaml` and `samples/openshift.yaml` instead of the Sail policy and `samples/basic.yaml`.
+> Wait for `policy/policy-ossm-operator` to become Compliant before creating the mesh.
 
-This installs the operator and distributes trust. For a working multi-cluster mesh setup, see the [User Guide](docs/user-guide.md) for prerequisites, what each step does, verification, and next steps (configuring Istio).
+This example uses the ACM `global` ClusterSet, which includes all managed clusters.
+For production, create a dedicated [ManagedClusterSet] with only the clusters that should participate in the mesh and bind it to the mesh namespace.
+See the [User Guide](docs/user-guide.md) for a complete walkthrough including prerequisites, dedicated ClusterSet setup, verification, and configuring Istio on the spoke clusters.
+
+[ManagedClusterSet]: https://open-cluster-management.io/docs/concepts/cluster-inventory/managedclusterset/
 
 <!-- Reference links -->
 [ACM]: https://www.redhat.com/en/technologies/management/advanced-cluster-management
 [cert-manager]: https://cert-manager.io/
+[gpf]: https://open-cluster-management.io/docs/governance/policy/policy-framework/
 [OCM]: https://open-cluster-management.io/
 [OLM]: https://olm.operatorframework.io/
 [fleet-mesh]: https://github.com/kiali/openshift-servicemesh-plugin/blob/main/docs/fleet-mesh/DEV-PREVIEW-GUIDE.md

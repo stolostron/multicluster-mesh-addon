@@ -3,38 +3,17 @@ kind: MultiClusterMesh
 metadata:
   name: complete-mesh
 spec:
-  # Reference to the ManagedClusterSet that defines which clusters participate in the mesh
-  # NOTE: Update this to match your ManagedClusterSet name
-  clusterSet: default
+  # Reference to the Placement that defines which clusters participate in the mesh
+  # NOTE: Update this to match your Placement name
+  placementRef:
+    name: mesh-placement
 
-  # Control plane configuration
-  controlPlane:
-    # Namespace where Istio will be installed on each cluster
-    namespace: istio-system
-
-  # Operator installation configuration (overrides the OSSM kubebuilder defaults)
-  operator:
-    # OLM package name
-    name: sailoperator
-
-    # Namespace where the operator will be installed
-    # This namespace may be deleted when the mesh is removed
-    namespace: multicluster-mesh-operator
-
-    # OLM subscription channel
-    channel: stable
-
-    # CatalogSource name
-    source: operatorhubio-catalog
-
-    # CatalogSource namespace
-    sourceNamespace: olm
-
-    # Specific operator version (optional, pins to a specific CSV)
-    # startingCSV: sail-operator.v1.23.0
-
-    # Install plan approval strategy
-    installPlanApproval: Automatic
+  # The control plane namespace is auto-derived as:
+  #   istio-system-{meshName}-{SHA-256(meshNamespace/meshName)[:10]}
+  # and reported in status.controlPlaneNamespace.
+  #
+  # Install the mesh operator before creating this resource
+  # (see samples/operator-policy-sail.yaml or samples/operator-policy-ossm.yaml).
 
   # Security configuration for trust and discovery
   security:

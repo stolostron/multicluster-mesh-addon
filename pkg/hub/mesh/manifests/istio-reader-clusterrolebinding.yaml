@@ -4,6 +4,17 @@
 # The name and roleRef.name are overridden at runtime with the per-mesh
 # istio-reader name; the subject is overridden with the mesh's endpoint-discovery
 # ServiceAccount in the addon namespace.
+#
+# `make verify-istio-reader-rbac` checks roleRef and the subject kind against
+# upstream Istio's reader-clusterrolebinding.yaml template:
+# https://github.com/istio/istio/blob/master/manifests/charts/istio-control/istio-discovery/templates/reader-clusterrolebinding.yaml
+#
+# roleRef.kind/apiGroup and the single-ServiceAccount subject shape rarely change
+# upstream, but buildIstioReaderManifestWork (pkg/hub/mesh/endpoint_discovery.go)
+# hardcodes that exact shape when it overrides the subject with the mesh's MSA
+# ServiceAccount. If Istio ever restructured this (e.g. multiple subjects, or a
+# non-ServiceAccount subject kind), this check catches it before the addon
+# silently produces incorrect RBAC on spoke clusters.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:

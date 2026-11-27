@@ -5,34 +5,88 @@ import (
 
 	. "github.com/onsi/gomega"
 	"github.com/stolostron/multicluster-mesh-addon/pkg/key"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	clusterv1 "open-cluster-management.io/api/cluster/v1"
+	clusterv1beta1 "open-cluster-management.io/api/cluster/v1beta1"
 	clusterv1beta2 "open-cluster-management.io/api/cluster/v1beta2"
 	workv1 "open-cluster-management.io/api/work/v1"
+	workv1alpha1 "open-cluster-management.io/api/work/v1alpha1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-// CreateManagedClusterSet creates a ManagedClusterSet.
-func CreateManagedClusterSet(ctx context.Context, k8sClient client.Client, name string) {
-	Expect(k8sClient.Create(ctx, &clusterv1beta2.ManagedClusterSet{
-		ObjectMeta: metav1.ObjectMeta{Name: name},
-		Spec: clusterv1beta2.ManagedClusterSetSpec{
-			ClusterSelector: clusterv1beta2.ManagedClusterSelector{
-				SelectorType: clusterv1beta2.ExclusiveClusterSetLabel,
+// CreatePlacement creates a Placement in the given namespace.
+func CreatePlacement(ctx context.Context, k8sClient client.Client, name, namespace string) {
+	Expect(k8sClient.Create(ctx, &clusterv1beta1.Placement{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
+	})).To(Succeed())
+}
+
+// CreatePlacementDecision creates a PlacementDecision with the given name for the given Placement and sets its status decisions.
+func CreatePlacementDecision(ctx context.Context, k8sClient client.Client, name, placementName, namespace string, clusterNames ...string) {
+	pd := &clusterv1beta1.PlacementDecision{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: namespace,
+			Labels: map[string]string{
+				"cluster.open-cluster-management.io/placement": placementName,
 			},
+		},
+	}
+	Expect(k8sClient.Create(ctx, pd)).To(Succeed())
+
+	// Update after creation since the API won't accept the status as part of the create operation.
+	UpdatePlacementDecision(ctx, k8sClient, name, namespace, clusterNames...)
+}
+
+// UpdatePlacementDecision rewrites the PlacementDecision's status decisions.
+func UpdatePlacementDecision(ctx context.Context, k8sClient client.Client, name, namespace string, clusterNames ...string) {
+	pd := &clusterv1beta1.PlacementDecision{}
+	Expect(k8sClient.Get(ctx, key.Of(name, namespace), pd)).To(Succeed())
+
+	decisions := make([]clusterv1beta1.ClusterDecision, len(clusterNames))
+	for i, name := range clusterNames {
+		decisions[i] = clusterv1beta1.ClusterDecision{ClusterName: name}
+	}
+	pd.Status.Decisions = decisions
+	Expect(k8sClient.Status().Update(ctx, pd)).To(Succeed())
+}
+
+// UpdatePlacementSelectedCount sets the Placement's NumberOfSelectedClusters.
+func UpdatePlacementSelectedCount(ctx context.Context, k8sClient client.Client, name, namespace string, count int32) {
+	placement := &clusterv1beta1.Placement{}
+	Expect(k8sClient.Get(ctx, key.Of(name, namespace), placement)).To(Succeed())
+	placement.Status.NumberOfSelectedClusters = count
+	Expect(k8sClient.Status().Update(ctx, placement)).To(Succeed())
+}
+
+// CreateManagedClusterSetBinding binds a ManagedClusterSet to a namespace,
+// allowing Placements in that namespace to select clusters from the set.
+func CreateManagedClusterSetBinding(ctx context.Context, k8sClient client.Client, clusterSetName, namespace string) {
+	Expect(client.IgnoreAlreadyExists(k8sClient.Create(ctx, &clusterv1beta2.ManagedClusterSetBinding{
+		ObjectMeta: metav1.ObjectMeta{Name: clusterSetName, Namespace: namespace},
+		Spec:       clusterv1beta2.ManagedClusterSetBindingSpec{ClusterSet: clusterSetName},
+	}))).To(Succeed())
+}
+
+// CreatePlacementForClusterSet creates a Placement that selects clusters from the given ClusterSet.
+// In an environment with the ACM Placement controller running (e2e), this will
+// automatically produce PlacementDecision resources.
+func CreatePlacementForClusterSet(ctx context.Context, k8sClient client.Client, name, namespace, clusterSetName string) {
+	Expect(k8sClient.Create(ctx, &clusterv1beta1.Placement{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
+		Spec: clusterv1beta1.PlacementSpec{
+			ClusterSets: []string{clusterSetName},
 		},
 	})).To(Succeed())
 }
 
 // CreateManagedCluster creates a ManagedCluster and its namespace (required for ManifestWorks).
-func CreateManagedCluster(ctx context.Context, k8sClient client.Client, name, clusterSet string) {
+func CreateManagedCluster(ctx context.Context, k8sClient client.Client, name string) {
 	CreateNamespace(ctx, k8sClient, name)
 	Expect(k8sClient.Create(ctx, &clusterv1.ManagedCluster{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: name,
-			Labels: map[string]string{
-				"cluster.open-cluster-management.io/clusterset": clusterSet,
-			},
 		},
 		Spec: clusterv1.ManagedClusterSpec{
 			ManagedClusterClientConfigs: []clusterv1.ClientConfig{{URL: "https://" + name + ":6443"}},
@@ -40,29 +94,23 @@ func CreateManagedCluster(ctx context.Context, k8sClient client.Client, name, cl
 	})).To(Succeed())
 }
 
-// SetManifestWorkFeedback updates a ManifestWork's status to include a string feedback value,
-// simulating what the OCM work agent does on a real spoke cluster.
-func SetManifestWorkFeedback(ctx context.Context, k8sClient client.Client, workName, namespace, feedbackName, feedbackValue string) {
-	work := &workv1.ManifestWork{}
-	Expect(k8sClient.Get(ctx, key.Of(workName, namespace), work)).To(Succeed())
-	work.Status.ResourceStatus = workv1.ManifestResourceStatus{
-		Manifests: []workv1.ManifestCondition{{
-			Conditions: []metav1.Condition{{
-				Type:               workv1.ManifestApplied,
-				Status:             metav1.ConditionTrue,
-				Reason:             "Applied",
-				LastTransitionTime: metav1.Now(),
-			}},
-			StatusFeedbacks: workv1.StatusFeedbackResult{
-				Values: []workv1.FeedbackValue{{
-					Name: feedbackName,
-					Value: workv1.FieldValue{
-						Type:   workv1.String,
-						String: &feedbackValue,
-					},
-				}},
-			},
-		}},
-	}
-	Expect(k8sClient.Status().Update(ctx, work)).To(Succeed())
+// SetManifestWorkCondition simulates a work agent condition for the work's current generation.
+func SetManifestWorkCondition(ctx context.Context, k8sClient client.Client, work *workv1.ManifestWork, conditionType string, status metav1.ConditionStatus) {
+	patch := client.MergeFrom(work.DeepCopy())
+	meta.SetStatusCondition(&work.Status.Conditions, metav1.Condition{
+		Type:               conditionType,
+		Status:             status,
+		Reason:             "ReportedByTest",
+		ObservedGeneration: work.Generation,
+	})
+	Expect(k8sClient.Status().Patch(ctx, work, patch)).To(Succeed())
+}
+
+// SetManifestWorkReplicaSetCondition simulates a condition reported by the ReplicaSet controller.
+func SetManifestWorkReplicaSetCondition(ctx context.Context, k8sClient client.Client, mwrset *workv1alpha1.ManifestWorkReplicaSet, conditionType string, status metav1.ConditionStatus) {
+	patch := client.MergeFrom(mwrset.DeepCopy())
+	meta.SetStatusCondition(&mwrset.Status.Conditions, metav1.Condition{
+		Type: conditionType, Status: status, Reason: "ReportedByTest",
+	})
+	Expect(k8sClient.Status().Patch(ctx, mwrset, patch)).To(Succeed())
 }
