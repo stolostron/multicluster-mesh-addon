@@ -8,8 +8,7 @@
 #   1. Replace <MESH_NAME> with your mesh name.
 #   2. Replace <PLACEMENT_NAME> with your mesh's Placement name
 #      (spec.placementRef.name on the MultiClusterMesh).
-#   3. The addon must have created the MultiClusterMesh and populated
-#      status.controlPlaneNamespace.
+#   3. The MultiClusterMesh must report Ready=True and status.controlPlaneNamespace.
 #   4. governance-policy-framework and config-policy-controller must be enabled
 #      on the managed clusters. See docs/operator-installation.md for setup.
 #
@@ -61,6 +60,11 @@ spec:
                 spec:
                   namespace: '{{hub (lookup "mesh.open-cluster-management.io/v1alpha1" "MultiClusterMesh" .PolicyMetadata.namespace "<MESH_NAME>").status.controlPlaneNamespace hub}}'
                   values:
+                    # When the addon is used to manage trust distribution, uncomment on Istio 1.32+
+                    # See docs/user-guide.md#prevent-self-signed-ca-fallback.
+                    # pilot:
+                    #   env:
+                    #     PILOT_DISABLE_SELF_SIGNED_CA: "true"
                     meshConfig:
                       trustDomain: '<MESH_NAME>'
                     global:

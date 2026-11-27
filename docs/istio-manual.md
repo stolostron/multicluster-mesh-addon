@@ -11,7 +11,8 @@ See the [Sail operator multicluster docs][sail-multicluster] for the full proced
 
 ## Prerequisites
 
-- The MultiClusterMesh must be created and reporting `status.controlPlaneNamespace`. See the [user guide](user-guide.md#step-6-create-a-multiclustermesh).
+- The MultiClusterMesh must report `Ready=True` and `status.controlPlaneNamespace`. See [Verify the Setup](user-guide.md#step-7-verify-the-setup).
+- When the addon is used to manage trust distribution, configure [self-signed CA fallback protection](user-guide.md#prevent-self-signed-ca-fallback) on a supported control-plane version.
 - Your kubeconfig must have contexts for each managed cluster.
 - Compatible Gateway API CRDs are available on each spoke. If they are not already present, see [Install Gateway API CRDs](operator-installation.md#install-gateway-api-crds).
 - The sample manifests from [samples/istio/](../samples/istio/).

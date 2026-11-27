@@ -5,6 +5,7 @@ Automates [multi-cluster Istio service mesh][sail] setup on [Open Cluster Manage
 The addon creates the control plane namespace, distributes CA certificates for mTLS trust, and exchanges endpoint-discovery credentials.
 Registered managed clusters and a service mesh operator are prerequisites. OperatorPolicy is the supported way to install the operator.
 The addon does not install Istio itself. Use ACM policies to configure Istio on managed clusters from the hub, as described in [Step 8 of the User Guide](docs/user-guide.md#step-8-configure-istio).
+When the addon is used to manage trust distribution, see [Prevent self-signed CA fallback](docs/user-guide.md#prevent-self-signed-ca-fallback) before installing istiod.
 
 ## Documentation
 

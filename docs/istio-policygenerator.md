@@ -10,7 +10,8 @@ This page covers the [PolicyGenerator] + Kustomize approach for users who manage
 
 - The [PolicyGenerator Kustomize plugin][PolicyGenerator] must be installed. For ACM, the CLI is available from the OpenShift console. See [Red Hat's download instructions][policygenerator-download]. Follow the [installation instructions][policygenerator-install] to set up the local Kustomize plugin.
 - The governance-policy-framework and config-policy-controller add-ons must be enabled on the managed clusters. See [Install the Service Mesh Operator](operator-installation.md) for setup.
-- The MultiClusterMesh must be created and reporting `status.controlPlaneNamespace`.
+- The MultiClusterMesh must report `Ready=True` and `status.controlPlaneNamespace`. See [Verify the Setup](user-guide.md#step-7-verify-the-setup).
+- When the addon is used to manage trust distribution, configure [self-signed CA fallback protection](user-guide.md#prevent-self-signed-ca-fallback) on a supported control-plane version.
 - Compatible Gateway API CRDs are available on each spoke. If they are not already present, see [Install Gateway API CRDs](operator-installation.md#install-gateway-api-crds).
 
 ## How it works

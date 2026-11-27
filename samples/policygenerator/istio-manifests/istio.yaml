@@ -14,6 +14,11 @@ metadata:
 spec:
   namespace: '{{hub (lookup "mesh.open-cluster-management.io/v1alpha1" "MultiClusterMesh" .PolicyMetadata.namespace (index .PolicyMetadata.labels "mesh.open-cluster-management.io/mesh-name")).status.controlPlaneNamespace hub}}'
   values:
+    # When the addon is used to manage trust distribution, uncomment on Istio 1.32+
+    # See docs/user-guide.md#prevent-self-signed-ca-fallback.
+    # pilot:
+    #   env:
+    #     PILOT_DISABLE_SELF_SIGNED_CA: "true"
     meshConfig:
       trustDomain: '{{hub (index .PolicyMetadata.labels "mesh.open-cluster-management.io/mesh-name") hub}}'
     global:

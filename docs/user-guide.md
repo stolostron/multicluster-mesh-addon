@@ -213,6 +213,8 @@ The addon creates the control plane namespace, distributes trust, and handles en
 Both OSSM 3.x and upstream Sail use the `sailoperator.io` API group.
 See the [Sail operator multicluster docs][sail-multicluster] for the full procedure.
 
+When the addon is used to manage trust distribution, follow [Prevent self-signed CA fallback](#prevent-self-signed-ca-fallback) before applying the Istio samples.
+
 The recommended approach uses ACM policies to configure all clusters from the hub. No direct spoke access is needed to apply the policies. The policy samples read the control plane namespace from the MultiClusterMesh status using the `lookup` hub template function.
 
 The samples configure sidecar mode only. For ambient mode, see [Customize Istio](#customize-istio).
@@ -286,6 +288,24 @@ fi
 
 For direct spoke-cluster access without ACM policies, see [Configure Istio (Manual)](istio-manual.md).
 For GitOps workflows with Kustomize, see [Configure Istio with PolicyGenerator](istio-policygenerator.md).
+
+### Prevent self-signed CA fallback
+
+Wait for MultiClusterMesh `Ready=True` before installing istiod. On newly selected clusters, policy propagation can race with certificate distribution even after the initial setup.
+
+When the addon is used to manage trust distribution, enable `PILOT_DISABLE_SELF_SIGNED_CA` in the Istio CR to prevent istiod from generating or reusing its own self-signed CA when `cacerts` is missing:
+
+```yaml
+spec:
+  values:
+    pilot:
+      env:
+        PILOT_DISABLE_SELF_SIGNED_CA: "true"
+```
+
+The flag was added in [Istio 1.32](https://istio.io/latest/news/releases/1.32.x/announcing-1.32/change-notes/). Verify support in your Sail/OSSM control-plane version before uncommenting it in the samples. Older versions without this feature remain unprotected by the setting; sequence Istio installation after trust distribution on each added cluster.
+
+If the CA bundle is missing, istiod fails startup and Kubernetes retries it. Startup can succeed once a valid bundle is mounted. This setting belongs on the Istio CR; IstioCNI can be installed earlier.
 
 ### Customize Istio
 
