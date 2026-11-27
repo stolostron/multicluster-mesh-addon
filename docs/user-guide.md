@@ -219,7 +219,7 @@ The samples configure sidecar mode only. For ambient mode, see [Customize Istio]
 
 > **Note:** The east-west gateway uses Gateway API CRDs, which your clusters may already provide. If they are not already present, see [Install Gateway API CRDs](operator-installation.md#install-gateway-api-crds) for compatibility guidance and installation instructions.
 
-> **Warning:** The policy sample creates the cluster-scoped `Istio/default` resource. This means one mesh per spoke cluster. Running two meshes on the same cluster requires distinct Istio resource names plus revision, injection, discovery-selector, and gateway ownership configuration.
+> **Warning:** The policy sample creates the cluster-scoped `Istio/default` resource and supports one mesh per spoke. To install separate control planes on shared spokes, see [Multiple meshes on shared clusters](multiple-meshes.md).
 
 For OpenShift or ambient mode, install IstioCNI. IstioCNI is a cluster-level prerequisite (like the operator), not a per-mesh resource. Apply it once with a Placement covering all clusters that need CNI, typically the same Placement used for the operator:
 

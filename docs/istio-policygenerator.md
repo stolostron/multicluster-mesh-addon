@@ -77,11 +77,7 @@ kubectl wait --for=jsonpath='{.status.compliant}'=Compliant \
 PolicyGenerator requires all manifest paths to be within the build directory tree.
 Set each environment's namespace, Placement, and mesh-name label in its `policygenerator.yaml`. The Istio manifests read the namespace and mesh name from the generated policy's metadata.
 
-If multiple meshes share a hub namespace, set `policies[].name` and `placementBindingDefaults.name` to unique values for each mesh.
-For example, use `policy-istio-basic-mesh` and `binding-istio-basic-mesh`.
-Renaming only the policy leaves the meshes sharing the same PlacementBinding.
-Unique policy and binding names only separate hub resources.
-If meshes select the same spoke, additional Istio configuration is required as described in [Step 8 of the user guide](user-guide.md#step-8-configure-istio).
+Give each mesh a distinct `policies[].name` if meshes share a hub namespace or select the same spoke. In this single-policy sample, PolicyGenerator derives the PlacementBinding and embedded ConfigurationPolicy names from the policy name. On shared spokes, each mesh also needs its own Istio revision, discovery selectors, and gateway ownership. See [Multiple meshes on shared clusters](multiple-meshes.md).
 
 Copy the `samples/policygenerator/` directory for each environment and set the values in `policygenerator.yaml`:
 
@@ -115,23 +111,23 @@ See the [ACM PolicyGenerator documentation][PolicyGenerator] and the [ZTP GitOps
 
 ## Cleanup
 
-Delete the generated policy and its binding on the hub. Use the namespace configured in `policyDefaults.namespace`. If you changed the generated resource names, use those names instead:
+Delete the generated policy and its binding on the hub. Use the same build directory, configuration, and namespace you applied:
 
 ```bash
-kubectl delete policy policy-istio -n "$MESH_NAMESPACE"
-kubectl delete placementbinding binding-istio -n "$MESH_NAMESPACE"
+kustomize build --enable-alpha-plugins samples/policygenerator/ \
+  | kubectl delete -n "$MESH_NAMESPACE" -f -
 ```
 
 The generated policy sets `pruneObjectBehavior: DeleteIfCreated`.
 Deleting it also removes the Istio CR and east-west gateway it created on the spokes.
 Pruning is asynchronous and only covers objects the policy created.
 
-If the `Istio/default` CR already existed before the policy was applied, delete it on each spoke.
-Replace the example context names with those from your kubeconfig:
+If an Istio CR or Gateway predated the policy and belongs to the mesh you are retiring, remove it separately. For example, the single-mesh sample uses `Istio/default`. For shared spokes, set `ISTIO_NAME` to the departing mesh's Istio CR name. Replace the example context names with those from your kubeconfig:
 
 ```bash
+ISTIO_NAME=default
 for CONTEXT in context-for-cluster1 context-for-cluster2; do
-  kubectl --context "$CONTEXT" delete istio.sailoperator.io default --ignore-not-found
+  kubectl --context "$CONTEXT" delete istio.sailoperator.io "$ISTIO_NAME" --ignore-not-found
 done
 ```
 

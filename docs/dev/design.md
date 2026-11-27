@@ -168,7 +168,7 @@ apiVersion: mesh.open-cluster-management.io/v1alpha1
 kind: MultiClusterMesh
 metadata:
   name: prod-mesh
-  namespace: mesh-team-a
+  namespace: team-a-ns
 spec:
   placementRef:
     name: mesh-placement
@@ -189,6 +189,7 @@ The add-on uses OCM [Placement] for cluster selection. The user creates a `Place
 This design gives the user full control over cluster selection using Placement's rich scheduling capabilities: label selectors, cluster sets, tolerations, priority-based scheduling, spread policies, etc. The add-on is agnostic to how clusters are selected - it simply reads the decisions.
 
 Multiple meshes can target overlapping clusters. Their certificates, discovery tokens, RBAC, and control plane namespaces are scoped to their hub namespace/name identity. Trust domains are derived only from the mesh name, so meshes with the same name in different hub namespaces share a trust-domain string. Separate resource identities alone do not provide workload trust or service-discovery isolation; users configure issuers and Istio discovery selectors accordingly.
+See [Multiple meshes on shared clusters](../multiple-meshes.md) for a two-mesh PolicyGenerator example.
 
 Plumbing resources (ManifestWorks, ManagedServiceAccounts, Certificates) use a deterministic naming strategy scoped to the owning mesh, so that multiple meshes on the same cluster don't collide.
 
@@ -222,8 +223,6 @@ Cleanup and status pruning use the effective membership, observed names plus clu
 Readiness uses the resolved objects, so a partially missing selection is not currently reflected as an unready member.
 
 Placement and PlacementDecision events enqueue meshes using a namespace-scoped field index on `spec.placementRef.name`. ManagedCluster events find affected meshes from their labeled ManifestWorks. The addon also watches mesh-labeled Secrets and ManagedServiceAccounts, addon-managed ManifestWorks, generation changes to owned Certificates, and all changes to owned ManifestWorkReplicaSets, so external edits and deletions are repaired promptly.
-
-For a step-by-step guide with sample YAMLs, see [Multi-Tenancy Guide](../multi-tenancy.md).
 
 ## Operator Lifecycle
 
@@ -369,7 +368,7 @@ The user is responsible for:
 - Creating and managing Istio custom resources on each spoke cluster (directly or via GitOps)
 - Setting `values.global.network` in the Istio CR to match the cluster's network identity (cluster name by default, or the value of `topology.istio.io/network` on the ManagedCluster if set). See [Network Partitioning](#network-partitioning).
 - Enabling Istio CNI on OpenShift clusters
-- Configuring `discoverySelectors` in multi-tenant environments to prevent cross-mesh service visibility
+- Configuring `discoverySelectors` to limit service visibility when multiple meshes share a cluster
 - Labeling application namespaces to match discovery selector configuration
 - Creating and managing Placement resources for cluster selection
 

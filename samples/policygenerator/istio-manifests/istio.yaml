@@ -10,7 +10,7 @@
 apiVersion: sailoperator.io/v1
 kind: Istio
 metadata:
-  name: default
+  name: default  # For shared spokes, use the mesh name (e.g. mcm-team-a) and configure discoverySelectors.
 spec:
   namespace: '{{hub (lookup "mesh.open-cluster-management.io/v1alpha1" "MultiClusterMesh" .PolicyMetadata.namespace (index .PolicyMetadata.labels "mesh.open-cluster-management.io/mesh-name")).status.controlPlaneNamespace hub}}'
   values:
